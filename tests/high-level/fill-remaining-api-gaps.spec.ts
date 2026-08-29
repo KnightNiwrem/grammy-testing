@@ -287,6 +287,7 @@ describe('Senderless system message (#22b)', () => {
     const { chats } = await prepareBot(bot);
     const channel = chats.newChannel('Test Channel');
 
+    // eslint-disable-next-line sonarjs/deprecation, @typescript-eslint/no-deprecated -- deliberately exercises the deprecated verb's kept behavior
     await channel.sendSystemMessage('channel notice');
 
     expect(capturedFrom).toBeUndefined();

@@ -6,6 +6,7 @@ import { dispatchMyChatMember, makeChannelBotUser } from './dispatch';
 import type { Group } from './group';
 import type { IdGenerator } from './id-generator';
 import type { MessagesLog } from './messages-log';
+import type { ModerationLog } from './moderation-log';
 import type { Supergroup } from './supergroup';
 import type { DispatchReactionCountOptions, Membership, MemberStatusTransition, SendSystemMessageOptions } from './types';
 import type { User } from './user';
@@ -44,6 +45,13 @@ export class Channel<TContext extends Context = Context> implements ChatRefHolde
    * explicitly promotes/restricts a user in the channel.
    */
   readonly members = new Map<number, Membership<TContext>>();
+
+  /**
+   * Captured moderation calls (`banChatMember` / `unbanChatMember` /
+   * `promoteChatMember`) targeting this channel, with per-kind views
+   * such as `moderation.bans.byUser(user)`.
+   */
+  moderation!: ModerationLog<TContext>;
 
   /** @internal */
   bot!: Bot<TContext>;

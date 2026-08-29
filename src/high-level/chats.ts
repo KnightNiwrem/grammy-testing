@@ -3,7 +3,7 @@
 /* eslint-disable no-param-reassign -- attachBot intentionally hands bot to each chat */
 
 import type { Bot, Context, RawApi } from 'grammy';
-import type { ChatMember, Message, Poll, Update, User as TelegramUser } from 'grammy/types';
+import type { ChatMember, ChatPermissions, Message, Poll, Update, User as TelegramUser } from 'grammy/types';
 
 import type { IdleTracker } from '../low-level/idle';
 import type { OutgoingRequests, Request } from '../low-level/outgoing-requests';
@@ -19,6 +19,14 @@ import { type Edit, EditsLog } from './edits-log';
 import { Group } from './group';
 import { IdGenerator } from './id-generator';
 import { MessagesLog } from './messages-log';
+import {
+  clampUntilDate,
+  expandChatPermissions,
+  extractPromoteFlags,
+  liftsAllRestrictions,
+  type ModerationAction,
+  ModerationLog,
+} from './moderation-log';
 import { PrivateChat } from './private-chat';
 import { ReactionRemovalsLog } from './reaction-removals-log';
 import { Reply } from './reply';
@@ -181,6 +189,15 @@ const REACTION_REMOVAL_METHODS_GUARD = {
 
 const REACTION_REMOVAL_METHODS = new Set(Object.keys(REACTION_REMOVAL_METHODS_GUARD));
 
+const MODERATION_METHODS_GUARD = {
+  banChatMember: true,
+  unbanChatMember: true,
+  restrictChatMember: true,
+  promoteChatMember: true,
+} satisfies Partial<Record<keyof RawApi, true>>;
+
+const MODERATION_METHODS = new Set(Object.keys(MODERATION_METHODS_GUARD));
+
 /**
  * Per-user inbox: filtered view of messages directed at this user.
  */
@@ -289,6 +306,9 @@ function undefinedSafeBot<TContext extends Context>(ref: BotRef<TContext>): Bot<
 /** Telegram chat ID — either a numeric ID or a `@username` string. */
 type ChatId = number | string;
 
+/** A non-private chat actor — the kinds that track members and moderation state. */
+type GroupLikeChat<TContext extends Context> = Channel<TContext> | Group<TContext> | Supergroup<TContext>;
+
 /**
  * The orchestrator returned from every entry point's `chats` field.
  * Mints users and chats, exposes the v0.1 capture surface
@@ -361,6 +381,10 @@ export class Chats<TContext extends Context = Context> {
 
     for (const chat of this.chats.values()) {
       chat.messages.clear();
+
+      if (chat.type !== 'private') {
+        chat.moderation.clear();
+      }
 
       if (chat.type === 'supergroup') {
         for (const topic of chat.allTopics) {
@@ -814,6 +838,12 @@ export class Chats<TContext extends Context = Context> {
       return;
     }
 
+    if (MODERATION_METHODS.has(request.method)) {
+      this.deriveModeration(request.method, payload);
+
+      return;
+    }
+
     if (!MESSAGE_METHODS.has(request.method)) {
       return;
     }
@@ -993,6 +1023,186 @@ export class Chats<TContext extends Context = Context> {
   }
 
   /**
+   * Routes a captured `banChatMember` / `unbanChatMember` / `restrictChatMember` /
+   * `promoteChatMember` payload to the target chat's moderation log and syncs the
+   * chat's `members` map so `user.in(chat)` and the `getChatMember` resolver reflect
+   * the bot's own moderation calls. No `chat_member` update is dispatched — captures
+   * only mutate state (auto-dispatching would re-enter the bot's own handlers);
+   * compose with `chat.dispatchMemberUpdate(...)` to drive `chat_member` handlers.
+   * @param method - The moderation method name.
+   * @param payload - The raw outgoing API payload.
+   */
+  private deriveModeration(method: string, payload: Record<string, unknown>): void {
+    const chatId = payload.chat_id as ChatId | undefined;
+    const userId = payload.user_id as number | undefined;
+
+    if (chatId === undefined || userId === undefined) {
+      return;
+    }
+
+    const chat = this.findChatByTelegramId(Number(chatId));
+
+    if (!chat) {
+      this.warnUnregisteredChat(method, chatId);
+
+      return;
+    }
+
+    if (chat.type === 'private') {
+      return; // moderation methods target groups/supergroups/channels; real Telegram rejects private chats
+    }
+
+    const user = this.users.get(userId)?.user;
+    const action = this.buildModerationAction(method, payload, chatId, userId, user);
+
+    chat.moderation.push(action);
+
+    if (user !== undefined) {
+      this.applyModerationTransition(chat, user, action);
+    }
+  }
+
+  /**
+   * Normalises a moderation payload into a `ModerationAction` record.
+   * @param method - The moderation method name.
+   * @param payload - The raw outgoing API payload.
+   * @param chatId - The target chat ID from the payload.
+   * @param userId - The target user ID from the payload.
+   * @param user - The resolved `User` actor, when minted by this orchestrator.
+   * @returns The normalised action.
+   */
+  private buildModerationAction(
+    method: string,
+    payload: Record<string, unknown>,
+    chatId: ChatId,
+    userId: number,
+    user: User<TContext> | undefined,
+  ): ModerationAction<TContext> {
+    const base = { method, chatId, userId, user, raw: payload };
+
+    switch (method) {
+      case 'banChatMember': {
+        return {
+          ...base,
+          kind: 'ban',
+          untilDate: payload.until_date as number | undefined,
+          revokeMessages: payload.revoke_messages as boolean | undefined,
+        };
+      }
+
+      case 'unbanChatMember': {
+        return { ...base, kind: 'unban', onlyIfBanned: payload.only_if_banned as boolean | undefined };
+      }
+
+      case 'restrictChatMember': {
+        const permissions = expandChatPermissions(
+          (payload.permissions ?? {}) as ChatPermissions,
+          payload.use_independent_chat_permissions as boolean | undefined,
+        );
+
+        return { ...base, kind: 'restrict', permissions, untilDate: payload.until_date as number | undefined };
+      }
+
+      default: {
+        // promoteChatMember: all-false/absent boolean rights demote (per the Bot API docs).
+        const flags = extractPromoteFlags(payload);
+        const hasGrantedRight = Object.values(flags).includes(true);
+
+        if (!hasGrantedRight) {
+          return { ...base, kind: 'demote', permissions: {} };
+        }
+
+        // can_manage_chat is documented as implied by any other administrator privilege.
+        return { ...base, kind: 'promote', permissions: { can_manage_chat: true, ...flags } };
+      }
+    }
+  }
+
+  /**
+   * Applies a captured moderation action to the chat's `members` map, mirroring real
+   * Telegram semantics: bans set `'kicked'` (with `until_date` clamped to forever when
+   * under 30 seconds or over 366 days away, and ignored in basic groups), unbans set
+   * `'left'` (removing an active member unless `only_if_banned` guards it), restricts
+   * set `'restricted'` (or lift back to `'member'` when every permission is granted),
+   * and promotes set `'administrator'` (all-false demotes an administrator back to
+   * `'member'`). Creators are never mutated — real Telegram rejects moderating the owner.
+   * @param chat - The group, supergroup, or channel the action targets.
+   * @param user - The minted target user.
+   * @param action - The normalised moderation action.
+   */
+  private applyModerationTransition(chat: GroupLikeChat<TContext>, user: User<TContext>, action: ModerationAction<TContext>): void {
+    const current = chat.members.get(user.id);
+
+    if (current?.status === 'creator') {
+      return;
+    }
+
+    const next = this.nextModerationMembership(chat, user, current, action);
+
+    if (next !== undefined) {
+      chat.members.set(user.id, next);
+    }
+  }
+
+  /**
+   * Computes the membership record a moderation action transitions the target to,
+   * or `undefined` when the action leaves the current state untouched (an
+   * `only_if_banned` unban of a non-banned user, or a demotion of a non-administrator).
+   * @param chat - The group, supergroup, or channel the action targets.
+   * @param user - The minted target user.
+   * @param current - The target's current membership record, if any.
+   * @param action - The normalised moderation action.
+   * @returns The next membership record, or `undefined` for no change.
+   */
+  private nextModerationMembership(
+    chat: GroupLikeChat<TContext>,
+    user: User<TContext>,
+    current: Membership<TContext> | undefined,
+    action: ModerationAction<TContext>,
+  ): Membership<TContext> | undefined {
+    const now = Math.floor(Date.now() / 1000);
+
+    switch (action.kind) {
+      case 'ban': {
+        // until_date is applied for supergroups and channels only (Bot API docs).
+        const untilDate = chat.type === 'group' ? undefined : clampUntilDate(action.untilDate, now);
+
+        return { user, chat, status: 'kicked', permissions: {}, untilDate };
+      }
+
+      case 'unban': {
+        if (action.onlyIfBanned === true && current?.status !== 'kicked') {
+          return undefined;
+        }
+
+        return { user, chat, status: 'left', permissions: {} };
+      }
+
+      case 'restrict': {
+        const permissions = action.permissions ?? {};
+
+        if (liftsAllRestrictions(permissions)) {
+          return { user, chat, status: 'member', permissions: {} };
+        }
+
+        return { user, chat, status: 'restricted', permissions, untilDate: clampUntilDate(action.untilDate, now) };
+      }
+
+      case 'demote': {
+        return current?.status === 'administrator' ? { user, chat, status: 'member', permissions: {} } : undefined;
+      }
+
+      case 'promote': {
+        return { user, chat, status: 'administrator', permissions: action.permissions ?? {} };
+      }
+
+      default: {
+        throw new Error(`Unknown moderation action kind: ${String(action.kind)}`);
+      }
+    }
+  }
+
+  /**
    * Returns `true` if `entry`'s user should receive `reply` in their inbox.
    * @param entry - The user entry to evaluate.
    * @param chat - The chat the reply was sent to.
@@ -1134,7 +1344,7 @@ export class Chats<TContext extends Context = Context> {
    *   registration would silently re-route captured messages, deletions, and `getChat`-style
    *   resolvers to the new actor while the original actor's logs stay empty.
    */
-  private registerChat(chat: Channel<TContext> | Group<TContext> | Supergroup<TContext>): void {
+  private registerChat(chat: GroupLikeChat<TContext>): void {
     const existing = this.chats.get(chat.id);
 
     if (existing !== undefined) {
@@ -1148,6 +1358,7 @@ export class Chats<TContext extends Context = Context> {
     }
 
     chat.messages = new MessagesLog<TContext>();
+    chat.moderation = new ModerationLog<TContext>();
     this.chats.set(chat.id, chat);
     this.chatDeletions.set(chat.id, new DeletionsLog<TContext>());
 

@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.31.0 — 2026-08-29
+
+### Moderation capture: `chat.moderation` log + membership state sync
+
+Captured `banChatMember` / `unbanChatMember` / `restrictChatMember` / `promoteChatMember`
+calls now get first-class handling: a per-chat moderation log for assertions, and
+membership sync so the bot's own moderation actions are reflected by `user.in(chat)` and
+the `getChatMember` / `getChatAdministrators` resolvers instead of showing stale
+pre-moderation state. (#7)
+
+- **New `chat.moderation` log** on `Group`, `Supergroup`, and `Channel`: every captured
+  moderation call is normalised into a `ModerationAction` (`kind`, `method`, `chatId`,
+  `userId`, the resolved `user` actor when minted, `untilDate`, `revokeMessages`,
+  `onlyIfBanned`, effective `permissions`, and the `raw` payload). Per-kind views —
+  `moderation.bans`, `.unbans`, `.restrictions`, `.promotions`, `.demotions` — expose the
+  standard log surface (`length`, `last`, `all`, `lastOrThrow()`) plus `byUser(user | id)`
+  narrowing. `chats.clear()` empties the logs; membership records are preserved.
+- **Membership sync** mirrors verified Bot API semantics:
+  - `banChatMember` sets `'kicked'`. `until_date` under 30 seconds or over 366 days away
+    means banned forever (stored as no `untilDate`, surfaced as `until_date: 0`), and is
+    applied for supergroups and channels only — basic-group bans ignore it.
+  - `unbanChatMember` sets `'left'` — including for an active member, matching the Bot API
+    guarantee that the user is not a member after the call. `only_if_banned` makes it a
+    no-op for anyone not currently banned.
+  - `restrictChatMember` sets `'restricted'` with the payload's permissions after applying
+    the implied-permission grouping (`can_send_other_messages` / `can_add_web_page_previews`
+    grant every media-send permission, `can_send_polls` grants `can_send_messages`, unless
+    `use_independent_chat_permissions` is passed). Granting every permission lifts the
+    restriction back to `'member'`. `until_date` follows the same forever-clamping as bans.
+  - `promoteChatMember` sets `'administrator'` with the granted rights (`can_manage_chat`
+    implied by any other privilege). All-false/absent rights are a demotion (kind
+    `'demote'`), which moves an `'administrator'` back to `'member'` and leaves everyone
+    else untouched.
+  - Creators are never mutated (real Telegram rejects moderating the owner), and calls
+    targeting user IDs not minted by the orchestrator are logged without state sync.
+- **No auto-dispatched `chat_member` update**: captured moderation calls only mutate state.
+  Real Telegram does emit `chat_member` for the bot's own actions (when the bot is admin
+  and subscribes via `allowed_updates`), but auto-dispatching inside a capture would
+  re-enter the bot's own handlers mid-call; drive `chat_member` handlers explicitly with
+  the existing `chat.dispatchMemberUpdate(...)`.
+- `examples/14-moderation-bot` now asserts through `group.moderation` and synced
+  membership instead of digging through raw outgoing payloads.
+
 ## 0.30.0 — 2026-08-29
 
 ### Channel self-posting: `channel.post` dispatches `channel_post`

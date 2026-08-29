@@ -51,6 +51,8 @@ export { Group, type PostRelayMessageOptions } from './high-level/group';
 
 export { MessagesLog } from './high-level/messages-log';
 
+export { ModerationActionsView, ModerationLog, type ModerationAction, type ModerationActionKind } from './high-level/moderation-log';
+
 export { PrivateChat } from './high-level/private-chat';
 
 export type { ReactionRemoval, ReactionRemovalsLog } from './high-level/reaction-removals-log';
