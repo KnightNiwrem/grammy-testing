@@ -114,6 +114,43 @@ describe('User', () => {
         expect(capturedReplyChatId).toBe(group.id);
       });
 
+      it('synthesizes reply_to_message from reply_parameters alone', async () => {
+        const bot = new Bot('test-token');
+        let capturedReplyToId: number | undefined;
+        let capturedReplyChatId: number | undefined;
+
+        bot.on('message', (ctx) => {
+          capturedReplyToId = ctx.message.reply_to_message?.message_id;
+          capturedReplyChatId = ctx.message.reply_to_message?.chat.id;
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newSupergroup('Dev Chat');
+        const user = chats.newUser();
+
+        await send(user, { chat: group, reply_parameters: { message_id: 11 } });
+
+        expect(capturedReplyToId).toBe(11);
+        expect(capturedReplyChatId).toBe(group.id);
+      });
+
+      it('prefers the richer reply_to_message when both reply options are given', async () => {
+        const bot = new Bot('test-token');
+        let capturedReplyToId: number | undefined;
+
+        bot.on('message', (ctx) => {
+          capturedReplyToId = ctx.message.reply_to_message?.message_id;
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newSupergroup('Dev Chat');
+        const user = chats.newUser();
+
+        await send(user, { chat: group, reply_parameters: { message_id: 11 }, reply_to_message: { message_id: 12 } });
+
+        expect(capturedReplyToId).toBe(12);
+      });
+
       it('combines topic and reply_to_message on one dispatched message', async () => {
         const bot = new Bot('test-token');
         let captured: { messageThreadId?: number; replyToId?: number } = {};
@@ -242,6 +279,48 @@ describe('User', () => {
         const user = chats.newUser();
 
         await expect(user.sendMediaGroup([{ photo: 'file-1', chat: other }], { topic: billing })).rejects.toThrow(/belongs to forum/);
+      });
+
+      it('dispatches nothing when a later item chat fails topic validation', async () => {
+        const bot = new Bot('test-token');
+        let dispatchedCount = 0;
+
+        bot.on('message', () => {
+          dispatchedCount += 1;
+        });
+
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const other = chats.newSupergroup('Other');
+        const billing = forum.newTopic({ name: 'Billing' });
+        const user = chats.newUser();
+
+        await expect(user.sendMediaGroup([{ photo: 'file-1' }, { photo: 'file-2', chat: other }], { topic: billing })).rejects.toThrow(
+          /belongs to forum/,
+        );
+
+        expect(dispatchedCount).toBe(0);
+        expect(forum.messages.length).toBe(0);
+      });
+
+      it('throws when anonymous: true meets a non-group item chat, before any dispatch', async () => {
+        const bot = new Bot('test-token');
+        let dispatchedCount = 0;
+
+        bot.on('message', () => {
+          dispatchedCount += 1;
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newSupergroup('Dev Chat');
+        const channel = chats.newChannel('Announcements');
+        const user = chats.newUser();
+
+        await expect(
+          user.sendMediaGroup([{ photo: 'file-1' }, { photo: 'file-2', chat: channel }], { chat: group, anonymous: true }),
+        ).rejects.toThrow(/every item chat to be a Group or Supergroup/);
+
+        expect(dispatchedCount).toBe(0);
       });
 
       it('throws for anonymous: true without a group target chat', async () => {

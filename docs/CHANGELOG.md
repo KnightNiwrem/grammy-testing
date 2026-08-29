@@ -26,6 +26,15 @@ across the user actor surface instead of being limited to `sendText` / `sendComm
   (`anonymous` / reply options are intentionally not added — callback queries always
   originate from the real user account.)
 - `sendCommand` additionally gains `reply_parameters` / `reply_to_message`.
+- **`reply_parameters` now works on its own**: passing only
+  `reply_parameters: { message_id }` synthesizes a minimal `reply_to_message` stub on the
+  dispatched message (real Telegram reply updates always carry `reply_to_message`).
+  Previously the option was silently ignored unless `reply_to_message` was also supplied;
+  an explicit `reply_to_message` still wins.
+- **`sendMediaGroup` validates before dispatching**: per-item `chat` overrides are checked
+  against the topic's forum _and_ the anonymous group precondition for every item before
+  any update is dispatched, so invalid input can never leave a partially dispatched album
+  in the logs.
 - Out of scope (unchanged): `sendForwarded`, `sendWebAppData`, and `sendSuccessfulPayment`
   keep their existing narrow options; General-topic (`message_thread_id = 1`) modeling is
   not introduced.
