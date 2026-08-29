@@ -370,8 +370,9 @@ export class User<TContext extends Context = Context> {
     }
 
     const chatActor = options.chat ?? options.topic?.forum;
-    const targetChat: Chat = chatActor ? this.ctx.resolveChatToTelegram(chatActor) : this.ctx.defaultPrivateChat();
 
+    // Validated before resolving the target chat: resolving the default private chat
+    // registers it on the orchestrator, and a rejected send must not mutate that state.
     if (options.anonymous) {
       const chatType = (chatActor as { type?: string } | undefined)?.type;
 
@@ -382,6 +383,8 @@ export class User<TContext extends Context = Context> {
         );
       }
     }
+
+    const targetChat: Chat = chatActor ? this.ctx.resolveChatToTelegram(chatActor) : this.ctx.defaultPrivateChat();
 
     // `reply_parameters` alone synthesizes a minimal quoted message — in real Telegram a
     // reply update always carries `reply_to_message`. An explicit `reply_to_message` wins.

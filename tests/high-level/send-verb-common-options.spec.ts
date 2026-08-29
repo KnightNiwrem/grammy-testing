@@ -203,6 +203,18 @@ describe('User', () => {
 
         await expect(send(user, { anonymous: true })).rejects.toThrow(/Group or Supergroup/);
       });
+
+      it('does not register a private chat when the anonymous check rejects the send', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        const chatsBefore = [...chats.allChats].length;
+
+        await expect(send(user, { anonymous: true })).rejects.toThrow(/Group or Supergroup/);
+
+        expect([...chats.allChats].length).toBe(chatsBefore);
+      });
     });
   });
 
