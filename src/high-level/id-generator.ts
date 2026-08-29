@@ -101,6 +101,17 @@ export class IdGenerator {
   }
 
   /**
+   * Reports whether `nextMessageId` has already handed out the given ID to a
+   * synthetic message. Every ID below the counter was issued unless it was
+   * reserved (reserved IDs are skipped, never issued).
+   * @param id - The message ID to check.
+   * @returns `true` when the ID was already allocated to a message.
+   */
+  hasIssuedMessageId(id: number): boolean {
+    return id < this.messageCounter && !this.reservedMessageIds.has(id);
+  }
+
+  /**
    * Returns the next unique media group ID as a string token (e.g. `"mg-1"`).
    * @returns A unique media group ID string.
    */

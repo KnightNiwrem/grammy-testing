@@ -119,6 +119,17 @@ describe('forum supergroups and topics', () => {
 
         expect(() => forum.newTopic({ name: 'Duplicate', messageThreadId: 42 })).toThrow(/already registered/);
       });
+
+      it('throws when the message_thread_id was already allocated to a synthetic message', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const user = chats.newUser();
+
+        const message = await user.sendText('claims a message ID', { chat: forum });
+
+        expect(() => forum.newTopic({ name: 'Billing', messageThreadId: message.message_id })).toThrow(/already allocated/);
+      });
     });
   });
 

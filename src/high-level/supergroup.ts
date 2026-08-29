@@ -94,7 +94,8 @@ export class Supergroup<TContext extends Context = Context> implements ChatRefHo
    * auto-generated topic can collide with it.
    * @param options - The topic `name` and an optional explicit `messageThreadId`.
    * @returns The new `ForumTopic` instance.
-   * @throws {Error} When this supergroup is not a forum, or when an explicit `messageThreadId` is already registered.
+   * @throws {Error} When this supergroup is not a forum, or when an explicit `messageThreadId` is
+   *   already registered or was already allocated to a synthetic message.
    */
   newTopic(options: NewTopicOptions): ForumTopic<TContext> {
     if (!this.isForum) {
@@ -107,6 +108,10 @@ export class Supergroup<TContext extends Context = Context> implements ChatRefHo
       messageThreadId = this.ids.nextMessageId();
     } else if (this.topics.has(messageThreadId)) {
       throw new Error(`newTopic: message_thread_id ${String(messageThreadId)} is already registered on supergroup "${this.title}"`);
+    } else if (this.ids.hasIssuedMessageId(messageThreadId)) {
+      throw new Error(
+        `newTopic: message_thread_id ${String(messageThreadId)} was already allocated to a synthetic message — pick an unused ID`,
+      );
     } else {
       this.ids.reserveMessageId(messageThreadId);
     }
