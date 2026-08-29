@@ -593,9 +593,13 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendPhoto(file?: string, options: SendPhotoOptions<TContext> = {}): Promise<Message> {
-    const fileId = file ?? this.ctx.ids.nextFileId();
+    // Factory: the stub file ID is minted only after validation succeeds, so rejected
+    // sends never advance the deterministic file-ID sequence.
+    return this.dispatchUserMessage('sendPhoto', options, () => {
+      const fileId = file ?? this.ctx.ids.nextFileId();
 
-    return this.dispatchUserMessage('sendPhoto', options, { photo: [makePhotoSizeStub(fileId)], caption: options.caption });
+      return { photo: [makePhotoSizeStub(fileId)], caption: options.caption };
+    });
   }
 
   /**
@@ -605,9 +609,13 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendDocument(file?: string, options: SendDocumentOptions<TContext> = {}): Promise<Message> {
-    const fileId = file ?? this.ctx.ids.nextFileId();
+    // Factory: the stub file ID is minted only after validation succeeds, so rejected
+    // sends never advance the deterministic file-ID sequence.
+    return this.dispatchUserMessage('sendDocument', options, () => {
+      const fileId = file ?? this.ctx.ids.nextFileId();
 
-    return this.dispatchUserMessage('sendDocument', options, { document: makeDocumentStub(fileId), caption: options.caption });
+      return { document: makeDocumentStub(fileId), caption: options.caption };
+    });
   }
 
   /**
@@ -617,9 +625,13 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendVideo(file?: string, options: SendVideoOptions<TContext> = {}): Promise<Message> {
-    const fileId = file ?? this.ctx.ids.nextFileId();
+    // Factory: the stub file ID is minted only after validation succeeds, so rejected
+    // sends never advance the deterministic file-ID sequence.
+    return this.dispatchUserMessage('sendVideo', options, () => {
+      const fileId = file ?? this.ctx.ids.nextFileId();
 
-    return this.dispatchUserMessage('sendVideo', options, { video: makeVideoStub(fileId), caption: options.caption });
+      return { video: makeVideoStub(fileId), caption: options.caption };
+    });
   }
 
   /**
@@ -629,9 +641,13 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendAudio(file?: string, options: SendAudioOptions<TContext> = {}): Promise<Message> {
-    const fileId = file ?? this.ctx.ids.nextFileId();
+    // Factory: the stub file ID is minted only after validation succeeds, so rejected
+    // sends never advance the deterministic file-ID sequence.
+    return this.dispatchUserMessage('sendAudio', options, () => {
+      const fileId = file ?? this.ctx.ids.nextFileId();
 
-    return this.dispatchUserMessage('sendAudio', options, { audio: makeAudioStub(fileId), caption: options.caption });
+      return { audio: makeAudioStub(fileId), caption: options.caption };
+    });
   }
 
   /**
@@ -641,9 +657,13 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendVoice(file?: string, options: SendVoiceOptions<TContext> = {}): Promise<Message> {
-    const fileId = file ?? this.ctx.ids.nextFileId();
+    // Factory: the stub file ID is minted only after validation succeeds, so rejected
+    // sends never advance the deterministic file-ID sequence.
+    return this.dispatchUserMessage('sendVoice', options, () => {
+      const fileId = file ?? this.ctx.ids.nextFileId();
 
-    return this.dispatchUserMessage('sendVoice', options, { voice: makeVoiceStub(fileId), caption: options.caption });
+      return { voice: makeVoiceStub(fileId), caption: options.caption };
+    });
   }
 
   /**
@@ -653,9 +673,13 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendVideoNote(file?: string, options: SendVideoNoteOptions<TContext> = {}): Promise<Message> {
-    const fileId = file ?? this.ctx.ids.nextFileId();
+    // Factory: the stub file ID is minted only after validation succeeds, so rejected
+    // sends never advance the deterministic file-ID sequence.
+    return this.dispatchUserMessage('sendVideoNote', options, () => {
+      const fileId = file ?? this.ctx.ids.nextFileId();
 
-    return this.dispatchUserMessage('sendVideoNote', options, { video_note: makeVideoNoteStub(fileId) });
+      return { video_note: makeVideoNoteStub(fileId) };
+    });
   }
 
   /**
@@ -665,9 +689,13 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendAnimation(file?: string, options: SendAnimationOptions<TContext> = {}): Promise<Message> {
-    const fileId = file ?? this.ctx.ids.nextFileId();
+    // Factory: the stub file ID is minted only after validation succeeds, so rejected
+    // sends never advance the deterministic file-ID sequence.
+    return this.dispatchUserMessage('sendAnimation', options, () => {
+      const fileId = file ?? this.ctx.ids.nextFileId();
 
-    return this.dispatchUserMessage('sendAnimation', options, { animation: makeAnimationStub(fileId), caption: options.caption });
+      return { animation: makeAnimationStub(fileId), caption: options.caption };
+    });
   }
 
   /**
@@ -677,9 +705,13 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendSticker(file?: string, options: SendStickerOptions<TContext> = {}): Promise<Message> {
-    const fileId = file ?? this.ctx.ids.nextFileId();
+    // Factory: the stub file ID is minted only after validation succeeds, so rejected
+    // sends never advance the deterministic file-ID sequence.
+    return this.dispatchUserMessage('sendSticker', options, () => {
+      const fileId = file ?? this.ctx.ids.nextFileId();
 
-    return this.dispatchUserMessage('sendSticker', options, { sticker: makeStickerStub(fileId) });
+      return { sticker: makeStickerStub(fileId) };
+    });
   }
 
   /**
@@ -942,24 +974,37 @@ export class User<TContext extends Context = Context> {
    * message — matching real Telegram, where these are message-level fields carried by each
    * message of an album. An item's `chat` override is resolved with the same validation and
    * metadata rules as `sharedOptions.chat`, so `reply_to_message.chat`, `sender_chat`, and
-   * the anonymous group precondition always reflect the item's effective target. Every item
-   * is resolved before anything is dispatched, so invalid input can never leave a partially
-   * dispatched album in the bot's and chats' logs.
+   * the anonymous group precondition always reflect the item's effective target. The shared
+   * target is only resolved (and validated) when some item actually falls back to it, so an
+   * album whose items all override `chat` is judged purely on those effective targets.
+   * Every item is resolved before anything is dispatched — including the media-group ID
+   * allocation — so invalid input can never leave a partially dispatched album in the
+   * bot's and chats' logs, nor advance the deterministic ID sequences.
    * @param items - Array of media items (photo, video, or document) to send as a group.
    * @param sharedOptions - Optional default target chat, reply context, anonymous flag, and
    *   forum topic applied to every item; items may override the chat individually.
    * @returns The dispatched synthetic `Message` objects, one per item in dispatch order.
    */
   async sendMediaGroup(items: UserSendMediaGroupItem<TContext>[], sharedOptions: UserSendOptions<TContext> = {}): Promise<Message[]> {
-    const mediaGroupId = this.ctx.ids.nextMediaGroupId();
+    // Lazily memoized: the shared target only matters for items without a chat override,
+    // and resolving it eagerly would spuriously reject e.g. anonymous albums whose items
+    // all target their own group.
+    let memoizedSharedTarget: UserResolveSendTargetReturn | undefined;
 
-    const sharedTarget = this.resolveSendTarget('sendMediaGroup', sharedOptions);
+    const sharedTarget = (): UserResolveSendTargetReturn => {
+      memoizedSharedTarget ??= this.resolveSendTarget('sendMediaGroup', sharedOptions);
+
+      return memoizedSharedTarget;
+    };
 
     // Resolve (and thereby validate) every item's effective target before the dispatch loop.
     const dispatchPlan = items.map((item) => ({
       item,
-      target: item.chat ? this.resolveSendTarget('sendMediaGroup', { ...sharedOptions, chat: item.chat }) : sharedTarget,
+      target: item.chat ? this.resolveSendTarget('sendMediaGroup', { ...sharedOptions, chat: item.chat }) : sharedTarget(),
     }));
+
+    // Allocated only after every item validated, so rejected albums never consume an ID.
+    const mediaGroupId = this.ctx.ids.nextMediaGroupId();
 
     const messages: Message[] = [];
 

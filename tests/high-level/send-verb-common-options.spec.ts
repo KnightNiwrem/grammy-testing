@@ -362,6 +362,73 @@ describe('User', () => {
     });
   });
 
+  describe('sendPhoto (ID allocation)', () => {
+    describe('positive', () => {
+      it('mints consecutive stub file IDs across successful sends', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        const first = await user.sendPhoto();
+        const second = await user.sendPhoto();
+
+        expect(first.photo?.[0].file_id).toBe('stub-file-1');
+        expect(second.photo?.[0].file_id).toBe('stub-file-2');
+      });
+    });
+
+    describe('negative', () => {
+      it('does not consume stub file IDs when validation rejects the send', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await expect(user.sendPhoto(undefined, { anonymous: true })).rejects.toThrow(/Group or Supergroup/);
+
+        const message = await user.sendPhoto();
+
+        expect(message.photo?.[0].file_id).toBe('stub-file-1');
+      });
+    });
+  });
+
+  describe('sendMediaGroup (ID allocation)', () => {
+    describe('positive', () => {
+      it('accepts an anonymous album whose items all target their own group', async () => {
+        const bot = new Bot('test-token');
+        let captured: { fromId?: number; senderChatId?: number } = {};
+
+        bot.on('message', (ctx) => {
+          captured = { fromId: ctx.message.from.id, senderChatId: ctx.message.sender_chat?.id };
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newSupergroup('Dev Chat');
+        const user = chats.newUser();
+
+        const messages = await user.sendMediaGroup([{ photo: 'file-1', chat: group }], { anonymous: true });
+
+        expect(messages).toHaveLength(1);
+        expect(captured.fromId).toBe(GROUP_ANONYMOUS_BOT.id);
+        expect(captured.senderChatId).toBe(group.id);
+      });
+    });
+
+    describe('negative', () => {
+      it('does not consume the media-group ID when validation rejects the album', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await expect(user.sendMediaGroup([{ photo: 'file-1' }], { anonymous: true })).rejects.toThrow(/Group or Supergroup/);
+
+        const messages = await user.sendMediaGroup([{ photo: 'file-2' }]);
+
+        expect(messages[0].media_group_id).toBe('mg-1');
+      });
+    });
+  });
+
   describe('sendPoll (ID allocation)', () => {
     describe('positive', () => {
       it('allocates the message_id before the poll token, matching pre-0.29 order', async () => {
