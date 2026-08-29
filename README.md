@@ -73,7 +73,8 @@ expect(user.replies.lastOrThrow().text).toContain('Welcome');
 
 - `user.replies.lastOrThrow()` — the last reply sent to this user
 - `group.messages.last` — the latest message in a group context
-- `group.moderation.bans.byUser(user)` — captured ban/restrict/promote calls, with membership state synced
+- `group.moderation` — captured ban/unban/restrict/promote calls with per-kind views
+  (`moderation.bans.byUser(user)`, `.restrictions`, `.promotions`) and membership state synced
 - `chats.outgoing.requests` — every raw Telegram API call the bot made
 
 **Session & state injection**
