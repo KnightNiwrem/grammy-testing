@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.29.0 — 2026-08-29
+
+### `topic`, `reply_to_message`, and `anonymous` on every user send verb
+
+The high-level convenience options introduced with forum-topic support are now uniform
+across the user actor surface instead of being limited to `sendText` / `sendCommand`. (#5)
+
+- **Shared options**: a new exported `UserSendOptions` interface (`chat`,
+  `reply_parameters`, `reply_to_message`, `anonymous`, `topic`) is accepted by `sendText`,
+  `sendCommand`, `sendPhoto`, `sendDocument`, `sendVideo`, `sendAudio`, `sendVoice`,
+  `sendVideoNote`, `sendAnimation`, `sendSticker`, `sendLocation`, `sendContact`,
+  `sendVenue`, `sendPoll`, `sendDice`, and `sendMediaGroup` (shared options). All existing
+  per-verb option interfaces extend it, so no call sites change.
+- **One dispatch path**: the ~15 near-identical verb bodies now funnel through a shared
+  helper on `User`, so topic-registration validation, forum-identity checks, the
+  GroupAnonymousBot precondition, and reply synthesis behave identically everywhere.
+  Validation error messages are prefixed with the calling verb name.
+- **`sendMediaGroup`**: `topic` / `reply_to_message` / `anonymous` apply to every message
+  of the album — matching real Telegram, where these are message-level fields on each album
+  message. Per-item `chat` overrides get the same forum-identity validation.
+- **`sendCallbackQuery`**: accepts `topic`; the synthesized `callback_query.message`
+  carries the topic's `message_thread_id` and `is_topic_message: true`, and the topic's
+  parent forum becomes the default chat. Explicit `options.message` fields win.
+  (`anonymous` / reply options are intentionally not added — callback queries always
+  originate from the real user account.)
+- `sendCommand` additionally gains `reply_parameters` / `reply_to_message`.
+- **`reply_parameters` now works on its own**: passing only
+  `reply_parameters: { message_id }` synthesizes a minimal `reply_to_message` stub on the
+  dispatched message (real Telegram reply updates always carry `reply_to_message`).
+  Previously the option was silently ignored unless `reply_to_message` was also supplied;
+  an explicit `reply_to_message` still wins.
+- **`sendMediaGroup` resolves each item before dispatching**: an item's `chat` override is
+  resolved with the same validation and metadata rules as the shared chat — so
+  `reply_to_message.chat` and `sender_chat` always reflect the item's effective target,
+  the anonymous group precondition holds per item, and every item is validated before any
+  update is dispatched (invalid input can never leave a partially dispatched album in the
+  logs).
+- Out of scope (unchanged): `sendForwarded`, `sendWebAppData`, and `sendSuccessfulPayment`
+  keep their existing narrow options; General-topic (`message_thread_id = 1`) modeling is
+  not introduced.
+
 ## 0.28.0 — 2026-08-29
 
 ### Duplicate chat-ID registration now throws

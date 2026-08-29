@@ -109,4 +109,6 @@ export {
   type SendVoiceOptions,
   type SendWebAppDataOptions,
   type UserProfile,
+  type UserSendMediaGroupItem,
+  type UserSendOptions,
 } from './high-level/user';

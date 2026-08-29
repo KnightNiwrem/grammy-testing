@@ -7,20 +7,45 @@ update to your bot and returns the resulting `Message` object.
 const user = chats.newUser({ first_name: 'Alice' });
 ```
 
-## SendTextOptions
+## UserSendOptions
 
-Most dispatch methods accept an options object. The most common fields:
+The message-send verbs `sendText`, `sendCommand`, `sendPhoto`, `sendDocument`, `sendVideo`,
+`sendAudio`, `sendVoice`, `sendVideoNote`, `sendAnimation`, `sendSticker`, `sendLocation`,
+`sendContact`, `sendVenue`, `sendPoll`, `sendDice`, and `sendMediaGroup` accept the same
+shared options. For `sendMediaGroup` they are passed as the second argument and apply to
+every message of the album. (`sendForwarded`, `sendWebAppData`, and `sendSuccessfulPayment`
+keep their narrower options — no topic, reply, or anonymous.)
 
 ```ts
-interface SendTextOptions {
+interface UserSendOptions {
   chat?: Group | Supergroup | Channel | PrivateChat; // target chat (default: user's private chat)
   reply_to_message?: Partial<Message> & { message_id: number };
-  reply_markup?: InlineKeyboard | ReplyKeyboardMarkup | ...;
+  reply_parameters?: { message_id: number };
+  anonymous?: boolean; // send as GROUP_ANONYMOUS_BOT (requires chat: group/supergroup)
+  topic?: ForumTopic; // target forum topic minted via forum.newTopic(...)
+}
+```
+
+`sendText` additionally accepts text-specific fields:
+
+```ts
+interface SendTextOptions extends UserSendOptions {
   parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
   entities?: MessageEntity[];
-  anonymous?: boolean; // send as GROUP_ANONYMOUS_BOT (requires chat: group)
-  // ... all sendMessage fields
 }
+```
+
+So "a user posts a photo into the Billing topic" or "a user replies to a message with a
+document" needs no hand-built raw payloads:
+
+```ts
+const forum = chats.newSupergroup({ title: 'Support', isForum: true });
+const billing = forum.newTopic({ name: 'Billing' });
+const group = chats.newSupergroup('Dev Chat');
+
+await user.sendPhoto(undefined, { topic: billing, caption: 'invoice screenshot' });
+await user.sendDocument(undefined, { chat: group, reply_to_message: { message_id: 7 } });
+await user.sendDice('🎲', { chat: group, anonymous: true });
 ```
 
 ## Text & Commands
