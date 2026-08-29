@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 import { ForumTopic, prepareBot } from '../../src/index';
 
-describe('forum supergroups and topics', () => {
-  describe('Chats#newSupergroup', () => {
+describe('Chats', () => {
+  describe('newSupergroup', () => {
     describe('positive', () => {
       it('marks a supergroup as a forum via isForum: true', async () => {
         const bot = new Bot('test-token');
@@ -46,7 +46,149 @@ describe('forum supergroups and topics', () => {
     });
   });
 
-  describe('Supergroup#newTopic', () => {
+  describe('deriveFromCapture (topic-scoped message logs)', () => {
+    describe('positive', () => {
+      it('associates explicit Bot API sends carrying message_thread_id with the topic', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+
+        await bot.api.sendMessage(forum.id, 'invoice update', { message_thread_id: 42 });
+
+        expect(billing.messages.last?.text).toBe('invoice update');
+        expect(billing.messages.last?.topic).toBe(billing);
+      });
+
+      it('keeps all topic messages in the parent forum log while topic projections stay scoped', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+        const shipping = forum.newTopic({ name: 'Shipping', messageThreadId: 43 });
+
+        await bot.api.sendMessage(forum.id, 'billing note', { message_thread_id: 42 });
+        await bot.api.sendMessage(forum.id, 'shipping note', { message_thread_id: 43 });
+        await bot.api.sendMessage(forum.id, 'general note');
+
+        expect(forum.messages.length).toBe(3);
+        expect(billing.messages.length).toBe(1);
+        expect(shipping.messages.length).toBe(1);
+      });
+    });
+
+    describe('negative', () => {
+      it('keeps unknown thread IDs inspectable without associating a registered topic', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+
+        await bot.api.sendMessage(forum.id, 'stray note', { message_thread_id: 999 });
+
+        const reply = forum.messages.last;
+
+        expect(reply?.messageThreadId).toBe(999);
+        expect(reply?.topic).toBeUndefined();
+        expect(billing.messages.length).toBe(0);
+      });
+    });
+  });
+
+  describe('buildDefaultResponses (synthetic sent-message responses)', () => {
+    describe('positive', () => {
+      it('preserves topic metadata in the default sendMessage response', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+
+        forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+
+        const sent = await bot.api.sendMessage(forum.id, 'invoice update', { message_thread_id: 42 });
+
+        expect(sent.message_thread_id).toBe(42);
+        expect(sent.is_topic_message).toBe(true);
+        expect(sent.chat.id).toBe(forum.id);
+      });
+
+      it('preserves topic metadata in every default sendMediaGroup response message', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+
+        forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+
+        const sent = await bot.api.sendMediaGroup(
+          forum.id,
+          [
+            { type: 'photo', media: 'file-1' },
+            { type: 'photo', media: 'file-2' },
+          ],
+          { message_thread_id: 42 },
+        );
+
+        expect(sent).toHaveLength(2);
+
+        for (const message of sent) {
+          expect(message.message_thread_id).toBe(42);
+          expect(message.is_topic_message).toBe(true);
+        }
+      });
+    });
+
+    describe('negative', () => {
+      it('omits topic metadata from the response when the send carries no message_thread_id', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+
+        forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+
+        const sent = await bot.api.sendMessage(forum.id, 'general note');
+
+        expect(sent.message_thread_id).toBeUndefined();
+        expect(sent.is_topic_message).toBeUndefined();
+      });
+    });
+  });
+
+  describe('clear', () => {
+    describe('positive', () => {
+      it('clears topic logs via chats.clear()', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+
+        await bot.api.sendMessage(forum.id, 'billing note', { message_thread_id: 42 });
+        chats.clear();
+
+        expect(billing.messages.length).toBe(0);
+      });
+    });
+
+    describe('negative', () => {
+      it('does not unregister topics — the registry keeps resolving after clear()', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+
+        await bot.api.sendMessage(forum.id, 'billing note', { message_thread_id: 42 });
+        chats.clear();
+
+        expect(forum.topicByThreadId(42)).toBe(billing);
+
+        await bot.api.sendMessage(forum.id, 'after clear', { message_thread_id: 42 });
+
+        expect(billing.messages.last?.text).toBe('after clear');
+      });
+    });
+  });
+});
+
+describe('Supergroup', () => {
+  describe('newTopic', () => {
     describe('positive', () => {
       it('registers multiple topics with stable, unique message_thread_id values', async () => {
         const bot = new Bot('test-token');
@@ -135,8 +277,10 @@ describe('forum supergroups and topics', () => {
       });
     });
   });
+});
 
-  describe('User#sendText with topic', () => {
+describe('User', () => {
+  describe('sendText (with topic)', () => {
     describe('positive', () => {
       it('dispatches is_topic_message and message_thread_id to the handler', async () => {
         const bot = new Bot('test-token');
@@ -221,8 +365,12 @@ describe('forum supergroups and topics', () => {
         const { chats } = await prepareBot(bot);
         const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
         const billing = forum.newTopic({ name: 'Billing' });
-        const imposter = chats.newGroup({ id: forum.id, title: 'Imposter' });
         const user = chats.newUser();
+
+        // Duplicate-ID registration throws within one orchestrator, so mint the
+        // imposter (same numeric ID, different object) from a second orchestrator.
+        const { chats: otherChats } = await prepareBot(new Bot('other-token'));
+        const imposter = otherChats.newGroup({ id: forum.id, title: 'Imposter' });
 
         await expect(user.sendText('hello', { chat: imposter, topic: billing })).rejects.toThrow(/belongs to forum/);
       });
@@ -239,7 +387,7 @@ describe('forum supergroups and topics', () => {
     });
   });
 
-  describe('User#sendCommand with topic', () => {
+  describe('sendCommand (with topic)', () => {
     describe('positive', () => {
       it('dispatches the command into the topic', async () => {
         const bot = new Bot('test-token');
@@ -259,39 +407,35 @@ describe('forum supergroups and topics', () => {
         expect(capturedThreadId).toBe(42);
       });
     });
+
+    describe('negative', () => {
+      it('throws when options.chat is not the topic parent forum', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const other = chats.newSupergroup('Other');
+        const billing = forum.newTopic({ name: 'Billing' });
+        const user = chats.newUser();
+
+        await expect(user.sendCommand('help', undefined, { chat: other, topic: billing })).rejects.toThrow(/belongs to forum/);
+      });
+
+      it('throws for a topic object that was not registered via newTopic', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const detached = new ForumTopic(forum, 'Detached', 999);
+        const user = chats.newUser();
+
+        await expect(user.sendCommand('help', undefined, { topic: detached })).rejects.toThrow(/not registered/);
+      });
+    });
   });
+});
 
-  describe('topic-scoped message logs', () => {
+describe('MessagesLog', () => {
+  describe('byText (topic-scoped)', () => {
     describe('positive', () => {
-      it('associates explicit Bot API sends carrying message_thread_id with the topic', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
-        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
-
-        await bot.api.sendMessage(forum.id, 'invoice update', { message_thread_id: 42 });
-
-        expect(billing.messages.last?.text).toBe('invoice update');
-        expect(billing.messages.last?.topic).toBe(billing);
-      });
-
-      it('keeps all topic messages in the parent forum log while topic projections stay scoped', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
-        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
-        const shipping = forum.newTopic({ name: 'Shipping', messageThreadId: 43 });
-
-        await bot.api.sendMessage(forum.id, 'billing note', { message_thread_id: 42 });
-        await bot.api.sendMessage(forum.id, 'shipping note', { message_thread_id: 43 });
-        await bot.api.sendMessage(forum.id, 'general note');
-
-        expect(forum.messages.length).toBe(3);
-        expect(billing.messages.length).toBe(1);
-        expect(shipping.messages.length).toBe(1);
-        expect(billing.messages.byText('shipping note')).toBeUndefined();
-      });
-
       it('isolates two topics even when their messages have identical text', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
@@ -306,81 +450,27 @@ describe('forum supergroups and topics', () => {
         expect(shipping.messages.byText('same text')).toBe(shipping.messages.last);
         expect(billing.messages.byText('same text')).not.toBe(shipping.messages.byText('same text'));
       });
-
-      it('clears topic logs via chats.clear()', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
-        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
-
-        await bot.api.sendMessage(forum.id, 'billing note', { message_thread_id: 42 });
-        chats.clear();
-
-        expect(billing.messages.length).toBe(0);
-      });
     });
 
     describe('negative', () => {
-      it('keeps unknown thread IDs inspectable without associating a registered topic', async () => {
+      it('returns undefined for text that was only logged in a sibling topic', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
         const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
         const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+        const shipping = forum.newTopic({ name: 'Shipping', messageThreadId: 43 });
 
-        await bot.api.sendMessage(forum.id, 'stray note', { message_thread_id: 999 });
+        await bot.api.sendMessage(forum.id, 'shipping note', { message_thread_id: 43 });
 
-        const reply = forum.messages.last;
-
-        expect(reply?.messageThreadId).toBe(999);
-        expect(reply?.topic).toBeUndefined();
-        expect(billing.messages.length).toBe(0);
+        expect(shipping.messages.byText('shipping note')).toBeDefined();
+        expect(billing.messages.byText('shipping note')).toBeUndefined();
       });
     });
   });
+});
 
-  describe('synthetic sent-message responses', () => {
-    describe('positive', () => {
-      it('preserves topic metadata in the default sendMessage response', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
-
-        forum.newTopic({ name: 'Billing', messageThreadId: 42 });
-
-        const sent = await bot.api.sendMessage(forum.id, 'invoice update', { message_thread_id: 42 });
-
-        expect(sent.message_thread_id).toBe(42);
-        expect(sent.is_topic_message).toBe(true);
-        expect(sent.chat.id).toBe(forum.id);
-      });
-
-      it('preserves topic metadata in every default sendMediaGroup response message', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
-
-        forum.newTopic({ name: 'Billing', messageThreadId: 42 });
-
-        const sent = await bot.api.sendMediaGroup(
-          forum.id,
-          [
-            { type: 'photo', media: 'file-1' },
-            { type: 'photo', media: 'file-2' },
-          ],
-          { message_thread_id: 42 },
-        );
-
-        expect(sent).toHaveLength(2);
-
-        for (const message of sent) {
-          expect(message.message_thread_id).toBe(42);
-          expect(message.is_topic_message).toBe(true);
-        }
-      });
-    });
-  });
-
-  describe('Reply#clickButton', () => {
+describe('Reply', () => {
+  describe('clickButton (topic propagation)', () => {
     describe('positive', () => {
       it('preserves topic metadata in the generated callback query message', async () => {
         const bot = new Bot('test-token');
@@ -406,6 +496,38 @@ describe('forum supergroups and topics', () => {
 
         expect(captured.messageThreadId).toBe(42);
         expect(captured.isTopicMessage).toBe(true);
+      });
+    });
+
+    describe('negative', () => {
+      it('leaves topic metadata unset for buttons on non-topic messages', async () => {
+        const bot = new Bot('test-token');
+        let handled = false;
+        let captured: { messageThreadId?: number; isTopicMessage?: boolean } = {};
+
+        bot.on('callback_query:data', (ctx) => {
+          handled = true;
+
+          captured = {
+            messageThreadId: ctx.callbackQuery.message?.message_thread_id,
+            isTopicMessage: ctx.callbackQuery.message?.is_topic_message,
+          };
+        });
+
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+
+        forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+
+        await bot.api.sendMessage(forum.id, 'pick one', {
+          reply_markup: { inline_keyboard: [[{ text: 'Invoices', callback_data: 'invoices' }]] },
+        });
+
+        await forum.messages.last?.clickButton('Invoices');
+
+        expect(handled).toBe(true);
+        expect(captured.messageThreadId).toBeUndefined();
+        expect(captured.isTopicMessage).toBeUndefined();
       });
     });
   });

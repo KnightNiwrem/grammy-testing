@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.28.0 — 2026-08-29
+
+### Duplicate chat-ID registration now throws
+
+- **Breaking (guard)**: `chats.newGroup(...)`, `chats.newSupergroup(...)`, and
+  `chats.newChannel(...)` now throw when the explicit `id` is already registered to a
+  different chat in the same orchestrator (including a user's private chat). Previously the
+  later registration silently replaced the earlier one in the routing map, so captured bot
+  replies, deletions, and `getChat`-style resolvers were attributed to the replacement actor
+  while the original actor's logs stayed empty. Reuse the existing chat object, or pick a
+  different `id`. Repeated `chats.newPrivateChat(user)` calls for the same user are unaffected
+  and keep returning the same instance. (#3)
+- Tests: the forum-topics suite was restructured into class-specific root describes
+  (`Chats`, `Supergroup`, `User`, `MessagesLog`, `Reply`) with per-method
+  `positive` / `negative` branches, and gained explicit negative coverage for
+  `sendCommand` with a topic, `clickButton` topic propagation, and non-topic synthetic
+  responses. Behavior and coverage are unchanged. (#2)
+
 ## 0.27.0 — 2026-08-29
 
 ### Forum supergroups and topics

@@ -499,6 +499,7 @@ export class Chats<TContext extends Context = Context> {
    *   is supplied the auto-ID counter is skipped; any integer is accepted. Title defaults to
    *   `Group<abs(id)>` when omitted.
    * @returns The new `Group` instance.
+   * @throws {Error} When `id` is already registered to another chat in this orchestrator.
    */
   newGroup(profile?: ChatProfile | string): Group<TContext> {
     const { id, title } = resolveChatProfile(
@@ -521,6 +522,7 @@ export class Chats<TContext extends Context = Context> {
    *   defaults to `Supergroup<abs(id)>` when omitted. Pass `isForum: true` to mint a forum
    *   supergroup that can register topics via `supergroup.newTopic(...)`.
    * @returns The new `Supergroup` instance.
+   * @throws {Error} When `id` is already registered to another chat in this orchestrator.
    */
   newSupergroup(profile?: SupergroupProfile | string): Supergroup<TContext> {
     const { id, title } = resolveChatProfile(
@@ -544,6 +546,7 @@ export class Chats<TContext extends Context = Context> {
    *   is supplied the auto-ID counter is skipped; any integer is accepted. Title defaults to
    *   `Channel<abs(id)>` when omitted.
    * @returns The new `Channel` instance.
+   * @throws {Error} When `id` is already registered to another chat in this orchestrator.
    */
   newChannel(profile?: ChatProfile | string): Channel<TContext> {
     const { id, title } = resolveChatProfile(
@@ -1042,8 +1045,23 @@ export class Chats<TContext extends Context = Context> {
   /**
    * Registers a newly created chat, initialises its messages log, and wires the bot if attached.
    * @param chat - The channel, group, or supergroup to register.
+   * @throws {Error} When `chat.id` is already registered to a different actor. Allowing the
+   *   registration would silently re-route captured messages, deletions, and `getChat`-style
+   *   resolvers to the new actor while the original actor's logs stay empty.
    */
   private registerChat(chat: Channel<TContext> | Group<TContext> | Supergroup<TContext>): void {
+    const existing = this.chats.get(chat.id);
+
+    if (existing !== undefined) {
+      const existingLabel = existing.type === 'private' ? `a private chat` : `a ${existing.type} ("${existing.title}")`;
+
+      throw new Error(
+        `[grammy-testing] Chat ID ${String(chat.id)} is already registered to ${existingLabel}. ` +
+          'Registering a second chat with the same ID would silently take over message routing for that ID. ' +
+          'Reuse the existing chat object, or pick a different id.',
+      );
+    }
+
     chat.messages = new MessagesLog<TContext>();
     this.chats.set(chat.id, chat);
     this.chatDeletions.set(chat.id, new DeletionsLog<TContext>());
