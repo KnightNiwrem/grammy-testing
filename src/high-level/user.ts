@@ -859,14 +859,19 @@ export class User<TContext extends Context = Context> {
    * @param options - Optional message context, chat override, and forum topic for the embedded message.
    */
   async sendCallbackQuery(callbackData: string, options: SendCallbackQueryOptions<TContext> = {}): Promise<void> {
-    // Reuses the shared topic validation; `from` / reply / anonymous fields are unused here
-    // because callback queries always originate from the real user account.
-    const target = this.resolveSendTarget('sendCallbackQuery', { chat: options.chat, topic: options.topic });
+    // `options.chat` is documented as ignored when `options.message.chat` is set, so topic
+    // validation applies only to the effective chat (the topic's forum then stands in as the
+    // chat actor). Reuses the shared topic validation; `from` / reply / anonymous fields are
+    // unused here because callback queries always originate from the real user account.
+    const embeddedChat = options.message?.chat;
+
+    const target = this.resolveSendTarget('sendCallbackQuery', {
+      chat: options.topic && embeddedChat ? undefined : options.chat,
+      topic: options.topic,
+    });
 
     // An explicit embedded chat must still be the topic's parent forum — otherwise the
     // spread below would stamp topic metadata onto a foreign chat, a shape Telegram never sends.
-    const embeddedChat = options.message?.chat;
-
     if (options.topic && embeddedChat && embeddedChat.id !== options.topic.forum.id) {
       throw new Error(
         `sendCallbackQuery: topic "${options.topic.name}" belongs to forum ${String(options.topic.forum.id)}, ` +

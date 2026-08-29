@@ -525,6 +525,34 @@ describe('User', () => {
         expect(capturedThreadId).toBe(7);
       });
 
+      it('ignores options.chat when options.message.chat carries the topic parent forum', async () => {
+        const bot = new Bot('test-token');
+        let captured: { chatId?: number; messageThreadId?: number } = {};
+
+        bot.on('callback_query:data', (ctx) => {
+          captured = {
+            chatId: ctx.callbackQuery.message?.chat.id,
+            messageThreadId: ctx.callbackQuery.message?.message_thread_id,
+          };
+        });
+
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const other = chats.newSupergroup('Other');
+        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+        const user = chats.newUser();
+
+        // options.chat is documented as ignored when options.message.chat is set.
+        await user.sendCallbackQuery('invoices', {
+          chat: other,
+          topic: billing,
+          message: { message_id: 5, chat: forum.toTelegramChat() },
+        });
+
+        expect(captured.chatId).toBe(forum.id);
+        expect(captured.messageThreadId).toBe(42);
+      });
+
       it('accepts an embedded options.message.chat matching the topic parent forum', async () => {
         const bot = new Bot('test-token');
         let captured: { chatId?: number; messageThreadId?: number } = {};
