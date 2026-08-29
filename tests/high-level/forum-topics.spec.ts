@@ -502,11 +502,11 @@ describe('Reply', () => {
     describe('negative', () => {
       it('leaves topic metadata unset for buttons on non-topic messages', async () => {
         const bot = new Bot('test-token');
-        let handled = false;
+        let didHandle = false;
         let captured: { messageThreadId?: number; isTopicMessage?: boolean } = {};
 
         bot.on('callback_query:data', (ctx) => {
-          handled = true;
+          didHandle = true;
 
           captured = {
             messageThreadId: ctx.callbackQuery.message?.message_thread_id,
@@ -525,7 +525,7 @@ describe('Reply', () => {
 
         await forum.messages.last?.clickButton('Invoices');
 
-        expect(handled).toBe(true);
+        expect(didHandle).toBe(true);
         expect(captured.messageThreadId).toBeUndefined();
         expect(captured.isTopicMessage).toBeUndefined();
       });

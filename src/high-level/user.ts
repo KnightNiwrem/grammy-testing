@@ -1,5 +1,14 @@
 import type { Bot, Context } from 'grammy';
-import type { Chat, Message, MessageEntity, MessageOrigin, ReactionType, ShippingAddress, Update } from 'grammy/types';
+import type {
+  Chat,
+  Message,
+  MessageEntity,
+  MessageOrigin,
+  ReactionType,
+  ShippingAddress,
+  Update,
+  User as TelegramUser,
+} from 'grammy/types';
 
 import type { AnyChat } from './chat';
 import type { RepliesInbox } from './chats';
@@ -53,10 +62,14 @@ export interface SendTextOptionsReplyToMessage {
   message_id: number;
 }
 
-export interface SendTextOptions<TContext extends Context = Context> {
+/**
+ * Options shared by every user message-send verb (`sendText`, `sendCommand`, the media
+ * verbs, `sendMediaGroup`, ...). All dispatched `message` updates support the same
+ * message-level metadata in real Telegram — target chat, reply context, GroupAnonymousBot
+ * identity, and forum-topic targeting — regardless of the message content kind.
+ */
+export interface UserSendOptions<TContext extends Context = Context> {
   chat?: AnyChat<TContext>;
-  entities?: MessageEntity[];
-  parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
   reply_parameters?: SendTextOptionsReplyParameter;
   reply_to_message?: Partial<Message> & SendTextOptionsReplyToMessage;
   /**
@@ -74,69 +87,55 @@ export interface SendTextOptions<TContext extends Context = Context> {
   topic?: ForumTopic<TContext>;
 }
 
+export interface SendTextOptions<TContext extends Context = Context> extends UserSendOptions<TContext> {
+  entities?: MessageEntity[];
+  parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
+}
+
 export interface SendForwardedOptions<TContext extends Context = Context> {
   forwardOrigin: MessageOrigin;
   chat?: AnyChat<TContext>;
 }
 
-export interface SendPhotoOptions<TContext extends Context = Context> {
+export interface SendPhotoOptions<TContext extends Context = Context> extends UserSendOptions<TContext> {
   caption?: string;
-  chat?: AnyChat<TContext>;
 }
 
-export interface SendDocumentOptions<TContext extends Context = Context> {
+export interface SendDocumentOptions<TContext extends Context = Context> extends UserSendOptions<TContext> {
   caption?: string;
-  chat?: AnyChat<TContext>;
 }
 
-export interface SendVideoOptions<TContext extends Context = Context> {
+export interface SendVideoOptions<TContext extends Context = Context> extends UserSendOptions<TContext> {
   caption?: string;
-  chat?: AnyChat<TContext>;
 }
 
-export interface SendAudioOptions<TContext extends Context = Context> {
+export interface SendAudioOptions<TContext extends Context = Context> extends UserSendOptions<TContext> {
   caption?: string;
-  chat?: AnyChat<TContext>;
 }
 
-export interface SendVoiceOptions<TContext extends Context = Context> {
+export interface SendVoiceOptions<TContext extends Context = Context> extends UserSendOptions<TContext> {
   caption?: string;
-  chat?: AnyChat<TContext>;
 }
 
-export interface SendVideoNoteOptions<TContext extends Context = Context> {
-  chat?: AnyChat<TContext>;
-}
+export type SendVideoNoteOptions<TContext extends Context = Context> = UserSendOptions<TContext>;
 
-export interface SendAnimationOptions<TContext extends Context = Context> {
+export interface SendAnimationOptions<TContext extends Context = Context> extends UserSendOptions<TContext> {
   caption?: string;
-  chat?: AnyChat<TContext>;
 }
 
-export interface SendStickerOptions<TContext extends Context = Context> {
-  chat?: AnyChat<TContext>;
-}
+export type SendStickerOptions<TContext extends Context = Context> = UserSendOptions<TContext>;
 
-export interface SendLocationOptions<TContext extends Context = Context> {
-  chat?: AnyChat<TContext>;
-}
+export type SendLocationOptions<TContext extends Context = Context> = UserSendOptions<TContext>;
 
-export interface SendContactOptions<TContext extends Context = Context> {
+export interface SendContactOptions<TContext extends Context = Context> extends UserSendOptions<TContext> {
   lastName?: string;
-  chat?: AnyChat<TContext>;
 }
 
-export interface SendVenueOptions<TContext extends Context = Context> {
-  chat?: AnyChat<TContext>;
-}
+export type SendVenueOptions<TContext extends Context = Context> = UserSendOptions<TContext>;
 
-export interface SendPollOptions<TContext extends Context = Context> {
-  chat?: AnyChat<TContext>;
-}
+export type SendPollOptions<TContext extends Context = Context> = UserSendOptions<TContext>;
 
-export interface SendDiceOptions<TContext extends Context = Context> {
-  chat?: AnyChat<TContext>;
-}
+export type SendDiceOptions<TContext extends Context = Context> = UserSendOptions<TContext>;
 
 export interface SendWebAppDataOptions<TContext extends Context = Context> {
   chat?: AnyChat<TContext>;
@@ -201,6 +200,13 @@ export interface SendCallbackQueryOptions<TContext extends Context = Context> {
    * `options.message.chat` is explicitly set.
    */
   chat?: AnyChat<TContext>;
+  /**
+   * Target forum topic for the embedded `callback_query.message`. Must be a topic minted
+   * via `forum.newTopic(...)`. The synthesized message carries the topic's
+   * `message_thread_id` and `is_topic_message: true` (explicit `options.message` fields
+   * win). When `options.chat` is omitted, the topic's parent forum is used as the chat.
+   */
+  topic?: ForumTopic<TContext>;
 }
 
 /** Minimal bot user profile for `user.manageBot`. */
@@ -235,6 +241,14 @@ export interface UserSendMediaGroupItem<TContext extends Context = Context> {
   video?: string | null;
   document?: string | null;
   chat?: AnyChat<TContext>;
+}
+
+export interface UserResolveSendTargetReturn {
+  targetChat: Chat;
+  from: TelegramUser;
+  senderChat?: Chat;
+  messageThreadId?: number;
+  replyToMessage?: Message;
 }
 
 /**
@@ -304,17 +318,36 @@ export class User<TContext extends Context = Context> {
   }
 
   /**
-   * Dispatches a text message update from this user.
-   * @param text - The message text.
-   * @param options - Optional target chat, entities, parse mode, reply parameters, and
-   *   anonymous mode (GroupAnonymousBot identity).
-   * @returns The dispatched synthetic `Message`.
+   * Builds this user's Telegram identity object for use as `message.from`.
+   * @returns The `TelegramUser` shape for this actor.
    */
-  async sendText(text: string, options: SendTextOptions<TContext> = {}): Promise<Message> {
+  private toTelegramUser(): TelegramUser {
+    return {
+      id: this.id,
+      is_bot: false,
+      first_name: this.first_name,
+      last_name: this.last_name,
+      username: this.username,
+    };
+  }
+
+  /**
+   * Validates and resolves the shared send options (`chat`, `topic`, `anonymous`,
+   * `reply_to_message`) into the concrete dispatch target. Owns the topic-registration and
+   * forum-identity validation as well as the GroupAnonymousBot precondition, so every send
+   * verb enforces identical semantics.
+   * @param verb - The calling verb name, used to prefix validation error messages.
+   * @param options - The shared send options to resolve.
+   * @returns The resolved target chat, `from` identity, and optional `sender_chat`,
+   *   `message_thread_id`, and quoted `reply_to_message` values.
+   * @throws {Error} When the topic is not registered on its forum, when `options.chat` is
+   *   not the topic's parent forum, or when `anonymous` is used outside a group context.
+   */
+  private resolveSendTarget(verb: string, options: UserSendOptions<TContext>): UserResolveSendTargetReturn {
     if (options.topic) {
       if (options.topic.forum.topicByThreadId(options.topic.messageThreadId) !== options.topic) {
         throw new Error(
-          `sendText: topic "${options.topic.name}" is not registered on forum "${options.topic.forum.title}" — ` +
+          `${verb}: topic "${options.topic.name}" is not registered on forum "${options.topic.forum.title}" — ` +
             'mint topics with forum.newTopic(...) on a forum supergroup',
         );
       }
@@ -322,7 +355,7 @@ export class User<TContext extends Context = Context> {
       // Identity comparison: a different chat object with the same numeric ID is still the wrong target.
       if (options.chat && options.chat !== (options.topic.forum as AnyChat<TContext>)) {
         throw new Error(
-          `sendText: topic "${options.topic.name}" belongs to forum ${String(options.topic.forum.id)}, ` +
+          `${verb}: topic "${options.topic.name}" belongs to forum ${String(options.topic.forum.id)}, ` +
             `but options.chat is a different chat (${String(options.chat.id)}) — pass the topic's parent forum or omit options.chat`,
         );
       }
@@ -336,7 +369,7 @@ export class User<TContext extends Context = Context> {
 
       if (!chatActor || (chatType !== 'group' && chatType !== 'supergroup')) {
         throw new Error(
-          'sendText: anonymous: true requires options.chat to be a Group or Supergroup — ' +
+          `${verb}: anonymous: true requires options.chat to be a Group or Supergroup — ` +
             'GroupAnonymousBot only exists in group contexts',
         );
       }
@@ -346,20 +379,70 @@ export class User<TContext extends Context = Context> {
       ? ({ date: Math.floor(Date.now() / 1000), chat: targetChat, ...options.reply_to_message } as Message)
       : undefined;
 
+    return {
+      targetChat,
+      from: options.anonymous ? { ...GROUP_ANONYMOUS_BOT } : this.toTelegramUser(),
+      senderChat: options.anonymous ? targetChat : undefined,
+      messageThreadId: options.topic?.messageThreadId,
+      replyToMessage,
+    };
+  }
+
+  /**
+   * Assembles and dispatches a `message` update carrying the given content fields plus the
+   * message-level metadata resolved from the shared send options. Every media/message verb
+   * funnels through here so `topic` / `reply` / `anonymous` handling lives in one place.
+   * @param verb - The calling verb name, used to prefix validation error messages.
+   * @param options - The shared send options.
+   * @param content - Content-specific `Message` fields (e.g. `photo`, `caption`, `dice`).
+   * @returns The dispatched synthetic `Message`.
+   */
+  private async dispatchUserMessage(verb: string, options: UserSendOptions<TContext>, content: Partial<Message>): Promise<Message> {
+    const target = this.resolveSendTarget(verb, options);
+
+    const message: Message = {
+      message_id: this.ctx.ids.nextMessageId(),
+      date: Math.floor(Date.now() / 1000),
+      chat: target.targetChat,
+      from: target.from,
+      ...content,
+      ...(target.replyToMessage !== undefined && { reply_to_message: target.replyToMessage }),
+      ...(target.senderChat !== undefined && { sender_chat: target.senderChat }),
+      ...(target.messageThreadId !== undefined && { message_thread_id: target.messageThreadId, is_topic_message: true }),
+    } as Message;
+
+    await this.ctx.bot.handleUpdate({
+      update_id: this.ctx.ids.nextUpdateId(),
+      message,
+    } as Update);
+
+    return message;
+  }
+
+  /**
+   * Dispatches a text message update from this user.
+   * @param text - The message text.
+   * @param options - Optional target chat, entities, parse mode, reply parameters,
+   *   anonymous mode (GroupAnonymousBot identity), and forum topic.
+   * @returns The dispatched synthetic `Message`.
+   */
+  async sendText(text: string, options: SendTextOptions<TContext> = {}): Promise<Message> {
+    const target = this.resolveSendTarget('sendText', options);
+
     return dispatchTextMessage({
       bot: this.ctx.bot,
       user: this,
-      chat: targetChat,
+      chat: target.targetChat,
       text,
       messageId: this.ctx.ids.nextMessageId(),
       updateId: this.ctx.ids.nextUpdateId(),
       entities: options.entities,
       replyToMessageId: options.reply_parameters?.message_id,
-      replyToMessage,
-      messageThreadId: options.topic?.messageThreadId,
+      replyToMessage: target.replyToMessage,
+      messageThreadId: target.messageThreadId,
       ...(options.anonymous && {
-        fromOverride: GROUP_ANONYMOUS_BOT,
-        senderChat: targetChat,
+        fromOverride: target.from,
+        senderChat: target.senderChat,
       }),
     });
   }
@@ -468,294 +551,139 @@ export class User<TContext extends Context = Context> {
    * Dispatches a bot command message from this user. A leading `/` is added if absent.
    * @param command - The command name (with or without a leading `/`).
    * @param args - Optional arguments appended after the command.
-   * @param options - Optional target chat override, anonymous flag, and forum topic.
+   * @param options - Optional target chat override, reply context, anonymous flag, and forum topic.
    * @param options.chat - The target chat (defaults to the private chat with this user).
    * @param options.anonymous - When `true`, dispatches as GroupAnonymousBot (see `sendText`).
    * @param options.topic - Target forum topic (see `sendText`).
    * @returns A promise that resolves when the update is handled.
    */
-  async sendCommand(
-    command: string,
-    args?: string,
-    options: { chat?: AnyChat<TContext>; anonymous?: boolean; topic?: ForumTopic<TContext> } = {},
-  ): Promise<Message> {
+  async sendCommand(command: string, args?: string, options: UserSendOptions<TContext> = {}): Promise<Message> {
     const normalized = command.startsWith('/') ? command : `/${command}`;
     const text = args ? `${normalized} ${args}` : normalized;
 
     const entities: MessageEntity[] = [{ type: 'bot_command', offset: 0, length: normalized.length }];
 
-    return this.sendText(text, { entities, chat: options.chat, anonymous: options.anonymous, topic: options.topic });
+    return this.sendText(text, { ...options, entities });
   }
 
   /**
    * Dispatches a photo message from this user.
    * @param file - Optional file ID; a stub is generated when omitted.
-   * @param options - Optional caption and target chat.
+   * @param options - Optional caption, target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendPhoto(file?: string, options: SendPhotoOptions<TContext> = {}): Promise<Message> {
     const fileId = file ?? this.ctx.ids.nextFileId();
 
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: {
-        id: this.id,
-        is_bot: false,
-        first_name: this.first_name,
-        last_name: this.last_name,
-        username: this.username,
-      },
-      photo: [makePhotoSizeStub(fileId)],
-      caption: options.caption,
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({
-      update_id: this.ctx.ids.nextUpdateId(),
-      message,
-    } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendPhoto', options, { photo: [makePhotoSizeStub(fileId)], caption: options.caption });
   }
 
   /**
    * Dispatches a document message from this user.
    * @param file - Optional file ID; a stub is generated when omitted.
-   * @param options - Optional caption and target chat.
+   * @param options - Optional caption, target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendDocument(file?: string, options: SendDocumentOptions<TContext> = {}): Promise<Message> {
     const fileId = file ?? this.ctx.ids.nextFileId();
 
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: {
-        id: this.id,
-        is_bot: false,
-        first_name: this.first_name,
-        last_name: this.last_name,
-        username: this.username,
-      },
-      document: makeDocumentStub(fileId),
-      caption: options.caption,
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({
-      update_id: this.ctx.ids.nextUpdateId(),
-      message,
-    } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendDocument', options, { document: makeDocumentStub(fileId), caption: options.caption });
   }
 
   /**
    * Dispatches a video message from this user.
    * @param file - Optional file ID; a stub is generated when omitted.
-   * @param options - Optional caption and target chat.
+   * @param options - Optional caption, target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendVideo(file?: string, options: SendVideoOptions<TContext> = {}): Promise<Message> {
     const fileId = file ?? this.ctx.ids.nextFileId();
 
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: {
-        id: this.id,
-        is_bot: false,
-        first_name: this.first_name,
-        last_name: this.last_name,
-        username: this.username,
-      },
-      video: makeVideoStub(fileId),
-      caption: options.caption,
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({
-      update_id: this.ctx.ids.nextUpdateId(),
-      message,
-    } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendVideo', options, { video: makeVideoStub(fileId), caption: options.caption });
   }
 
   /**
    * Dispatches an audio message from this user.
    * @param file - Optional file ID; a stub is generated when omitted.
-   * @param options - Optional caption and target chat.
+   * @param options - Optional caption, target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendAudio(file?: string, options: SendAudioOptions<TContext> = {}): Promise<Message> {
     const fileId = file ?? this.ctx.ids.nextFileId();
 
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: { id: this.id, is_bot: false, first_name: this.first_name, last_name: this.last_name, username: this.username },
-      audio: makeAudioStub(fileId),
-      caption: options.caption,
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendAudio', options, { audio: makeAudioStub(fileId), caption: options.caption });
   }
 
   /**
    * Dispatches a voice message from this user.
    * @param file - Optional file ID; a stub is generated when omitted.
-   * @param options - Optional caption and target chat.
+   * @param options - Optional caption, target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendVoice(file?: string, options: SendVoiceOptions<TContext> = {}): Promise<Message> {
     const fileId = file ?? this.ctx.ids.nextFileId();
 
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: { id: this.id, is_bot: false, first_name: this.first_name, last_name: this.last_name, username: this.username },
-      voice: makeVoiceStub(fileId),
-      caption: options.caption,
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendVoice', options, { voice: makeVoiceStub(fileId), caption: options.caption });
   }
 
   /**
    * Dispatches a video note (round video) message from this user.
    * @param file - Optional file ID; a stub is generated when omitted.
-   * @param options - Optional target chat.
+   * @param options - Optional target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendVideoNote(file?: string, options: SendVideoNoteOptions<TContext> = {}): Promise<Message> {
     const fileId = file ?? this.ctx.ids.nextFileId();
 
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: { id: this.id, is_bot: false, first_name: this.first_name, last_name: this.last_name, username: this.username },
-      video_note: makeVideoNoteStub(fileId),
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendVideoNote', options, { video_note: makeVideoNoteStub(fileId) });
   }
 
   /**
    * Dispatches an animation (GIF) message from this user.
    * @param file - Optional file ID; a stub is generated when omitted.
-   * @param options - Optional caption and target chat.
+   * @param options - Optional caption, target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendAnimation(file?: string, options: SendAnimationOptions<TContext> = {}): Promise<Message> {
     const fileId = file ?? this.ctx.ids.nextFileId();
 
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: { id: this.id, is_bot: false, first_name: this.first_name, last_name: this.last_name, username: this.username },
-      animation: makeAnimationStub(fileId),
-      caption: options.caption,
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendAnimation', options, { animation: makeAnimationStub(fileId), caption: options.caption });
   }
 
   /**
    * Dispatches a sticker message from this user.
    * @param file - Optional file ID; a stub is generated when omitted.
-   * @param options - Optional target chat.
+   * @param options - Optional target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendSticker(file?: string, options: SendStickerOptions<TContext> = {}): Promise<Message> {
     const fileId = file ?? this.ctx.ids.nextFileId();
 
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: { id: this.id, is_bot: false, first_name: this.first_name, last_name: this.last_name, username: this.username },
-      sticker: makeStickerStub(fileId),
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendSticker', options, { sticker: makeStickerStub(fileId) });
   }
 
   /**
    * Dispatches a location message from this user.
    * @param latitude - Geographic latitude in degrees.
    * @param longitude - Geographic longitude in degrees.
-   * @param options - Optional target chat.
+   * @param options - Optional target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendLocation(latitude: number, longitude: number, options: SendLocationOptions<TContext> = {}): Promise<Message> {
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: { id: this.id, is_bot: false, first_name: this.first_name, last_name: this.last_name, username: this.username },
-      location: { latitude, longitude },
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendLocation', options, { location: { latitude, longitude } });
   }
 
   /**
    * Dispatches a contact message from this user.
    * @param phoneNumber - The contact's phone number.
    * @param firstName - The contact's first name.
-   * @param options - Optional last name and target chat.
+   * @param options - Optional last name, target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendContact(phoneNumber: string, firstName: string, options: SendContactOptions<TContext> = {}): Promise<Message> {
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: { id: this.id, is_bot: false, first_name: this.first_name, last_name: this.last_name, username: this.username },
+    return this.dispatchUserMessage('sendContact', options, {
       contact: { phone_number: phoneNumber, first_name: firstName, last_name: options.lastName },
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
-
-    return message;
+    });
   }
 
   /**
@@ -764,7 +692,7 @@ export class User<TContext extends Context = Context> {
    * @param longitude - Geographic longitude of the venue.
    * @param title - Name of the venue.
    * @param address - Address of the venue.
-   * @param options - Optional target chat.
+   * @param options - Optional target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendVenue(
@@ -774,36 +702,18 @@ export class User<TContext extends Context = Context> {
     address: string,
     options: SendVenueOptions<TContext> = {},
   ): Promise<Message> {
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: { id: this.id, is_bot: false, first_name: this.first_name, last_name: this.last_name, username: this.username },
-      venue: { location: { latitude, longitude }, title, address },
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendVenue', options, { venue: { location: { latitude, longitude }, title, address } });
   }
 
   /**
    * Dispatches a poll message from this user.
    * @param question - The poll question text.
    * @param answerOptions - Array of answer option strings.
-   * @param options - Optional target chat.
+   * @param options - Optional target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendPoll(question: string, answerOptions: string[], options: SendPollOptions<TContext> = {}): Promise<Message> {
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: { id: this.id, is_bot: false, first_name: this.first_name, last_name: this.last_name, username: this.username },
+    return this.dispatchUserMessage('sendPoll', options, {
       poll: {
         id: `poll-${String(this.ctx.ids.nextMessageId())}`,
         question,
@@ -814,34 +724,18 @@ export class User<TContext extends Context = Context> {
         type: 'regular',
         allows_multiple_answers: false,
         allows_revoting: false,
-      },
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
-
-    return message;
+      } as Message['poll'],
+    });
   }
 
   /**
    * Dispatches a dice message from this user.
    * @param emoji - The dice emoji to use (default `🎲`).
-   * @param options - Optional target chat.
+   * @param options - Optional target chat, reply context, anonymous flag, and forum topic.
    * @returns The dispatched synthetic `Message`.
    */
   async sendDice(emoji = '🎲', options: SendDiceOptions<TContext> = {}): Promise<Message> {
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
-
-    const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
-      date: Math.floor(Date.now() / 1000),
-      chat: targetChat,
-      from: { id: this.id, is_bot: false, first_name: this.first_name, last_name: this.last_name, username: this.username },
-      dice: { emoji, value: 1 },
-    } as Message;
-
-    await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
-
-    return message;
+    return this.dispatchUserMessage('sendDice', options, { dice: { emoji, value: 1 } });
   }
 
   /**
@@ -905,15 +799,18 @@ export class User<TContext extends Context = Context> {
   /**
    * Dispatches a `callback_query` update from this user without requiring a prior captured reply.
    * @param callbackData - The callback payload string (`callback_query.data`).
-   * @param options - Optional message context and chat override.
+   * @param options - Optional message context, chat override, and forum topic for the embedded message.
    */
   async sendCallbackQuery(callbackData: string, options: SendCallbackQueryOptions<TContext> = {}): Promise<void> {
-    const defaultChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
+    // Reuses the shared topic validation; `from` / reply / anonymous fields are unused here
+    // because callback queries always originate from the real user account.
+    const target = this.resolveSendTarget('sendCallbackQuery', { chat: options.chat, topic: options.topic });
     const messageId = options.message?.message_id ?? this.ctx.ids.nextMessageId();
 
     const message: Message = {
       date: Math.floor(Date.now() / 1000),
-      chat: defaultChat,
+      chat: target.targetChat,
+      ...(target.messageThreadId !== undefined && { message_thread_id: target.messageThreadId, is_topic_message: true }),
       ...options.message,
       message_id: messageId,
     } as Message;
@@ -1018,37 +915,46 @@ export class User<TContext extends Context = Context> {
 
   /**
    * Dispatches a series of media group updates from this user, one per item.
+   *
+   * The shared options (`topic`, `reply_to_message`, `anonymous`) apply to every dispatched
+   * message — matching real Telegram, where these are message-level fields carried by each
+   * message of an album.
    * @param items - Array of media items (photo, video, or document) to send as a group.
-   * @param sharedOptions - Optional default target chat applied to items that omit their own.
-   * @param sharedOptions.chat - The default target chat (defaults to the private chat with this user).
+   * @param sharedOptions - Optional default target chat, reply context, anonymous flag, and
+   *   forum topic applied to every item; items may override the chat individually.
    * @returns The dispatched synthetic `Message` objects, one per item in dispatch order.
    */
-  async sendMediaGroup(items: UserSendMediaGroupItem<TContext>[], sharedOptions: { chat?: AnyChat<TContext> } = {}): Promise<Message[]> {
+  async sendMediaGroup(items: UserSendMediaGroupItem<TContext>[], sharedOptions: UserSendOptions<TContext> = {}): Promise<Message[]> {
     const mediaGroupId = this.ctx.ids.nextMediaGroupId();
 
-    const targetChat: Chat = sharedOptions.chat ? this.ctx.resolveChatToTelegram(sharedOptions.chat) : this.ctx.defaultPrivateChat();
+    const target = this.resolveSendTarget('sendMediaGroup', sharedOptions);
 
     const messages: Message[] = [];
 
     for (const item of items) {
-      const itemChat = item.chat ? this.ctx.resolveChatToTelegram(item.chat) : targetChat;
+      // Per-item chat overrides get the same forum-identity validation as sharedOptions.chat.
+      if (item.chat && sharedOptions.topic && item.chat !== (sharedOptions.topic.forum as AnyChat<TContext>)) {
+        throw new Error(
+          `sendMediaGroup: topic "${sharedOptions.topic.name}" belongs to forum ${String(sharedOptions.topic.forum.id)}, ` +
+            `but an item's chat is a different chat (${String(item.chat.id)}) — pass the topic's parent forum or omit the item chat`,
+        );
+      }
+
+      const itemChat = item.chat ? this.ctx.resolveChatToTelegram(item.chat) : target.targetChat;
 
       const message: Message = {
         message_id: this.ctx.ids.nextMessageId(),
         date: Math.floor(Date.now() / 1000),
         chat: itemChat,
-        from: {
-          id: this.id,
-          is_bot: false,
-          first_name: this.first_name,
-          last_name: this.last_name,
-          username: this.username,
-        },
+        from: target.from,
         media_group_id: mediaGroupId,
         caption: item.caption,
         photo: item.photo ? [makePhotoSizeStub(item.photo)] : undefined,
         document: item.document ? makeDocumentStub(item.document) : undefined,
         video: item.video ? makeVideoStub(item.video) : undefined,
+        ...(target.replyToMessage !== undefined && { reply_to_message: target.replyToMessage }),
+        ...(target.senderChat !== undefined && { sender_chat: itemChat }),
+        ...(target.messageThreadId !== undefined && { message_thread_id: target.messageThreadId, is_topic_message: true }),
       } as Message;
 
       const update: Update = {
