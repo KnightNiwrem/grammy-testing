@@ -1018,9 +1018,10 @@ export class Chats<TContext extends Context = Context> {
    * Returns the existing private chat for `user`, or creates and registers a new one.
    * @param user - The user whose private chat to retrieve or create.
    * @returns The `PrivateChat` instance for `user`.
-   * @throws {Error} When `user.id` is already registered to a non-private chat. Re-registering
-   *   a private chat over the same user's earlier private chat stays allowed — private-chat
-   *   IDs always mirror the owning user's ID, so routing is unchanged in that case.
+   * @throws {Error} When `user.id` is already registered to a non-private chat, or to a
+   *   private chat owned by a different user actor. Repeated calls for the same user object
+   *   keep returning the same instance — private-chat IDs always mirror the owning user's ID,
+   *   so routing is unchanged in that case.
    */
   private privateChatFor(user: User<TContext>): PrivateChat<TContext> {
     const entry = this.users.get(user.id);
@@ -1031,12 +1032,31 @@ export class Chats<TContext extends Context = Context> {
 
     const existing = this.chats.get(user.id);
 
-    if (existing !== undefined && existing.type !== 'private') {
+    if (existing !== undefined) {
+      if (existing.type !== 'private') {
+        throw new Error(
+          `[grammy-testing] Cannot register a private chat for user ${String(user.id)}: ` +
+            `that ID is already registered to a ${existing.type} ("${existing.title}"). ` +
+            'Registering the private chat would silently take over message routing for that ID. ' +
+            'Pick a different user id, or a different chat id.',
+        );
+      }
+
+      // Same owning user object: reuse the registered chat (and its messages log)
+      // instead of re-registering a fresh instance over it.
+      if (existing.user === user) {
+        if (entry) {
+          entry.privateChat = existing;
+        }
+
+        return existing;
+      }
+
       throw new Error(
         `[grammy-testing] Cannot register a private chat for user ${String(user.id)}: ` +
-          `that ID is already registered to a ${existing.type} ("${existing.title}"). ` +
+          'that ID is already registered to a private chat owned by a different user actor. ' +
           'Registering the private chat would silently take over message routing for that ID. ' +
-          'Pick a different user id, or a different chat id.',
+          'Reuse the original user object, or pick a different user id.',
       );
     }
 

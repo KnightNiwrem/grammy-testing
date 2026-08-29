@@ -12,8 +12,9 @@
   while the original actor's logs stayed empty. Reuse the existing chat object, or pick a
   different `id`. The guard also covers the reverse order: creating a private chat (via
   `chats.newPrivateChat(user)` or a default private send) throws when the user's ID is
-  already registered to a non-private chat. Repeated `chats.newPrivateChat(user)` calls for
-  the same user are unaffected and keep returning the same instance. Auto-generated IDs
+  already registered to a non-private chat, or to a private chat owned by a different user
+  actor with the same ID. Repeated `chats.newPrivateChat(user)` calls for the same user
+  object are unaffected and keep returning the same instance. Auto-generated IDs
   (`newUser`, `newGroup`, `newSupergroup`, `newChannel` without an explicit `id`) skip values
   that an explicit registration already claimed, so factory calls that request a generated ID
   never trip the guard. (#3)

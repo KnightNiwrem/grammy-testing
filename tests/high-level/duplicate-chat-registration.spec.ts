@@ -162,9 +162,37 @@ describe('Chats', () => {
 
         expect(second).toBe(first);
       });
+
+      it('keeps returning the same private chat for a user minted by another orchestrator', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const { chats: other } = await prepareBot(new Bot('other-token'));
+
+        // No user entry exists in `chats` for this user, so the registry lookup
+        // (not the per-user fast path) must provide the reuse.
+        const foreign = other.newUser({ id: 4242 });
+        const first = chats.newPrivateChat(foreign);
+        const second = chats.newPrivateChat(foreign);
+
+        expect(second).toBe(first);
+      });
     });
 
     describe('negative', () => {
+      it('throws when the ID is registered to a private chat owned by a different user actor', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const { chats: other } = await prepareBot(new Bot('other-token'));
+
+        const original = other.newUser({ id: 4242 });
+        const imposter = other.newUser({ id: 4242 });
+
+        const originalChat = chats.newPrivateChat(original);
+
+        expect(() => chats.newPrivateChat(imposter)).toThrow(/different user actor/);
+        expect(chats.newPrivateChat(original)).toBe(originalChat);
+      });
+
       it('throws when the user ID is already registered to a non-private chat', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
