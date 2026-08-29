@@ -882,14 +882,20 @@ export class User<TContext extends Context = Context> {
       topic: options.topic,
     });
 
-    // An explicit embedded chat must still be the topic's parent forum — same ID *and*
-    // supergroup shape — otherwise the spread below would stamp topic metadata onto a
-    // foreign chat, a shape Telegram never sends.
-    if (options.topic && embeddedChat && (embeddedChat.id !== options.topic.forum.id || embeddedChat.type !== 'supergroup')) {
+    // An explicit embedded chat must still be the topic's parent forum — same ID, supergroup
+    // type, and is_forum: true (the full forum identity) — otherwise the spread below would
+    // stamp topic metadata onto a foreign chat, a shape Telegram never sends.
+    if (
+      options.topic &&
+      embeddedChat &&
+      (embeddedChat.id !== options.topic.forum.id ||
+        embeddedChat.type !== 'supergroup' ||
+        (embeddedChat as { is_forum?: boolean }).is_forum !== true)
+    ) {
       throw new Error(
         `sendCallbackQuery: topic "${options.topic.name}" belongs to forum ${String(options.topic.forum.id)}, ` +
-          `but options.message.chat is a different chat (${String(embeddedChat.id)}, type "${embeddedChat.type}") — ` +
-          "embed the topic's parent forum or omit it",
+          `but options.message.chat is not that forum's shape (id ${String(embeddedChat.id)}, type "${embeddedChat.type}") — ` +
+          'embed topic.forum.toTelegramChat() or omit the chat',
       );
     }
 
