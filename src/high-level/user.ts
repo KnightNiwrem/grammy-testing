@@ -986,6 +986,14 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message` objects, one per item in dispatch order.
    */
   async sendMediaGroup(items: UserSendMediaGroupItem<TContext>[], sharedOptions: UserSendOptions<TContext> = {}): Promise<Message[]> {
+    if (items.length === 0) {
+      // An empty album dispatches nothing, but the shared options are still validated so an
+      // invalid topic/anonymous combination never passes silently.
+      this.resolveSendTarget('sendMediaGroup', sharedOptions);
+
+      return [];
+    }
+
     // Lazily memoized: the shared target only matters for items without a chat override,
     // and resolving it eagerly would spuriously reject e.g. anonymous albums whose items
     // all target their own group.

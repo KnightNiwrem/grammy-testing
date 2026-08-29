@@ -415,6 +415,16 @@ describe('User', () => {
     });
 
     describe('negative', () => {
+      it('still validates the shared options for an empty album', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await expect(user.sendMediaGroup([], { anonymous: true })).rejects.toThrow(/Group or Supergroup/);
+
+        await expect(user.sendMediaGroup([])).resolves.toEqual([]);
+      });
+
       it('does not consume the media-group ID when validation rejects the album', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);

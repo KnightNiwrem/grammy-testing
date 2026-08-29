@@ -11,9 +11,10 @@ const user = chats.newUser({ first_name: 'Alice' });
 
 The message-send verbs `sendText`, `sendCommand`, `sendPhoto`, `sendDocument`, `sendVideo`,
 `sendAudio`, `sendVoice`, `sendVideoNote`, `sendAnimation`, `sendSticker`, `sendLocation`,
-`sendContact`, `sendVenue`, `sendPoll`, `sendDice`, and `sendMediaGroup` (shared options)
-accept the same shared options. (`sendForwarded`, `sendWebAppData`, and
-`sendSuccessfulPayment` keep their narrower `{ chat }` options.)
+`sendContact`, `sendVenue`, `sendPoll`, `sendDice`, and `sendMediaGroup` accept the same
+shared options. For `sendMediaGroup` they are passed as the second argument and apply to
+every message of the album. (`sendForwarded`, `sendWebAppData`, and `sendSuccessfulPayment`
+keep their narrower options — no topic, reply, or anonymous.)
 
 ```ts
 interface UserSendOptions {
