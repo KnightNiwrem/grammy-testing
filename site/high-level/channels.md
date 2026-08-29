@@ -103,7 +103,7 @@ channel.dispatchReactionCount(msg.message_id, [{ type: 'emoji', emoji: '🔥', t
 ::: warning Deprecated
 Real Telegram never delivers `message` updates with a channel-typed `chat` —
 everything a channel emits arrives as `channel_post` or `edited_channel_post`.
-Use [`post`](#post-text-options-→-dispatches-channel-post) instead. This verb is
+Use [`post`](#posting-messages) instead. This verb is
 kept for backwards compatibility and still dispatches the historical shape.
 :::
 
