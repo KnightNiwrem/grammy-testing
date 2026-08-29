@@ -102,13 +102,14 @@ export class IdGenerator {
 
   /**
    * Reports whether `nextMessageId` has already handed out the given ID to a
-   * synthetic message. Every ID below the counter was issued unless it was
-   * reserved (reserved IDs are skipped, never issued).
+   * synthetic message. Issued IDs are exactly `1..counter-1` minus the reserved
+   * ones (reserved IDs are skipped, never issued); non-positive IDs are never
+   * issued by the generator.
    * @param id - The message ID to check.
    * @returns `true` when the ID was already allocated to a message.
    */
   hasIssuedMessageId(id: number): boolean {
-    return id < this.messageCounter && !this.reservedMessageIds.has(id);
+    return id > 0 && id < this.messageCounter && !this.reservedMessageIds.has(id);
   }
 
   /**

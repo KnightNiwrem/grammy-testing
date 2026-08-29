@@ -129,6 +129,9 @@ describe('forum supergroups and topics', () => {
         const message = await user.sendText('claims a message ID', { chat: forum });
 
         expect(() => forum.newTopic({ name: 'Billing', messageThreadId: message.message_id })).toThrow(/already allocated/);
+
+        // Non-positive IDs are never issued by the generator, so they must not trip a false "already allocated" error.
+        expect(() => forum.newTopic({ name: 'Zero', messageThreadId: 0 })).not.toThrow();
       });
     });
   });
