@@ -24,10 +24,11 @@ driven without hand-built raw updates. (#6)
 - **No auto-relay into linked groups**: `channel.post` dispatches exactly one update,
   consistent with every other verb. Simulate Telegram's linked-discussion-group
   auto-forward by composing it with the existing `supergroup.postRelayMessage`.
-- **`postRelayMessage` gains `originMessageId`**: sets `forward_origin.message_id` to the
-  original channel post's ID (real auto-forwards keep the origin post's ID there, distinct
-  from the relay message's own local ID). Defaults to the previous behavior — the relay's
-  own ID — when omitted.
+- **`postRelayMessage` gains `originMessageId` and `originDate`**: set
+  `forward_origin.message_id` / `forward_origin.date` to the original channel post's ID
+  and timestamp (real auto-forwards keep the origin post's identity there, distinct from
+  the relay message's own local ID and send time). Both default to the previous behavior —
+  the relay's own values — when omitted.
 - `examples/15-channel-post-bot` now also covers the incoming direction with a
   `channel_post:text` handler that pins marked posts.
 

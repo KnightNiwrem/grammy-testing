@@ -48,6 +48,12 @@ export interface PostRelayMessageOptions<TContext extends Context = Context> {
    * Defaults to the relay message's ID when omitted.
    */
   originMessageId?: number;
+  /**
+   * The `date` of the original post in the channel, used for
+   * `forward_origin.date` (the Bot API defines it as the time the original
+   * message was sent). Defaults to the relay message's timestamp when omitted.
+   */
+  originDate?: number;
 }
 
 /**
@@ -275,7 +281,8 @@ export class Group<TContext extends Context = Context> implements ChatRefHolder<
    * to `user.sendText` as `reply_to_message`.
    * @param text - The relay message text.
    * @param options - Optional `messageId` override, `channel` for `forward_origin`, and
-   *   `originMessageId` for the original channel post's ID inside `forward_origin`.
+   *   `originMessageId` / `originDate` for the original channel post's ID and timestamp
+   *   inside `forward_origin`.
    * @returns The dispatched synthetic `Message`.
    */
   async postRelayMessage(text: string, options: PostRelayMessageOptions<TContext> = {}): Promise<Message> {
@@ -292,7 +299,7 @@ export class Group<TContext extends Context = Context> implements ChatRefHolder<
         forward_origin: {
           type: 'channel' as const,
           chat: options.channel.toTelegramChat(),
-          date: now,
+          date: options.originDate ?? now,
           message_id: options.originMessageId ?? messageId,
         },
       }),

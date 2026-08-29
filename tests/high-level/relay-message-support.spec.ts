@@ -66,7 +66,7 @@ describe('postRelayMessage', () => {
     expect((forwardOrigin as Extract<typeof forwardOrigin, { type: 'channel' }>).chat.id).toBe(channel.id);
   });
 
-  describe('originMessageId option', () => {
+  describe('originMessageId and originDate options', () => {
     describe('positive', () => {
       it('sets forward_origin.message_id to the original channel post ID', async () => {
         const bot = new Bot('test-token');
@@ -82,6 +82,21 @@ describe('postRelayMessage', () => {
         expect(origin.message_id).toBe(post.message_id);
         expect(relay.message_id).not.toBe(post.message_id);
       });
+
+      it('sets forward_origin.date to the original channel post timestamp', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const group = chats.newGroup();
+        const channel = chats.newChannel('My Channel');
+        const originalDate = 1_700_000_000;
+
+        const relay = await group.postRelayMessage('original post', { channel, originDate: originalDate });
+
+        const origin = relay.forward_origin as Extract<Message['forward_origin'], { type: 'channel' }>;
+
+        expect(origin.date).toBe(originalDate);
+        expect(relay.date).not.toBe(originalDate);
+      });
     });
 
     describe('negative', () => {
@@ -96,6 +111,19 @@ describe('postRelayMessage', () => {
         const origin = relay.forward_origin as Extract<Message['forward_origin'], { type: 'channel' }>;
 
         expect(origin.message_id).toBe(relay.message_id);
+      });
+
+      it('forward_origin.date defaults to the relay message timestamp when omitted', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const group = chats.newGroup();
+        const channel = chats.newChannel('My Channel');
+
+        const relay = await group.postRelayMessage('post text', { channel });
+
+        const origin = relay.forward_origin as Extract<Message['forward_origin'], { type: 'channel' }>;
+
+        expect(origin.date).toBe(relay.date);
       });
     });
   });
