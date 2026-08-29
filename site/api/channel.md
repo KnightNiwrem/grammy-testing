@@ -16,21 +16,31 @@ class Channel<TContext extends Context = Context>
 
 ## Methods
 
-| Method                  | Signature                                                                            | Description                           |
-| ----------------------- | ------------------------------------------------------------------------------------ | ------------------------------------- |
-| `postMessageTo`         | `(chat: Group \| Supergroup \| Channel, text: string, options?) => Promise<Message>` | Post as channel into a linked group   |
-| `editPost`              | `(messageId: number, newText: string, options?: EditPostOptions) => Promise<void>`   | Dispatch `edited_channel_post`        |
-| `changeMemberStatus`    | `(user: User<TContext>, transition: MemberStatusTransition) => void`                 | Dispatch `my_chat_member` for channel |
-| `dispatchReactionCount` | `(messageId, reactions, options?) => Promise<void>`                                  | Dispatch `message_reaction_count`     |
-| `sendSystemMessage`     | `(text: string, options?: SendSystemMessageOptions) => Promise<Message>`             | System message                        |
+| Method                  | Signature                                                                          | Description                                     |
+| ----------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `post`                  | `(text: string, options?: ChannelPostOptions) => Promise<Message>`                 | Dispatch `channel_post` in the channel itself   |
+| `postMessageTo`         | `(chat: Group \| Supergroup, text: string, options?) => Promise<Message>`          | Post as channel into a linked group (`message`) |
+| `editPost`              | `(messageId: number, newText: string, options?: EditPostOptions) => Promise<void>` | Dispatch `edited_channel_post`                  |
+| `changeMemberStatus`    | `(user: User<TContext>, transition: MemberStatusTransition) => Promise<void>`      | Dispatch `my_chat_member` for channel           |
+| `dispatchReactionCount` | `(messageId, reactions, options?) => Promise<void>`                                | Dispatch `message_reaction_count`               |
+| `sendSystemMessage`     | `(text: string, options?: SendSystemMessageOptions) => Promise<void>`              | System message (deprecated — use `post`)        |
+
+## ChannelPostOptions
+
+```ts
+interface ChannelPostOptions {
+  messageId?: number;
+  author_signature?: string;
+  reply_to_message?: Partial<Message> & { message_id: number };
+}
+```
 
 ## EditPostOptions
 
 ```ts
 interface EditPostOptions {
-  parse_mode?: ParseMode;
-  entities?: MessageEntity[];
-  reply_markup?: InlineKeyboardMarkup;
+  date?: number;
+  author_signature?: string;
 }
 ```
 
