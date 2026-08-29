@@ -307,9 +307,12 @@ export function expandChatPermissions(permissions: ChatPermissions, independent:
     }
   }
 
-  flags.can_react_to_messages ??= flags.can_send_messages;
-  flags.can_manage_topics ??= flags.can_pin_messages;
-  flags.can_edit_tag ??= flags.can_pin_messages;
+  // Coerce omitted sources to false — restrictChatMember replaces the whole permission
+  // set, so an omitted flag means "not allowed". Plain `??=` would otherwise create own
+  // properties holding `undefined` that later spread over default-false ChatMember bases.
+  flags.can_react_to_messages ??= flags.can_send_messages ?? false;
+  flags.can_manage_topics ??= flags.can_pin_messages ?? false;
+  flags.can_edit_tag ??= flags.can_pin_messages ?? false;
 
   return flags;
 }

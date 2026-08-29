@@ -136,6 +136,19 @@ describe('moderation capture', () => {
         expect(owner.in(group)?.status).toBe('creator');
       });
 
+      it('logs but does not mutate membership when the target is an administrator', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const admin = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.promote(admin);
+        await bot.api.banChatMember(group.id, admin.id);
+
+        expect(group.moderation.bans.length).toBe(1);
+        expect(admin.in(group)?.status).toBe('administrator');
+      });
+
       it('logs with user undefined and skips membership sync for an unminted user id', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
@@ -473,6 +486,49 @@ describe('moderation capture', () => {
 
         expect(owner.in(group)?.status).toBe('creator');
         expect(group.moderation.restrictions.length).toBe(1);
+      });
+
+      it('never mutates an administrator (Telegram requires demotion first)', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const admin = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.promote(admin);
+        await bot.api.restrictChatMember(group.id, admin.id, { can_send_messages: false });
+
+        expect(admin.in(group)?.status).toBe('administrator');
+        expect(group.moderation.restrictions.length).toBe(1);
+      });
+
+      it('fills omitted derived permissions as false, not undefined, in the resolved shape', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const admin = chats.newAdmin();
+        const target = chats.newUser();
+        const group = chats.defaultGroup;
+
+        assert.ok(group);
+        group.join(target);
+
+        let result: ChatMember | undefined;
+
+        bot.command('restrict', async (ctx) => {
+          await ctx.restrictChatMember(target.id, { can_send_messages: false });
+          result = await ctx.api.getChatMember(ctx.chat.id, target.id);
+        });
+
+        await admin.sendCommand('/restrict', undefined, { chat: group });
+        await chats.idle();
+
+        assert.ok(result?.status === 'restricted');
+        expect(result.can_manage_topics).toBe(false);
+        expect((result as unknown as Record<string, unknown>).can_edit_tag).toBe(false);
+
+        const action = group.moderation.restrictions.lastOrThrow();
+
+        expect(action.permissions?.can_react_to_messages).toBe(false);
+        expect(action.permissions?.can_edit_tag).toBe(false);
       });
 
       it('logs but does not sync membership in a basic group (supergroup-only method)', async () => {

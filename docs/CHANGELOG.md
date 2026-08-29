@@ -44,8 +44,10 @@ pre-moderation state. (#7)
     `'member'` and leaves everyone else untouched. The method is supported in supergroups
     and channels only — captured promotes in basic groups are logged but never mutate
     membership.
-  - Creators are never mutated (real Telegram rejects moderating the owner), and calls
-    targeting user IDs not minted by the orchestrator are logged without state sync.
+  - Creators are never mutated (real Telegram rejects moderating the owner), bans and
+    restricts never rewrite an administrator record (Telegram requires demotion first),
+    and calls targeting user IDs not minted by the orchestrator are logged without
+    state sync.
   - Membership only changes when the mocked call succeeds: a `failNext` / `failAll`
     override or a raw non-OK response means Telegram performed no action, so the
     transition is deferred until the response settles OK. The moderation log still

@@ -1184,6 +1184,12 @@ export class Chats<TContext extends Context = Context> {
       return;
     }
 
+    // Real Telegram rejects banning or restricting an administrator until they are
+    // demoted, so those kinds never rewrite an administrator record.
+    if (current?.status === 'administrator' && (action.kind === 'ban' || action.kind === 'restrict')) {
+      return;
+    }
+
     const next = this.nextModerationMembership(chat, user, current, action);
 
     if (next !== undefined) {
