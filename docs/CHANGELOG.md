@@ -18,7 +18,7 @@
   (`Chats`, `Supergroup`, `User`, `MessagesLog`, `Reply`) with per-method
   `positive` / `negative` branches, and gained explicit negative coverage for
   `sendCommand` with a topic, `clickButton` topic propagation, and non-topic synthetic
-  responses. Behavior and coverage are unchanged. (#2)
+  responses. Behavior is unchanged. (#2)
 
 ## 0.27.0 — 2026-08-29
 
