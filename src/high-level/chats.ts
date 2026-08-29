@@ -339,6 +339,12 @@ export class Chats<TContext extends Context = Context> {
   /** guest_query_id->User registry, populated by `user.sendGuestMessage`, for answer correlation. */
   private readonly guestQueryToUser = new Map<string, User<TContext>>();
 
+  /**
+   * Membership transitions queued at capture time for in-flight moderation calls,
+   * applied by `settleFromCapture` only when the mocked response succeeds.
+   */
+  private readonly pendingModerationTransitions = new WeakMap<Request, () => void>();
+
   /** The Reply created by the most recent message-method `onCapture` call. Read by the default response resolvers. */
   private lastCapturedReply: Reply<TContext> | undefined;
 
@@ -839,7 +845,7 @@ export class Chats<TContext extends Context = Context> {
     }
 
     if (MODERATION_METHODS.has(request.method)) {
-      this.deriveModeration(request.method, payload);
+      this.deriveModeration(request, payload);
 
       return;
     }
@@ -1024,15 +1030,20 @@ export class Chats<TContext extends Context = Context> {
 
   /**
    * Routes a captured `banChatMember` / `unbanChatMember` / `restrictChatMember` /
-   * `promoteChatMember` payload to the target chat's moderation log and syncs the
-   * chat's `members` map so `user.in(chat)` and the `getChatMember` resolver reflect
-   * the bot's own moderation calls. No `chat_member` update is dispatched — captures
-   * only mutate state (auto-dispatching would re-enter the bot's own handlers);
-   * compose with `chat.dispatchMemberUpdate(...)` to drive `chat_member` handlers.
-   * @param method - The moderation method name.
+   * `promoteChatMember` payload to the target chat's moderation log and queues the
+   * membership transition so `user.in(chat)` and the `getChatMember` resolver reflect
+   * the bot's own moderation calls. The log records the attempt immediately (matching
+   * `chat.messages` semantics), but the members-map mutation is deferred until the
+   * mocked response settles successfully — a `failNext`/`failAll` override or a raw
+   * non-OK response means Telegram performed no action, so state must not change.
+   * No `chat_member` update is dispatched — captures only mutate state
+   * (auto-dispatching would re-enter the bot's own handlers); compose with
+   * `chat.dispatchMemberUpdate(...)` to drive `chat_member` handlers.
+   * @param request - The captured outgoing API request.
    * @param payload - The raw outgoing API payload.
    */
-  private deriveModeration(method: string, payload: Record<string, unknown>): void {
+  private deriveModeration(request: Request, payload: Record<string, unknown>): void {
+    const { method } = request;
     const chatId = payload.chat_id as ChatId | undefined;
     const userId = payload.user_id as number | undefined;
 
@@ -1058,7 +1069,30 @@ export class Chats<TContext extends Context = Context> {
     chat.moderation.push(action);
 
     if (user !== undefined) {
-      this.applyModerationTransition(chat, user, action);
+      this.pendingModerationTransitions.set(request, () => {
+        this.applyModerationTransition(chat, user, action);
+      });
+    }
+  }
+
+  /**
+   * Called when a captured request's mocked response settles. Applies the queued
+   * membership transition for a moderation call only when the call succeeded.
+   * @param request - The captured outgoing API request that settled.
+   * @param ok - Whether the call resolved with an `ok: true` envelope.
+   * @internal
+   */
+  settleFromCapture(request: Request, ok: boolean): void {
+    const transition = this.pendingModerationTransitions.get(request);
+
+    if (transition === undefined) {
+      return;
+    }
+
+    this.pendingModerationTransitions.delete(request);
+
+    if (ok) {
+      transition();
     }
   }
 
@@ -1112,8 +1146,9 @@ export class Chats<TContext extends Context = Context> {
           return { ...base, kind: 'demote', permissions: {} };
         }
 
-        // can_manage_chat is documented as implied by any other administrator privilege.
-        return { ...base, kind: 'promote', permissions: { can_manage_chat: true, ...flags } };
+        // can_manage_chat is documented as implied by any other administrator privilege,
+        // so it wins over an explicit false in the payload.
+        return { ...base, kind: 'promote', permissions: { ...flags, can_manage_chat: true } };
       }
     }
   }

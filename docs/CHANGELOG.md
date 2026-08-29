@@ -35,6 +35,10 @@ pre-moderation state. (#7)
     else untouched.
   - Creators are never mutated (real Telegram rejects moderating the owner), and calls
     targeting user IDs not minted by the orchestrator are logged without state sync.
+  - Membership only changes when the mocked call succeeds: a `failNext` / `failAll`
+    override or a raw non-OK response means Telegram performed no action, so the
+    transition is deferred until the response settles OK. The moderation log still
+    records the attempt, matching `chat.messages` semantics for failed sends.
 - **No auto-dispatched `chat_member` update**: captured moderation calls only mutate state.
   Real Telegram does emit `chat_member` for the bot's own actions (when the bot is admin
   and subscribes via `allowed_updates`), but auto-dispatching inside a capture would

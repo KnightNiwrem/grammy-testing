@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 
-import { Bot } from 'grammy';
+import { Bot, GrammyError } from 'grammy';
 import type { ChatMember } from 'grammy/types';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -404,6 +404,21 @@ describe('moderation capture', () => {
         expect(action.kind).toBe('demote');
       });
 
+      it('keeps the implied can_manage_chat true even when the payload passes it as false', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(target);
+        await bot.api.promoteChatMember(group.id, target.id, { can_manage_chat: false, can_delete_messages: true });
+
+        const membership = target.in(group);
+
+        expect(membership?.status).toBe('administrator');
+        expect(membership?.permissions.can_manage_chat).toBe(true);
+      });
+
       it('treats a promote call without any flags as a demotion', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
@@ -520,6 +535,55 @@ describe('moderation capture', () => {
         const group = chats.newSupergroup();
 
         expect(() => group.moderation.bans.lastOrThrow()).toThrow('Expected a moderation action but the log is empty');
+      });
+    });
+  });
+
+  describe('failed moderation calls', () => {
+    describe('negative', () => {
+      it('does not mutate membership when the call fails via failNext, but still logs the attempt', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(target);
+        chats.outgoing.failNext('banChatMember', { code: 400, description: 'Bad Request: not enough rights' });
+
+        await expect(bot.api.banChatMember(group.id, target.id)).rejects.toBeInstanceOf(GrammyError);
+
+        expect(target.in(group)?.status).toBe('member');
+        expect(group.moderation.bans.length).toBe(1);
+      });
+
+      it('does not mutate membership when a raw non-OK response is configured', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(target);
+        chats.outgoing.respondNextRaw('restrictChatMember', { ok: false, error_code: 400, description: 'Bad Request' });
+
+        await expect(bot.api.restrictChatMember(group.id, target.id, { can_send_messages: false })).rejects.toBeInstanceOf(GrammyError);
+
+        expect(target.in(group)?.status).toBe('member');
+      });
+
+      it('applies membership sync again once a later call succeeds', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(target);
+        chats.outgoing.failNext('banChatMember', { code: 400, description: 'Bad Request' });
+
+        await expect(bot.api.banChatMember(group.id, target.id)).rejects.toBeInstanceOf(GrammyError);
+        await bot.api.banChatMember(group.id, target.id);
+
+        expect(target.in(group)?.status).toBe('kicked');
+        expect(group.moderation.bans.length).toBe(2);
       });
     });
   });
