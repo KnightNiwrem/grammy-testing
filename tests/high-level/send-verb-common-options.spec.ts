@@ -362,6 +362,36 @@ describe('User', () => {
     });
   });
 
+  describe('sendPoll (ID allocation)', () => {
+    describe('positive', () => {
+      it('allocates the message_id before the poll token, matching pre-0.29 order', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        const message = await user.sendPoll('Which?', ['A', 'B']);
+
+        expect(message.poll?.id).toBe(`poll-${String(message.message_id + 1)}`);
+      });
+    });
+
+    describe('negative', () => {
+      it('does not consume message IDs when validation rejects the send', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        const before = await user.sendText('before');
+
+        await expect(user.sendPoll('Which?', ['A', 'B'], { anonymous: true })).rejects.toThrow(/Group or Supergroup/);
+
+        const after = await user.sendText('after');
+
+        expect(after.message_id).toBe(before.message_id + 1);
+      });
+    });
+  });
+
   describe('sendCallbackQuery (topic option)', () => {
     describe('positive', () => {
       it('carries topic metadata on the embedded callback_query.message', async () => {

@@ -404,18 +404,28 @@ export class User<TContext extends Context = Context> {
    * funnels through here so `topic` / `reply` / `anonymous` handling lives in one place.
    * @param verb - The calling verb name, used to prefix validation error messages.
    * @param options - The shared send options.
-   * @param content - Content-specific `Message` fields (e.g. `photo`, `caption`, `dice`).
+   * @param content - Content-specific `Message` fields (e.g. `photo`, `caption`, `dice`),
+   *   or a factory producing them. Pass a factory when building the content consumes shared
+   *   IDs (e.g. `sendPoll`'s poll token): it runs only after validation succeeds and after
+   *   the `message_id` is allocated, so rejected sends never mutate the ID sequence.
    * @returns The dispatched synthetic `Message`.
    */
-  private async dispatchUserMessage(verb: string, options: UserSendOptions<TContext>, content: Partial<Message>): Promise<Message> {
+  private async dispatchUserMessage(
+    verb: string,
+    options: UserSendOptions<TContext>,
+    content: (() => Partial<Message>) | Partial<Message>,
+  ): Promise<Message> {
     const target = this.resolveSendTarget(verb, options);
 
+    const messageId = this.ctx.ids.nextMessageId();
+    const resolvedContent = typeof content === 'function' ? content() : content;
+
     const message: Message = {
-      message_id: this.ctx.ids.nextMessageId(),
+      message_id: messageId,
       date: Math.floor(Date.now() / 1000),
       chat: target.targetChat,
       from: target.from,
-      ...content,
+      ...resolvedContent,
       ...(target.replyToMessage !== undefined && { reply_to_message: target.replyToMessage }),
       ...(target.senderChat !== undefined && { sender_chat: target.senderChat }),
       ...(target.messageThreadId !== undefined && { message_thread_id: target.messageThreadId, is_topic_message: true }),
@@ -723,7 +733,9 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendPoll(question: string, answerOptions: string[], options: SendPollOptions<TContext> = {}): Promise<Message> {
-    return this.dispatchUserMessage('sendPoll', options, {
+    // Factory: the poll token consumes a shared message ID, so it must only be minted after
+    // validation succeeds and after the message_id allocation (preserving pre-0.29 ID order).
+    return this.dispatchUserMessage('sendPoll', options, () => ({
       poll: {
         id: `poll-${String(this.ctx.ids.nextMessageId())}`,
         question,
@@ -735,7 +747,7 @@ export class User<TContext extends Context = Context> {
         allows_multiple_answers: false,
         allows_revoting: false,
       } as Message['poll'],
-    });
+    }));
   }
 
   /**
