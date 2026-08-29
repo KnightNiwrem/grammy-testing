@@ -9,8 +9,11 @@ const user = chats.newUser({ first_name: 'Alice' });
 
 ## UserSendOptions
 
-Every message-send verb (`sendText`, `sendCommand`, the media verbs, `sendMediaGroup`)
-accepts the same shared options:
+The message-send verbs `sendText`, `sendCommand`, `sendPhoto`, `sendDocument`, `sendVideo`,
+`sendAudio`, `sendVoice`, `sendVideoNote`, `sendAnimation`, `sendSticker`, `sendLocation`,
+`sendContact`, `sendVenue`, `sendPoll`, `sendDice`, and `sendMediaGroup` (shared options)
+accept the same shared options. (`sendForwarded`, `sendWebAppData`, and
+`sendSuccessfulPayment` keep their narrower `{ chat }` options.)
 
 ```ts
 interface UserSendOptions {

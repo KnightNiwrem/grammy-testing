@@ -63,10 +63,12 @@ export interface SendTextOptionsReplyToMessage {
 }
 
 /**
- * Options shared by every user message-send verb (`sendText`, `sendCommand`, the media
- * verbs, `sendMediaGroup`, ...). All dispatched `message` updates support the same
- * message-level metadata in real Telegram — target chat, reply context, GroupAnonymousBot
- * identity, and forum-topic targeting — regardless of the message content kind.
+ * Options shared by the user message-send verbs (`sendText`, `sendCommand`, the media
+ * verbs through `sendDice`, and `sendMediaGroup`'s shared options; `sendForwarded`,
+ * `sendWebAppData`, and `sendSuccessfulPayment` keep narrower options). All dispatched
+ * `message` updates support the same message-level metadata in real Telegram — target
+ * chat, reply context, GroupAnonymousBot identity, and forum-topic targeting — regardless
+ * of the message content kind.
  */
 export interface UserSendOptions<TContext extends Context = Context> {
   chat?: AnyChat<TContext>;
@@ -922,48 +924,15 @@ export class User<TContext extends Context = Context> {
   }
 
   /**
-   * Validates one media-group item's `chat` override against the shared options. Runs for
-   * every item before anything is dispatched, so invalid input can never leave a partially
-   * dispatched album in the bot's and chats' logs.
-   * @param item - The media-group item whose `chat` override is being checked.
-   * @param sharedOptions - The shared send options the item must be consistent with.
-   * @throws {Error} When the item chat is not the topic's parent forum, or when
-   *   `anonymous` is combined with a non-group item chat.
-   */
-  private validateMediaGroupItemChat(item: UserSendMediaGroupItem<TContext>, sharedOptions: UserSendOptions<TContext>): void {
-    if (!item.chat) {
-      return;
-    }
-
-    // Per-item chat overrides get the same forum-identity validation as sharedOptions.chat.
-    if (sharedOptions.topic && item.chat !== (sharedOptions.topic.forum as AnyChat<TContext>)) {
-      throw new Error(
-        `sendMediaGroup: topic "${sharedOptions.topic.name}" belongs to forum ${String(sharedOptions.topic.forum.id)}, ` +
-          `but an item's chat is a different chat (${String(item.chat.id)}) — pass the topic's parent forum or omit the item chat`,
-      );
-    }
-
-    // Anonymous mode must also hold for each item's effective target — GroupAnonymousBot
-    // never appears outside group contexts, so a private-chat or channel override is invalid.
-    if (sharedOptions.anonymous) {
-      const itemChatType = (item.chat as { type?: string }).type;
-
-      if (itemChatType !== 'group' && itemChatType !== 'supergroup') {
-        throw new Error(
-          `sendMediaGroup: anonymous: true requires every item chat to be a Group or Supergroup, ` +
-            `but an item's chat (${String(item.chat.id)}) is a ${String(itemChatType)} — ` +
-            'GroupAnonymousBot only exists in group contexts',
-        );
-      }
-    }
-  }
-
-  /**
    * Dispatches a series of media group updates from this user, one per item.
    *
    * The shared options (`topic`, `reply_to_message`, `anonymous`) apply to every dispatched
    * message — matching real Telegram, where these are message-level fields carried by each
-   * message of an album.
+   * message of an album. An item's `chat` override is resolved with the same validation and
+   * metadata rules as `sharedOptions.chat`, so `reply_to_message.chat`, `sender_chat`, and
+   * the anonymous group precondition always reflect the item's effective target. Every item
+   * is resolved before anything is dispatched, so invalid input can never leave a partially
+   * dispatched album in the bot's and chats' logs.
    * @param items - Array of media items (photo, video, or document) to send as a group.
    * @param sharedOptions - Optional default target chat, reply context, anonymous flag, and
    *   forum topic applied to every item; items may override the chat individually.
@@ -972,21 +941,21 @@ export class User<TContext extends Context = Context> {
   async sendMediaGroup(items: UserSendMediaGroupItem<TContext>[], sharedOptions: UserSendOptions<TContext> = {}): Promise<Message[]> {
     const mediaGroupId = this.ctx.ids.nextMediaGroupId();
 
-    const target = this.resolveSendTarget('sendMediaGroup', sharedOptions);
+    const sharedTarget = this.resolveSendTarget('sendMediaGroup', sharedOptions);
 
-    for (const item of items) {
-      this.validateMediaGroupItemChat(item, sharedOptions);
-    }
+    // Resolve (and thereby validate) every item's effective target before the dispatch loop.
+    const dispatchPlan = items.map((item) => ({
+      item,
+      target: item.chat ? this.resolveSendTarget('sendMediaGroup', { ...sharedOptions, chat: item.chat }) : sharedTarget,
+    }));
 
     const messages: Message[] = [];
 
-    for (const item of items) {
-      const itemChat = item.chat ? this.ctx.resolveChatToTelegram(item.chat) : target.targetChat;
-
+    for (const { item, target } of dispatchPlan) {
       const message: Message = {
         message_id: this.ctx.ids.nextMessageId(),
         date: Math.floor(Date.now() / 1000),
-        chat: itemChat,
+        chat: target.targetChat,
         from: target.from,
         media_group_id: mediaGroupId,
         caption: item.caption,
@@ -994,7 +963,7 @@ export class User<TContext extends Context = Context> {
         document: item.document ? makeDocumentStub(item.document) : undefined,
         video: item.video ? makeVideoStub(item.video) : undefined,
         ...(target.replyToMessage !== undefined && { reply_to_message: target.replyToMessage }),
-        ...(target.senderChat !== undefined && { sender_chat: itemChat }),
+        ...(target.senderChat !== undefined && { sender_chat: target.senderChat }),
         ...(target.messageThreadId !== undefined && { message_thread_id: target.messageThreadId, is_topic_message: true }),
       } as Message;
 

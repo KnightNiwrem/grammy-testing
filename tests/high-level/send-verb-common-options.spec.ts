@@ -267,6 +267,35 @@ describe('User', () => {
           expect(entry.replyToId).toBe(7);
         }
       });
+
+      it('resolves reply and anonymous metadata against each item chat override', async () => {
+        const bot = new Bot('test-token');
+        const captured: { chatId?: number; replyChatId?: number; senderChatId?: number }[] = [];
+
+        bot.on('message', (ctx) => {
+          captured.push({
+            chatId: ctx.message.chat.id,
+            replyChatId: ctx.message.reply_to_message?.chat.id,
+            senderChatId: ctx.message.sender_chat?.id,
+          });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const groupA = chats.newSupergroup('Dev Chat A');
+        const groupB = chats.newSupergroup('Dev Chat B');
+        const user = chats.newUser();
+
+        await user.sendMediaGroup([{ photo: 'file-1' }, { photo: 'file-2', chat: groupB }], {
+          chat: groupA,
+          anonymous: true,
+          reply_to_message: { message_id: 7 },
+        });
+
+        expect(captured).toEqual([
+          { chatId: groupA.id, replyChatId: groupA.id, senderChatId: groupA.id },
+          { chatId: groupB.id, replyChatId: groupB.id, senderChatId: groupB.id },
+        ]);
+      });
     });
 
     describe('negative', () => {
@@ -318,7 +347,7 @@ describe('User', () => {
 
         await expect(
           user.sendMediaGroup([{ photo: 'file-1' }, { photo: 'file-2', chat: channel }], { chat: group, anonymous: true }),
-        ).rejects.toThrow(/every item chat to be a Group or Supergroup/);
+        ).rejects.toThrow(/Group or Supergroup/);
 
         expect(dispatchedCount).toBe(0);
       });

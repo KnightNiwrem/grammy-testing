@@ -31,10 +31,12 @@ across the user actor surface instead of being limited to `sendText` / `sendComm
   dispatched message (real Telegram reply updates always carry `reply_to_message`).
   Previously the option was silently ignored unless `reply_to_message` was also supplied;
   an explicit `reply_to_message` still wins.
-- **`sendMediaGroup` validates before dispatching**: per-item `chat` overrides are checked
-  against the topic's forum _and_ the anonymous group precondition for every item before
-  any update is dispatched, so invalid input can never leave a partially dispatched album
-  in the logs.
+- **`sendMediaGroup` resolves each item before dispatching**: an item's `chat` override is
+  resolved with the same validation and metadata rules as the shared chat — so
+  `reply_to_message.chat` and `sender_chat` always reflect the item's effective target,
+  the anonymous group precondition holds per item, and every item is validated before any
+  update is dispatched (invalid input can never leave a partially dispatched album in the
+  logs).
 - Out of scope (unchanged): `sendForwarded`, `sendWebAppData`, and `sendSuccessfulPayment`
   keep their existing narrow options; General-topic (`message_thread_id = 1`) modeling is
   not introduced.
