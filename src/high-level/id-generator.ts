@@ -14,6 +14,9 @@ export class IdGenerator {
 
   private messageCounter = 1;
 
+  /** Message IDs claimed out-of-band (e.g. explicit forum topic thread IDs) that `nextMessageId` must never hand out. */
+  private readonly reservedMessageIds = new Set<number>();
+
   private mediaGroupCounter = 1;
 
   private fileCounter = 1;
@@ -70,14 +73,46 @@ export class IdGenerator {
 
   /**
    * Returns the next unique message ID, starting at 1 and incrementing by 1.
+   * IDs reserved via {@link reserveMessageId} are skipped so they are never
+   * handed out to a synthetic message.
    * @returns A unique positive integer message ID.
    */
   nextMessageId(): number {
-    const id = this.messageCounter;
+    let id = this.messageCounter;
 
-    this.messageCounter += 1;
+    while (this.reservedMessageIds.has(id)) {
+      id += 1;
+    }
+
+    this.messageCounter = id + 1;
 
     return id;
+  }
+
+  /**
+   * Reserves a message ID claimed out-of-band — e.g. an explicit forum topic
+   * `message_thread_id`, which in real Telegram is the `message_id` of the
+   * topic-creation service message. Reserved IDs are never returned by
+   * `nextMessageId`, so no synthetic message can collide with them.
+   * @param id - The message ID to reserve.
+   */
+  reserveMessageId(id: number): void {
+    this.reservedMessageIds.add(id);
+  }
+
+  /**
+   * Reports whether `nextMessageId` has already handed out the given ID.
+   * The sequence is shared: besides message IDs it also feeds other synthetic
+   * tokens (callback-query IDs, business connection IDs, …), so this is a
+   * conservative "the generator no longer owns this ID" signal rather than a
+   * ledger of actual messages. Issued IDs are exactly `1..counter-1` minus the
+   * reserved ones (reserved IDs are skipped, never issued); non-positive IDs
+   * are never issued by the generator.
+   * @param id - The ID to check.
+   * @returns `true` when the generator already handed out the ID.
+   */
+  hasIssuedMessageId(id: number): boolean {
+    return id > 0 && id < this.messageCounter && !this.reservedMessageIds.has(id);
   }
 
   /**

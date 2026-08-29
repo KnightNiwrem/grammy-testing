@@ -326,6 +326,8 @@ interface PrivateMessageDispatch<TContext extends Context> {
   fromOverride?: TelegramUser;
   /** When set, adds `sender_chat` to the dispatched message. */
   senderChat?: Chat;
+  /** When set, adds `message_thread_id` and `is_topic_message: true` to the dispatched message. */
+  messageThreadId?: number;
 }
 
 /**
@@ -352,6 +354,7 @@ export async function dispatchTextMessage<TContext extends Context>(spec: Privat
     reply_to_message: spec.replyToMessage,
     forward_origin: spec.forwardOrigin,
     ...(spec.senderChat !== undefined && { sender_chat: spec.senderChat }),
+    ...(spec.messageThreadId !== undefined && { message_thread_id: spec.messageThreadId, is_topic_message: true }),
   } as Message;
 
   const update: Update = {

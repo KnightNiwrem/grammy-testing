@@ -3,6 +3,7 @@ import type { Chat, Message, ReactionCount, Update, User as TelegramUser } from 
 
 import { type ChatRefHolder, setBotRef } from './chat';
 import { dispatchChatMember, dispatchMyChatMember, makeRelayUser } from './dispatch';
+import { ForumTopic, type NewTopicOptions } from './forum-topic';
 import type { PostRelayMessageOptions } from './group';
 import type { IdGenerator } from './id-generator';
 import type { MessagesLog } from './messages-log';
@@ -51,16 +52,21 @@ export class Supergroup<TContext extends Context = Context> implements ChatRefHo
   /** @internal */
   bot!: Bot<TContext>;
 
+  /** messageThreadId->ForumTopic registry for this forum. */
+  private readonly topics = new Map<number, ForumTopic<TContext>>();
+
   /**
    * Creates a `Supergroup` actor with the given ID and title.
    * @param id - Telegram chat ID (negative integer).
    * @param title - Display title of the supergroup.
    * @param ids - Shared ID generator for this `Chats` instance.
+   * @param isForum - When `true`, the supergroup is a forum and can register topics via `newTopic`.
    */
   constructor(
     public readonly id: number,
     public readonly title: string,
     private readonly ids: IdGenerator,
+    public readonly isForum = false,
   ) {}
 
   /**
@@ -76,7 +82,63 @@ export class Supergroup<TContext extends Context = Context> implements ChatRefHo
    * @returns A plain `Chat.SupergroupChat` suitable for embedding in updates.
    */
   toTelegramChat(): Chat.SupergroupChat {
-    return { id: this.id, type: 'supergroup', title: this.title };
+    return { id: this.id, type: 'supergroup', title: this.title, ...(this.isForum && { is_forum: true }) };
+  }
+
+  /**
+   * Registers a new forum topic on this supergroup and returns a stable `ForumTopic`
+   * reference. The topic's `messageThreadId` is auto-generated from the shared
+   * message-ID counter when not supplied explicitly; an explicit ID is reserved in
+   * that counter (mirroring real Telegram, where a thread ID is the `message_id` of
+   * the topic-creation service message), so no later synthetic message or
+   * auto-generated topic can collide with it.
+   * @param options - The topic `name` and an optional explicit `messageThreadId`.
+   * @returns The new `ForumTopic` instance.
+   * @throws {Error} When this supergroup is not a forum, or when an explicit `messageThreadId` is
+   *   already registered or was already allocated to a synthetic message.
+   */
+  newTopic(options: NewTopicOptions): ForumTopic<TContext> {
+    if (!this.isForum) {
+      throw new Error(`newTopic: supergroup "${this.title}" is not a forum — create it with chats.newSupergroup({ title, isForum: true })`);
+    }
+
+    let { messageThreadId } = options;
+
+    if (messageThreadId === undefined) {
+      messageThreadId = this.ids.nextMessageId();
+    } else if (this.topics.has(messageThreadId)) {
+      throw new Error(`newTopic: message_thread_id ${String(messageThreadId)} is already registered on supergroup "${this.title}"`);
+    } else if (this.ids.hasIssuedMessageId(messageThreadId)) {
+      throw new Error(
+        `newTopic: message_thread_id ${String(messageThreadId)} was already handed out by this Chats instance's ID generator ` +
+          '(messages and other synthetic tokens share one sequence) — pick an unused ID, e.g. a higher value',
+      );
+    } else {
+      this.ids.reserveMessageId(messageThreadId);
+    }
+
+    const topic = new ForumTopic<TContext>(this, options.name, messageThreadId);
+
+    this.topics.set(messageThreadId, topic);
+
+    return topic;
+  }
+
+  /**
+   * Looks up a registered forum topic by its `message_thread_id`.
+   * @param messageThreadId - The thread ID to look up.
+   * @returns The matching `ForumTopic`, or `undefined` when no topic with that ID is registered.
+   */
+  topicByThreadId(messageThreadId: number): ForumTopic<TContext> | undefined {
+    return this.topics.get(messageThreadId);
+  }
+
+  /**
+   * Iterate over every forum topic registered on this supergroup (read-only view).
+   * @returns An iterator over all registered topics.
+   */
+  get allTopics(): IterableIterator<ForumTopic<TContext>> {
+    return this.topics.values();
   }
 
   /**

@@ -37,6 +37,15 @@ export interface ChatProfile {
   title?: string;
 }
 
+/**
+ * Profile for `chats.newSupergroup(...)`. Extends `ChatProfile` with the forum flag —
+ * pass `isForum: true` to mint a forum supergroup that can register topics via
+ * `supergroup.newTopic(...)` and includes `is_forum: true` in its Telegram chat shape.
+ */
+export interface SupergroupProfile extends ChatProfile {
+  isForum?: boolean;
+}
+
 interface ResolveChatProfileReturn {
   id: number;
   title: string;
@@ -352,6 +361,12 @@ export class Chats<TContext extends Context = Context> {
 
     for (const chat of this.chats.values()) {
       chat.messages.clear();
+
+      if (chat.type === 'supergroup') {
+        for (const topic of chat.allTopics) {
+          topic.messages.clear();
+        }
+      }
     }
 
     for (const log of this.chatDeletions.values()) {
@@ -501,19 +516,22 @@ export class Chats<TContext extends Context = Context> {
 
   /**
    * Creates a new supergroup chat.
-   * @param profile - Optional title string, or an object with `id` and/or `title`. When `id`
-   *   is supplied the auto-ID counter is skipped; any integer is accepted. Title defaults to
-   *   `Supergroup<abs(id)>` when omitted.
+   * @param profile - Optional title string, or an object with `id`, `title`, and/or `isForum`.
+   *   When `id` is supplied the auto-ID counter is skipped; any integer is accepted. Title
+   *   defaults to `Supergroup<abs(id)>` when omitted. Pass `isForum: true` to mint a forum
+   *   supergroup that can register topics via `supergroup.newTopic(...)`.
    * @returns The new `Supergroup` instance.
    */
-  newSupergroup(profile?: ChatProfile | string): Supergroup<TContext> {
+  newSupergroup(profile?: SupergroupProfile | string): Supergroup<TContext> {
     const { id, title } = resolveChatProfile(
       profile,
       () => this.ids.nextSupergroupId(),
       (chatId) => `Supergroup${String(Math.abs(chatId))}`,
     );
 
-    const supergroup = new Supergroup<TContext>(id, title, this.ids);
+    const isForum = typeof profile === 'object' ? (profile.isForum ?? false) : false;
+
+    const supergroup = new Supergroup<TContext>(id, title, this.ids, isForum);
 
     this.registerChat(supergroup);
 
@@ -592,6 +610,7 @@ export class Chats<TContext extends Context = Context> {
         message_id: reply.messageId,
         date: Math.floor(Date.now() / 1000),
         chat: reply.chat?.toTelegramChat() ?? ({ id: 0, type: 'private' } as Message['chat']),
+        ...(reply.messageThreadId !== undefined && { message_thread_id: reply.messageThreadId, is_topic_message: true }),
       };
     };
 
@@ -608,12 +627,12 @@ export class Chats<TContext extends Context = Context> {
       const mediaGroupId = this.ids.nextMediaGroupId();
       const chat = reply.chat?.toTelegramChat() ?? ({ id: 0, type: 'private' } as Message['chat']);
 
-      const messages: { message_id: number; date: number; chat: Message['chat']; media_group_id: string }[] = [
-        { message_id: reply.messageId, date: now, chat, media_group_id: mediaGroupId },
-      ];
+      const topicFields = reply.messageThreadId === undefined ? {} : { message_thread_id: reply.messageThreadId, is_topic_message: true };
+
+      const messages: Partial<Message>[] = [{ message_id: reply.messageId, date: now, chat, media_group_id: mediaGroupId, ...topicFields }];
 
       for (let index = 1; index < count; index += 1) {
-        messages.push({ message_id: this.ids.nextMessageId(), date: now, chat, media_group_id: mediaGroupId });
+        messages.push({ message_id: this.ids.nextMessageId(), date: now, chat, media_group_id: mediaGroupId, ...topicFields });
       }
 
       return messages;
@@ -810,6 +829,7 @@ export class Chats<TContext extends Context = Context> {
     this.messageIdToReply.set(reply.messageId, reply);
 
     chat.messages.push(reply);
+    reply.topic?.messages.push(reply);
 
     for (const entry of this.users.values()) {
       if (this.userReceivesReply(entry, chat, reply)) {

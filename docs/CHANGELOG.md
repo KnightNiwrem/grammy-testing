@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.27.0 — 2026-08-29
+
+### Forum supergroups and topics
+
+High-level support for simulating Telegram forum supergroups and forum topics, so
+topic-sensitive handlers can be tested without hand-built raw payloads.
+
+- **Forum supergroups**: `chats.newSupergroup({ title, isForum: true })` mints a forum;
+  `supergroup.isForum` exposes the flag and `toTelegramChat()` includes `is_forum: true`.
+- **Topics**: `forum.newTopic({ name, messageThreadId? })` registers a stable `ForumTopic`
+  reference with a unique `message_thread_id` (auto-generated when omitted). Duplicate thread
+  IDs and `newTopic` on non-forum supergroups throw. Look topics up with
+  `forum.topicByThreadId(id)` or iterate `forum.allTopics`.
+- **Topic dispatch**: `user.sendText(text, { chat: forum, topic })` (and `sendCommand`) dispatch
+  messages carrying `is_topic_message: true` and the topic's `message_thread_id`; `options.chat`
+  defaults to the topic's parent forum and must match it when supplied.
+- **Topic-aware replies**: captured bot messages expose `reply.topic` and
+  `reply.messageThreadId`. `ctx.reply` from a topic message and explicit sends with
+  `message_thread_id` are recorded in the parent `forum.messages` log **and** the topic-scoped
+  `topic.messages` projection (`byText`, `last`, etc.). Unknown thread IDs stay inspectable via
+  `reply.messageThreadId` without being associated to a registered topic.
+- **Topic metadata propagation**: default synthetic sent-message responses (including every
+  message of a `sendMediaGroup` response) and `reply.clickButton()` callback queries preserve
+  `message_thread_id` / `is_topic_message`.
+- `chats.clear()` also clears topic-scoped logs. Non-forum groups and supergroups are unchanged.
+
 ## 0.26.0 — 2026-06-16
 
 ### First public release as `grammy-testing`
