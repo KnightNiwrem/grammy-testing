@@ -677,6 +677,7 @@ describe('moderation capture', () => {
         expect(result.can_delete_messages).toBe(true);
         expect(result.can_change_info).toBe(false);
         expect(result.can_promote_members).toBe(false);
+        expect((result as unknown as Record<string, unknown>).can_manage_tags).toBe(false);
       });
 
       it('resolves partial channel promotions with channel-only admin booleans defaulted to false', async () => {

@@ -110,10 +110,13 @@ function membershipToChatMember<TContext extends Context>(
     }
 
     case 'administrator': {
-      const channelFields =
-        chatType === 'channel' ? { can_post_messages: false, can_edit_messages: false, can_manage_direct_messages: false } : {};
+      // can_manage_tags is scoped to groups/supergroups; the other three are channel-only.
+      const chatScopedFields =
+        chatType === 'channel'
+          ? { can_post_messages: false, can_edit_messages: false, can_manage_direct_messages: false }
+          : { can_manage_tags: false };
 
-      return { ...makeChatMember(user, 'administrator', {}), ...channelFields, can_be_edited: true, ...permissions } as ChatMember;
+      return { ...makeChatMember(user, 'administrator', {}), ...chatScopedFields, can_be_edited: true, ...permissions } as ChatMember;
     }
 
     case 'member': {
