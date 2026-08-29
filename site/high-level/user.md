@@ -40,6 +40,7 @@ document" needs no hand-built raw payloads:
 ```ts
 const forum = chats.newSupergroup({ title: 'Support', isForum: true });
 const billing = forum.newTopic({ name: 'Billing' });
+const group = chats.newSupergroup('Dev Chat');
 
 await user.sendPhoto(undefined, { topic: billing, caption: 'invoice screenshot' });
 await user.sendDocument(undefined, { chat: group, reply_to_message: { message_id: 7 } });
