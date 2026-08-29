@@ -512,6 +512,31 @@ describe('User', () => {
 
         expect(capturedThreadId).toBe(7);
       });
+
+      it('accepts an embedded options.message.chat matching the topic parent forum', async () => {
+        const bot = new Bot('test-token');
+        let captured: { chatId?: number; messageThreadId?: number } = {};
+
+        bot.on('callback_query:data', (ctx) => {
+          captured = {
+            chatId: ctx.callbackQuery.message?.chat.id,
+            messageThreadId: ctx.callbackQuery.message?.message_thread_id,
+          };
+        });
+
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+        const user = chats.newUser();
+
+        await user.sendCallbackQuery('invoices', {
+          topic: billing,
+          message: { message_id: 5, chat: forum.toTelegramChat() },
+        });
+
+        expect(captured.chatId).toBe(forum.id);
+        expect(captured.messageThreadId).toBe(42);
+      });
     });
 
     describe('negative', () => {
@@ -534,6 +559,21 @@ describe('User', () => {
         const user = chats.newUser();
 
         await expect(user.sendCallbackQuery('invoices', { chat: other, topic: billing })).rejects.toThrow(/belongs to forum/);
+      });
+
+      it('throws when an embedded options.message.chat is not the topic parent forum', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const billing = forum.newTopic({ name: 'Billing' });
+        const user = chats.newUser();
+
+        await expect(
+          user.sendCallbackQuery('invoices', {
+            topic: billing,
+            message: { message_id: 5, chat: { id: 999, type: 'private', first_name: 'Someone' } },
+          }),
+        ).rejects.toThrow(/belongs to forum/);
       });
     });
   });
