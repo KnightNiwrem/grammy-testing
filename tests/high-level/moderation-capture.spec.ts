@@ -331,6 +331,30 @@ describe('moderation capture', () => {
         expect(result.can_invite_users).toBe(false);
       });
 
+      it('resolves group.restrict() partial permissions with complete restricted shapes', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const sender = chats.newUser();
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(sender);
+        group.restrict(target, { can_send_messages: false });
+
+        let result: ChatMember | undefined;
+
+        bot.on('message', async (ctx) => {
+          result = await ctx.api.getChatMember(ctx.chat.id, target.id);
+        });
+
+        await sender.sendText('ping', { chat: group });
+        await chats.idle();
+
+        assert.ok(result?.status === 'restricted');
+        expect(result.can_react_to_messages).toBe(false);
+        expect((result as unknown as Record<string, unknown>).can_edit_tag).toBe(false);
+      });
+
       it('applies the implied-permission grouping: can_send_other_messages grants media sends', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
