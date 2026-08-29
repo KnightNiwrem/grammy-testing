@@ -398,9 +398,21 @@ export class Chats<TContext extends Context = Context> {
    * Mints a new synthetic user with an auto-generated ID.
    * @param profile - Optional profile overrides (id, first_name, last_name, username).
    * @returns The new `User` instance.
+   * @throws {Error} When an explicit `id` is already minted for another user in this
+   *   orchestrator — the registry entry (and with it reply routing) would silently switch
+   *   to the new actor otherwise.
    */
   newUser(profile: UserProfile = {}): User<TContext> {
     const id = profile.id ?? this.nextUnregisteredId(() => this.ids.nextUserId());
+
+    if (this.users.has(id)) {
+      throw new Error(
+        `[grammy-testing] User ID ${String(id)} is already minted in this orchestrator. ` +
+          'Minting a second user with the same ID would silently take over reply routing for that ID. ' +
+          'Reuse the existing User object, or pick a different id.',
+      );
+    }
+
     const inbox = new RepliesInbox<TContext>();
     const drafts = new DraftsLog();
 

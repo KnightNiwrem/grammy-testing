@@ -148,6 +148,36 @@ describe('Chats', () => {
         expect(() => chats.newPrivateChat(user)).not.toThrow();
       });
     });
+
+    describe('negative', () => {
+      it('throws when the explicit user ID is already minted', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+
+        chats.newUser({ id: 42, first_name: 'First' });
+
+        expect(() => chats.newUser({ id: 42, first_name: 'Second' })).toThrow(/already minted/);
+      });
+
+      it('rejects duplicate user IDs so reply routing stays with the original owner', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:text', async (ctx) => {
+          await ctx.reply('ack');
+        });
+
+        const { chats } = await prepareBot(bot);
+        const owner = chats.newUser({ id: 4242 });
+
+        chats.newPrivateChat(owner);
+
+        expect(() => chats.newUser({ id: 4242 })).toThrow(/already minted/);
+
+        await owner.sendText('hello');
+
+        expect(chats.repliesFor(owner).last?.text).toBe('ack');
+      });
+    });
   });
 
   describe('newPrivateChat', () => {
@@ -179,48 +209,36 @@ describe('Chats', () => {
     });
 
     describe('negative', () => {
-      it('throws for the second of two same-orchestrator user instances sharing an explicit ID', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-
-        const first = chats.newUser({ id: 42, first_name: 'First' });
-        const second = chats.newUser({ id: 42, first_name: 'Second' });
-
-        // Whichever instance claims the private chat first owns it; the other must
-        // never be handed that chat or silently replace it — in either claim order.
-        const firstChat = chats.newPrivateChat(first);
-
-        expect(firstChat.user).toBe(first);
-        expect(() => chats.newPrivateChat(second)).toThrow(/different user actor/);
-        expect(chats.newPrivateChat(first)).toBe(firstChat);
-      });
-
-      it('throws for the earlier user instance when a later duplicate claimed the private chat first', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-
-        const first = chats.newUser({ id: 42, first_name: 'First' });
-        const second = chats.newUser({ id: 42, first_name: 'Second' });
-
-        const secondChat = chats.newPrivateChat(second);
-
-        expect(secondChat.user).toBe(second);
-        expect(() => chats.newPrivateChat(first)).toThrow(/different user actor/);
-        expect(chats.newPrivateChat(second)).toBe(secondChat);
-      });
-
       it('throws when the ID is registered to a private chat owned by a different user actor', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
-        const { chats: other } = await prepareBot(new Bot('other-token'));
+        const { chats: otherA } = await prepareBot(new Bot('other-token-a'));
+        const { chats: otherB } = await prepareBot(new Bot('other-token-b'));
 
-        const original = other.newUser({ id: 4242 });
-        const imposter = other.newUser({ id: 4242 });
+        // Duplicate user IDs throw within one orchestrator, so distinct user objects
+        // sharing an ID must come from separate orchestrators.
+        const original = otherA.newUser({ id: 4242 });
+        const imposter = otherB.newUser({ id: 4242 });
 
         const originalChat = chats.newPrivateChat(original);
 
         expect(() => chats.newPrivateChat(imposter)).toThrow(/different user actor/);
         expect(chats.newPrivateChat(original)).toBe(originalChat);
+      });
+
+      it('throws for a foreign user object whose ID matches a minted user owning a private chat', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const { chats: other } = await prepareBot(new Bot('other-token'));
+
+        // The users-registry entry for 4242 belongs to `mine`; the foreign object must
+        // not receive the cached chat through the per-user fast path.
+        const mine = chats.newUser({ id: 4242 });
+        const mineChat = chats.newPrivateChat(mine);
+        const foreign = other.newUser({ id: 4242 });
+
+        expect(() => chats.newPrivateChat(foreign)).toThrow(/different user actor/);
+        expect(chats.newPrivateChat(mine)).toBe(mineChat);
       });
 
       it('throws when the user ID is already registered to a non-private chat', async () => {
