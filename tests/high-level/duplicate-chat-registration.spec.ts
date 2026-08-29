@@ -108,5 +108,39 @@ describe('Chats', () => {
         expect(second).toBe(first);
       });
     });
+
+    describe('negative', () => {
+      it('throws when the user ID is already registered to a non-private chat', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+
+        chats.newGroup({ id: 42, title: 'Original' });
+        const user = chats.newUser({ id: 42 });
+
+        expect(() => chats.newPrivateChat(user)).toThrow(/already registered/);
+      });
+
+      it('rejects default private sends that would take over a registered chat ID', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:text', async (ctx) => {
+          await ctx.reply('ack');
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newGroup({ id: 42, title: 'Original' });
+        const user = chats.newUser({ id: 42 });
+
+        // No options.chat: sendText defaults to the user's private chat, whose ID
+        // collides with the group registered above.
+        await expect(user.sendText('hello')).rejects.toThrow(/already registered/);
+
+        const outsider = chats.newUser();
+
+        await outsider.sendText('hello', { chat: group });
+
+        expect(group.messages.last?.text).toBe('ack');
+      });
+    });
   });
 });

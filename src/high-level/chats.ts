@@ -1018,12 +1018,26 @@ export class Chats<TContext extends Context = Context> {
    * Returns the existing private chat for `user`, or creates and registers a new one.
    * @param user - The user whose private chat to retrieve or create.
    * @returns The `PrivateChat` instance for `user`.
+   * @throws {Error} When `user.id` is already registered to a non-private chat. Re-registering
+   *   a private chat over the same user's earlier private chat stays allowed — private-chat
+   *   IDs always mirror the owning user's ID, so routing is unchanged in that case.
    */
   private privateChatFor(user: User<TContext>): PrivateChat<TContext> {
     const entry = this.users.get(user.id);
 
     if (entry?.privateChat) {
       return entry.privateChat;
+    }
+
+    const existing = this.chats.get(user.id);
+
+    if (existing !== undefined && existing.type !== 'private') {
+      throw new Error(
+        `[grammy-testing] Cannot register a private chat for user ${String(user.id)}: ` +
+          `that ID is already registered to a ${existing.type} ("${existing.title}"). ` +
+          'Registering the private chat would silently take over message routing for that ID. ' +
+          'Pick a different user id, or a different chat id.',
+      );
     }
 
     const chat = new PrivateChat<TContext>(user);

@@ -10,8 +10,10 @@
   later registration silently replaced the earlier one in the routing map, so captured bot
   replies, deletions, and `getChat`-style resolvers were attributed to the replacement actor
   while the original actor's logs stayed empty. Reuse the existing chat object, or pick a
-  different `id`. Repeated `chats.newPrivateChat(user)` calls for the same user are unaffected
-  and keep returning the same instance. (#3)
+  different `id`. The guard also covers the reverse order: creating a private chat (via
+  `chats.newPrivateChat(user)` or a default private send) throws when the user's ID is
+  already registered to a non-private chat. Repeated `chats.newPrivateChat(user)` calls for
+  the same user are unaffected and keep returning the same instance. (#3)
 - Tests: the forum-topics suite was restructured into class-specific root describes
   (`Chats`, `Supergroup`, `User`, `MessagesLog`, `Reply`) with per-method
   `positive` / `negative` branches, and gained explicit negative coverage for
