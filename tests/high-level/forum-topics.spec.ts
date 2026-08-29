@@ -78,6 +78,27 @@ describe('forum supergroups and topics', () => {
         expect(forum.topicByThreadId(nextAuto.messageThreadId)).toBe(nextAuto);
         expect([...forum.allTopics]).toHaveLength(3);
       });
+
+      it('reserves explicit thread IDs so later synthetic messages never reuse them', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:text', async (ctx) => {
+          await ctx.reply('ack');
+        });
+
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const billing = forum.newTopic({ name: 'Billing', messageThreadId: 2 });
+        const user = chats.newUser();
+
+        const first = await user.sendText('one', { topic: billing });
+        const second = await user.sendText('two', { topic: billing });
+
+        const allocatedIds = [first.message_id, second.message_id, ...forum.messages.all.map((reply) => reply.messageId)];
+
+        expect(allocatedIds).not.toContain(billing.messageThreadId);
+        expect(second.message_id).toBeGreaterThan(billing.messageThreadId);
+      });
     });
 
     describe('negative', () => {
