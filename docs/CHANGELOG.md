@@ -27,12 +27,19 @@ pre-moderation state. (#7)
   - `restrictChatMember` sets `'restricted'` with the payload's permissions after applying
     the implied-permission grouping (`can_send_other_messages` / `can_add_web_page_previews`
     grant every media-send permission, `can_send_polls` grants `can_send_messages`, unless
-    `use_independent_chat_permissions` is passed). Granting every permission lifts the
+    `use_independent_chat_permissions` is passed) and the documented omitted-flag defaults
+    (`can_react_to_messages` follows `can_send_messages`; `can_manage_topics` and
+    `can_edit_tag` follow `can_pin_messages`). Granting every permission lifts the
     restriction back to `'member'`. `until_date` follows the same forever-clamping as bans.
+    The method is supported in supergroups only — captured restricts elsewhere are logged
+    but never mutate membership.
   - `promoteChatMember` sets `'administrator'` with the granted rights (`can_manage_chat`
-    implied by any other privilege). All-false/absent rights are a demotion (kind
-    `'demote'`), which moves an `'administrator'` back to `'member'` and leaves everyone
-    else untouched.
+    implied by any other privilege; omitted `can_restrict_members` defaults to `true` for
+    channel promotions, per the Bot API's backward-compatibility rule). All-false/absent
+    rights are a demotion (kind `'demote'`), which moves an `'administrator'` back to
+    `'member'` and leaves everyone else untouched. The method is supported in supergroups
+    and channels only — captured promotes in basic groups are logged but never mutate
+    membership.
   - Creators are never mutated (real Telegram rejects moderating the owner), and calls
     targeting user IDs not minted by the orchestrator are logged without state sync.
   - Membership only changes when the mocked call succeeds: a `failNext` / `failAll`

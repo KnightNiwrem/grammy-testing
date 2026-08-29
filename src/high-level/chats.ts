@@ -1064,7 +1064,7 @@ export class Chats<TContext extends Context = Context> {
     }
 
     const user = this.users.get(userId)?.user;
-    const action = this.buildModerationAction(method, payload, chatId, userId, user);
+    const action = this.buildModerationAction(method, payload, chatId, userId, user, chat.type);
 
     chat.moderation.push(action);
 
@@ -1103,6 +1103,7 @@ export class Chats<TContext extends Context = Context> {
    * @param chatId - The target chat ID from the payload.
    * @param userId - The target user ID from the payload.
    * @param user - The resolved `User` actor, when minted by this orchestrator.
+   * @param chatType - The target chat's type, for chat-type-specific flag defaults.
    * @returns The normalised action.
    */
   private buildModerationAction(
@@ -1111,6 +1112,7 @@ export class Chats<TContext extends Context = Context> {
     chatId: ChatId,
     userId: number,
     user: User<TContext> | undefined,
+    chatType: GroupLikeChat<TContext>['type'],
   ): ModerationAction<TContext> {
     const base = { method, chatId, userId, user, raw: payload };
 
@@ -1140,6 +1142,13 @@ export class Chats<TContext extends Context = Context> {
       default: {
         // promoteChatMember: all-false/absent boolean rights demote (per the Bot API docs).
         const flags = extractPromoteFlags(payload);
+
+        // For backward compatibility, can_restrict_members defaults to true for
+        // promotions of channel administrators (Bot API docs).
+        if (chatType === 'channel') {
+          flags.can_restrict_members ??= true;
+        }
+
         const hasGrantedRight = Object.values(flags).includes(true);
 
         if (!hasGrantedRight) {
@@ -1214,20 +1223,24 @@ export class Chats<TContext extends Context = Context> {
       }
 
       case 'restrict': {
-        const permissions = action.permissions ?? {};
-
-        if (liftsAllRestrictions(permissions)) {
-          return { user, chat, status: 'member', permissions: {} };
-        }
-
-        return { user, chat, status: 'restricted', permissions, untilDate: clampUntilDate(action.untilDate, now) };
+        return this.nextRestrictMembership(chat, user, action, now);
       }
 
       case 'demote': {
+        // promoteChatMember is supported in supergroups and channels only (Bot API docs).
+        if (chat.type === 'group') {
+          return undefined;
+        }
+
         return current?.status === 'administrator' ? { user, chat, status: 'member', permissions: {} } : undefined;
       }
 
       case 'promote': {
+        // promoteChatMember is supported in supergroups and channels only (Bot API docs).
+        if (chat.type === 'group') {
+          return undefined;
+        }
+
         return { user, chat, status: 'administrator', permissions: action.permissions ?? {} };
       }
 
@@ -1235,6 +1248,36 @@ export class Chats<TContext extends Context = Context> {
         throw new Error(`Unknown moderation action kind: ${String(action.kind)}`);
       }
     }
+  }
+
+  /**
+   * Computes the membership record a captured `restrictChatMember` call transitions the
+   * target to. The method is supported in supergroups only (Bot API docs) — real
+   * Telegram rejects it elsewhere, so no state changes for other chat types. Granting
+   * every permission lifts the restriction back to `'member'`.
+   * @param chat - The group, supergroup, or channel the action targets.
+   * @param user - The minted target user.
+   * @param action - The normalised restrict action.
+   * @param now - The current Unix timestamp in seconds, for `until_date` clamping.
+   * @returns The next membership record, or `undefined` for no change.
+   */
+  private nextRestrictMembership(
+    chat: GroupLikeChat<TContext>,
+    user: User<TContext>,
+    action: ModerationAction<TContext>,
+    now: number,
+  ): Membership<TContext> | undefined {
+    if (chat.type !== 'supergroup') {
+      return undefined;
+    }
+
+    const permissions = action.permissions ?? {};
+
+    if (liftsAllRestrictions(permissions)) {
+      return { user, chat, status: 'member', permissions: {} };
+    }
+
+    return { user, chat, status: 'restricted', permissions, untilDate: clampUntilDate(action.untilDate, now) };
   }
 
   /**

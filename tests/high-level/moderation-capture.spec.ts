@@ -348,7 +348,7 @@ describe('moderation capture', () => {
         expect(target.in(group)?.status).toBe('member');
       });
 
-      it('defaults can_react_to_messages and can_edit_tag from their source flags when omitted', async () => {
+      it('defaults can_react_to_messages, can_manage_topics, and can_edit_tag from their source flags when omitted', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
         const target = chats.newUser();
@@ -360,7 +360,35 @@ describe('moderation capture', () => {
         const action = group.moderation.restrictions.lastOrThrow();
 
         expect(action.permissions?.can_react_to_messages).toBe(true);
+        expect(action.permissions?.can_manage_topics).toBe(false);
         expect(action.permissions?.can_edit_tag).toBe(false);
+      });
+
+      it('lifts restrictions when can_manage_topics is omitted but defaults to a granted can_pin_messages', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(target);
+
+        await bot.api.restrictChatMember(group.id, target.id, {
+          can_send_messages: true,
+          can_send_audios: true,
+          can_send_documents: true,
+          can_send_photos: true,
+          can_send_videos: true,
+          can_send_video_notes: true,
+          can_send_voice_notes: true,
+          can_send_polls: true,
+          can_send_other_messages: true,
+          can_add_web_page_previews: true,
+          can_change_info: true,
+          can_invite_users: true,
+          can_pin_messages: true,
+        });
+
+        expect(target.in(group)?.status).toBe('member');
       });
     });
 
@@ -404,6 +432,19 @@ describe('moderation capture', () => {
         await bot.api.restrictChatMember(group.id, owner.id, { can_send_messages: false });
 
         expect(owner.in(group)?.status).toBe('creator');
+        expect(group.moderation.restrictions.length).toBe(1);
+      });
+
+      it('logs but does not sync membership in a basic group (supergroup-only method)', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newGroup();
+
+        group.join(target);
+        await bot.api.restrictChatMember(group.id, target.id, { can_send_messages: false });
+
+        expect(target.in(group)?.status).toBe('member');
         expect(group.moderation.restrictions.length).toBe(1);
       });
     });
@@ -463,6 +504,38 @@ describe('moderation capture', () => {
         expect(membership?.permissions.can_manage_chat).toBe(true);
       });
 
+      it('defaults can_restrict_members to true for channel promotions', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const channel = chats.newChannel();
+
+        await bot.api.promoteChatMember(channel.id, target.id);
+
+        const action = channel.moderation.promotions.lastOrThrow();
+
+        expect(action.kind).toBe('promote');
+        expect(action.permissions?.can_restrict_members).toBe(true);
+        expect(target.in(channel)?.status).toBe('administrator');
+        expect(target.in(channel)?.permissions.can_restrict_members).toBe(true);
+      });
+
+      it('demotes a channel administrator when can_restrict_members is explicitly false with no other rights', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const channel = chats.newChannel();
+
+        await bot.api.promoteChatMember(channel.id, target.id, { can_post_messages: true });
+
+        expect(target.in(channel)?.status).toBe('administrator');
+
+        await bot.api.promoteChatMember(channel.id, target.id, { can_restrict_members: false });
+
+        expect(target.in(channel)?.status).toBe('member');
+        expect(channel.moderation.demotions.length).toBe(1);
+      });
+
       it('treats a promote call without any flags as a demotion', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
@@ -488,6 +561,19 @@ describe('moderation capture', () => {
 
         expect(target.in(group)?.status).toBe('member');
         expect(group.moderation.demotions.length).toBe(1);
+      });
+
+      it('logs but does not sync membership in a basic group (supergroup/channel-only method)', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newGroup();
+
+        group.join(target);
+        await bot.api.promoteChatMember(group.id, target.id, { can_delete_messages: true });
+
+        expect(target.in(group)?.status).toBe('member');
+        expect(group.moderation.promotions.length).toBe(1);
       });
 
       it('does not demote a restricted member to member', async () => {
