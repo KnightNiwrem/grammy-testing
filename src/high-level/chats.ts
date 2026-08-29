@@ -398,9 +398,32 @@ export class Chats<TContext extends Context = Context> {
    * Mints a new synthetic user with an auto-generated ID.
    * @param profile - Optional profile overrides (id, first_name, last_name, username).
    * @returns The new `User` instance.
+   * @throws {Error} When an explicit `id` is already minted for another user in this
+   *   orchestrator — the registry entry (and with it reply routing) would silently switch
+   *   to the new actor otherwise.
    */
   newUser(profile: UserProfile = {}): User<TContext> {
-    const id = profile.id ?? this.ids.nextUserId();
+    const id = profile.id ?? this.nextUnregisteredId(() => this.ids.nextUserId());
+
+    if (this.users.has(id)) {
+      throw new Error(
+        `[grammy-testing] User ID ${String(id)} is already minted in this orchestrator. ` +
+          'Minting a second user with the same ID would silently take over reply routing for that ID. ' +
+          'Reuse the existing User object, or pick a different id.',
+      );
+    }
+
+    // A private chat at this ID with no users-registry entry was registered for a user
+    // object from another orchestrator; private reply routing matches numeric IDs, so a
+    // local user minted over it would silently receive that chat's replies.
+    if (this.chats.get(id)?.type === 'private') {
+      throw new Error(
+        `[grammy-testing] User ID ${String(id)} is already registered to a private chat owned by a different user actor. ` +
+          'Minting a user with the same ID would silently take over reply routing for that chat. ' +
+          'Reuse the original user object, or pick a different id.',
+      );
+    }
+
     const inbox = new RepliesInbox<TContext>();
     const drafts = new DraftsLog();
 
@@ -499,11 +522,12 @@ export class Chats<TContext extends Context = Context> {
    *   is supplied the auto-ID counter is skipped; any integer is accepted. Title defaults to
    *   `Group<abs(id)>` when omitted.
    * @returns The new `Group` instance.
+   * @throws {Error} When `id` is already registered to another chat in this orchestrator.
    */
   newGroup(profile?: ChatProfile | string): Group<TContext> {
     const { id, title } = resolveChatProfile(
       profile,
-      () => this.ids.nextGroupId(),
+      () => this.nextUnregisteredId(() => this.ids.nextGroupId()),
       (chatId) => `Group${String(Math.abs(chatId))}`,
     );
 
@@ -521,11 +545,12 @@ export class Chats<TContext extends Context = Context> {
    *   defaults to `Supergroup<abs(id)>` when omitted. Pass `isForum: true` to mint a forum
    *   supergroup that can register topics via `supergroup.newTopic(...)`.
    * @returns The new `Supergroup` instance.
+   * @throws {Error} When `id` is already registered to another chat in this orchestrator.
    */
   newSupergroup(profile?: SupergroupProfile | string): Supergroup<TContext> {
     const { id, title } = resolveChatProfile(
       profile,
-      () => this.ids.nextSupergroupId(),
+      () => this.nextUnregisteredId(() => this.ids.nextSupergroupId()),
       (chatId) => `Supergroup${String(Math.abs(chatId))}`,
     );
 
@@ -544,11 +569,12 @@ export class Chats<TContext extends Context = Context> {
    *   is supplied the auto-ID counter is skipped; any integer is accepted. Title defaults to
    *   `Channel<abs(id)>` when omitted.
    * @returns The new `Channel` instance.
+   * @throws {Error} When `id` is already registered to another chat in this orchestrator.
    */
   newChannel(profile?: ChatProfile | string): Channel<TContext> {
     const { id, title } = resolveChatProfile(
       profile,
-      () => this.ids.nextChannelId(),
+      () => this.nextUnregisteredId(() => this.ids.nextChannelId()),
       (chatId) => `Channel${String(Math.abs(chatId))}`,
     );
 
@@ -1015,17 +1041,62 @@ export class Chats<TContext extends Context = Context> {
    * Returns the existing private chat for `user`, or creates and registers a new one.
    * @param user - The user whose private chat to retrieve or create.
    * @returns The `PrivateChat` instance for `user`.
+   * @throws {Error} When `user.id` is already registered to a non-private chat, or to a
+   *   private chat owned by a different user actor. Repeated calls for the same user object
+   *   keep returning the same instance — private-chat IDs always mirror the owning user's ID,
+   *   so routing is unchanged in that case.
    */
   private privateChatFor(user: User<TContext>): PrivateChat<TContext> {
     const entry = this.users.get(user.id);
 
-    if (entry?.privateChat) {
+    if (entry?.privateChat && entry.user === user) {
       return entry.privateChat;
+    }
+
+    // A registry entry owned by a different user object means another actor is minted at
+    // this ID; registering a private chat for this object would route that actor's private
+    // replies (matched by numeric ID) to the wrong inbox.
+    if (entry !== undefined && entry.user !== user) {
+      throw new Error(
+        `[grammy-testing] Cannot register a private chat for user ${String(user.id)}: ` +
+          'a different user actor with that ID is minted in this orchestrator. ' +
+          'Reuse the minted User object, or pick a different user id.',
+      );
+    }
+
+    const existing = this.chats.get(user.id);
+
+    if (existing !== undefined) {
+      if (existing.type !== 'private') {
+        throw new Error(
+          `[grammy-testing] Cannot register a private chat for user ${String(user.id)}: ` +
+            `that ID is already registered to a ${existing.type} ("${existing.title}"). ` +
+            'Registering the private chat would silently take over message routing for that ID. ' +
+            'Pick a different user id, or a different chat id.',
+        );
+      }
+
+      // Same owning user object: reuse the registered chat (and its messages log)
+      // instead of re-registering a fresh instance over it.
+      if (existing.user === user) {
+        if (entry?.user === user) {
+          entry.privateChat = existing;
+        }
+
+        return existing;
+      }
+
+      throw new Error(
+        `[grammy-testing] Cannot register a private chat for user ${String(user.id)}: ` +
+          'that ID is already registered to a private chat owned by a different user actor. ' +
+          'Registering the private chat would silently take over message routing for that ID. ' +
+          'Reuse the original user object, or pick a different user id.',
+      );
     }
 
     const chat = new PrivateChat<TContext>(user);
 
-    if (entry) {
+    if (entry?.user === user) {
       entry.privateChat = chat;
     }
 
@@ -1040,10 +1111,42 @@ export class Chats<TContext extends Context = Context> {
   }
 
   /**
+   * Draws IDs from `nextId` until one is found that no registered user or chat occupies.
+   * Explicit IDs may claim values inside an auto-generated range; the generated paths skip
+   * them instead of colliding with the duplicate-registration guards.
+   * @param nextId - Counter function that yields candidate IDs.
+   * @returns The first unoccupied auto-generated ID.
+   */
+  private nextUnregisteredId(nextId: () => number): number {
+    let id = nextId();
+
+    while (this.chats.has(id) || this.users.has(id)) {
+      id = nextId();
+    }
+
+    return id;
+  }
+
+  /**
    * Registers a newly created chat, initialises its messages log, and wires the bot if attached.
    * @param chat - The channel, group, or supergroup to register.
+   * @throws {Error} When `chat.id` is already registered to a different actor. Allowing the
+   *   registration would silently re-route captured messages, deletions, and `getChat`-style
+   *   resolvers to the new actor while the original actor's logs stay empty.
    */
   private registerChat(chat: Channel<TContext> | Group<TContext> | Supergroup<TContext>): void {
+    const existing = this.chats.get(chat.id);
+
+    if (existing !== undefined) {
+      const existingLabel = existing.type === 'private' ? `a private chat` : `a ${existing.type} ("${existing.title}")`;
+
+      throw new Error(
+        `[grammy-testing] Chat ID ${String(chat.id)} is already registered to ${existingLabel}. ` +
+          'Registering a second chat with the same ID would silently take over message routing for that ID. ' +
+          'Reuse the existing chat object, or pick a different id.',
+      );
+    }
+
     chat.messages = new MessagesLog<TContext>();
     this.chats.set(chat.id, chat);
     this.chatDeletions.set(chat.id, new DeletionsLog<TContext>());
