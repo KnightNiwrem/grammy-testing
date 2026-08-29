@@ -45,8 +45,11 @@ exactly one update:
 ```ts
 const post = await channel.post('Breaking news!');
 
-await discussionGroup.postRelayMessage(post.text!, { channel });
+await discussionGroup.postRelayMessage(post.text!, { channel, originMessageId: post.message_id });
 ```
+
+`originMessageId` keeps the original channel post's ID in `forward_origin.message_id`,
+matching real auto-forwards (the relay message gets its own local ID in the group).
 
 ### `postMessageTo(targetChat, text, options?)` → dispatches `message`
 

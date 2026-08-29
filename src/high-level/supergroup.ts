@@ -322,7 +322,8 @@ export class Supergroup<TContext extends Context = Context> implements ChatRefHo
    * (`from.id === 777_000`). Returns the dispatched `Message` so it can be passed directly
    * to `user.sendText` as `reply_to_message`.
    * @param text - The relay message text.
-   * @param options - Optional `messageId` override and `channel` for `forward_origin`.
+   * @param options - Optional `messageId` override, `channel` for `forward_origin`, and
+   *   `originMessageId` for the original channel post's ID inside `forward_origin`.
    * @returns The dispatched synthetic `Message`.
    */
   async postRelayMessage(text: string, options: PostRelayMessageOptions<TContext> = {}): Promise<Message> {
@@ -340,7 +341,7 @@ export class Supergroup<TContext extends Context = Context> implements ChatRefHo
           type: 'channel' as const,
           chat: options.channel.toTelegramChat(),
           date: now,
-          message_id: messageId,
+          message_id: options.originMessageId ?? messageId,
         },
       }),
     } as Message;
