@@ -14,7 +14,8 @@
   `chats.newPrivateChat(user)` or a default private send) throws when the user's ID is
   already registered to a non-private chat, or to a private chat owned by a different user
   actor with the same ID. `chats.newUser(...)` likewise throws when an explicit `id` is
-  already minted for another user, so reply routing can never silently switch actors.
+  already minted for another user or owned by an already-registered private chat, so reply
+  routing can never silently switch actors.
   Repeated `chats.newPrivateChat(user)` calls for the same user object are unaffected and
   keep returning the same instance. Auto-generated IDs
   (`newUser`, `newGroup`, `newSupergroup`, `newChannel` without an explicit `id`) skip values

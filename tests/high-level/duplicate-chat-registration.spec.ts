@@ -177,6 +177,20 @@ describe('Chats', () => {
 
         expect(chats.repliesFor(owner).last?.text).toBe('ack');
       });
+
+      it('throws when the ID is already registered to a foreign private chat', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const { chats: other } = await prepareBot(new Bot('other-token'));
+
+        // The foreign user is absent from this orchestrator's user registry, so only
+        // the chat registry can reveal that the ID's private chat is already owned.
+        const foreign = other.newUser({ id: 4242 });
+
+        chats.newPrivateChat(foreign);
+
+        expect(() => chats.newUser({ id: 4242 })).toThrow(/already registered/);
+      });
     });
   });
 
@@ -239,6 +253,19 @@ describe('Chats', () => {
 
         expect(() => chats.newPrivateChat(foreign)).toThrow(/different user actor/);
         expect(chats.newPrivateChat(mine)).toBe(mineChat);
+      });
+
+      it('throws for a foreign user object whose ID matches a minted user without a private chat', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const { chats: other } = await prepareBot(new Bot('other-token'));
+
+        // No private chat exists yet, so without a guard the foreign object would
+        // register one whose replies route to the minted user's inbox by numeric ID.
+        chats.newUser({ id: 4242 });
+        const foreign = other.newUser({ id: 4242 });
+
+        expect(() => chats.newPrivateChat(foreign)).toThrow(/different user actor/);
       });
 
       it('throws when the user ID is already registered to a non-private chat', async () => {

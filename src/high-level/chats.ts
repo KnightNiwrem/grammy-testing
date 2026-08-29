@@ -413,6 +413,17 @@ export class Chats<TContext extends Context = Context> {
       );
     }
 
+    // A private chat at this ID with no users-registry entry was registered for a user
+    // object from another orchestrator; private reply routing matches numeric IDs, so a
+    // local user minted over it would silently receive that chat's replies.
+    if (this.chats.get(id)?.type === 'private') {
+      throw new Error(
+        `[grammy-testing] User ID ${String(id)} is already registered to a private chat owned by a different user actor. ` +
+          'Minting a user with the same ID would silently take over reply routing for that chat. ' +
+          'Reuse the original user object, or pick a different id.',
+      );
+    }
+
     const inbox = new RepliesInbox<TContext>();
     const drafts = new DraftsLog();
 
@@ -1038,10 +1049,19 @@ export class Chats<TContext extends Context = Context> {
   private privateChatFor(user: User<TContext>): PrivateChat<TContext> {
     const entry = this.users.get(user.id);
 
-    // The registry entry may belong to a different user object minted later with the same
-    // explicit ID; ownership checks below must not be bypassed for it.
     if (entry?.privateChat && entry.user === user) {
       return entry.privateChat;
+    }
+
+    // A registry entry owned by a different user object means another actor is minted at
+    // this ID; registering a private chat for this object would route that actor's private
+    // replies (matched by numeric ID) to the wrong inbox.
+    if (entry !== undefined && entry.user !== user) {
+      throw new Error(
+        `[grammy-testing] Cannot register a private chat for user ${String(user.id)}: ` +
+          'a different user actor with that ID is minted in this orchestrator. ' +
+          'Reuse the minted User object, or pick a different user id.',
+      );
     }
 
     const existing = this.chats.get(user.id);
