@@ -247,6 +247,8 @@ const CHAT_PERMISSION_KEYS = [
   'can_invite_users',
   'can_pin_messages',
   'can_manage_topics',
+  'can_react_to_messages',
+  'can_edit_tag',
 ] as const;
 
 const MEDIA_SEND_KEYS = [
@@ -264,6 +266,8 @@ const MEDIA_SEND_KEYS = [
  * `permissions` object. Unless `use_independent_chat_permissions` is passed:
  * `can_send_other_messages` / `can_add_web_page_previews` imply `can_send_messages`
  * and every media-send permission, and `can_send_polls` implies `can_send_messages`.
+ * Afterwards the documented omitted-flag defaults apply: `can_react_to_messages`
+ * defaults to `can_send_messages`, and `can_edit_tag` defaults to `can_pin_messages`.
  * @param permissions - The raw `permissions` object from the payload.
  * @param independent - The payload's `use_independent_chat_permissions` flag.
  * @returns The effective permission flags after grouping.
@@ -283,6 +287,9 @@ export function expandChatPermissions(permissions: ChatPermissions, independent:
       flags.can_send_messages = true;
     }
   }
+
+  flags.can_react_to_messages ??= flags.can_send_messages;
+  flags.can_edit_tag ??= flags.can_pin_messages;
 
   return flags;
 }
