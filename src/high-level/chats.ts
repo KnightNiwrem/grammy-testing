@@ -92,9 +92,15 @@ function resolveChatProfile(
  * (e.g. `can_change_info`) come back as `false` rather than missing when a membership stores only
  * the granted flags. The spread may still carry flags beyond the strict shape, hence the casts.
  * @param membership - The membership record to convert.
+ * @param chatType - The chat's type; channels additionally default the channel-only
+ *   administrator booleans (`can_post_messages`, `can_edit_messages`,
+ *   `can_manage_direct_messages`) to `false`, as real Telegram returns them there.
  * @returns The corresponding `ChatMember` discriminated union value.
  */
-function membershipToChatMember<TContext extends Context>(membership: Membership<TContext>): ChatMember {
+function membershipToChatMember<TContext extends Context>(
+  membership: Membership<TContext>,
+  chatType: 'channel' | 'group' | 'supergroup',
+): ChatMember {
   const user = membership.user as unknown as TelegramUser;
   const { status, permissions, untilDate } = membership;
 
@@ -104,7 +110,10 @@ function membershipToChatMember<TContext extends Context>(membership: Membership
     }
 
     case 'administrator': {
-      return { ...makeChatMember(user, 'administrator', {}), can_be_edited: true, ...permissions } as ChatMember;
+      const channelFields =
+        chatType === 'channel' ? { can_post_messages: false, can_edit_messages: false, can_manage_direct_messages: false } : {};
+
+      return { ...makeChatMember(user, 'administrator', {}), ...channelFields, can_be_edited: true, ...permissions } as ChatMember;
     }
 
     case 'member': {
@@ -722,7 +731,7 @@ export class Chats<TContext extends Context = Context> {
       const membership = chat.members.get(payload.user_id);
 
       if (membership) {
-        return membershipToChatMember(membership);
+        return membershipToChatMember(membership, chat.type);
       }
 
       const userEntry = this.users.get(payload.user_id);
@@ -745,7 +754,7 @@ export class Chats<TContext extends Context = Context> {
 
       const admins = [...chat.members.values()]
         .filter((membership) => membership.status === 'creator' || membership.status === 'administrator')
-        .map((membership) => membershipToChatMember(membership));
+        .map((membership) => membershipToChatMember(membership, chat.type));
 
       // Bot API 10.0: return_bots: false excludes bot administrators.
       if (payload.return_bots === false) {

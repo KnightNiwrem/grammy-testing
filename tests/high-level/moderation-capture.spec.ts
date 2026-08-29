@@ -679,6 +679,22 @@ describe('moderation capture', () => {
         expect(result.can_promote_members).toBe(false);
       });
 
+      it('resolves partial channel promotions with channel-only admin booleans defaulted to false', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const channel = chats.newChannel();
+
+        await bot.api.promoteChatMember(channel.id, target.id, { can_post_stories: true });
+
+        const result = (await bot.api.getChatMember(channel.id, target.id)) as ChatMember & Record<string, unknown>;
+
+        assert.ok(result.status === 'administrator');
+        expect(result.can_post_stories).toBe(true);
+        expect(result.can_post_messages).toBe(false);
+        expect(result.can_edit_messages).toBe(false);
+      });
+
       it('demotes a channel administrator when can_restrict_members is explicitly false with no other rights', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
