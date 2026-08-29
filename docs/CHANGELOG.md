@@ -21,8 +21,9 @@ topic-sensitive handlers can be tested without hand-built raw payloads.
   `message_thread_id` are recorded in the parent `forum.messages` log **and** the topic-scoped
   `topic.messages` projection (`byText`, `last`, etc.). Unknown thread IDs stay inspectable via
   `reply.messageThreadId` without being associated to a registered topic.
-- **Topic metadata propagation**: default synthetic sent-message responses and
-  `reply.clickButton()` callback queries preserve `message_thread_id` / `is_topic_message`.
+- **Topic metadata propagation**: default synthetic sent-message responses (including every
+  message of a `sendMediaGroup` response) and `reply.clickButton()` callback queries preserve
+  `message_thread_id` / `is_topic_message`.
 - `chats.clear()` also clears topic-scoped logs. Non-forum groups and supergroups are unchanged.
 
 ## 0.26.0 — 2026-06-16

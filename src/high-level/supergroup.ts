@@ -88,19 +88,24 @@ export class Supergroup<TContext extends Context = Context> implements ChatRefHo
   /**
    * Registers a new forum topic on this supergroup and returns a stable `ForumTopic`
    * reference. The topic's `messageThreadId` is auto-generated from the shared
-   * message-ID counter when not supplied explicitly.
+   * message-ID counter when not supplied explicitly; auto-generation skips IDs that
+   * were already registered explicitly, so explicit and automatic topics can be mixed.
    * @param options - The topic `name` and an optional explicit `messageThreadId`.
    * @returns The new `ForumTopic` instance.
-   * @throws {Error} When this supergroup is not a forum, or when `messageThreadId` is already registered.
+   * @throws {Error} When this supergroup is not a forum, or when an explicit `messageThreadId` is already registered.
    */
   newTopic(options: NewTopicOptions): ForumTopic<TContext> {
     if (!this.isForum) {
       throw new Error(`newTopic: supergroup "${this.title}" is not a forum — create it with chats.newSupergroup({ title, isForum: true })`);
     }
 
-    const messageThreadId = options.messageThreadId ?? this.ids.nextMessageId();
+    let { messageThreadId } = options;
 
-    if (this.topics.has(messageThreadId)) {
+    if (messageThreadId === undefined) {
+      do {
+        messageThreadId = this.ids.nextMessageId();
+      } while (this.topics.has(messageThreadId));
+    } else if (this.topics.has(messageThreadId)) {
       throw new Error(`newTopic: message_thread_id ${String(messageThreadId)} is already registered on supergroup "${this.title}"`);
     }
 

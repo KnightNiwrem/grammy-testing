@@ -627,12 +627,12 @@ export class Chats<TContext extends Context = Context> {
       const mediaGroupId = this.ids.nextMediaGroupId();
       const chat = reply.chat?.toTelegramChat() ?? ({ id: 0, type: 'private' } as Message['chat']);
 
-      const messages: { message_id: number; date: number; chat: Message['chat']; media_group_id: string }[] = [
-        { message_id: reply.messageId, date: now, chat, media_group_id: mediaGroupId },
-      ];
+      const topicFields = reply.messageThreadId === undefined ? {} : { message_thread_id: reply.messageThreadId, is_topic_message: true };
+
+      const messages: Partial<Message>[] = [{ message_id: reply.messageId, date: now, chat, media_group_id: mediaGroupId, ...topicFields }];
 
       for (let index = 1; index < count; index += 1) {
-        messages.push({ message_id: this.ids.nextMessageId(), date: now, chat, media_group_id: mediaGroupId });
+        messages.push({ message_id: this.ids.nextMessageId(), date: now, chat, media_group_id: mediaGroupId, ...topicFields });
       }
 
       return messages;

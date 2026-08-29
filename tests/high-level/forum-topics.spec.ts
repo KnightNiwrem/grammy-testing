@@ -1,7 +1,7 @@
 import { Bot } from 'grammy';
 import { describe, expect, it } from 'vitest';
 
-import { prepareBot } from '../../src/index';
+import { ForumTopic, prepareBot } from '../../src/index';
 
 describe('forum supergroups and topics', () => {
   describe('Chats#newSupergroup', () => {
@@ -63,6 +63,20 @@ describe('forum supergroups and topics', () => {
         expect(forum.topicByThreadId(42)).toBe(billing);
         expect(forum.topicByThreadId(shipping.messageThreadId)).toBe(shipping);
         expect([...forum.allTopics]).toEqual([billing, shipping]);
+      });
+
+      it('skips explicitly registered IDs when auto-generating thread IDs', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+
+        const auto = forum.newTopic({ name: 'Auto' });
+        const explicit = forum.newTopic({ name: 'Explicit', messageThreadId: auto.messageThreadId + 1 });
+        const nextAuto = forum.newTopic({ name: 'Next Auto' });
+
+        expect(nextAuto.messageThreadId).not.toBe(explicit.messageThreadId);
+        expect(forum.topicByThreadId(nextAuto.messageThreadId)).toBe(nextAuto);
+        expect([...forum.allTopics]).toHaveLength(3);
       });
     });
 
@@ -165,6 +179,27 @@ describe('forum supergroups and topics', () => {
         const user = chats.newUser();
 
         await expect(user.sendText('hello', { chat: other, topic: billing })).rejects.toThrow(/belongs to forum/);
+      });
+
+      it('throws when options.chat is a different chat object with the same numeric ID', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const billing = forum.newTopic({ name: 'Billing' });
+        const imposter = chats.newGroup({ id: forum.id, title: 'Imposter' });
+        const user = chats.newUser();
+
+        await expect(user.sendText('hello', { chat: imposter, topic: billing })).rejects.toThrow(/belongs to forum/);
+      });
+
+      it('throws for a topic object that was not registered via newTopic', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const detached = new ForumTopic(forum, 'Detached', 999);
+        const user = chats.newUser();
+
+        await expect(user.sendText('hello', { topic: detached })).rejects.toThrow(/not registered/);
       });
     });
   });
@@ -282,6 +317,30 @@ describe('forum supergroups and topics', () => {
         expect(sent.message_thread_id).toBe(42);
         expect(sent.is_topic_message).toBe(true);
         expect(sent.chat.id).toBe(forum.id);
+      });
+
+      it('preserves topic metadata in every default sendMediaGroup response message', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+
+        forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+
+        const sent = await bot.api.sendMediaGroup(
+          forum.id,
+          [
+            { type: 'photo', media: 'file-1' },
+            { type: 'photo', media: 'file-2' },
+          ],
+          { message_thread_id: 42 },
+        );
+
+        expect(sent).toHaveLength(2);
+
+        for (const message of sent) {
+          expect(message.message_thread_id).toBe(42);
+          expect(message.is_topic_message).toBe(true);
+        }
       });
     });
   });

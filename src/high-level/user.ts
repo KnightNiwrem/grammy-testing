@@ -66,9 +66,10 @@ export interface SendTextOptions<TContext extends Context = Context> {
    */
   anonymous?: boolean;
   /**
-   * Target forum topic. The dispatched message carries the topic's `message_thread_id`
-   * and `is_topic_message: true`. When `options.chat` is omitted, the topic's parent
-   * forum is used as the target chat; when supplied, it must be the topic's parent forum.
+   * Target forum topic. Must be a topic minted via `forum.newTopic(...)`. The dispatched
+   * message carries the topic's `message_thread_id` and `is_topic_message: true`. When
+   * `options.chat` is omitted, the topic's parent forum is used as the target chat; when
+   * supplied, it must be the same forum instance the topic was registered on.
    */
   topic?: ForumTopic<TContext>;
 }
@@ -310,11 +311,21 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendText(text: string, options: SendTextOptions<TContext> = {}): Promise<Message> {
-    if (options.topic && options.chat && options.chat.id !== options.topic.forum.id) {
-      throw new Error(
-        `sendText: topic "${options.topic.name}" belongs to forum ${String(options.topic.forum.id)}, ` +
-          `but options.chat is chat ${String(options.chat.id)} — pass the topic's parent forum or omit options.chat`,
-      );
+    if (options.topic) {
+      if (options.topic.forum.topicByThreadId(options.topic.messageThreadId) !== options.topic) {
+        throw new Error(
+          `sendText: topic "${options.topic.name}" is not registered on forum "${options.topic.forum.title}" — ` +
+            'mint topics with forum.newTopic(...) on a forum supergroup',
+        );
+      }
+
+      // Identity comparison: a different chat object with the same numeric ID is still the wrong target.
+      if (options.chat && options.chat !== (options.topic.forum as AnyChat<TContext>)) {
+        throw new Error(
+          `sendText: topic "${options.topic.name}" belongs to forum ${String(options.topic.forum.id)}, ` +
+            `but options.chat is a different chat (${String(options.chat.id)}) — pass the topic's parent forum or omit options.chat`,
+        );
+      }
     }
 
     const chatActor = options.chat ?? options.topic?.forum;
