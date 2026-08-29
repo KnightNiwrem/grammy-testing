@@ -110,7 +110,8 @@ export class Supergroup<TContext extends Context = Context> implements ChatRefHo
       throw new Error(`newTopic: message_thread_id ${String(messageThreadId)} is already registered on supergroup "${this.title}"`);
     } else if (this.ids.hasIssuedMessageId(messageThreadId)) {
       throw new Error(
-        `newTopic: message_thread_id ${String(messageThreadId)} was already allocated to a synthetic message — pick an unused ID`,
+        `newTopic: message_thread_id ${String(messageThreadId)} was already handed out by this Chats instance's ID generator ` +
+          '(messages and other synthetic tokens share one sequence) — pick an unused ID, e.g. a higher value',
       );
     } else {
       this.ids.reserveMessageId(messageThreadId);

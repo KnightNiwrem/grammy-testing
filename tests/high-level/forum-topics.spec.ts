@@ -120,7 +120,7 @@ describe('forum supergroups and topics', () => {
         expect(() => forum.newTopic({ name: 'Duplicate', messageThreadId: 42 })).toThrow(/already registered/);
       });
 
-      it('throws when the message_thread_id was already allocated to a synthetic message', async () => {
+      it('throws when the message_thread_id was already handed out by the ID generator', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
         const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
@@ -128,9 +128,9 @@ describe('forum supergroups and topics', () => {
 
         const message = await user.sendText('claims a message ID', { chat: forum });
 
-        expect(() => forum.newTopic({ name: 'Billing', messageThreadId: message.message_id })).toThrow(/already allocated/);
+        expect(() => forum.newTopic({ name: 'Billing', messageThreadId: message.message_id })).toThrow(/already handed out/);
 
-        // Non-positive IDs are never issued by the generator, so they must not trip a false "already allocated" error.
+        // Non-positive IDs are never issued by the generator, so they must not trip a false "already handed out" error.
         expect(() => forum.newTopic({ name: 'Zero', messageThreadId: 0 })).not.toThrow();
       });
     });
