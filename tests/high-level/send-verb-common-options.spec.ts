@@ -601,6 +601,21 @@ describe('User', () => {
         await expect(user.sendCallbackQuery('invoices', { chat: other, topic: billing })).rejects.toThrow(/belongs to forum/);
       });
 
+      it('throws for an embedded chat with the forum ID but a foreign type', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+        const billing = forum.newTopic({ name: 'Billing' });
+        const user = chats.newUser();
+
+        await expect(
+          user.sendCallbackQuery('invoices', {
+            topic: billing,
+            message: { message_id: 5, chat: { id: forum.id, type: 'private', first_name: 'Someone' } },
+          }),
+        ).rejects.toThrow(/belongs to forum/);
+      });
+
       it('throws when an embedded options.message.chat is not the topic parent forum', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
