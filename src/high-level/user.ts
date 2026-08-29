@@ -450,7 +450,19 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendText(text: string, options: SendTextOptions<TContext> = {}): Promise<Message> {
-    const target = this.resolveSendTarget('sendText', options);
+    return this.dispatchText('sendText', text, options);
+  }
+
+  /**
+   * Shared text-dispatch path for `sendText` and `sendCommand`, keeping validation errors
+   * prefixed with the public verb that was actually called.
+   * @param verb - The calling verb name, used to prefix validation error messages.
+   * @param text - The message text.
+   * @param options - Text options (shared send options plus entities / parse mode).
+   * @returns The dispatched synthetic `Message`.
+   */
+  private async dispatchText(verb: string, text: string, options: SendTextOptions<TContext>): Promise<Message> {
+    const target = this.resolveSendTarget(verb, options);
 
     return dispatchTextMessage({
       bot: this.ctx.bot,
@@ -586,7 +598,7 @@ export class User<TContext extends Context = Context> {
 
     const entities: MessageEntity[] = [{ type: 'bot_command', offset: 0, length: normalized.length }];
 
-    return this.sendText(text, { ...options, entities });
+    return this.dispatchText('sendCommand', text, { ...options, entities });
   }
 
   /**

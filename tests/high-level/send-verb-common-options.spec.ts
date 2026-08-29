@@ -204,6 +204,14 @@ describe('User', () => {
         await expect(send(user, { anonymous: true })).rejects.toThrow(/Group or Supergroup/);
       });
 
+      it('prefixes validation errors with the public verb that was called', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await expect(send(user, { anonymous: true })).rejects.toThrow(new RegExp(`^${_verb}:`));
+      });
+
       it('does not register a private chat when the anonymous check rejects the send', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
