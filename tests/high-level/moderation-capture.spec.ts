@@ -238,6 +238,19 @@ describe('moderation capture', () => {
         expect(group.moderation.unbans.length).toBe(1);
       });
 
+      it('never removes an administrator (Telegram requires demotion first)', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const admin = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.promote(admin);
+        await bot.api.unbanChatMember(group.id, admin.id);
+
+        expect(admin.in(group)?.status).toBe('administrator');
+        expect(group.moderation.unbans.length).toBe(1);
+      });
+
       it('unbans a kicked user when only_if_banned is set', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
