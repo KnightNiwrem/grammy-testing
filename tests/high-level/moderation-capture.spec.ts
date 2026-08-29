@@ -193,6 +193,37 @@ describe('moderation capture', () => {
           warnSpy.mockRestore();
         }
       });
+
+      it('does not mutate membership when the call fails via failNext, but still logs the attempt', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(target);
+        chats.outgoing.failNext('banChatMember', { code: 400, description: 'Bad Request: not enough rights' });
+
+        await expect(bot.api.banChatMember(group.id, target.id)).rejects.toBeInstanceOf(GrammyError);
+
+        expect(target.in(group)?.status).toBe('member');
+        expect(group.moderation.bans.length).toBe(1);
+      });
+
+      it('applies membership sync again once a later call succeeds after a failNext failure', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(target);
+        chats.outgoing.failNext('banChatMember', { code: 400, description: 'Bad Request' });
+
+        await expect(bot.api.banChatMember(group.id, target.id)).rejects.toBeInstanceOf(GrammyError);
+        await bot.api.banChatMember(group.id, target.id);
+
+        expect(target.in(group)?.status).toBe('kicked');
+        expect(group.moderation.bans.length).toBe(2);
+      });
     });
   });
 
@@ -580,6 +611,67 @@ describe('moderation capture', () => {
         expect(target.in(group)?.status).toBe('member');
         expect(group.moderation.restrictions.length).toBe(1);
       });
+
+      it('does not mutate membership when a raw non-OK response is configured', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(target);
+        chats.outgoing.respondNextRaw('restrictChatMember', { ok: false, error_code: 400, description: 'Bad Request' });
+
+        await expect(bot.api.restrictChatMember(group.id, target.id, { can_send_messages: false })).rejects.toBeInstanceOf(GrammyError);
+
+        expect(target.in(group)?.status).toBe('member');
+      });
+
+      it('keeps is_member false when restricting a user who is not in the chat', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        await bot.api.restrictChatMember(group.id, target.id, { can_send_messages: false });
+
+        const membership = target.in(group);
+
+        expect(membership?.status).toBe('restricted');
+        expect(membership?.permissions.is_member).toBe(false);
+
+        const result = await bot.api.getChatMember(group.id, target.id);
+
+        assert.ok(result.status === 'restricted');
+        expect(result.is_member).toBe(false);
+      });
+
+      it('lifting all restrictions from a non-member leaves them left, not member', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        await bot.api.restrictChatMember(group.id, target.id, { can_send_messages: false });
+
+        await bot.api.restrictChatMember(group.id, target.id, {
+          can_send_messages: true,
+          can_send_audios: true,
+          can_send_documents: true,
+          can_send_photos: true,
+          can_send_videos: true,
+          can_send_video_notes: true,
+          can_send_voice_notes: true,
+          can_send_polls: true,
+          can_send_other_messages: true,
+          can_add_web_page_previews: true,
+          can_change_info: true,
+          can_invite_users: true,
+          can_pin_messages: true,
+          can_manage_topics: true,
+        });
+
+        expect(target.in(group)?.status).toBe('left');
+      });
     });
   });
 
@@ -865,55 +957,6 @@ describe('moderation capture', () => {
         const group = chats.newSupergroup();
 
         expect(() => group.moderation.bans.lastOrThrow()).toThrow('Expected a moderation action but the log is empty');
-      });
-    });
-  });
-
-  describe('failed moderation calls', () => {
-    describe('negative', () => {
-      it('does not mutate membership when the call fails via failNext, but still logs the attempt', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-        const target = chats.newUser();
-        const group = chats.newSupergroup();
-
-        group.join(target);
-        chats.outgoing.failNext('banChatMember', { code: 400, description: 'Bad Request: not enough rights' });
-
-        await expect(bot.api.banChatMember(group.id, target.id)).rejects.toBeInstanceOf(GrammyError);
-
-        expect(target.in(group)?.status).toBe('member');
-        expect(group.moderation.bans.length).toBe(1);
-      });
-
-      it('does not mutate membership when a raw non-OK response is configured', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-        const target = chats.newUser();
-        const group = chats.newSupergroup();
-
-        group.join(target);
-        chats.outgoing.respondNextRaw('restrictChatMember', { ok: false, error_code: 400, description: 'Bad Request' });
-
-        await expect(bot.api.restrictChatMember(group.id, target.id, { can_send_messages: false })).rejects.toBeInstanceOf(GrammyError);
-
-        expect(target.in(group)?.status).toBe('member');
-      });
-
-      it('applies membership sync again once a later call succeeds', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-        const target = chats.newUser();
-        const group = chats.newSupergroup();
-
-        group.join(target);
-        chats.outgoing.failNext('banChatMember', { code: 400, description: 'Bad Request' });
-
-        await expect(bot.api.banChatMember(group.id, target.id)).rejects.toBeInstanceOf(GrammyError);
-        await bot.api.banChatMember(group.id, target.id);
-
-        expect(target.in(group)?.status).toBe('kicked');
-        expect(group.moderation.bans.length).toBe(2);
       });
     });
   });

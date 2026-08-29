@@ -1298,13 +1298,25 @@ export class Chats<TContext extends Context = Context> {
       return undefined;
     }
 
+    // Restricting a user who is not currently in the chat keeps them out:
+    // real Telegram stores the restriction with is_member: false, and lifting
+    // it leaves them 'left' rather than making them a member.
+    const current = chat.members.get(user.id);
+    const isMember = current?.status === 'member' || (current?.status === 'restricted' && current.permissions.is_member !== false);
+
     const permissions = action.permissions ?? {};
 
     if (liftsAllRestrictions(permissions)) {
-      return { user, chat, status: 'member', permissions: {} };
+      return isMember ? { user, chat, status: 'member', permissions: {} } : { user, chat, status: 'left', permissions: {} };
     }
 
-    return { user, chat, status: 'restricted', permissions, untilDate: clampUntilDate(action.untilDate, now) };
+    return {
+      user,
+      chat,
+      status: 'restricted',
+      permissions: { ...permissions, is_member: isMember },
+      untilDate: clampUntilDate(action.untilDate, now),
+    };
   }
 
   /**
