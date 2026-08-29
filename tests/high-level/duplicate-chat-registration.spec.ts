@@ -179,6 +179,36 @@ describe('Chats', () => {
     });
 
     describe('negative', () => {
+      it('throws for the second of two same-orchestrator user instances sharing an explicit ID', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+
+        const first = chats.newUser({ id: 42, first_name: 'First' });
+        const second = chats.newUser({ id: 42, first_name: 'Second' });
+
+        // Whichever instance claims the private chat first owns it; the other must
+        // never be handed that chat or silently replace it — in either claim order.
+        const firstChat = chats.newPrivateChat(first);
+
+        expect(firstChat.user).toBe(first);
+        expect(() => chats.newPrivateChat(second)).toThrow(/different user actor/);
+        expect(chats.newPrivateChat(first)).toBe(firstChat);
+      });
+
+      it('throws for the earlier user instance when a later duplicate claimed the private chat first', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+
+        const first = chats.newUser({ id: 42, first_name: 'First' });
+        const second = chats.newUser({ id: 42, first_name: 'Second' });
+
+        const secondChat = chats.newPrivateChat(second);
+
+        expect(secondChat.user).toBe(second);
+        expect(() => chats.newPrivateChat(first)).toThrow(/different user actor/);
+        expect(chats.newPrivateChat(second)).toBe(secondChat);
+      });
+
       it('throws when the ID is registered to a private chat owned by a different user actor', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);

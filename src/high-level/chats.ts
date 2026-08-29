@@ -1026,7 +1026,9 @@ export class Chats<TContext extends Context = Context> {
   private privateChatFor(user: User<TContext>): PrivateChat<TContext> {
     const entry = this.users.get(user.id);
 
-    if (entry?.privateChat) {
+    // The registry entry may belong to a different user object minted later with the same
+    // explicit ID; ownership checks below must not be bypassed for it.
+    if (entry?.privateChat && entry.user === user) {
       return entry.privateChat;
     }
 
@@ -1045,7 +1047,7 @@ export class Chats<TContext extends Context = Context> {
       // Same owning user object: reuse the registered chat (and its messages log)
       // instead of re-registering a fresh instance over it.
       if (existing.user === user) {
-        if (entry) {
+        if (entry?.user === user) {
           entry.privateChat = existing;
         }
 
@@ -1062,7 +1064,7 @@ export class Chats<TContext extends Context = Context> {
 
     const chat = new PrivateChat<TContext>(user);
 
-    if (entry) {
+    if (entry?.user === user) {
       entry.privateChat = chat;
     }
 
