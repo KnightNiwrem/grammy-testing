@@ -66,32 +66,38 @@ describe('postRelayMessage', () => {
     expect((forwardOrigin as Extract<typeof forwardOrigin, { type: 'channel' }>).chat.id).toBe(channel.id);
   });
 
-  it('options.originMessageId sets forward_origin.message_id to the original channel post ID', async () => {
-    const bot = new Bot('test-token');
-    const { chats } = await prepareBot(bot);
-    const group = chats.newGroup();
-    const channel = chats.newChannel('My Channel');
+  describe('originMessageId option', () => {
+    describe('positive', () => {
+      it('sets forward_origin.message_id to the original channel post ID', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const group = chats.newGroup();
+        const channel = chats.newChannel('My Channel');
 
-    const post = await channel.post('original post');
-    const relay = await group.postRelayMessage('original post', { channel, originMessageId: post.message_id });
+        const post = await channel.post('original post');
+        const relay = await group.postRelayMessage('original post', { channel, originMessageId: post.message_id });
 
-    const origin = relay.forward_origin as Extract<Message['forward_origin'], { type: 'channel' }>;
+        const origin = relay.forward_origin as Extract<Message['forward_origin'], { type: 'channel' }>;
 
-    expect(origin.message_id).toBe(post.message_id);
-    expect(relay.message_id).not.toBe(post.message_id);
-  });
+        expect(origin.message_id).toBe(post.message_id);
+        expect(relay.message_id).not.toBe(post.message_id);
+      });
+    });
 
-  it('forward_origin.message_id defaults to the relay message ID when originMessageId is omitted', async () => {
-    const bot = new Bot('test-token');
-    const { chats } = await prepareBot(bot);
-    const group = chats.newGroup();
-    const channel = chats.newChannel('My Channel');
+    describe('negative', () => {
+      it('forward_origin.message_id defaults to the relay message ID when omitted', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const group = chats.newGroup();
+        const channel = chats.newChannel('My Channel');
 
-    const relay = await group.postRelayMessage('post text', { channel });
+        const relay = await group.postRelayMessage('post text', { channel });
 
-    const origin = relay.forward_origin as Extract<Message['forward_origin'], { type: 'channel' }>;
+        const origin = relay.forward_origin as Extract<Message['forward_origin'], { type: 'channel' }>;
 
-    expect(origin.message_id).toBe(relay.message_id);
+        expect(origin.message_id).toBe(relay.message_id);
+      });
+    });
   });
 
   it('TELEGRAM_RELAY matches the from field of a relay message', async () => {
