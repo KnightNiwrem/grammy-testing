@@ -211,6 +211,20 @@ describe('moderation capture', () => {
         expect(target.in(group)?.status).toBe('left');
       });
 
+      it('logs but does not sync membership in a basic group (supergroup/channel-only method)', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newGroup();
+
+        group.join(target);
+        await bot.api.banChatMember(group.id, target.id);
+        await bot.api.unbanChatMember(group.id, target.id);
+
+        expect(target.in(group)?.status).toBe('kicked');
+        expect(group.moderation.unbans.length).toBe(1);
+      });
+
       it('unbans a kicked user when only_if_banned is set', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
@@ -263,6 +277,32 @@ describe('moderation capture', () => {
         expect(membership?.status).toBe('restricted');
         expect(membership?.permissions.can_send_messages).toBe(false);
         expect(membership?.untilDate).toBe(untilDate);
+      });
+
+      it('returns complete restricted shapes from getChatMember with omitted permissions as false', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const admin = chats.newAdmin();
+        const target = chats.newUser();
+        const group = chats.defaultGroup;
+
+        assert.ok(group);
+        group.join(target);
+
+        let result: ChatMember | undefined;
+
+        bot.command('restrict', async (ctx) => {
+          await ctx.restrictChatMember(target.id, { can_send_messages: false });
+          result = await ctx.api.getChatMember(ctx.chat.id, target.id);
+        });
+
+        await admin.sendCommand('/restrict', undefined, { chat: group });
+        await chats.idle();
+
+        assert.ok(result?.status === 'restricted');
+        expect(result.can_send_messages).toBe(false);
+        expect(result.can_send_polls).toBe(false);
+        expect(result.can_invite_users).toBe(false);
       });
 
       it('applies the implied-permission grouping: can_send_other_messages grants media sends', async () => {
@@ -518,6 +558,32 @@ describe('moderation capture', () => {
         expect(action.permissions?.can_restrict_members).toBe(true);
         expect(target.in(channel)?.status).toBe('administrator');
         expect(target.in(channel)?.permissions.can_restrict_members).toBe(true);
+      });
+
+      it('returns complete administrator shapes from getChatMember with omitted rights as false', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const admin = chats.newAdmin();
+        const target = chats.newUser();
+        const group = chats.defaultGroup;
+
+        assert.ok(group);
+        group.join(target);
+
+        let result: ChatMember | undefined;
+
+        bot.command('promote', async (ctx) => {
+          await ctx.promoteChatMember(target.id, { can_delete_messages: true });
+          result = await ctx.api.getChatMember(ctx.chat.id, target.id);
+        });
+
+        await admin.sendCommand('/promote', undefined, { chat: group });
+        await chats.idle();
+
+        assert.ok(result?.status === 'administrator');
+        expect(result.can_delete_messages).toBe(true);
+        expect(result.can_change_info).toBe(false);
+        expect(result.can_promote_members).toBe(false);
       });
 
       it('demotes a channel administrator when can_restrict_members is explicitly false with no other rights', async () => {

@@ -14,6 +14,7 @@ import { BusinessAccount } from './business-account';
 import { Channel } from './channel';
 import { type AnyChat, setBotRef } from './chat';
 import { type Deletion, DeletionsLog } from './deletions-log';
+import { makeChatMember } from './dispatch';
 import { DraftsLog } from './drafts-log';
 import { type Edit, EditsLog } from './edits-log';
 import { Group } from './group';
@@ -86,8 +87,10 @@ function resolveChatProfile(
 /**
  * Converts a `Membership` record to the `ChatMember` discriminated union shape expected by the Telegram API.
  * `User<TContext>` is structurally compatible with the Telegram `User` interface (same required fields).
- * For `'administrator'` and `'restricted'` statuses the permissions spread may not satisfy every required
- * field of the strict Telegram shape, so those branches use an explicit cast.
+ * For `'administrator'` and `'restricted'` statuses the record's flags are spread over a complete
+ * default-false base from `makeChatMember`, so required booleans real Telegram always returns
+ * (e.g. `can_change_info`) come back as `false` rather than missing when a membership stores only
+ * the granted flags. The spread may still carry flags beyond the strict shape, hence the casts.
  * @param membership - The membership record to convert.
  * @returns The corresponding `ChatMember` discriminated union value.
  */
@@ -101,7 +104,7 @@ function membershipToChatMember<TContext extends Context>(membership: Membership
     }
 
     case 'administrator': {
-      return { status: 'administrator', user, is_anonymous: false, can_be_edited: true, ...permissions } as ChatMember;
+      return { ...makeChatMember(user, 'administrator', {}), can_be_edited: true, ...permissions } as ChatMember;
     }
 
     case 'member': {
@@ -109,7 +112,7 @@ function membershipToChatMember<TContext extends Context>(membership: Membership
     }
 
     case 'restricted': {
-      return { status: 'restricted', user, is_member: true, until_date: untilDate ?? 0, ...permissions } as ChatMember;
+      return { ...makeChatMember(user, 'restricted', {}, untilDate), ...permissions } as ChatMember;
     }
 
     case 'left': {
@@ -1215,6 +1218,11 @@ export class Chats<TContext extends Context = Context> {
       }
 
       case 'unban': {
+        // unbanChatMember is supported in supergroups and channels only (Bot API docs).
+        if (chat.type === 'group') {
+          return undefined;
+        }
+
         if (action.onlyIfBanned === true && current?.status !== 'kicked') {
           return undefined;
         }

@@ -23,6 +23,12 @@ interface TransformerOptions {
    * (`failNext` / `failAll`) and raw non-OK responses report `false`.
    * Used by the v0.2 high-level layer to apply state transitions (e.g.
    * moderation membership sync) only for calls the bot observed succeeding.
+   *
+   * Boundary: settlement reflects this terminal mock's resolution. A
+   * user-installed transformer outside the terminal one (reinstalled on top
+   * by `prepareBot`) that afterwards throws or rewrites the envelope is not
+   * observed — captured requests cannot be reliably correlated across outer
+   * transformers, which may rewrite payloads, retry, or interleave calls.
    */
   onSettled?: (request: Request, ok: boolean) => void;
 }

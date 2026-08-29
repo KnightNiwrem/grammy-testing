@@ -23,7 +23,11 @@ pre-moderation state. (#7)
     applied for supergroups and channels only — basic-group bans ignore it.
   - `unbanChatMember` sets `'left'` — including for an active member, matching the Bot API
     guarantee that the user is not a member after the call. `only_if_banned` makes it a
-    no-op for anyone not currently banned.
+    no-op for anyone not currently banned. The method is supported in supergroups and
+    channels only — captured unbans in basic groups are logged but never mutate membership.
+  - Synced `'administrator'` / `'restricted'` records resolve through `getChatMember` /
+    `getChatAdministrators` as complete Telegram shapes: rights and permissions the call
+    did not grant come back as explicit `false`, as on real Telegram, instead of missing.
   - `restrictChatMember` sets `'restricted'` with the payload's permissions after applying
     the implied-permission grouping (`can_send_other_messages` / `can_add_web_page_previews`
     grant every media-send permission, `can_send_polls` grants `can_send_messages`, unless
