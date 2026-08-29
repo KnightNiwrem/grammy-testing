@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.30.0 — 2026-08-29
+
+### Channel self-posting: `channel.post` dispatches `channel_post`
+
+Channels can now post in themselves, so bots built on `bot.on('channel_post')` can be
+driven without hand-built raw updates. (#6)
+
+- **New verb `channel.post(text, options?)`**: dispatches a `channel_post` update and
+  returns the synthetic `Message`. The payload matches real Bot API shapes: no `from`
+  field (the Bot API documents `from` as "may be empty for messages sent to channels"),
+  `sender_chat` set to the channel itself, and an optional `author_signature` for
+  channels with "Sign messages" enabled. Options: `messageId`, `author_signature`, and
+  `reply_to_message` (full `Message` or partial `{ message_id, ...rest }` with `date` /
+  `chat` auto-filled). The new exported `ChannelPostOptions` interface types the options.
+- **`channel.editPost` payload fidelity**: the dispatched `edited_channel_post` now
+  carries `sender_chat` set to the channel (real edited channel posts always do), and
+  `EditPostOptions` gains an optional `author_signature`.
+- **`channel.sendSystemMessage` deprecated**: investigation confirmed real Telegram never
+  delivers `message` updates with a channel-typed `chat` — everything a channel emits
+  arrives as `channel_post` / `edited_channel_post`. The verb keeps its historical
+  behavior for backwards compatibility; use `channel.post` for realistic payloads.
+- **No auto-relay into linked groups**: `channel.post` dispatches exactly one update,
+  consistent with every other verb. Simulate Telegram's linked-discussion-group
+  auto-forward by composing it with the existing `supergroup.postRelayMessage`.
+- **`postRelayMessage` gains `originMessageId` and `originDate`**: set
+  `forward_origin.message_id` / `forward_origin.date` to the original channel post's ID
+  and timestamp (real auto-forwards keep the origin post's identity there, distinct from
+  the relay message's own local ID and send time). Both default to the previous behavior —
+  the relay's own values — when omitted.
+- `examples/15-channel-post-bot` now also covers the incoming direction with a
+  `channel_post:text` handler that pins marked posts.
+
 ## 0.29.0 — 2026-08-29
 
 ### `topic`, `reply_to_message`, and `anonymous` on every user send verb

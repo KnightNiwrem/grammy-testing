@@ -38,6 +38,35 @@ describe('channel-post-bot', () => {
     expect(user.replies.lastOrThrow().text).toBe('Usage: /post <text>');
   });
 
+  describe('channel_post pin handler', () => {
+    describe('positive', () => {
+      it('pins incoming channel posts that start with the pin marker', async () => {
+        const { chats } = await prepareBot(createChannelPostBot(-1_001_234_567_890));
+        const channel = chats.newChannel({ id: -1_001_234_567_890, title: 'Announcements' });
+
+        const post = await channel.post('📌 Read the rules before posting');
+
+        const pinCall = chats.outgoing.requests.find((request) => request.method === 'pinChatMessage');
+
+        expect(pinCall).toBeDefined();
+        expect(pinCall?.payload).toMatchObject({ chat_id: channel.id, message_id: post.message_id });
+      });
+    });
+
+    describe('negative', () => {
+      it('leaves ordinary channel posts unpinned', async () => {
+        const { chats } = await prepareBot(createChannelPostBot(-1_001_234_567_890));
+        const channel = chats.newChannel({ id: -1_001_234_567_890, title: 'Announcements' });
+
+        await channel.post('Just a regular update');
+
+        const pinCall = chats.outgoing.requests.find((request) => request.method === 'pinChatMessage');
+
+        expect(pinCall).toBeUndefined();
+      });
+    });
+  });
+
   it('channel id from chats.newChannel matches the configured id', async () => {
     const { chats } = await prepareBot(createChannelPostBot(-1_001_234_567_890));
     const channel = chats.newChannel({ id: -1_001_234_567_890, title: 'News' });

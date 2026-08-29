@@ -45,7 +45,7 @@ export type { ResponseResolver, Responses } from './low-level/responses';
 // v0.2 high-level surface (orchestrator, actors, replies, membership).
 export type { AnyChat } from './high-level/chat';
 
-export { Channel, type EditPostOptions } from './high-level/channel';
+export { Channel, type ChannelPostOptions, type EditPostOptions } from './high-level/channel';
 
 export { Group, type PostRelayMessageOptions } from './high-level/group';
 

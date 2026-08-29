@@ -41,6 +41,19 @@ export interface PostRelayMessageOptions<TContext extends Context = Context> {
   messageId?: number;
   /** When present, sets `message.forward_origin` to simulate a relayed channel post. */
   channel?: Channel<TContext>;
+  /**
+   * The `message_id` of the original post in the channel, used for
+   * `forward_origin.message_id`. Real Telegram auto-forwards keep the original
+   * channel post's ID there, distinct from the relay message's own local ID.
+   * Defaults to the relay message's ID when omitted.
+   */
+  originMessageId?: number;
+  /**
+   * The `date` of the original post in the channel, used for
+   * `forward_origin.date` (the Bot API defines it as the time the original
+   * message was sent). Defaults to the relay message's timestamp when omitted.
+   */
+  originDate?: number;
 }
 
 /**
@@ -267,7 +280,9 @@ export class Group<TContext extends Context = Context> implements ChatRefHolder<
    * (`from.id === 777_000`). Returns the dispatched `Message` so it can be passed directly
    * to `user.sendText` as `reply_to_message`.
    * @param text - The relay message text.
-   * @param options - Optional `messageId` override and `channel` for `forward_origin`.
+   * @param options - Optional `messageId` override, `channel` for `forward_origin`, and
+   *   `originMessageId` / `originDate` for the original channel post's ID and timestamp
+   *   inside `forward_origin`.
    * @returns The dispatched synthetic `Message`.
    */
   async postRelayMessage(text: string, options: PostRelayMessageOptions<TContext> = {}): Promise<Message> {
@@ -284,8 +299,8 @@ export class Group<TContext extends Context = Context> implements ChatRefHolder<
         forward_origin: {
           type: 'channel' as const,
           chat: options.channel.toTelegramChat(),
-          date: now,
-          message_id: messageId,
+          date: options.originDate ?? now,
+          message_id: options.originMessageId ?? messageId,
         },
       }),
     } as Message;

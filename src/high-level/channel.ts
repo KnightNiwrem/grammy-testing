@@ -28,9 +28,9 @@ const CHANNEL_ADMIN_RIGHTS = {
 } as const;
 
 /**
- * Channel actor. The only verb in v0.2 is `postMessageTo` which
- * dispatches a message to a target group with `sender_chat = this`.
- * Channel-self-posting (Coverage-audit gap #6) defers to v0.2.x.
+ * Channel actor. `post` dispatches a `channel_post` update in the channel
+ * itself, `postMessageTo` dispatches a message to a target group with
+ * `sender_chat = this`, and `editPost` dispatches `edited_channel_post`.
  */
 export class Channel<TContext extends Context = Context> implements ChatRefHolder<TContext> {
   readonly type = 'channel' as const;
@@ -74,6 +74,53 @@ export class Channel<TContext extends Context = Context> implements ChatRefHolde
    */
   toTelegramChat(): Chat.ChannelChat {
     return { id: this.id, type: 'channel', title: this.title };
+  }
+
+  /**
+   * Dispatches a `channel_post` update — the channel posting a text message in itself.
+   *
+   * The synthetic message matches real Bot API payloads: it carries no `from` field
+   * (the Bot API documents `from` as "may be empty for messages sent to channels")
+   * and sets `sender_chat` to the channel itself. Pass `author_signature` to simulate
+   * a channel with "Sign messages" enabled.
+   *
+   * To also simulate Telegram auto-forwarding the post into a linked discussion group,
+   * compose this verb with `supergroup.postRelayMessage` — each verb dispatches exactly
+   * one update.
+   * @param text - The post text.
+   * @param options - Optional overrides.
+   * @param options.messageId - Optional message ID to assign instead of auto-generating one.
+   * @param options.author_signature - Post author signature, present when the channel signs messages.
+   * @param options.reply_to_message - Optional earlier channel post this post replies to. Accepts a
+   *   full `Message` or a partial shape `{ message_id: number, ...rest }`. `date` and `chat` are
+   *   auto-filled from context when absent.
+   * @returns The synthetic `Message` that was dispatched.
+   */
+  async post(text: string, options: ChannelPostOptions = {}): Promise<Message> {
+    const messageId = options.messageId ?? this.ids.nextMessageId();
+
+    const replyToMessage = options.reply_to_message
+      ? ({ date: Math.floor(Date.now() / 1000), chat: this.toTelegramChat(), ...options.reply_to_message } as Message)
+      : undefined;
+
+    const message: Message = {
+      message_id: messageId,
+      date: Math.floor(Date.now() / 1000),
+      chat: this.toTelegramChat(),
+      sender_chat: this.toTelegramChat(),
+      text,
+      ...(options.author_signature !== undefined && { author_signature: options.author_signature }),
+      ...(replyToMessage !== undefined && { reply_to_message: replyToMessage }),
+    } as Message;
+
+    const update: Update = {
+      update_id: this.ids.nextUpdateId(),
+      channel_post: message,
+    } as Update;
+
+    await this.bot.handleUpdate(update);
+
+    return message;
   }
 
   /**
@@ -152,9 +199,11 @@ export class Channel<TContext extends Context = Context> implements ChatRefHolde
   /**
    * Dispatches an `edited_channel_post` update — simulating a channel post
    * being edited. `messageId` is the `message_id` of the original channel post.
+   * Like real payloads, the edited post carries `sender_chat` set to the channel
+   * itself and no `from` field.
    * @param messageId - The `message_id` of the original channel post.
    * @param newText - The replacement text for the post.
-   * @param options - Optional overrides for the original post timestamp.
+   * @param options - Optional overrides for the original post timestamp and author signature.
    */
   async editPost(messageId: number, newText: string, options: EditPostOptions = {}): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
@@ -166,7 +215,9 @@ export class Channel<TContext extends Context = Context> implements ChatRefHolde
         date: options.date ?? now,
         edit_date: now,
         chat: this.toTelegramChat(),
+        sender_chat: this.toTelegramChat(),
         text: newText,
+        ...(options.author_signature !== undefined && { author_signature: options.author_signature }),
       },
     } as Update;
 
@@ -197,6 +248,11 @@ export class Channel<TContext extends Context = Context> implements ChatRefHolde
    * service message that carries no sender identity.
    * @param text - The message text.
    * @param options - Optional `messageId` override; auto-generated when omitted.
+   * @deprecated Real Telegram never delivers `message` updates with a channel-typed
+   * `chat` — everything a channel emits arrives as `channel_post` (or
+   * `edited_channel_post`). Use {@link Channel.post} to drive `bot.on('channel_post')`
+   * handlers with a realistic payload. This verb is kept for backwards compatibility
+   * and still dispatches the historical (invented) `message`-update shape.
    */
   async sendSystemMessage(text: string, options: SendSystemMessageOptions = {}): Promise<void> {
     await this.bot.handleUpdate({
@@ -214,6 +270,24 @@ export class Channel<TContext extends Context = Context> implements ChatRefHolde
 export interface EditPostOptions {
   /** Override the original `date` timestamp of the channel post. */
   date?: number;
+  /** Post author signature, present when the channel has "Sign messages" enabled. */
+  author_signature?: string;
+}
+
+export interface ChannelPostOptionsReplyToMessage {
+  message_id: number;
+}
+
+export interface ChannelPostOptions {
+  /** Override the auto-generated `message_id` for the dispatched post. */
+  messageId?: number;
+  /** Post author signature, present when the channel has "Sign messages" enabled. */
+  author_signature?: string;
+  /**
+   * Earlier channel post this post replies to. Accepts a full `Message` or a partial
+   * shape `{ message_id: number, ...rest }`; `date` and `chat` are auto-filled when absent.
+   */
+  reply_to_message?: Partial<Message> & ChannelPostOptionsReplyToMessage;
 }
 
 // Re-export so callers can import from 'channel' directly if needed.
