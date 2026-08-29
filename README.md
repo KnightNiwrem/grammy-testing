@@ -58,11 +58,13 @@ expect(user.replies.lastOrThrow().text).toContain('Welcome');
 
 - Create users and admins with custom profiles (`chats.newUser()`, `chats.newAdmin()`)
 - Create groups, supergroups, and channels (`chats.newGroup()`, `chats.newSupergroup()`, `chats.newChannel()`)
+- Create forum supergroups with topics (`chats.newSupergroup({ isForum: true })`, `forum.newTopic({ name })`)
 - Place users into group contexts (`group.own(user)`)
 
 **Dispatch — send anything a real user can send**
 
 - Text messages, commands, photos, documents, stickers, polls, dice, locations, contacts
+- Messages into forum topics (`user.sendText(text, { topic })`) with topic-scoped logs (`topic.messages`)
 - Callback queries, inline queries, reactions, media groups
 - Member join/leave events, chat member status changes
 - Channel posts, forwarded messages, business account messages

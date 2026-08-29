@@ -2,6 +2,7 @@ import type { Bot, Context } from 'grammy';
 import type { InlineKeyboardButton, InputRichMessage, Message, MessageEntity, ParseMode, Update } from 'grammy/types';
 
 import type { AnyChat } from './chat';
+import type { ForumTopic } from './forum-topic';
 import type { IdGenerator } from './id-generator';
 
 export type MediaType = 'animation' | 'audio' | 'document' | 'photo' | 'sticker' | 'video' | 'video_note' | 'voice';
@@ -282,6 +283,20 @@ export class Reply<TContext extends Context = Context> {
 
   readonly chat: AnyChat<TContext> | undefined;
 
+  /**
+   * The `message_thread_id` the bot targeted, or `undefined` for non-topic sends.
+   * Stays inspectable even when the ID matches no registered topic (`topic` is
+   * `undefined` in that case).
+   */
+  readonly messageThreadId: number | undefined;
+
+  /**
+   * The registered `ForumTopic` this reply targeted, resolved via the chat's topic
+   * registry. `undefined` for non-topic sends, non-forum chats, and unregistered
+   * thread IDs (inspect `messageThreadId` for the raw value in that case).
+   */
+  readonly topic: ForumTopic<TContext> | undefined;
+
   /** The synthetic message_id assigned to this captured reply. */
   readonly messageId: number;
 
@@ -322,6 +337,10 @@ export class Reply<TContext extends Context = Context> {
     this.media = deriveMedia(rawPayload);
     this.richMessage = deriveRichMessage(rawPayload);
     this.replyMarkup = rawPayload.reply_markup as Record<string, unknown> | undefined;
+
+    this.messageThreadId = typeof rawPayload.message_thread_id === 'number' ? rawPayload.message_thread_id : undefined;
+
+    this.topic = chat?.type === 'supergroup' && this.messageThreadId !== undefined ? chat.topicByThreadId(this.messageThreadId) : undefined;
 
     this.replyingTo = this.replyToMessageId === undefined ? undefined : deps.resolveReply(this.replyToMessageId);
   }
@@ -381,6 +400,7 @@ export class Reply<TContext extends Context = Context> {
       chat: this.chat ? this.chat.toTelegramChat() : ({ id: 0, type: 'private' } as Message['chat']),
       text: this.text,
       entities: this.entities,
+      ...(this.messageThreadId !== undefined && { message_thread_id: this.messageThreadId, is_topic_message: true }),
       ...(this.replyMarkup !== undefined && { reply_markup: this.replyMarkup }),
     } as Message;
   }

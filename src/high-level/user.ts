@@ -5,6 +5,7 @@ import type { AnyChat } from './chat';
 import type { RepliesInbox } from './chats';
 import { dispatchEditedMessage, dispatchServiceMessage, dispatchTextMessage } from './dispatch';
 import type { DraftsLog } from './drafts-log';
+import type { ForumTopic } from './forum-topic';
 import type { Group } from './group';
 import type { IdGenerator } from './id-generator';
 import {
@@ -64,6 +65,12 @@ export interface SendTextOptions<TContext extends Context = Context> {
    * `Supergroup` — Telegram only sends this shape in group contexts.
    */
   anonymous?: boolean;
+  /**
+   * Target forum topic. The dispatched message carries the topic's `message_thread_id`
+   * and `is_topic_message: true`. When `options.chat` is omitted, the topic's parent
+   * forum is used as the target chat; when supplied, it must be the topic's parent forum.
+   */
+  topic?: ForumTopic<TContext>;
 }
 
 export interface SendForwardedOptions<TContext extends Context = Context> {
@@ -303,12 +310,20 @@ export class User<TContext extends Context = Context> {
    * @returns The dispatched synthetic `Message`.
    */
   async sendText(text: string, options: SendTextOptions<TContext> = {}): Promise<Message> {
-    const targetChat: Chat = options.chat ? this.ctx.resolveChatToTelegram(options.chat) : this.ctx.defaultPrivateChat();
+    if (options.topic && options.chat && options.chat.id !== options.topic.forum.id) {
+      throw new Error(
+        `sendText: topic "${options.topic.name}" belongs to forum ${String(options.topic.forum.id)}, ` +
+          `but options.chat is chat ${String(options.chat.id)} — pass the topic's parent forum or omit options.chat`,
+      );
+    }
+
+    const chatActor = options.chat ?? options.topic?.forum;
+    const targetChat: Chat = chatActor ? this.ctx.resolveChatToTelegram(chatActor) : this.ctx.defaultPrivateChat();
 
     if (options.anonymous) {
-      const chatType = (options.chat as { type?: string } | undefined)?.type;
+      const chatType = (chatActor as { type?: string } | undefined)?.type;
 
-      if (!options.chat || (chatType !== 'group' && chatType !== 'supergroup')) {
+      if (!chatActor || (chatType !== 'group' && chatType !== 'supergroup')) {
         throw new Error(
           'sendText: anonymous: true requires options.chat to be a Group or Supergroup — ' +
             'GroupAnonymousBot only exists in group contexts',
@@ -330,6 +345,7 @@ export class User<TContext extends Context = Context> {
       entities: options.entities,
       replyToMessageId: options.reply_parameters?.message_id,
       replyToMessage,
+      messageThreadId: options.topic?.messageThreadId,
       ...(options.anonymous && {
         fromOverride: GROUP_ANONYMOUS_BOT,
         senderChat: targetChat,
@@ -441,18 +457,23 @@ export class User<TContext extends Context = Context> {
    * Dispatches a bot command message from this user. A leading `/` is added if absent.
    * @param command - The command name (with or without a leading `/`).
    * @param args - Optional arguments appended after the command.
-   * @param options - Optional target chat override and anonymous flag.
+   * @param options - Optional target chat override, anonymous flag, and forum topic.
    * @param options.chat - The target chat (defaults to the private chat with this user).
    * @param options.anonymous - When `true`, dispatches as GroupAnonymousBot (see `sendText`).
+   * @param options.topic - Target forum topic (see `sendText`).
    * @returns A promise that resolves when the update is handled.
    */
-  async sendCommand(command: string, args?: string, options: { chat?: AnyChat<TContext>; anonymous?: boolean } = {}): Promise<Message> {
+  async sendCommand(
+    command: string,
+    args?: string,
+    options: { chat?: AnyChat<TContext>; anonymous?: boolean; topic?: ForumTopic<TContext> } = {},
+  ): Promise<Message> {
     const normalized = command.startsWith('/') ? command : `/${command}`;
     const text = args ? `${normalized} ${args}` : normalized;
 
     const entities: MessageEntity[] = [{ type: 'bot_command', offset: 0, length: normalized.length }];
 
-    return this.sendText(text, { entities, chat: options.chat, anonymous: options.anonymous });
+    return this.sendText(text, { entities, chat: options.chat, anonymous: options.anonymous, topic: options.topic });
   }
 
   /**

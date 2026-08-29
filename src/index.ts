@@ -11,7 +11,7 @@ export {
 
 export type { ActionsLog } from './high-level/actions-log';
 
-export type { ChatProfile, Chats, RepliesInbox, DispatchPollStateOptions } from './high-level/chats';
+export type { ChatProfile, Chats, RepliesInbox, DispatchPollStateOptions, SupergroupProfile } from './high-level/chats';
 
 export type { Deletion, DeletionsLog } from './high-level/deletions-log';
 
@@ -58,6 +58,8 @@ export type { ReactionRemoval, ReactionRemovalsLog } from './high-level/reaction
 export { Reply, type MediaType, type ReplyButton, type ReplyMedia, type ReplyRichMessage } from './high-level/reply';
 
 export type { ParseMode } from 'grammy/types';
+
+export { ForumTopic, type NewTopicOptions } from './high-level/forum-topic';
 
 export { Supergroup } from './high-level/supergroup';
 
