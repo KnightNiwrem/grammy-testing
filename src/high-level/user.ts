@@ -986,9 +986,10 @@ export class User<TContext extends Context = Context> {
    * message — matching real Telegram, where these are message-level fields carried by each
    * message of an album. An item's `chat` override is resolved with the same validation and
    * metadata rules as `sharedOptions.chat`, so `reply_to_message.chat`, `sender_chat`, and
-   * the anonymous group precondition always reflect the item's effective target. The shared
-   * target is only resolved (and validated) when some item actually falls back to it, so an
-   * album whose items all override `chat` is judged purely on those effective targets.
+   * the anonymous group precondition always reflect the item's effective target. When every
+   * item overrides `chat`, the album is judged purely on those effective targets and the
+   * unused shared target stays unresolved; an empty album still validates the shared
+   * options (and dispatches nothing).
    * Every item is resolved before anything is dispatched — including the media-group ID
    * allocation — so invalid input can never leave a partially dispatched album in the
    * bot's and chats' logs, nor advance the deterministic ID sequences.
