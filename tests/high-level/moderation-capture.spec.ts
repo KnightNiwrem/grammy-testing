@@ -645,6 +645,30 @@ describe('moderation capture', () => {
         expect(target.in(group)?.status).toBe('kicked');
       });
 
+      it('keeps retained views live across later captures and chats.clear()', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(target);
+
+        const { bans } = group.moderation;
+        const targetBans = group.moderation.bans.byUser(target);
+
+        expect(bans.length).toBe(0);
+
+        await bot.api.banChatMember(group.id, target.id);
+
+        expect(bans.length).toBe(1);
+        expect(targetBans.last?.userId).toBe(target.id);
+
+        chats.clear();
+
+        expect(bans.length).toBe(0);
+        expect(targetBans.length).toBe(0);
+      });
+
       it('works on channels for ban and promote', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);

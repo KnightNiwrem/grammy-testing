@@ -52,20 +52,28 @@ export interface ModerationAction<TContext extends Context = Context> {
 /**
  * Read-only filtered view over moderation actions. Returned by the per-kind
  * getters on `ModerationLog` (`bans`, `restrictions`, …) and by `byUser`.
+ *
+ * Views are live: they hold the underlying log plus a predicate and evaluate
+ * on each access, so a view retained before the bot acts still reflects later
+ * captures and `chats.clear()`.
  */
 export class ModerationActionsView<TContext extends Context = Context> {
   /**
-   * Creates a view over the given actions.
-   * @param items - The actions this view exposes, in capture order.
+   * Creates a live view over the given source actions.
+   * @param source - The underlying action collection, in capture order.
+   * @param predicate - Optional filter; omitted means the view exposes every action.
    */
-  constructor(protected readonly items: readonly ModerationAction<TContext>[]) {}
+  constructor(
+    protected readonly source: readonly ModerationAction<TContext>[],
+    private readonly predicate?: (action: ModerationAction<TContext>) => boolean,
+  ) {}
 
   /**
    * Number of actions in this view.
    * @returns The count of captured actions.
    */
   get length(): number {
-    return this.items.length;
+    return this.all.length;
   }
 
   /**
@@ -73,15 +81,18 @@ export class ModerationActionsView<TContext extends Context = Context> {
    * @returns The last action, or `undefined`.
    */
   get last(): ModerationAction<TContext> | undefined {
-    return this.items.at(-1);
+    return this.all.at(-1);
   }
 
   /**
-   * Read-only view of all actions in capture order.
-   * @returns A read-only array of all captured actions.
+   * Read-only array of the actions currently in this view, in capture order.
+   * Evaluated at access time — retain the view, not this array, for live reads.
+   * @returns A read-only array of all matching actions.
    */
   get all(): readonly ModerationAction<TContext>[] {
-    return this.items;
+    const { predicate } = this;
+
+    return predicate === undefined ? this.source : this.source.filter((action) => predicate(action));
   }
 
   /**
@@ -90,7 +101,7 @@ export class ModerationActionsView<TContext extends Context = Context> {
    * @throws {Error} When the view is empty.
    */
   lastOrThrow(): ModerationAction<TContext> {
-    const last = this.items.at(-1);
+    const last = this.all.at(-1);
 
     if (last === undefined) {
       throw new Error('Expected a moderation action but the log is empty');
@@ -100,14 +111,21 @@ export class ModerationActionsView<TContext extends Context = Context> {
   }
 
   /**
-   * Narrows this view to actions targeting the given user.
+   * Narrows this view to actions targeting the given user. The returned view is
+   * live, like every other view.
    * @param user - A `User` actor or a plain Telegram user ID.
    * @returns A new view containing only actions whose `userId` matches.
    */
   byUser(user: User<TContext> | number): ModerationActionsView<TContext> {
     const userId = typeof user === 'number' ? user : user.id;
+    const { predicate } = this;
 
-    return new ModerationActionsView(this.items.filter((action) => action.userId === userId));
+    const matchesUser = (action: ModerationAction<TContext>): boolean => action.userId === userId;
+
+    return new ModerationActionsView(
+      this.source,
+      predicate === undefined ? matchesUser : (action) => predicate(action) && matchesUser(action),
+    );
   }
 }
 
@@ -126,12 +144,12 @@ export class ModerationLog<TContext extends Context = Context> extends Moderatio
    * @param action - The action to append.
    */
   push(action: ModerationAction<TContext>): void {
-    (this.items as ModerationAction<TContext>[]).push(action);
+    (this.source as ModerationAction<TContext>[]).push(action);
   }
 
   /** Removes all actions from the log. */
   clear(): void {
-    (this.items as ModerationAction<TContext>[]).length = 0;
+    (this.source as ModerationAction<TContext>[]).length = 0;
   }
 
   /**
@@ -178,10 +196,10 @@ export class ModerationLog<TContext extends Context = Context> extends Moderatio
   /**
    * Narrows the log to a single action kind.
    * @param kind - The kind to filter by.
-   * @returns A view containing only actions of that kind.
+   * @returns A live view containing only actions of that kind.
    */
   private ofKind(kind: ModerationActionKind): ModerationActionsView<TContext> {
-    return new ModerationActionsView(this.items.filter((action) => action.kind === kind));
+    return new ModerationActionsView(this.source, (action) => action.kind === kind);
   }
 }
 
