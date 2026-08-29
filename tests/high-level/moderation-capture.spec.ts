@@ -224,6 +224,21 @@ describe('moderation capture', () => {
         expect(target.in(group)?.status).toBe('left');
       });
 
+      it('unbans a kicked user when only_if_banned is set', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const target = chats.newUser();
+        const group = chats.newSupergroup();
+
+        group.join(target);
+        await bot.api.banChatMember(group.id, target.id);
+        await bot.api.unbanChatMember(group.id, target.id, { only_if_banned: true });
+
+        expect(target.in(group)?.status).toBe('left');
+      });
+    });
+
+    describe('negative', () => {
       it('logs but does not sync membership in a basic group (supergroup/channel-only method)', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
@@ -251,21 +266,6 @@ describe('moderation capture', () => {
         expect(group.moderation.unbans.length).toBe(1);
       });
 
-      it('unbans a kicked user when only_if_banned is set', async () => {
-        const bot = new Bot('test-token');
-        const { chats } = await prepareBot(bot);
-        const target = chats.newUser();
-        const group = chats.newSupergroup();
-
-        group.join(target);
-        await bot.api.banChatMember(group.id, target.id);
-        await bot.api.unbanChatMember(group.id, target.id, { only_if_banned: true });
-
-        expect(target.in(group)?.status).toBe('left');
-      });
-    });
-
-    describe('negative', () => {
       it('does nothing to an active member when only_if_banned is set, but still logs', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
