@@ -13,7 +13,10 @@
   different `id`. The guard also covers the reverse order: creating a private chat (via
   `chats.newPrivateChat(user)` or a default private send) throws when the user's ID is
   already registered to a non-private chat. Repeated `chats.newPrivateChat(user)` calls for
-  the same user are unaffected and keep returning the same instance. (#3)
+  the same user are unaffected and keep returning the same instance. Auto-generated IDs
+  (`newUser`, `newGroup`, `newSupergroup`, `newChannel` without an explicit `id`) skip values
+  that an explicit registration already claimed, so factory calls that request a generated ID
+  never trip the guard. (#3)
 - Tests: the forum-topics suite was restructured into class-specific root describes
   (`Chats`, `Supergroup`, `User`, `MessagesLog`, `Reply`) with per-method
   `positive` / `negative` branches, and gained explicit negative coverage for

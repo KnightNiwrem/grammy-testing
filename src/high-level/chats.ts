@@ -400,7 +400,7 @@ export class Chats<TContext extends Context = Context> {
    * @returns The new `User` instance.
    */
   newUser(profile: UserProfile = {}): User<TContext> {
-    const id = profile.id ?? this.ids.nextUserId();
+    const id = profile.id ?? this.nextUnregisteredId(() => this.ids.nextUserId());
     const inbox = new RepliesInbox<TContext>();
     const drafts = new DraftsLog();
 
@@ -504,7 +504,7 @@ export class Chats<TContext extends Context = Context> {
   newGroup(profile?: ChatProfile | string): Group<TContext> {
     const { id, title } = resolveChatProfile(
       profile,
-      () => this.ids.nextGroupId(),
+      () => this.nextUnregisteredId(() => this.ids.nextGroupId()),
       (chatId) => `Group${String(Math.abs(chatId))}`,
     );
 
@@ -527,7 +527,7 @@ export class Chats<TContext extends Context = Context> {
   newSupergroup(profile?: SupergroupProfile | string): Supergroup<TContext> {
     const { id, title } = resolveChatProfile(
       profile,
-      () => this.ids.nextSupergroupId(),
+      () => this.nextUnregisteredId(() => this.ids.nextSupergroupId()),
       (chatId) => `Supergroup${String(Math.abs(chatId))}`,
     );
 
@@ -551,7 +551,7 @@ export class Chats<TContext extends Context = Context> {
   newChannel(profile?: ChatProfile | string): Channel<TContext> {
     const { id, title } = resolveChatProfile(
       profile,
-      () => this.ids.nextChannelId(),
+      () => this.nextUnregisteredId(() => this.ids.nextChannelId()),
       (chatId) => `Channel${String(Math.abs(chatId))}`,
     );
 
@@ -1054,6 +1054,23 @@ export class Chats<TContext extends Context = Context> {
     }
 
     return chat;
+  }
+
+  /**
+   * Draws IDs from `nextId` until one is found that no registered user or chat occupies.
+   * Explicit IDs may claim values inside an auto-generated range; the generated paths skip
+   * them instead of colliding with the duplicate-registration guards.
+   * @param nextId - Counter function that yields candidate IDs.
+   * @returns The first unoccupied auto-generated ID.
+   */
+  private nextUnregisteredId(nextId: () => number): number {
+    let id = nextId();
+
+    while (this.chats.has(id) || this.users.has(id)) {
+      id = nextId();
+    }
+
+    return id;
   }
 
   /**

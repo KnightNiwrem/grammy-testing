@@ -18,6 +18,19 @@ describe('Chats', () => {
         expect([...chats.allChats]).toContain(first);
         expect([...chats.allChats]).toContain(second);
       });
+
+      it('skips explicitly claimed IDs when auto-generating group IDs', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+
+        // -1_000_000_000 is the first value of the auto-generated group ID range.
+        const explicit = chats.newGroup({ id: -1_000_000_000, title: 'Explicit' });
+        const auto = chats.newGroup('Auto');
+
+        expect(auto.id).not.toBe(explicit.id);
+        expect([...chats.allChats]).toContain(explicit);
+        expect([...chats.allChats]).toContain(auto);
+      });
     });
 
     describe('negative', () => {
@@ -70,6 +83,19 @@ describe('Chats', () => {
   });
 
   describe('newSupergroup', () => {
+    describe('positive', () => {
+      it('skips explicitly claimed IDs when auto-generating supergroup IDs', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+
+        // -1_001_000_000_000 is the first value of the auto-generated supergroup ID range.
+        const explicit = chats.newSupergroup({ id: -1_001_000_000_000, title: 'Explicit' });
+        const auto = chats.newSupergroup('Auto');
+
+        expect(auto.id).not.toBe(explicit.id);
+      });
+    });
+
     describe('negative', () => {
       it('throws when the explicit ID is already registered to another chat type', async () => {
         const bot = new Bot('test-token');
@@ -83,6 +109,19 @@ describe('Chats', () => {
   });
 
   describe('newChannel', () => {
+    describe('positive', () => {
+      it('skips explicitly claimed IDs when auto-generating channel IDs', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+
+        // -1_002_000_000_000 is the first value of the auto-generated channel ID range.
+        const explicit = chats.newChannel({ id: -1_002_000_000_000, title: 'Explicit' });
+        const auto = chats.newChannel('Auto');
+
+        expect(auto.id).not.toBe(explicit.id);
+      });
+    });
+
     describe('negative', () => {
       it('throws when the explicit ID is already registered to another chat', async () => {
         const bot = new Bot('test-token');
@@ -91,6 +130,22 @@ describe('Chats', () => {
         const channel = chats.newChannel({ id: -500, title: 'Alerts' });
 
         expect(() => chats.newChannel({ id: channel.id, title: 'Duplicate' })).toThrow(/already registered/);
+      });
+    });
+  });
+
+  describe('newUser', () => {
+    describe('positive', () => {
+      it('skips IDs claimed by registered chats when auto-generating user IDs', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+
+        // 100_000_000 is the first value of the auto-generated user ID range.
+        const occupying = chats.newSupergroup({ id: 100_000_000, title: 'Occupying' });
+        const user = chats.newUser();
+
+        expect(user.id).not.toBe(occupying.id);
+        expect(() => chats.newPrivateChat(user)).not.toThrow();
       });
     });
   });
