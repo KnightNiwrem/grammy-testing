@@ -217,7 +217,7 @@ describe('ReactionChangesLog', () => {
         expect(chat.reactionChanges.lastOrThrow()).toMatchObject({ messageId: 7777, reply: undefined });
       });
 
-      it('backfills a reaction captured before its asynchronous send settles', async () => {
+      it('backfills a per-chat reaction after the global log is independently cleared', async () => {
         const bot = new Bot('test-token');
         let markReactionCaptured: (() => void) | undefined;
         let resolveResponse: ((value: { date: number; message_id: number }) => void) | undefined;
@@ -252,9 +252,12 @@ describe('ReactionChangesLog', () => {
 
         expect(change.reply).toBeUndefined();
 
+        chats.reactionChanges.clear();
+
         resolveResponse?.({ message_id: 6666, date: 0 });
         await dispatch;
 
+        expect(chats.reactionChanges.length).toBe(0);
         expect(change.reply).toBe(user.replies.lastOrThrow());
       });
     });

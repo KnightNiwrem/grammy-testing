@@ -1536,13 +1536,36 @@ export class Chats<TContext extends Context = Context> {
 
   /**
    * Resolves reaction attempts captured while an asynchronous send response was still pending.
-   * Global and per-chat logs share each `ReactionChange` object, so one mutation updates both.
+   * Checks both independently clearable projections; when both retain a change they share the
+   * same object, so the second pass is a no-op.
    * @param chatId - The destination chat's Telegram ID.
    * @param messageId - The message identity returned by the mocked send.
    * @param reply - The captured bot reply associated with that identity.
    */
   private backfillReactionReply(chatId: number, messageId: number, reply: Reply<TContext>): void {
-    for (const change of this.reactionChanges.all) {
+    this.backfillReactionLog(this.reactionChanges.all, chatId, messageId, reply);
+
+    const chat = this.findChatByTelegramId(chatId);
+
+    if (chat !== undefined) {
+      this.backfillReactionLog(chat.reactionChanges.all, chatId, messageId, reply);
+    }
+  }
+
+  /**
+   * Backfills one reaction-log projection for a newly resolved message identity.
+   * @param changes - The global or per-chat reaction records to inspect.
+   * @param chatId - The destination chat's Telegram ID.
+   * @param messageId - The message identity returned by the mocked send.
+   * @param reply - The captured bot reply associated with that identity.
+   */
+  private backfillReactionLog(
+    changes: readonly ReactionChange<TContext>[],
+    chatId: number,
+    messageId: number,
+    reply: Reply<TContext>,
+  ): void {
+    for (const change of changes) {
       if (change.reply === undefined && Number(change.chatId) === chatId && change.messageId === messageId) {
         change.reply = reply;
       }
