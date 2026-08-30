@@ -37,12 +37,13 @@ class Chats<TContext extends Context = Context>
 
 ## Properties
 
-| Property       | Type                   | Description                                      |
-| -------------- | ---------------------- | ------------------------------------------------ |
-| `outgoing`     | `OutgoingRequests`     | All captured API calls                           |
-| `defaultGroup` | `Supergroup<TContext>` | Auto-created group used by `newAdmin`/`newOwner` |
-| `allUsers`     | `User<TContext>[]`     | All created user actors                          |
-| `allChats`     | `AnyChat<TContext>[]`  | All created chat actors                          |
+| Property          | Type                           | Description                                      |
+| ----------------- | ------------------------------ | ------------------------------------------------ |
+| `outgoing`        | `OutgoingRequests`             | All captured API calls                           |
+| `reactionChanges` | `ReactionChangesLog<TContext>` | All captured `setMessageReaction` calls          |
+| `defaultGroup`    | `Supergroup<TContext>`         | Auto-created group used by `newAdmin`/`newOwner` |
+| `allUsers`        | `User<TContext>[]`             | All created user actors                          |
+| `allChats`        | `AnyChat<TContext>[]`          | All created chat actors                          |
 
 ## Methods
 

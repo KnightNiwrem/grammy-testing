@@ -14,6 +14,7 @@ The `Chats` class SHALL expose a `clear()` method that atomically resets all cap
 - Every registered user's `replies` inbox, `actions` log, and `edits` log
 - Every registered chat's `messages` log
 - Every registered chat's `DeletionsLog`
+- The orchestrator-wide and per-chat reaction-change logs
 - The `messageIdToReply` routing registry
 - The incoming-message author routing registry
 - The `clickers` routing registry
@@ -35,6 +36,7 @@ The reset SHALL NOT clear:
 - **AND** `chats.editsFor(user).all` is empty
 - **AND** `chats.deletionsFor(chat).all` is empty
 - **AND** `chat.messages.all` is empty
+- **AND** `chats.reactionChanges.all` and `chat.reactionChanges.all` are empty
 
 #### Scenario: User and chat references remain valid after clear
 

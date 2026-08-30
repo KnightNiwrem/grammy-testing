@@ -173,14 +173,14 @@ and the `clickButton()` method. It SHALL explain how Reply is obtained from `rep
 
 ### Requirement: High-Level API — Logs page
 
-`site/high-level/logs.md` SHALL document all five log types: `MessagesLog`, `RepliesInbox`,
-`ActionsLog`, `EditsLog`, and `DeletionsLog`. For each: `.last`, `.all`, `.length`,
-`.lastOrThrow()` (where available), and `.clear()`.
+`site/high-level/logs.md` SHALL document all six log types: `MessagesLog`, `RepliesInbox`,
+`ActionsLog`, `EditsLog`, `DeletionsLog`, and `ReactionChangesLog`. For each: `.last`,
+`.all`, `.length`, `.lastOrThrow()` (where available), and `.clear()`.
 
-#### Scenario: All five log classes are documented
+#### Scenario: All six log classes are documented
 
 - **WHEN** a user reads the Logs page
-- **THEN** MessagesLog, RepliesInbox, ActionsLog, EditsLog, and DeletionsLog each have their own section
+- **THEN** MessagesLog, RepliesInbox, ActionsLog, EditsLog, DeletionsLog, and ReactionChangesLog each have their own section
 
 ### Requirement: Low-Level API — Overview page
 

@@ -130,6 +130,15 @@ expect(deletion.messageId).toBe(42);
 
 ## Other properties
 
+### `reactionChanges`
+
+The orchestrator-wide `ReactionChangesLog` for every captured `setMessageReaction` attempt.
+Registered chats expose the same record through their scoped `chat.reactionChanges` log.
+
+```ts
+expect(chats.reactionChanges.lastOrThrow()).toBe(group.reactionChanges.lastOrThrow());
+```
+
 ### `outgoing`
 
 The `OutgoingRequests` store — every raw API call captured by the transformer.
@@ -151,8 +160,8 @@ expect(chats.outgoing.length).toBe(2); // reply + log call
 
 ### `clear()`
 
-Resets all logs (replies, messages, edits, deletions, actions) and clears `outgoing`. Does **not**
-remove actors or membership state.
+Resets all logs (replies, messages, edits, deletions, actions, and reaction changes) and clears
+`outgoing`. Does **not** remove actors or membership state.
 
 ```ts
 await user.sendCommand('/setup');
