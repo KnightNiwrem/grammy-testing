@@ -552,6 +552,10 @@ export class User<TContext extends Context = Context> {
       );
     }
 
+    // Telegram has already applied the join by the time this service message is delivered.
+    // Make that state visible to middleware and any synchronous reply it sends.
+    this.ctx.updateMembership(chat, this, 'join');
+
     await dispatchServiceMessage({
       bot: this.ctx.bot,
       kind: 'new_chat_members',
@@ -561,8 +565,6 @@ export class User<TContext extends Context = Context> {
       updateId: this.ctx.ids.nextUpdateId(),
       recordMessageAuthor: this.ctx.recordMessageAuthor,
     });
-
-    this.ctx.updateMembership(chat, this, 'join');
   }
 
   /**

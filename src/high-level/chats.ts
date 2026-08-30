@@ -1404,8 +1404,7 @@ export class Chats<TContext extends Context = Context> {
 
     const author = this.messageAuthors.get(chat.id)?.get(reply.replyToMessageId);
 
-    const isSameTopic =
-      author?.messageThreadId === undefined || reply.messageThreadId === undefined || author.messageThreadId === reply.messageThreadId;
+    const isSameTopic = author?.messageThreadId === reply.messageThreadId;
 
     return author?.userId === userId && isSameTopic;
   }
@@ -1421,6 +1420,19 @@ export class Chats<TContext extends Context = Context> {
     if (!authors) {
       authors = new Map<number, MessageAuthor>();
       this.messageAuthors.set(message.chat.id, authors);
+    }
+
+    const existingAuthor = authors.get(message.message_id);
+
+    if (existingAuthor) {
+      // An edited_message keeps the original message's author and forum topic. Preserve
+      // both when the synthetic edit helper is given only its chat and message ID.
+      if (message.message_thread_id === undefined && existingAuthor.messageThreadId !== undefined) {
+        message.message_thread_id = existingAuthor.messageThreadId;
+        message.is_topic_message = true;
+      }
+
+      return;
     }
 
     authors.set(message.message_id, { userId, messageThreadId: message.message_thread_id });

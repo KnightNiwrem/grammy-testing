@@ -17,8 +17,10 @@ routing rule. (#14)
   of a globally assumed message ID. This also prevents cross-chat collisions when resolving
   `reply.replyingTo`, edits, and deletions.
 - Reply-to-author routing remains subject to the active-membership gate, ignores
-  cross-chat/external replies and explicit cross-topic references, and does not attribute
-  GroupAnonymousBot messages to the user actor that dispatched them.
+  cross-chat/external replies and cross-topic references, and does not attribute
+  GroupAnonymousBot messages to the user actor that dispatched them. Edited-message
+  updates preserve the original author/topic identity, and join-service replies observe
+  the newly active membership during middleware dispatch.
 - `chats.clear()` now removes historical author associations alongside the other routing
   registries.
 

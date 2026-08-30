@@ -127,6 +127,53 @@ describe('user.replies filter rule', () => {
 
         expect(alice.replies.lastOrThrow().text).toBe('topic answer');
       });
+
+      it('routes a synchronous reply to a user joining a group', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:new_chat_members', async (ctx) => {
+          await ctx.reply('welcome', { reply_parameters: { message_id: ctx.message.message_id } });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newSupergroup();
+        const alice = chats.newUser();
+
+        await alice.joinChat(group);
+
+        expect(alice.replies.lastOrThrow().text).toBe('welcome');
+      });
+
+      it('preserves the original author and topic when a message is edited', async () => {
+        const bot = new Bot('test-token');
+        let editedThreadId: number | undefined;
+
+        bot.on('edited_message', async (ctx) => {
+          editedThreadId = ctx.editedMessage.message_thread_id;
+
+          await ctx.api.sendMessage(ctx.chat.id, 'edited answer', {
+            message_thread_id: ctx.editedMessage.message_thread_id,
+            reply_parameters: { message_id: ctx.editedMessage.message_id },
+          });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ isForum: true });
+        const topic = forum.newTopic({ name: 'Support' });
+        const alice = chats.newUser();
+        const bob = chats.newUser();
+
+        forum.promote(alice);
+        forum.promote(bob);
+
+        const original = await alice.sendText('original', { topic });
+
+        await bob.editMessage(original.message_id, 'edited', { chat: forum });
+
+        expect(editedThreadId).toBe(topic.messageThreadId);
+        expect(alice.replies.lastOrThrow().text).toBe('edited answer');
+        expect(bob.replies.length).toBe(0);
+      });
     });
 
     describe('negative cases', () => {
@@ -168,6 +215,45 @@ describe('user.replies filter rule', () => {
         });
 
         expect(destinationTopic.messages.last?.text).toBe('other-topic reply');
+        expect(alice.replies.length).toBe(0);
+      });
+
+      it('does not route a reply from an unthreaded message into a forum topic', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ isForum: true });
+        const topic = forum.newTopic({ name: 'Destination' });
+        const alice = chats.newUser();
+
+        forum.promote(alice);
+
+        const original = await alice.sendText('general message', { chat: forum });
+
+        await bot.api.sendMessage(forum.id, 'topic reply', {
+          message_thread_id: topic.messageThreadId,
+          reply_parameters: { message_id: original.message_id },
+        });
+
+        expect(topic.messages.last?.text).toBe('topic reply');
+        expect(alice.replies.length).toBe(0);
+      });
+
+      it('does not route a forum-topic reply whose destination topic is omitted', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ isForum: true });
+        const topic = forum.newTopic({ name: 'Source' });
+        const alice = chats.newUser();
+
+        forum.promote(alice);
+
+        const original = await alice.sendText('topic message', { topic });
+
+        await bot.api.sendMessage(forum.id, 'unthreaded reply', {
+          reply_parameters: { message_id: original.message_id },
+        });
+
+        expect(forum.messages.last?.text).toBe('unthreaded reply');
         expect(alice.replies.length).toBe(0);
       });
 
