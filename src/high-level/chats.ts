@@ -2,6 +2,8 @@
 /* eslint-disable prefer-const -- newUser uses let-then-assign for closure capture */
 /* eslint-disable no-param-reassign -- attachBot intentionally hands bot to each chat */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import type { Bot, Context, RawApi, Transformer } from 'grammy';
 import type { ChatMember, ChatPermissions, Message, Poll, ShippingOption, Update, User as TelegramUser } from 'grammy/types';
 
@@ -293,7 +295,19 @@ export class RepliesInbox<TContext extends Context = Context> {
         return false;
       }
 
-      return typeof matcher === 'string' ? reply.text === matcher : matcher.test(reply.text);
+      if (typeof matcher === 'string') {
+        return reply.text === matcher;
+      }
+
+      const expression = matcher;
+
+      expression.lastIndex = 0;
+
+      const isMatch = expression.test(reply.text);
+
+      expression.lastIndex = 0;
+
+      return isMatch;
     });
   }
 
@@ -559,6 +573,9 @@ export class Chats<TContext extends Context = Context> {
 
   private readonly preCheckoutQueryAnswers = new Map<string, PreCheckoutQueryAnswer>();
 
+  /** Successful payment dispatch currently executing in this async context. */
+  private readonly paymentCompletionContext = new AsyncLocalStorage<InvoicePaymentState<TContext>>();
+
   /** chatId->messageId->Reply registry for reply.replyingTo and mutation resolution. */
   private readonly messageIdToReply = new Map<number, Map<number, Reply<TContext>>>();
 
@@ -582,6 +599,9 @@ export class Chats<TContext extends Context = Context> {
    * applied by `settleFromCapture` only when the mocked response succeeds.
    */
   private readonly pendingModerationTransitions = new WeakMap<Request, () => void>();
+
+  /** Payment-query answers awaiting a successful mocked API response. */
+  private pendingPaymentAnswers = new WeakMap<Request, () => void>();
 
   /** Message requests awaiting a successful mocked result whose message ID may differ. */
   private pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
@@ -656,6 +676,7 @@ export class Chats<TContext extends Context = Context> {
     this.shippingQueryAnswers.clear();
     this.preCheckoutQueryIds.clear();
     this.preCheckoutQueryAnswers.clear();
+    this.pendingPaymentAnswers = new WeakMap<Request, () => void>();
     this.pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
     this.lastCapturedReply = undefined;
   }
@@ -1158,13 +1179,13 @@ export class Chats<TContext extends Context = Context> {
    */
   private deriveNonMessageCapture(request: Request, payload: Record<string, unknown>): boolean {
     if (request.method === 'answerShippingQuery') {
-      this.deriveShippingQueryAnswer(payload);
+      this.queueShippingQueryAnswer(request, payload);
 
       return true;
     }
 
     if (request.method === 'answerPreCheckoutQuery') {
-      this.derivePreCheckoutQueryAnswer(payload);
+      this.queuePreCheckoutQueryAnswer(request, payload);
 
       return true;
     }
@@ -1435,7 +1456,8 @@ export class Chats<TContext extends Context = Context> {
   /**
    * Called when a captured request's mocked response settles. Registers the
    * message ID returned by a successful mocked send against its captured reply,
-   * and applies queued moderation transitions only when the call succeeded.
+   * and applies queued payment answers and moderation transitions only when the
+   * call succeeded.
    * @param request - The captured outgoing API request that settled.
    * @param ok - Whether the call resolved with an `ok: true` envelope.
    * @param result - The successful envelope's result, or `undefined` on failure.
@@ -1448,6 +1470,14 @@ export class Chats<TContext extends Context = Context> {
 
     if (ok && pendingReply !== undefined) {
       this.registerReturnedMessageIds(pendingReply.chatId, pendingReply.reply, result);
+    }
+
+    const paymentAnswer = this.pendingPaymentAnswers.get(request);
+
+    this.pendingPaymentAnswers.delete(request);
+
+    if (ok) {
+      paymentAnswer?.();
     }
 
     const transition = this.pendingModerationTransitions.get(request);
@@ -2009,6 +2039,10 @@ export class Chats<TContext extends Context = Context> {
     }
 
     if (state.completionPromise !== undefined) {
+      if (this.paymentCompletionContext.getStore() === state) {
+        throw new Error("completeSuccessfully: cannot be called from this payment's successful_payment handler");
+      }
+
       return state.completionPromise;
     }
 
@@ -2058,7 +2092,7 @@ export class Chats<TContext extends Context = Context> {
 
     const completionPromise = Promise.resolve().then(async (): Promise<Message> => {
       this.recordMessageAuthor(message, state.user.id);
-      await bot.handleUpdate({ update_id: this.ids.nextUpdateId(), message } as Update);
+      await this.paymentCompletionContext.run(state, () => bot.handleUpdate({ update_id: this.ids.nextUpdateId(), message } as Update));
       state.successfulPayment = message;
 
       return message;
@@ -2076,41 +2110,53 @@ export class Chats<TContext extends Context = Context> {
   }
 
   /**
-   * Captures a strictly correlated `answerShippingQuery` payload.
+   * Queues a strictly correlated `answerShippingQuery` payload until the mocked
+   * API call succeeds.
+   * @param request - Captured outgoing request used for response settlement.
    * @param payload - Captured outgoing Bot API payload.
    */
-  private deriveShippingQueryAnswer(payload: Record<string, unknown>): void {
+  private queueShippingQueryAnswer(request: Request, payload: Record<string, unknown>): void {
     const shippingQueryId = payload.shipping_query_id;
 
     if (typeof shippingQueryId !== 'string' || !this.shippingQueryIds.has(shippingQueryId) || typeof payload.ok !== 'boolean') {
       return;
     }
 
-    this.shippingQueryAnswers.set(shippingQueryId, {
+    const answer: ShippingQueryAnswer = {
       shippingQueryId,
       ok: payload.ok,
       shippingOptions: Array.isArray(payload.shipping_options) ? (payload.shipping_options as ShippingOption[]) : undefined,
       errorMessage: typeof payload.error_message === 'string' ? payload.error_message : undefined,
       raw: payload,
+    };
+
+    this.pendingPaymentAnswers.set(request, () => {
+      this.shippingQueryAnswers.set(shippingQueryId, answer);
     });
   }
 
   /**
-   * Captures a strictly correlated `answerPreCheckoutQuery` payload.
+   * Queues a strictly correlated `answerPreCheckoutQuery` payload until the
+   * mocked API call succeeds.
+   * @param request - Captured outgoing request used for response settlement.
    * @param payload - Captured outgoing Bot API payload.
    */
-  private derivePreCheckoutQueryAnswer(payload: Record<string, unknown>): void {
+  private queuePreCheckoutQueryAnswer(request: Request, payload: Record<string, unknown>): void {
     const preCheckoutQueryId = payload.pre_checkout_query_id;
 
     if (typeof preCheckoutQueryId !== 'string' || !this.preCheckoutQueryIds.has(preCheckoutQueryId) || typeof payload.ok !== 'boolean') {
       return;
     }
 
-    this.preCheckoutQueryAnswers.set(preCheckoutQueryId, {
+    const answer: PreCheckoutQueryAnswer = {
       preCheckoutQueryId,
       ok: payload.ok,
       errorMessage: typeof payload.error_message === 'string' ? payload.error_message : undefined,
       raw: payload,
+    };
+
+    this.pendingPaymentAnswers.set(request, () => {
+      this.preCheckoutQueryAnswers.set(preCheckoutQueryId, answer);
     });
   }
 

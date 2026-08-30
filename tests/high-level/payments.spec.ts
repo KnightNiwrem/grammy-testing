@@ -4,7 +4,7 @@ import { Bot, InlineKeyboard } from 'grammy';
 import type { Message, PreCheckoutQuery, ShippingQuery } from 'grammy/types';
 import { describe, expect, it } from 'vitest';
 
-import { prepareBot } from '../../src/index';
+import { type InvoicePayment, prepareBot } from '../../src/index';
 
 const shippingAddress = {
   country_code: 'US',
@@ -110,6 +110,49 @@ describe('Payments', () => {
         await user.replies.lastOrThrow().clickButton('Open');
 
         expect(hasInvoiceField).toBe(false);
+      });
+
+      it('does not derive invoices from invalid price amounts or Stars price lists', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+        const privateChat = chats.newPrivateChat(user);
+
+        await bot.api.sendInvoice(user.id, 'Fractional', 'Invalid amount', 'fractional', 'USD', [{ label: 'Item', amount: 1.5 }], {
+          provider_token: 'provider-token',
+        });
+
+        await bot.api.sendInvoice(user.id, 'Infinite', 'Invalid amount', 'infinite', 'USD', [{ label: 'Item', amount: Infinity }], {
+          provider_token: 'provider-token',
+        });
+
+        await bot.api.sendInvoice(
+          user.id,
+          'Unsafe total',
+          'Invalid total',
+          'unsafe-total',
+          'USD',
+          [
+            { label: 'Item', amount: Number.MAX_SAFE_INTEGER },
+            { label: 'Fee', amount: 1 },
+          ],
+          { provider_token: 'provider-token' },
+        );
+
+        await bot.api.sendInvoice(
+          user.id,
+          'Split Stars',
+          'Invalid Stars prices',
+          'split-stars',
+          'XTR',
+          [
+            { label: 'First', amount: 1 },
+            { label: 'Second', amount: 2 },
+          ],
+          { provider_token: '' },
+        );
+
+        expect(privateChat.messages.all.slice(-4).map((reply) => reply.invoice)).toEqual([undefined, undefined, undefined, undefined]);
       });
     });
   });
@@ -297,6 +340,52 @@ describe('Payments', () => {
         expect(payment.successfulPayment).toBe(successful);
         expect(payment.status).toBe('completed');
       });
+
+      it('rejects completion re-entry from its own successful-payment handler', async () => {
+        const bot = new Bot('test-token');
+        let payment: InvoicePayment | undefined;
+        let reentrantError: unknown;
+
+        bot.command('buy', async (ctx) => {
+          await ctx.replyWithInvoice(
+            'Reentrant order',
+            'No self-waiting completion',
+            'reentrant-order',
+            'USD',
+            [{ label: 'Item', amount: 100 }],
+            {
+              provider_token: 'provider-token',
+            },
+          );
+        });
+
+        bot.on('pre_checkout_query', async (ctx) => {
+          await ctx.answerPreCheckoutQuery(true);
+        });
+
+        bot.on('message:successful_payment', async () => {
+          assert.ok(payment);
+
+          try {
+            await payment.completeSuccessfully();
+          } catch (error) {
+            reentrantError = error;
+          }
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await user.sendCommand('/buy');
+
+        payment = await user.payInvoice(user.replies.lastOrThrow());
+
+        const successful = await payment.completeSuccessfully();
+
+        expect(reentrantError).toBeInstanceOf(Error);
+        expect((reentrantError as Error).message).toMatch(/successful_payment handler/);
+        expect(payment.successfulPayment).toBe(successful);
+      });
     });
 
     describe('negative shipping', () => {
@@ -335,6 +424,57 @@ describe('Payments', () => {
         expect(payment.status).toBe('shipping-declined');
         expect(preCheckoutCount).toBe(0);
         await expect(payment.completeSuccessfully()).rejects.toThrow(/not ready/);
+      });
+
+      it('does not accept a shipping answer when the mocked API call fails', async () => {
+        const bot = new Bot('test-token');
+        let preCheckoutCount = 0;
+
+        bot.command('buy', async (ctx) => {
+          await ctx.replyWithInvoice(
+            'Failed shipping answer',
+            'A shipped item',
+            'failed-shipping-answer',
+            'USD',
+            [{ label: 'Item', amount: 100 }],
+            {
+              provider_token: 'provider-token',
+              need_shipping_address: true,
+              is_flexible: true,
+            },
+          );
+        });
+
+        bot.on('shipping_query', async (ctx) => {
+          try {
+            await ctx.answerShippingQuery(true, {
+              shipping_options: [{ id: 'standard', title: 'Standard', prices: [{ label: 'Delivery', amount: 20 }] }],
+            });
+          } catch {
+            // The bot may intentionally handle a failed Telegram answer call.
+          }
+        });
+
+        bot.on('pre_checkout_query', () => {
+          preCheckoutCount += 1;
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        chats.outgoing.failNext('answerShippingQuery', { code: 400, description: 'SHIPPING_QUERY_EXPIRED' });
+
+        await user.sendCommand('/buy');
+
+        const payment = await user.payInvoice(user.replies.lastOrThrow(), {
+          orderInfo: { shipping_address: shippingAddress },
+          shippingOptionId: 'standard',
+        });
+
+        expect(payment.shippingAnswer).toBeUndefined();
+        expect(payment.preCheckoutQueryId).toBeUndefined();
+        expect(payment.status).toBe('shipping-unanswered');
+        expect(preCheckoutCount).toBe(0);
       });
     });
 
@@ -436,6 +576,44 @@ describe('Payments', () => {
 
         expect(unanswered.preCheckoutAnswer).toBeUndefined();
         expect(unanswered.status).toBe('pre-checkout-unanswered');
+      });
+
+      it('does not approve pre-checkout when the mocked API call fails', async () => {
+        const bot = new Bot('test-token');
+
+        bot.command('buy', async (ctx) => {
+          await ctx.replyWithInvoice(
+            'Failed pre-checkout answer',
+            'A failed approval',
+            'failed-pre-checkout-answer',
+            'USD',
+            [{ label: 'Item', amount: 100 }],
+            {
+              provider_token: 'provider-token',
+            },
+          );
+        });
+
+        bot.on('pre_checkout_query', async (ctx) => {
+          try {
+            await ctx.answerPreCheckoutQuery(true);
+          } catch {
+            // The bot may intentionally handle a failed Telegram answer call.
+          }
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        chats.outgoing.failNext('answerPreCheckoutQuery', { code: 400, description: 'PRE_CHECKOUT_QUERY_EXPIRED' });
+
+        await user.sendCommand('/buy');
+
+        const payment = await user.payInvoice(user.replies.lastOrThrow());
+
+        expect(payment.preCheckoutAnswer).toBeUndefined();
+        expect(payment.status).toBe('pre-checkout-unanswered');
+        await expect(payment.completeSuccessfully()).rejects.toThrow(/pre-checkout-unanswered/);
       });
     });
 

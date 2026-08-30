@@ -32,10 +32,12 @@ describe('chat.messages log', () => {
       const bot = new Bot('test-token');
       const { chats } = await prepareBot(bot);
       const group = chats.newSupergroup();
+      const matcher = /hello/gi;
 
       await bot.api.sendMessage(group.id, 'Hello, world!');
 
-      expect(group.messages.byText(/hello/i)?.text).toBe('Hello, world!');
+      expect(group.messages.byText(matcher)?.text).toBe('Hello, world!');
+      expect(group.messages.byText(matcher)?.text).toBe('Hello, world!');
     });
   });
 

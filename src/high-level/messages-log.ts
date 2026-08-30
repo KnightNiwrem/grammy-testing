@@ -56,7 +56,15 @@ export class MessagesLog<TContext extends Context = Context> {
         return reply.text === matcher;
       }
 
-      return matcher.test(reply.text);
+      const expression = matcher;
+
+      expression.lastIndex = 0;
+
+      const isMatch = expression.test(reply.text);
+
+      expression.lastIndex = 0;
+
+      return isMatch;
     });
   }
 

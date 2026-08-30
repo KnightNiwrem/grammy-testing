@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "target": "esnext",
     "module": "esnext",
+    "types": ["node"],
     "strict": true,
     "allowJs": true,
     "skipLibCheck": true,

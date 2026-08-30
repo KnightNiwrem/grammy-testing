@@ -117,14 +117,28 @@ function deriveInvoice(payload: Record<string, unknown>): Invoice | undefined {
     return undefined;
   }
 
+  if (currency === 'XTR' && prices.length !== 1) {
+    return undefined;
+  }
+
   let totalAmount = 0;
 
   for (const price of prices) {
-    if (typeof price !== 'object' || price === null || typeof (price as { amount?: unknown }).amount !== 'number') {
+    if (typeof price !== 'object' || price === null) {
       return undefined;
     }
 
-    totalAmount += (price as { amount: number }).amount;
+    const { amount } = price as { amount?: unknown };
+
+    if (typeof amount !== 'number' || !Number.isSafeInteger(amount)) {
+      return undefined;
+    }
+
+    totalAmount += amount;
+
+    if (!Number.isSafeInteger(totalAmount)) {
+      return undefined;
+    }
   }
 
   return {
