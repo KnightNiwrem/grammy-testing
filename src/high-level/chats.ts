@@ -2105,9 +2105,9 @@ export class Chats<TContext extends Context = Context> {
         update_id: this.ids.nextUpdateId(),
         shipping_query: {
           id: state.shippingQueryId,
-          from,
+          from: { ...from },
           invoice_payload: state.invoicePayload,
-          shipping_address: shippingAddress,
+          shipping_address: { ...shippingAddress },
         },
       } as Update);
 

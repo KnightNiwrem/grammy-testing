@@ -362,8 +362,10 @@ describe('Payments', () => {
         });
       });
 
-      it('snapshots accepted shipping options before the handler mutates them', async () => {
+      it('isolates accepted shipping data from later handler mutations', async () => {
         const bot = new Bot('test-token');
+        let observedCity: string | undefined;
+        let observedFirstName: string | undefined;
         let observedTotal: number | undefined;
         const shippingOptions = [{ id: 'standard', title: 'Standard', prices: [{ label: 'Delivery', amount: 20 }] }];
 
@@ -385,15 +387,19 @@ describe('Payments', () => {
         bot.on('shipping_query', async (ctx) => {
           await ctx.answerShippingQuery(true, { shipping_options: shippingOptions });
           shippingOptions[0].prices[0].amount = 900;
+          ctx.shippingQuery.shipping_address.city = 'Middleware Mutated City';
+          ctx.shippingQuery.from.first_name = 'Middleware Mutated Name';
         });
 
         bot.on('pre_checkout_query', async (ctx) => {
+          observedCity = ctx.preCheckoutQuery.order_info?.shipping_address?.city;
+          observedFirstName = ctx.preCheckoutQuery.from.first_name;
           observedTotal = ctx.preCheckoutQuery.total_amount;
           await ctx.answerPreCheckoutQuery(true);
         });
 
         const { chats } = await prepareBot(bot);
-        const user = chats.newUser();
+        const user = chats.newUser({ first_name: 'Original Name' });
 
         await user.sendCommand('/buy');
 
@@ -403,10 +409,14 @@ describe('Payments', () => {
         });
 
         expect(payment.shippingAnswer?.shippingOptions?.[0].prices[0].amount).toBe(20);
+        expect(observedCity).toBe('San Francisco');
+        expect(observedFirstName).toBe('Original Name');
         expect(observedTotal).toBe(120);
 
         const successful = await payment.completeSuccessfully();
 
+        expect(successful.from?.first_name).toBe('Original Name');
+        expect(successful.successful_payment?.order_info?.shipping_address?.city).toBe('San Francisco');
         expect(successful.successful_payment?.total_amount).toBe(120);
       });
 
