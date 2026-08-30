@@ -1580,6 +1580,10 @@ export class Chats<TContext extends Context = Context> {
     };
 
     config.installedTransformers = () => {
+      // grammY invokes middleware before handleUpdate returns its promise, so
+      // restore before the fresh per-update Api can start any nested updates.
+      config.installedTransformers = installedTransformers;
+
       const transformers = installedTransformers();
       const captureIndex = transformers.indexOf(captureTransformer);
 

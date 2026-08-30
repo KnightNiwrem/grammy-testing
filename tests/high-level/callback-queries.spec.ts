@@ -300,6 +300,45 @@ describe('CallbackQueryHandle', () => {
 
         expect(user.replies.all.map(({ text }) => text)).toEqual(['click response']);
       });
+
+      it('does not leak click routing into a synchronously nested user update', async () => {
+        const bot = new Bot('test-token');
+        let sendNestedUpdate: (() => Promise<unknown>) | undefined;
+
+        bot.on('message:text', async (ctx) => {
+          if (ctx.message.text === 'nested user message') {
+            await ctx.reply('nested response', { reply_parameters: { message_id: ctx.message.message_id } });
+          }
+        });
+
+        bot.on('callback_query:data', async (ctx) => {
+          assert.ok(sendNestedUpdate);
+
+          await sendNestedUpdate();
+          await ctx.reply('click response');
+        });
+
+        const { chats } = await prepareBot(bot);
+        const clicker = chats.newUser();
+        const nestedSender = chats.newUser();
+        const group = chats.newGroup();
+
+        group.join(clicker);
+        group.join(nestedSender);
+
+        sendNestedUpdate = () => nestedSender.sendText('nested user message', { chat: group });
+
+        await bot.api.sendMessage(group.id, 'choose', { reply_markup: new InlineKeyboard().text('Go', 'go') });
+
+        const reply = group.messages.last;
+
+        assert.ok(reply);
+
+        await reply.clickButton('Go', { by: clicker });
+
+        expect(clicker.replies.all.map(({ text }) => text)).toEqual(['click response']);
+        expect(nestedSender.replies.all.map(({ text }) => text)).toEqual(['nested response']);
+      });
     });
 
     describe('negative cases', () => {
