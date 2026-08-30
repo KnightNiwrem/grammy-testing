@@ -1,9 +1,16 @@
 import assert from 'node:assert';
 
+import type { Transformer } from 'grammy';
 import { Bot, InlineKeyboard } from 'grammy';
 import { describe, expect, it } from 'vitest';
 
 import { prepareBot } from '../../src/index';
+
+const delayedCloneTransformer: Transformer = async (previous, method, payload, signal) => {
+  await Promise.resolve();
+
+  return previous(method, { ...payload }, signal);
+};
 
 describe('CallbackQueryHandle', () => {
   describe('clickButton', () => {
@@ -153,9 +160,23 @@ describe('CallbackQueryHandle', () => {
 
       it('isolates concurrent group clicks by different users', async () => {
         const bot = new Bot('test-token');
+        let startedHandlers = 0;
+        let releaseHandlers: (() => void) | undefined;
+
+        const bothHandlersStarted = new Promise<void>((resolve) => {
+          releaseHandlers = resolve;
+        });
+
+        bot.api.config.use(delayedCloneTransformer);
 
         bot.on('callback_query:data', async (ctx) => {
-          await Promise.resolve();
+          startedHandlers += 1;
+
+          if (startedHandlers === 2) {
+            releaseHandlers?.();
+          }
+
+          await bothHandlersStarted;
           await ctx.reply(`for-${String(ctx.from.id)}`);
         });
 
@@ -177,6 +198,50 @@ describe('CallbackQueryHandle', () => {
 
         expect(first.replies.all.map(({ text }) => text)).toEqual([`for-${String(first.id)}`]);
         expect(second.replies.all.map(({ text }) => text)).toEqual([`for-${String(second.id)}`]);
+      }, 1000);
+
+      it('does not route an unrelated concurrent send to the active group clicker', async () => {
+        const bot = new Bot('test-token');
+        let markHandlerStarted: (() => void) | undefined;
+        let releaseHandler: (() => void) | undefined;
+
+        const handlerStarted = new Promise<void>((resolve) => {
+          markHandlerStarted = resolve;
+        });
+
+        const handlerGate = new Promise<void>((resolve) => {
+          releaseHandler = resolve;
+        });
+
+        bot.on('callback_query:data', async (ctx) => {
+          markHandlerStarted?.();
+          await handlerGate;
+          await ctx.reply('click response');
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+        const group = chats.newGroup();
+
+        group.join(user);
+
+        await bot.api.sendMessage(group.id, 'choose', { reply_markup: new InlineKeyboard().text('Go', 'go') });
+
+        const reply = group.messages.last;
+
+        assert.ok(reply);
+
+        const click = reply.clickButton('Go', { by: user });
+
+        await handlerStarted;
+        await bot.api.sendMessage(group.id, 'unrelated concurrent send');
+
+        expect(user.replies.length).toBe(0);
+
+        releaseHandler?.();
+        await click;
+
+        expect(user.replies.all.map(({ text }) => text)).toEqual(['click response']);
       });
     });
 

@@ -2,7 +2,7 @@
 /* eslint-disable prefer-const -- newUser uses let-then-assign for closure capture */
 /* eslint-disable no-param-reassign -- attachBot intentionally hands bot to each chat */
 
-import type { Bot, Context, RawApi } from 'grammy';
+import type { Bot, Context, RawApi, Transformer } from 'grammy';
 import type { ChatMember, ChatPermissions, Message, Poll, Update, User as TelegramUser } from 'grammy/types';
 
 import type { IdleTracker } from '../low-level/idle';
@@ -314,6 +314,10 @@ interface ClickRoutingContext {
   chatId: number;
 }
 
+interface MutableTransformerConfig {
+  installedTransformers: () => Transformer[];
+}
+
 interface BotRef<TContext extends Context> {
   readonly bot: Bot<TContext> | undefined;
 }
@@ -357,11 +361,11 @@ export class Chats<TContext extends Context = Context> {
 
   private readonly chats = new Map<number, AnyChat<TContext>>();
 
-  /** Current serialized callback-query dispatch for the user.replies filter rule. */
-  private activeClickRouting: ClickRoutingContext | undefined;
+  /** Final API payload -> originating callback dispatch for user.replies routing. */
+  private readonly clickRoutingByPayload = new WeakMap<object, ClickRoutingContext>();
 
-  /** Serializes callback-query dispatches so concurrent clicks cannot cross-route replies. */
-  private clickRoutingTail = Promise.resolve();
+  /** Terminal capture transformer installed by prepareBot. */
+  private captureTransformer: Transformer | undefined;
 
   /** Query IDs minted by this orchestrator and their strictly correlated answers. */
   private readonly callbackQueryIds = new Set<string>();
@@ -459,7 +463,6 @@ export class Chats<TContext extends Context = Context> {
     this.guestQueryToUser.clear();
     this.messageIdToReply.clear();
     this.messageAuthors.clear();
-    this.activeClickRouting = undefined;
     this.callbackQueryIds.clear();
     this.callbackQueryAnswers.clear();
     this.pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
@@ -478,6 +481,16 @@ export class Chats<TContext extends Context = Context> {
     for (const chat of this.chats.values()) {
       chat[setBotRef](bot);
     }
+  }
+
+  /**
+   * Records the terminal transformer so per-update routing can be inserted
+   * immediately outside it without depending on the user's transformer order.
+   * @param transformer - The terminal capture transformer installed by prepareBot.
+   * @internal
+   */
+  attachCaptureTransformer(transformer: Transformer): void {
+    this.captureTransformer = transformer;
   }
 
   /**
@@ -878,6 +891,7 @@ export class Chats<TContext extends Context = Context> {
    */
   deriveFromCapture(request: Request): void {
     const payload = request.payload as Record<string, unknown>;
+    const clickRouting = this.clickRoutingByPayload.get(payload);
 
     if (this.deriveNonMessageCapture(request, payload)) {
       return;
@@ -926,7 +940,7 @@ export class Chats<TContext extends Context = Context> {
     reply.topic?.messages.push(reply);
 
     for (const entry of this.users.values()) {
-      if (this.userReceivesReply(entry, chat, reply)) {
+      if (this.userReceivesReply(entry, chat, reply, clickRouting)) {
         entry.replies.push(reply);
       }
     }
@@ -1447,9 +1461,15 @@ export class Chats<TContext extends Context = Context> {
    * @param entry - The user entry to evaluate.
    * @param chat - The chat the reply was sent to.
    * @param reply - The reply to evaluate.
+   * @param click - Callback dispatch associated with the final API payload, if any.
    * @returns `true` if the user should receive the reply.
    */
-  private userReceivesReply(entry: UserEntry<TContext>, chat: AnyChat<TContext>, reply: Reply<TContext>): boolean {
+  private userReceivesReply(
+    entry: UserEntry<TContext>,
+    chat: AnyChat<TContext>,
+    reply: Reply<TContext>,
+    click: ClickRoutingContext | undefined,
+  ): boolean {
     // Rule 1: chat is private with this user
     if (chat.type === 'private' && chat.id === entry.user.id) {
       return true;
@@ -1480,8 +1500,6 @@ export class Chats<TContext extends Context = Context> {
     }
 
     // Rule 4: response during a callback-query dispatch by this user in this chat.
-    const click = this.activeClickRouting;
-
     if (click?.userId === entry.user.id && click.chatId === chat.id) {
       return true;
     }
@@ -1502,7 +1520,8 @@ export class Chats<TContext extends Context = Context> {
   }
 
   /**
-   * Runs one callback-query dispatch in a serialized click-routing scope.
+   * Runs one callback-query dispatch with a routing transformer installed only
+   * on the per-update API instance that grammY creates for this dispatch.
    * @param user - The minted user who dispatched the query.
    * @param chatId - Chat containing the callback button or embedded message.
    * @param dispatch - Callback-query update dispatch.
@@ -1513,22 +1532,56 @@ export class Chats<TContext extends Context = Context> {
       throw new Error('Callback-query clicker must be a user minted by this Chats orchestrator');
     }
 
-    const previousDispatch = this.clickRoutingTail;
-    let completeDispatch!: () => void;
+    const { bot } = this;
 
-    this.clickRoutingTail = new Promise<void>((resolve) => {
-      completeDispatch = resolve;
-    });
+    if (!bot) {
+      throw new Error('Bot not attached — call prepareBot() first');
+    }
 
-    await previousDispatch;
-    this.activeClickRouting = { userId: user.id, chatId };
+    const config = bot.api.config as MutableTransformerConfig;
+    const { installedTransformers } = config;
+    const { captureTransformer } = this;
+    const clickRouting = { userId: user.id, chatId };
+
+    if (!captureTransformer) {
+      throw new Error('Callback-query routing is unavailable before prepareBot installs its capture transformer');
+    }
+
+    const routingTransformer: Transformer = (previous, method, payload, signal) => {
+      this.clickRoutingByPayload.set(payload, clickRouting);
+
+      try {
+        return previous(method, payload, signal);
+      } finally {
+        this.clickRoutingByPayload.delete(payload);
+      }
+    };
+
+    config.installedTransformers = () => {
+      const transformers = installedTransformers();
+      const captureIndex = transformers.indexOf(captureTransformer);
+
+      if (captureIndex === -1) {
+        throw new Error('The grammy-testing capture transformer is no longer installed');
+      }
+
+      // Placing the routing transformer immediately outside the terminal one
+      // marks the final payload even when user transformers above it await or
+      // replace earlier payloads.
+      return [...transformers.slice(0, captureIndex + 1), routingTransformer, ...transformers.slice(captureIndex + 1)];
+    };
+
+    let dispatchPromise: Promise<void>;
 
     try {
-      await dispatch();
+      // Bot.handleUpdate synchronously snapshots installed transformers onto a
+      // fresh per-update Api before returning its promise.
+      dispatchPromise = dispatch();
     } finally {
-      this.activeClickRouting = undefined;
-      completeDispatch();
+      config.installedTransformers = installedTransformers;
     }
+
+    await dispatchPromise;
   }
 
   /**
