@@ -169,6 +169,49 @@ describe('Payments', () => {
 
   describe('payInvoice', () => {
     describe('positive completion', () => {
+      it('isolates the captured invoice from mutations to the mocked response', async () => {
+        const bot = new Bot('test-token');
+        let observedPreCheckout: PreCheckoutQuery | undefined;
+
+        bot.command('buy', async (ctx) => {
+          const sent = await ctx.replyWithInvoice(
+            'Detached invoice',
+            'Preserves captured values',
+            'detached-invoice',
+            'USD',
+            [{ label: 'Item', amount: 100 }],
+            {
+              provider_token: 'provider-token',
+            },
+          );
+
+          sent.invoice.currency = 'EUR';
+          sent.invoice.total_amount = 9999;
+        });
+
+        bot.on('pre_checkout_query', async (ctx) => {
+          observedPreCheckout = ctx.preCheckoutQuery;
+          await ctx.answerPreCheckoutQuery(true);
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await user.sendCommand('/buy');
+
+        const invoice = user.replies.lastOrThrow();
+
+        expect(invoice.invoice).toMatchObject({ currency: 'USD', total_amount: 100 });
+
+        const payment = await user.payInvoice(invoice);
+
+        expect(observedPreCheckout).toMatchObject({ currency: 'USD', total_amount: 100 });
+
+        const successful = await payment.completeSuccessfully();
+
+        expect(successful.successful_payment).toMatchObject({ currency: 'USD', total_amount: 100 });
+      });
+
       it('correlates flexible shipping and pre-checkout before explicit provider success', async () => {
         const bot = new Bot('test-token');
         let observedShipping: ShippingQuery | undefined;

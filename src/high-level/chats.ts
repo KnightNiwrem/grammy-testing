@@ -1079,7 +1079,7 @@ export class Chats<TContext extends Context = Context> {
       const message = syntheticMessage();
       const invoice = this.lastCapturedReply?.invoice;
 
-      return invoice === undefined ? message : { ...message, invoice };
+      return invoice === undefined ? message : { ...message, invoice: { ...invoice } };
     };
 
     const syntheticMediaGroup = (payload: Record<string, unknown>): unknown[] => {
