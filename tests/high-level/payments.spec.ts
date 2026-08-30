@@ -659,6 +659,45 @@ describe('Payments', () => {
     });
 
     describe('negative validation', () => {
+      it('rejects checkout for an invoice whose send call failed', async () => {
+        const bot = new Bot('test-token');
+        let preCheckoutCount = 0;
+
+        bot.command('buy', async (ctx) => {
+          try {
+            await ctx.replyWithInvoice(
+              'Undelivered order',
+              'The send fails',
+              'undelivered-order',
+              'USD',
+              [{ label: 'Item', amount: 100 }],
+              {
+                provider_token: 'provider-token',
+              },
+            );
+          } catch {
+            // The bot may intentionally handle a failed Telegram send call.
+          }
+        });
+
+        bot.on('pre_checkout_query', () => {
+          preCheckoutCount += 1;
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        chats.outgoing.failNext('sendInvoice', { code: 400, description: 'INVOICE_PAYLOAD_INVALID' });
+
+        await user.sendCommand('/buy');
+
+        const invoice = user.replies.lastOrThrow();
+
+        expect(invoice.invoice?.title).toBe('Undelivered order');
+        await expect(user.payInvoice(invoice)).rejects.toThrow(/sendInvoice call did not settle successfully/);
+        expect(preCheckoutCount).toBe(0);
+      });
+
       it('rejects payment orchestration for a group invoice', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);

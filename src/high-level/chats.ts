@@ -606,6 +606,9 @@ export class Chats<TContext extends Context = Context> {
   /** Message requests awaiting a successful mocked result whose message ID may differ. */
   private pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
 
+  /** Captured message replies whose mocked API call settled successfully. */
+  private deliveredMessageReplies = new WeakSet<Reply<TContext>>();
+
   /** The Reply created by the most recent message-method `onCapture` call. Read by the default response resolvers. */
   private lastCapturedReply: Reply<TContext> | undefined;
 
@@ -678,6 +681,7 @@ export class Chats<TContext extends Context = Context> {
     this.preCheckoutQueryAnswers.clear();
     this.pendingPaymentAnswers = new WeakMap<Request, () => void>();
     this.pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
+    this.deliveredMessageReplies = new WeakSet<Reply<TContext>>();
     this.lastCapturedReply = undefined;
   }
 
@@ -1469,6 +1473,7 @@ export class Chats<TContext extends Context = Context> {
     this.pendingMessageReplies.delete(request);
 
     if (ok && pendingReply !== undefined) {
+      this.deliveredMessageReplies.add(pendingReply.reply);
       this.registerReturnedMessageIds(pendingReply.chatId, pendingReply.reply, result);
     }
 
@@ -1872,6 +1877,10 @@ export class Chats<TContext extends Context = Context> {
 
     if (publicInvoice === undefined || typeof invoice.raw.payload !== 'string') {
       throw new Error('payInvoice: reply does not contain a captured sendInvoice payload');
+    }
+
+    if (!this.deliveredMessageReplies.has(invoice)) {
+      throw new Error('payInvoice: captured sendInvoice call did not settle successfully');
     }
 
     if (invoice.chat?.type !== 'private' || invoice.chat.user !== user) {
