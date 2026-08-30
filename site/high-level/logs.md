@@ -146,3 +146,42 @@ await user.sendCommand('/clean', undefined, { chat: group });
 const deletion = chats.deletionsFor(group).lastOrThrow();
 expect(deletion.messageId).toBe(msg.message_id);
 ```
+
+---
+
+## ReactionChangesLog
+
+Captures every outgoing `setMessageReaction` attempt. Use `chats.reactionChanges` for the
+global sequence or `chat.reactionChanges` for a registered chat's scoped projection. The
+record models replacement semantics: `reaction` is the bot's complete chosen set, and an
+empty array means remove the bot's reaction.
+
+```ts
+group.reactionChanges.all; // ReactionChange<TContext>[]
+group.reactionChanges.last; // ReactionChange<TContext> | undefined
+group.reactionChanges.length; // number
+group.reactionChanges.lastOrThrow(); // ReactionChange<TContext> — throws if empty
+group.reactionChanges.clear();
+```
+
+### ReactionChange interface
+
+```ts
+interface ReactionChange<TContext> {
+  chatId: number | string;
+  messageId: number;
+  reaction: readonly ReactionType[];
+  isBig: boolean | undefined;
+  reply: Reply<TContext> | undefined;
+  raw: Record<string, unknown>;
+}
+```
+
+### Example
+
+```ts
+await bot.api.setMessageReaction(group.id, 42, [{ type: 'emoji', emoji: '👍' }]);
+
+const change = group.reactionChanges.lastOrThrow();
+expect(change.reaction).toEqual([{ type: 'emoji', emoji: '👍' }]);
+```

@@ -107,6 +107,31 @@ interface Deletion<TContext extends Context = Context> {
 | `lastOrThrow()` | `Deletion<TContext>`              | Last deletion or throws |
 | `clear()`       | `void`                            | Reset                   |
 
+---
+
+## ReactionChangesLog\<TContext\>
+
+Global or per-chat log of outgoing `setMessageReaction` attempts.
+
+```ts
+interface ReactionChange<TContext extends Context = Context> {
+  chatId: number | string;
+  messageId: number;
+  reaction: readonly ReactionType[];
+  isBig: boolean | undefined;
+  reply: Reply<TContext> | undefined;
+  raw: Record<string, unknown>;
+}
+```
+
+| Property/Method | Type                                    | Description            |
+| --------------- | --------------------------------------- | ---------------------- |
+| `all`           | `readonly ReactionChange<TContext>[]`   | All captured attempts  |
+| `last`          | `ReactionChange<TContext> \| undefined` | Last captured attempt  |
+| `length`        | `number`                                | Count                  |
+| `lastOrThrow()` | `ReactionChange<TContext>`              | Last attempt or throws |
+| `clear()`       | `void`                                  | Reset                  |
+
 ## See also
 
 - [Logs guide](/high-level/logs)

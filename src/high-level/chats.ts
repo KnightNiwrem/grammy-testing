@@ -29,6 +29,7 @@ import {
   ModerationLog,
 } from './moderation-log';
 import { PrivateChat } from './private-chat';
+import { type ReactionChange, ReactionChangesLog } from './reaction-changes-log';
 import { ReactionRemovalsLog } from './reaction-removals-log';
 import { Reply } from './reply';
 import { Supergroup } from './supergroup';
@@ -204,6 +205,12 @@ const REACTION_REMOVAL_METHODS_GUARD = {
 
 const REACTION_REMOVAL_METHODS = new Set(Object.keys(REACTION_REMOVAL_METHODS_GUARD));
 
+const REACTION_CHANGE_METHODS_GUARD = {
+  setMessageReaction: true,
+} satisfies Partial<Record<keyof RawApi, true>>;
+
+const REACTION_CHANGE_METHODS = new Set(Object.keys(REACTION_CHANGE_METHODS_GUARD));
+
 const MODERATION_METHODS_GUARD = {
   banChatMember: true,
   unbanChatMember: true,
@@ -359,6 +366,9 @@ export class Chats<TContext extends Context = Context> {
   /** Orchestrator-wide log of captured `deleteMessageReaction` / `deleteAllMessageReactions` calls. */
   readonly reactionRemovals = new ReactionRemovalsLog();
 
+  /** Orchestrator-wide log of captured `setMessageReaction` calls. */
+  readonly reactionChanges = new ReactionChangesLog<TContext>();
+
   /** guest_query_id->User registry, populated by `user.sendGuestMessage`, for answer correlation. */
   private readonly guestQueryToUser = new Map<string, User<TContext>>();
 
@@ -367,6 +377,9 @@ export class Chats<TContext extends Context = Context> {
    * applied by `settleFromCapture` only when the mocked response succeeds.
    */
   private readonly pendingModerationTransitions = new WeakMap<Request, () => void>();
+
+  /** Message requests awaiting a successful mocked result whose message ID may differ. */
+  private pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
 
   /** The Reply created by the most recent message-method `onCapture` call. Read by the default response resolvers. */
   private lastCapturedReply: Reply<TContext> | undefined;
@@ -410,6 +423,7 @@ export class Chats<TContext extends Context = Context> {
 
     for (const chat of this.chats.values()) {
       chat.messages.clear();
+      chat.reactionChanges.clear();
 
       if (chat.type !== 'private') {
         chat.moderation.clear();
@@ -427,10 +441,12 @@ export class Chats<TContext extends Context = Context> {
     }
 
     this.reactionRemovals.clear();
+    this.reactionChanges.clear();
     this.guestQueryToUser.clear();
     this.messageIdToReply.clear();
     this.messageAuthors.clear();
     this.clickers.clear();
+    this.pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
     this.lastCapturedReply = undefined;
   }
 
@@ -875,6 +891,12 @@ export class Chats<TContext extends Context = Context> {
       return;
     }
 
+    if (REACTION_CHANGE_METHODS.has(request.method)) {
+      this.deriveReactionChange(payload);
+
+      return;
+    }
+
     if (MODERATION_METHODS.has(request.method)) {
       this.deriveModeration(request, payload);
 
@@ -923,6 +945,7 @@ export class Chats<TContext extends Context = Context> {
     this.lastCapturedReply = reply;
 
     this.setReplyForChat(chat.id, reply);
+    this.pendingMessageReplies.set(request, { chatId: chat.id, reply });
 
     chat.messages.push(reply);
     reply.topic?.messages.push(reply);
@@ -1064,6 +1087,42 @@ export class Chats<TContext extends Context = Context> {
   }
 
   /**
+   * Routes a captured `setMessageReaction` payload to the orchestrator-wide log and,
+   * when the target chat is registered, that chat's scoped log.
+   * @param payload - The raw outgoing API payload.
+   */
+  private deriveReactionChange(payload: Record<string, unknown>): void {
+    const chatId = payload.chat_id as ChatId | undefined;
+    const messageId = payload.message_id as number | undefined;
+
+    if (chatId === undefined || messageId === undefined) {
+      return;
+    }
+
+    const numericChatId = Number(chatId);
+    const chat = this.findChatByTelegramId(numericChatId);
+
+    const change: ReactionChange<TContext> = {
+      chatId,
+      messageId,
+      reaction: (payload.reaction as ReactionChange<TContext>['reaction'] | undefined) ?? [],
+      isBig: payload.is_big as boolean | undefined,
+      reply: this.messageIdToReply.get(numericChatId)?.get(messageId),
+      raw: payload,
+    };
+
+    this.reactionChanges.push(change);
+
+    if (!chat) {
+      this.warnUnregisteredChat('setMessageReaction', chatId);
+
+      return;
+    }
+
+    chat.reactionChanges.push(change);
+  }
+
+  /**
    * Routes a captured `banChatMember` / `unbanChatMember` / `restrictChatMember` /
    * `promoteChatMember` payload to the target chat's moderation log and queues the
    * membership transition so `user.in(chat)` and the `getChatMember` resolver reflect
@@ -1111,13 +1170,23 @@ export class Chats<TContext extends Context = Context> {
   }
 
   /**
-   * Called when a captured request's mocked response settles. Applies the queued
-   * membership transition for a moderation call only when the call succeeded.
+   * Called when a captured request's mocked response settles. Registers the
+   * message ID returned by a successful mocked send against its captured reply,
+   * and applies queued moderation transitions only when the call succeeded.
    * @param request - The captured outgoing API request that settled.
    * @param ok - Whether the call resolved with an `ok: true` envelope.
+   * @param result - The successful envelope's result, or `undefined` on failure.
    * @internal
    */
-  settleFromCapture(request: Request, ok: boolean): void {
+  settleFromCapture(request: Request, ok: boolean, result: unknown): void {
+    const pendingReply = this.pendingMessageReplies.get(request);
+
+    this.pendingMessageReplies.delete(request);
+
+    if (ok && pendingReply !== undefined) {
+      this.registerReturnedMessageIds(pendingReply.chatId, pendingReply.reply, result);
+    }
+
     const transition = this.pendingModerationTransitions.get(request);
 
     if (transition === undefined) {
@@ -1444,11 +1513,76 @@ export class Chats<TContext extends Context = Context> {
   }
 
   /**
+   * Registers every Telegram message identity from a successful mocked send result.
+   * Media-group sends return multiple messages that all represent the same captured reply.
+   * @param chatId - The destination chat's Telegram ID.
+   * @param reply - The captured bot reply.
+   * @param result - The mocked API result, either one message-like object or an array.
+   */
+  private registerReturnedMessageIds(chatId: number, reply: Reply<TContext>, result: unknown): void {
+    const returnedMessages: unknown[] = Array.isArray(result) ? (result as unknown[]) : [result];
+
+    for (const returnedMessage of returnedMessages) {
+      if (typeof returnedMessage === 'object' && returnedMessage !== null && 'message_id' in returnedMessage) {
+        const messageId = returnedMessage.message_id;
+
+        if (typeof messageId === 'number') {
+          if (!this.ids.hasIssuedMessageId(messageId)) {
+            this.ids.reserveMessageId(messageId);
+          }
+
+          this.setReplyForChat(chatId, reply, messageId);
+          this.backfillReactionReply(chatId, messageId, reply);
+        }
+      }
+    }
+  }
+
+  /**
+   * Resolves reaction attempts captured while an asynchronous send response was still pending.
+   * Checks both independently clearable projections; when both retain a change they share the
+   * same object, so the second pass is a no-op.
+   * @param chatId - The destination chat's Telegram ID.
+   * @param messageId - The message identity returned by the mocked send.
+   * @param reply - The captured bot reply associated with that identity.
+   */
+  private backfillReactionReply(chatId: number, messageId: number, reply: Reply<TContext>): void {
+    this.backfillReactionLog(this.reactionChanges.all, chatId, messageId, reply);
+
+    const chat = this.findChatByTelegramId(chatId);
+
+    if (chat !== undefined) {
+      this.backfillReactionLog(chat.reactionChanges.all, chatId, messageId, reply);
+    }
+  }
+
+  /**
+   * Backfills one reaction-log projection for a newly resolved message identity.
+   * @param changes - The global or per-chat reaction records to inspect.
+   * @param chatId - The destination chat's Telegram ID.
+   * @param messageId - The message identity returned by the mocked send.
+   * @param reply - The captured bot reply associated with that identity.
+   */
+  private backfillReactionLog(
+    changes: readonly ReactionChange<TContext>[],
+    chatId: number,
+    messageId: number,
+    reply: Reply<TContext>,
+  ): void {
+    for (const change of changes) {
+      if (change.reply === undefined && Number(change.chatId) === chatId && change.messageId === messageId) {
+        change.reply = reply;
+      }
+    }
+  }
+
+  /**
    * Registers a captured bot reply under its chat-scoped Telegram message identity.
    * @param chatId - The destination chat's Telegram ID.
    * @param reply - The captured bot reply.
+   * @param messageId - The Telegram message ID to register; defaults to the reply's synthetic ID.
    */
-  private setReplyForChat(chatId: number, reply: Reply<TContext>): void {
+  private setReplyForChat(chatId: number, reply: Reply<TContext>, messageId = reply.messageId): void {
     let replies = this.messageIdToReply.get(chatId);
 
     if (!replies) {
@@ -1456,7 +1590,7 @@ export class Chats<TContext extends Context = Context> {
       this.messageIdToReply.set(chatId, replies);
     }
 
-    replies.set(reply.messageId, reply);
+    replies.set(messageId, reply);
   }
 
   /**
@@ -1524,6 +1658,7 @@ export class Chats<TContext extends Context = Context> {
 
     this.chats.set(chat.id, chat);
     this.chatDeletions.set(chat.id, new DeletionsLog<TContext>());
+    chat.reactionChanges = new ReactionChangesLog<TContext>();
 
     if (this.bot) {
       chat[setBotRef](this.bot);
@@ -1571,6 +1706,7 @@ export class Chats<TContext extends Context = Context> {
 
     chat.messages = new MessagesLog<TContext>();
     chat.moderation = new ModerationLog<TContext>();
+    chat.reactionChanges = new ReactionChangesLog<TContext>();
     this.chats.set(chat.id, chat);
     this.chatDeletions.set(chat.id, new DeletionsLog<TContext>());
 

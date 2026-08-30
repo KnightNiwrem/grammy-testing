@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.33.0 — 2026-08-30
+
+### Bot reaction-change capture
+
+Outgoing `setMessageReaction` calls now have a first-class high-level projection instead
+of requiring tests to search `chats.outgoing.requests`. (#10)
+
+- `chats.reactionChanges` records every captured attempt in dispatch order, including
+  calls to unregistered chats and calls that the mock later rejects.
+- Every registered `PrivateChat`, `Group`, `Supergroup`, and `Channel` exposes its own
+  `chat.reactionChanges` projection. Records include `chatId`, `messageId`, the complete
+  replacement `reaction` set, `isBig`, the resolved bot `reply` when available, and the
+  original `raw` payload.
+- An omitted reaction list is normalized to an empty replacement set, matching Telegram's
+  remove-own-reaction semantics. Moderation removals remain in `chats.reactionRemovals`
+  because they remove another actor's reactions rather than changing the bot's own set.
+- Capture does not synthesize a `message_reaction` update or pretend to maintain Telegram
+  reaction state. `chats.clear()` resets both the global and per-chat projections.
+
 ## 0.32.0 — 2026-08-30
 
 ### Reply-to-author routing in `user.replies`
