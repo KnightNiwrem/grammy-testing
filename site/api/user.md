@@ -113,12 +113,20 @@ All methods return `Promise<Message>` unless noted.
 
 ### Payment
 
-| Method                  | Signature                                                                |
-| ----------------------- | ------------------------------------------------------------------------ |
-| `sendSuccessfulPayment` | `(options?: SendSuccessfulPaymentOptions) => Promise<Message>`           |
-| `sendShippingQuery`     | `(options?) => Promise<void>`                                            |
-| `sendPreCheckoutQuery`  | `(options?) => Promise<void>`                                            |
-| `purchasePaidMedia`     | `(payload: string, options?: PurchasePaidMediaOptions) => Promise<void>` |
+| Method                  | Signature                                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------------- |
+| `payInvoice`            | `(invoice: Reply, options?: PayInvoiceOptions) => Promise<InvoicePayment<TContext>>`            |
+| `sendSuccessfulPayment` | `(invoicePayload: string, currency: string, totalAmount: number, options?) => Promise<Message>` |
+| `sendShippingQuery`     | `(invoicePayload: string, shippingAddress: ShippingAddress) => Promise<void>`                   |
+| `sendPreCheckoutQuery`  | `(invoicePayload: string, currency: string, totalAmount: number) => Promise<void>`              |
+| `purchasePaidMedia`     | `(payload: string, options?: PurchasePaidMediaOptions) => Promise<void>`                        |
+
+`InvoicePayment` is a live handle with correlated `shippingAnswer` and
+`preCheckoutAnswer` getters. Its `status` is one of `shipping-unanswered`,
+`shipping-declined`, `awaiting-pre-checkout`, `pre-checkout-unanswered`,
+`pre-checkout-declined`, `ready`, or `completed`. Call
+`completeSuccessfully(options?)` explicitly from `ready` to dispatch the
+successful-payment service message.
 
 ### Bot & chat management
 

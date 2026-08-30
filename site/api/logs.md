@@ -8,13 +8,14 @@ Per-chat log of all bot sends.
 class MessagesLog<TContext extends Context = Context>
 ```
 
-| Property/Method   | Type                           | Description                         |
-| ----------------- | ------------------------------ | ----------------------------------- |
-| `all`             | `Reply<TContext>[]`            | All captured messages               |
-| `last`            | `Reply<TContext> \| undefined` | Last captured message               |
-| `length`          | `number`                       | Count                               |
-| `byText(matcher)` | `Reply<TContext> \| undefined` | Find first by exact string or regex |
-| `clear()`         | `void`                         | Reset                               |
+| Property/Method           | Type                           | Description                                |
+| ------------------------- | ------------------------------ | ------------------------------------------ |
+| `all`                     | `Reply<TContext>[]`            | All captured messages                      |
+| `last`                    | `Reply<TContext> \| undefined` | Last captured message                      |
+| `length`                  | `number`                       | Count                                      |
+| `byText(matcher)`         | `Reply<TContext> \| undefined` | Find first by exact text or regex          |
+| `byInvoiceTitle(matcher)` | `Reply<TContext> \| undefined` | Find first by exact invoice title or regex |
+| `clear()`                 | `void`                         | Reset                                      |
 
 ---
 
@@ -26,13 +27,15 @@ Per-user log of bot replies to that user.
 class RepliesInbox<TContext extends Context = Context>
 ```
 
-| Property/Method | Type                           | Description                  |
-| --------------- | ------------------------------ | ---------------------------- |
-| `all`           | `Reply<TContext>[]`            | All replies                  |
-| `last`          | `Reply<TContext> \| undefined` | Last reply                   |
-| `length`        | `number`                       | Count                        |
-| `lastOrThrow()` | `Reply<TContext>`              | Last reply or throws `Error` |
-| `clear()`       | `void`                         | Reset                        |
+| Property/Method           | Type                           | Description                                |
+| ------------------------- | ------------------------------ | ------------------------------------------ |
+| `all`                     | `Reply<TContext>[]`            | All replies                                |
+| `last`                    | `Reply<TContext> \| undefined` | Last reply                                 |
+| `length`                  | `number`                       | Count                                      |
+| `lastOrThrow()`           | `Reply<TContext>`              | Last reply or throws `Error`               |
+| `byText(matcher)`         | `Reply<TContext> \| undefined` | Find first by exact text or regex          |
+| `byInvoiceTitle(matcher)` | `Reply<TContext> \| undefined` | Find first by exact invoice title or regex |
+| `clear()`                 | `void`                         | Reset                                      |
 
 ---
 

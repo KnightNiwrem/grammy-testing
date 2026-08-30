@@ -53,6 +53,15 @@ export { Group, type PostRelayMessageOptions } from './high-level/group';
 
 export { MessagesLog } from './high-level/messages-log';
 
+export {
+  type CompleteSuccessfulPaymentOptions,
+  InvoicePayment,
+  type InvoicePaymentStatus,
+  type PayInvoiceOptions,
+  type PreCheckoutQueryAnswer,
+  type ShippingQueryAnswer,
+} from './high-level/payment';
+
 export { ModerationActionsView, ModerationLog, type ModerationAction, type ModerationActionKind } from './high-level/moderation-log';
 
 export { PrivateChat } from './high-level/private-chat';

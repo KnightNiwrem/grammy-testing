@@ -3,7 +3,7 @@
 /* eslint-disable no-param-reassign -- attachBot intentionally hands bot to each chat */
 
 import type { Bot, Context, RawApi, Transformer } from 'grammy';
-import type { ChatMember, ChatPermissions, Message, Poll, Update, User as TelegramUser } from 'grammy/types';
+import type { ChatMember, ChatPermissions, Message, Poll, ShippingOption, Update, User as TelegramUser } from 'grammy/types';
 
 import type { IdleTracker } from '../low-level/idle';
 import type { OutgoingRequests, Request } from '../low-level/outgoing-requests';
@@ -29,6 +29,13 @@ import {
   type ModerationAction,
   ModerationLog,
 } from './moderation-log';
+import {
+  type CompleteSuccessfulPaymentOptions,
+  InvoicePayment,
+  type PayInvoiceOptions,
+  type PreCheckoutQueryAnswer,
+  type ShippingQueryAnswer,
+} from './payment';
 import { PrivateChat } from './private-chat';
 import { type ReactionChange, ReactionChangesLog } from './reaction-changes-log';
 import { ReactionRemovalsLog } from './reaction-removals-log';
@@ -163,6 +170,7 @@ const MESSAGE_METHODS_GUARD = {
   sendVenue: true,
   sendPoll: true,
   sendDice: true,
+  sendInvoice: true,
   sendLivePhoto: true,
   sendRichMessage: true,
   sendMediaGroup: true,
@@ -289,6 +297,23 @@ export class RepliesInbox<TContext extends Context = Context> {
     });
   }
 
+  /**
+   * Returns the first invoice reply whose product title matches `matcher`.
+   * @param matcher - A string for exact match or a `RegExp` for pattern match.
+   * @returns The first matching invoice reply, or `undefined`.
+   */
+  byInvoiceTitle(matcher: RegExp | string): Reply<TContext> | undefined {
+    return this.items.find((reply) => {
+      const title = reply.invoice?.title;
+
+      if (title === undefined) {
+        return false;
+      }
+
+      return typeof matcher === 'string' ? title === matcher : matcher.test(title);
+    });
+  }
+
   /** Removes all replies from the inbox. */
   clear(): void {
     this.items.length = 0;
@@ -316,6 +341,137 @@ interface ClickRoutingContext {
 
 interface MutableTransformerConfig {
   installedTransformers: () => Transformer[];
+}
+
+interface InvoicePaymentState<TContext extends Context> {
+  user: User<TContext>;
+  invoice: Reply<TContext>;
+  options: PayInvoiceOptions;
+  currency: string;
+  invoicePayload: string;
+  isShippingRequired: boolean;
+  shippingQueryId: string | undefined;
+  preCheckoutQueryId: string | undefined;
+  selectedShippingOption: ShippingOption | undefined;
+  totalAmount: number;
+  successfulPayment: Message | undefined;
+}
+
+interface ValidatedInvoicePaymentOptions {
+  isShippingRequired: boolean;
+  tipAmount: number;
+}
+
+/**
+ * Validates the optional tip and returns its normalized value.
+ * @param invoice - Captured invoice reply.
+ * @param options - Requested checkout options.
+ * @param isStars - Whether the invoice uses Telegram Stars.
+ * @returns The normalized tip amount.
+ */
+function validateInvoiceTip<TContext extends Context>(invoice: Reply<TContext>, options: PayInvoiceOptions, isStars: boolean): number {
+  const tipAmount = options.tipAmount ?? 0;
+
+  if (!Number.isSafeInteger(tipAmount) || tipAmount < 0) {
+    throw new Error('payInvoice: tipAmount must be a non-negative safe integer');
+  }
+
+  if (isStars && tipAmount !== 0) {
+    throw new Error('payInvoice: Telegram Stars invoices do not support tips');
+  }
+
+  const maxTipAmount = typeof invoice.raw.max_tip_amount === 'number' ? invoice.raw.max_tip_amount : 0;
+
+  if (tipAmount > maxTipAmount) {
+    throw new Error(`payInvoice: tipAmount ${String(tipAmount)} exceeds max_tip_amount ${String(maxTipAmount)}`);
+  }
+
+  return tipAmount;
+}
+
+/**
+ * Validates personal information requested by a non-Stars invoice.
+ * @param invoice - Captured invoice reply.
+ * @param options - Requested checkout options.
+ * @param isStars - Whether the invoice uses Telegram Stars.
+ */
+function validateInvoiceOrderInfo<TContext extends Context>(invoice: Reply<TContext>, options: PayInvoiceOptions, isStars: boolean): void {
+  const { orderInfo } = options;
+
+  if (isStars) {
+    if (orderInfo !== undefined) {
+      throw new Error('payInvoice: Telegram Stars invoices do not support personal order information');
+    }
+
+    return;
+  }
+
+  if (invoice.raw.need_name === true && !orderInfo?.name) {
+    throw new Error('payInvoice: orderInfo.name is required by this invoice');
+  }
+
+  if (invoice.raw.need_phone_number === true && !orderInfo?.phone_number) {
+    throw new Error('payInvoice: orderInfo.phone_number is required by this invoice');
+  }
+
+  if (invoice.raw.need_email === true && !orderInfo?.email) {
+    throw new Error('payInvoice: orderInfo.email is required by this invoice');
+  }
+
+  if (invoice.raw.need_shipping_address === true && !orderInfo?.shipping_address) {
+    throw new Error('payInvoice: orderInfo.shipping_address is required by this invoice');
+  }
+}
+
+/**
+ * Validates shipping selection and reports whether a shipping query is needed.
+ * @param invoice - Captured invoice reply.
+ * @param options - Requested checkout options.
+ * @param isStars - Whether the invoice uses Telegram Stars.
+ * @returns Whether checkout requires a shipping query.
+ */
+function validateInvoiceShipping<TContext extends Context>(
+  invoice: Reply<TContext>,
+  options: PayInvoiceOptions,
+  isStars: boolean,
+): boolean {
+  const isShippingRequired = !isStars && invoice.raw.is_flexible === true;
+
+  if (isStars && options.shippingOptionId !== undefined) {
+    throw new Error('payInvoice: Telegram Stars invoices do not support shipping');
+  }
+
+  if (isShippingRequired && options.shippingOptionId === undefined) {
+    throw new Error('payInvoice: shippingOptionId is required for a flexible invoice');
+  }
+
+  if (!isShippingRequired && options.shippingOptionId !== undefined) {
+    throw new Error('payInvoice: shippingOptionId is only valid for a flexible invoice');
+  }
+
+  return isShippingRequired;
+}
+
+/**
+ * Validates all checkout options for one captured invoice.
+ * @param invoice - Captured invoice reply.
+ * @param options - Requested checkout options.
+ * @param isStars - Whether the invoice uses Telegram Stars.
+ * @returns Normalized values needed to initialize payment state.
+ */
+function validateInvoicePaymentOptions<TContext extends Context>(
+  invoice: Reply<TContext>,
+  options: PayInvoiceOptions,
+  isStars: boolean,
+): ValidatedInvoicePaymentOptions {
+  const tipAmount = validateInvoiceTip(invoice, options, isStars);
+
+  validateInvoiceOrderInfo(invoice, options, isStars);
+
+  return {
+    isShippingRequired: validateInvoiceShipping(invoice, options, isStars),
+    tipAmount,
+  };
 }
 
 interface BotRef<TContext extends Context> {
@@ -371,6 +527,15 @@ export class Chats<TContext extends Context = Context> {
   private readonly callbackQueryIds = new Set<string>();
 
   private readonly callbackQueryAnswers = new Map<string, CallbackQueryAnswer>();
+
+  /** Query IDs minted by invoice flows and their strictly correlated answers. */
+  private readonly shippingQueryIds = new Set<string>();
+
+  private readonly shippingQueryAnswers = new Map<string, ShippingQueryAnswer>();
+
+  private readonly preCheckoutQueryIds = new Set<string>();
+
+  private readonly preCheckoutQueryAnswers = new Map<string, PreCheckoutQueryAnswer>();
 
   /** chatId->messageId->Reply registry for reply.replyingTo and mutation resolution. */
   private readonly messageIdToReply = new Map<number, Map<number, Reply<TContext>>>();
@@ -465,6 +630,10 @@ export class Chats<TContext extends Context = Context> {
     this.messageAuthors.clear();
     this.callbackQueryIds.clear();
     this.callbackQueryAnswers.clear();
+    this.shippingQueryIds.clear();
+    this.shippingQueryAnswers.clear();
+    this.preCheckoutQueryIds.clear();
+    this.preCheckoutQueryAnswers.clear();
     this.pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
     this.lastCapturedReply = undefined;
   }
@@ -550,6 +719,7 @@ export class Chats<TContext extends Context = Context> {
         },
         createCallbackQuery: (queryId, callbackData) => this.createCallbackQuery(queryId, callbackData),
         runWithClicker: (who, targetChatId, dispatch) => this.runWithClicker(who, targetChatId, dispatch),
+        payInvoice: (who, invoice, options) => this.payInvoice(who, invoice, options),
         recordMessageAuthor: (message) => {
           if (message.sender_chat !== undefined) {
             this.recordMessageAuthor(message);
@@ -748,6 +918,13 @@ export class Chats<TContext extends Context = Context> {
       };
     };
 
+    const syntheticInvoice = (): Partial<Message> => {
+      const message = syntheticMessage();
+      const invoice = this.lastCapturedReply?.invoice;
+
+      return invoice === undefined ? message : { ...message, invoice };
+    };
+
     const syntheticMediaGroup = (payload: Record<string, unknown>): unknown[] => {
       const reply = this.lastCapturedReply;
 
@@ -859,6 +1036,7 @@ export class Chats<TContext extends Context = Context> {
       sendVenue: syntheticMessage,
       sendPoll: syntheticMessage,
       sendDice: syntheticMessage,
+      sendInvoice: syntheticInvoice as never,
       sendLivePhoto: syntheticMessage as never,
       sendRichMessage: syntheticMessage as never,
       sendMediaGroup: syntheticMediaGroup as never,
@@ -957,6 +1135,18 @@ export class Chats<TContext extends Context = Context> {
    * @returns `true` when the caller should stop before message derivation.
    */
   private deriveNonMessageCapture(request: Request, payload: Record<string, unknown>): boolean {
+    if (request.method === 'answerShippingQuery') {
+      this.deriveShippingQueryAnswer(payload);
+
+      return true;
+    }
+
+    if (request.method === 'answerPreCheckoutQuery') {
+      this.derivePreCheckoutQueryAnswer(payload);
+
+      return true;
+    }
+
     if (request.method === 'answerCallbackQuery') {
       this.deriveCallbackQueryAnswer(payload);
 
@@ -1612,6 +1802,273 @@ export class Chats<TContext extends Context = Context> {
     } finally {
       isRoutingActive = false;
     }
+  }
+
+  /**
+   * Starts a payment attempt anchored to one captured private-chat invoice.
+   * @param user - Minted user paying the invoice.
+   * @param invoice - Captured `sendInvoice` reply.
+   * @param options - Checkout details, shipping selection, and optional tip.
+   * @returns A live payment-flow handle after all immediately available stages run.
+   */
+  private async payInvoice(user: User<TContext>, invoice: Reply<TContext>, options: PayInvoiceOptions): Promise<InvoicePayment<TContext>> {
+    if (this.users.get(user.id)?.user !== user) {
+      throw new Error('payInvoice: user must be minted by this Chats orchestrator');
+    }
+
+    const publicInvoice = invoice.invoice;
+
+    if (publicInvoice === undefined || typeof invoice.raw.payload !== 'string') {
+      throw new Error('payInvoice: reply does not contain a captured sendInvoice payload');
+    }
+
+    if (invoice.chat?.type !== 'private' || invoice.chat.user !== user) {
+      throw new Error("payInvoice: payment completion is currently supported only for an invoice in this user's private chat");
+    }
+
+    const { isShippingRequired, tipAmount } = validateInvoicePaymentOptions(invoice, options, publicInvoice.currency === 'XTR');
+
+    const state: InvoicePaymentState<TContext> = {
+      user,
+      invoice,
+      options,
+      currency: publicInvoice.currency,
+      invoicePayload: invoice.raw.payload,
+      isShippingRequired,
+      shippingQueryId: undefined,
+      preCheckoutQueryId: undefined,
+      selectedShippingOption: undefined,
+      totalAmount: publicInvoice.total_amount + tipAmount,
+      successfulPayment: undefined,
+    };
+
+    const payment = new InvoicePayment<TContext>(invoice, {
+      snapshot: () => ({
+        requiresShipping: state.isShippingRequired,
+        shippingQueryId: state.shippingQueryId,
+        preCheckoutQueryId: state.preCheckoutQueryId,
+        shippingAnswer: state.shippingQueryId === undefined ? undefined : this.shippingQueryAnswers.get(state.shippingQueryId),
+        preCheckoutAnswer: state.preCheckoutQueryId === undefined ? undefined : this.preCheckoutQueryAnswers.get(state.preCheckoutQueryId),
+        successfulPayment: state.successfulPayment,
+      }),
+      proceed: () => this.proceedInvoicePayment(state),
+      completeSuccessfully: (completionOptions) => this.completeInvoicePayment(state, completionOptions),
+    });
+
+    await payment.proceed();
+
+    return payment;
+  }
+
+  /**
+   * Dispatches the next eligible shipping or pre-checkout stage for a payment.
+   * @param state - Internal live payment state.
+   */
+  private async proceedInvoicePayment(state: InvoicePaymentState<TContext>): Promise<void> {
+    if (state.successfulPayment !== undefined || state.preCheckoutQueryId !== undefined) {
+      return;
+    }
+
+    const { bot } = this;
+
+    if (!bot) {
+      throw new Error('Bot not attached — call prepareBot() first');
+    }
+
+    const from = {
+      id: state.user.id,
+      is_bot: false,
+      first_name: state.user.first_name,
+      last_name: state.user.last_name,
+      username: state.user.username,
+    };
+
+    if (state.isShippingRequired) {
+      const shippingAnswer = await this.resolveInvoiceShipping(state, bot, from);
+
+      if (!shippingAnswer?.ok) {
+        return;
+      }
+
+      this.selectInvoiceShippingOption(state, shippingAnswer);
+    }
+
+    state.preCheckoutQueryId = `pcq-${String(this.ids.nextMessageId())}`;
+    this.preCheckoutQueryIds.add(state.preCheckoutQueryId);
+
+    await bot.handleUpdate({
+      update_id: this.ids.nextUpdateId(),
+      pre_checkout_query: {
+        id: state.preCheckoutQueryId,
+        from,
+        currency: state.currency,
+        total_amount: state.totalAmount,
+        invoice_payload: state.invoicePayload,
+        ...(state.selectedShippingOption !== undefined && { shipping_option_id: state.selectedShippingOption.id }),
+        ...(state.options.orderInfo !== undefined && { order_info: state.options.orderInfo }),
+      },
+    } as Update);
+
+    await this.idle();
+  }
+
+  /**
+   * Dispatches a shipping query once, then returns its correlated answer.
+   * @param state - Internal live payment state.
+   * @param bot - Attached grammY bot.
+   * @param from - Synthetic Telegram identity of the paying user.
+   * @returns The correlated shipping answer, when the bot supplied one.
+   */
+  private async resolveInvoiceShipping(
+    state: InvoicePaymentState<TContext>,
+    bot: Bot<TContext>,
+    from: TelegramUser,
+  ): Promise<ShippingQueryAnswer | undefined> {
+    if (state.shippingQueryId === undefined) {
+      const shippingAddress = state.options.orderInfo?.shipping_address;
+
+      if (shippingAddress === undefined) {
+        throw new Error('payInvoice: a flexible invoice requires orderInfo.shipping_address');
+      }
+
+      state.shippingQueryId = `shq-${String(this.ids.nextMessageId())}`;
+      this.shippingQueryIds.add(state.shippingQueryId);
+
+      await bot.handleUpdate({
+        update_id: this.ids.nextUpdateId(),
+        shipping_query: {
+          id: state.shippingQueryId,
+          from,
+          invoice_payload: state.invoicePayload,
+          shipping_address: shippingAddress,
+        },
+      } as Update);
+
+      await this.idle();
+    }
+
+    return this.shippingQueryAnswers.get(state.shippingQueryId);
+  }
+
+  /**
+   * Applies the user's selected option from a successful shipping answer once.
+   * @param state - Internal live payment state.
+   * @param answer - Correlated successful shipping answer.
+   */
+  private selectInvoiceShippingOption(state: InvoicePaymentState<TContext>, answer: ShippingQueryAnswer): void {
+    if (state.selectedShippingOption !== undefined) {
+      return;
+    }
+
+    const selected = answer.shippingOptions?.find(({ id }) => id === state.options.shippingOptionId);
+
+    if (selected === undefined) {
+      throw new Error(`payInvoice: shipping option "${String(state.options.shippingOptionId)}" was not offered by answerShippingQuery`);
+    }
+
+    state.selectedShippingOption = selected;
+    state.totalAmount += selected.prices.reduce((sum, { amount }) => sum + amount, 0);
+  }
+
+  /**
+   * Emits a successful-payment service message only after correlated approval.
+   * @param state - Internal live payment state.
+   * @param options - Optional payment charge-ID fixtures.
+   * @returns The dispatched successful-payment message.
+   */
+  private async completeInvoicePayment(state: InvoicePaymentState<TContext>, options: CompleteSuccessfulPaymentOptions): Promise<Message> {
+    if (state.successfulPayment !== undefined) {
+      throw new Error('completeSuccessfully: this payment is already completed');
+    }
+
+    const { preCheckoutQueryId } = state;
+
+    if (preCheckoutQueryId === undefined) {
+      throw new Error('completeSuccessfully: payment is not ready (awaiting-pre-checkout)');
+    }
+
+    const answer = this.preCheckoutQueryAnswers.get(preCheckoutQueryId);
+
+    if (answer === undefined) {
+      throw new Error('completeSuccessfully: payment is not ready (pre-checkout-unanswered)');
+    }
+
+    if (!answer.ok) {
+      throw new Error('completeSuccessfully: payment is not ready (pre-checkout-declined)');
+    }
+
+    const { bot } = this;
+
+    if (!bot || state.invoice.chat?.type !== 'private') {
+      throw new Error('completeSuccessfully: the invoice private chat is unavailable');
+    }
+
+    const message: Message = {
+      message_id: this.ids.nextMessageId(),
+      date: Math.floor(Date.now() / 1000),
+      chat: state.invoice.chat.toTelegramChat(),
+      from: {
+        id: state.user.id,
+        is_bot: false,
+        first_name: state.user.first_name,
+        last_name: state.user.last_name,
+        username: state.user.username,
+      },
+      successful_payment: {
+        currency: state.currency,
+        total_amount: state.totalAmount,
+        invoice_payload: state.invoicePayload,
+        ...(state.selectedShippingOption !== undefined && { shipping_option_id: state.selectedShippingOption.id }),
+        ...(state.options.orderInfo !== undefined && { order_info: state.options.orderInfo }),
+        telegram_payment_charge_id: options.telegramPaymentChargeId ?? `charge-tg-${preCheckoutQueryId}`,
+        provider_payment_charge_id: options.providerPaymentChargeId ?? `charge-provider-${preCheckoutQueryId}`,
+      },
+    } as Message;
+
+    this.recordMessageAuthor(message, state.user.id);
+    await bot.handleUpdate({ update_id: this.ids.nextUpdateId(), message } as Update);
+    state.successfulPayment = message;
+
+    return message;
+  }
+
+  /**
+   * Captures a strictly correlated `answerShippingQuery` payload.
+   * @param payload - Captured outgoing Bot API payload.
+   */
+  private deriveShippingQueryAnswer(payload: Record<string, unknown>): void {
+    const shippingQueryId = payload.shipping_query_id;
+
+    if (typeof shippingQueryId !== 'string' || !this.shippingQueryIds.has(shippingQueryId) || typeof payload.ok !== 'boolean') {
+      return;
+    }
+
+    this.shippingQueryAnswers.set(shippingQueryId, {
+      shippingQueryId,
+      ok: payload.ok,
+      shippingOptions: Array.isArray(payload.shipping_options) ? (payload.shipping_options as ShippingOption[]) : undefined,
+      errorMessage: typeof payload.error_message === 'string' ? payload.error_message : undefined,
+      raw: payload,
+    });
+  }
+
+  /**
+   * Captures a strictly correlated `answerPreCheckoutQuery` payload.
+   * @param payload - Captured outgoing Bot API payload.
+   */
+  private derivePreCheckoutQueryAnswer(payload: Record<string, unknown>): void {
+    const preCheckoutQueryId = payload.pre_checkout_query_id;
+
+    if (typeof preCheckoutQueryId !== 'string' || !this.preCheckoutQueryIds.has(preCheckoutQueryId) || typeof payload.ok !== 'boolean') {
+      return;
+    }
+
+    this.preCheckoutQueryAnswers.set(preCheckoutQueryId, {
+      preCheckoutQueryId,
+      ok: payload.ok,
+      errorMessage: typeof payload.error_message === 'string' ? payload.error_message : undefined,
+      raw: payload,
+    });
   }
 
   /**

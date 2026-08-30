@@ -17,6 +17,7 @@ dist/
 *.tgz
 site/.vitepress/cache
 site/.vitepress/dist
+site/.vitepress/.temp
 
 drafts
 /*.png

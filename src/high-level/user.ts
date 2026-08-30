@@ -28,6 +28,7 @@ import {
   makeVideoStub,
   makeVoiceStub,
 } from './media-stubs';
+import { type InvoicePayment, type PayInvoiceOptions } from './payment';
 import type { Reply } from './reply';
 import type { Supergroup } from './supergroup';
 import type { Membership } from './types';
@@ -246,6 +247,8 @@ interface UserContext<TContext extends Context = Context> {
   createCallbackQuery: (queryId: string, callbackData: string) => CallbackQueryHandle;
   /** Runs the update within a clicker-scoped reply-routing context. */
   runWithClicker: (user: User<TContext>, chatId: number, dispatch: () => Promise<void>) => Promise<void>;
+  /** Starts a correlated payment flow for one captured invoice. */
+  payInvoice: (user: User<TContext>, invoice: Reply<TContext>, options: PayInvoiceOptions) => Promise<InvoicePayment<TContext>>;
   /** Records a user-authored message before middleware can synchronously reply to it. */
   recordMessageAuthor: (message: Message) => void;
 }
@@ -885,6 +888,18 @@ export class User<TContext extends Context = Context> {
     await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
 
     return message;
+  }
+
+  /**
+   * Runs this user through the shipping and pre-checkout stages of a captured
+   * private-chat invoice. Provider success remains an explicit step on the
+   * returned live handle.
+   * @param invoice - A captured `sendInvoice` reply from this user's private chat.
+   * @param options - Checkout details, shipping selection, and optional tip.
+   * @returns A live, strictly correlated invoice-payment handle.
+   */
+  async payInvoice(invoice: Reply<TContext>, options: PayInvoiceOptions = {}): Promise<InvoicePayment<TContext>> {
+    return this.ctx.payInvoice(this, invoice, options);
   }
 
   /**

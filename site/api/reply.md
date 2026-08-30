@@ -6,18 +6,19 @@ class Reply<TContext extends Context = Context>
 
 ## Properties
 
-| Property      | Type                           | Description                                    |
-| ------------- | ------------------------------ | ---------------------------------------------- |
-| `text`        | `string \| undefined`          | Message text                                   |
-| `parseMode`   | `ParseMode \| undefined`       | Parse mode used                                |
-| `entities`    | `MessageEntity[] \| undefined` | Text entities                                  |
-| `buttons`     | `ReplyButton[]`                | Inline keyboard buttons (empty if no keyboard) |
-| `replyMarkup` | `unknown`                      | Raw `reply_markup` from the payload            |
-| `chat`        | `AnyChat<TContext>`            | Target chat                                    |
-| `messageId`   | `number`                       | Synthetic message ID                           |
-| `raw`         | `Message`                      | Full raw Message object                        |
-| `replyingTo`  | `Reply<TContext> \| undefined` | Referenced earlier reply (if any)              |
-| `media`       | `ReplyMedia \| undefined`      | Media type and file ID (if media message)      |
+| Property      | Type                           | Description                                           |
+| ------------- | ------------------------------ | ----------------------------------------------------- |
+| `text`        | `string \| undefined`          | Message text                                          |
+| `parseMode`   | `ParseMode \| undefined`       | Parse mode used                                       |
+| `entities`    | `MessageEntity[] \| undefined` | Text entities                                         |
+| `buttons`     | `ReplyButton[]`                | Inline keyboard buttons (empty if no keyboard)        |
+| `invoice`     | `Invoice \| undefined`         | Public `sendInvoice` fields (private payload omitted) |
+| `replyMarkup` | `unknown`                      | Raw `reply_markup` from the payload                   |
+| `chat`        | `AnyChat<TContext>`            | Target chat                                           |
+| `messageId`   | `number`                       | Synthetic message ID                                  |
+| `raw`         | `Record<string, unknown>`      | Full outgoing Bot API payload                         |
+| `replyingTo`  | `Reply<TContext> \| undefined` | Referenced earlier reply (if any)                     |
+| `media`       | `ReplyMedia \| undefined`      | Media type and file ID (if media message)             |
 
 ## Methods
 
