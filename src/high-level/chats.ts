@@ -2,7 +2,7 @@
 /* eslint-disable prefer-const -- newUser uses let-then-assign for closure capture */
 /* eslint-disable no-param-reassign -- attachBot intentionally hands bot to each chat */
 
-import type { Bot, Context, RawApi } from 'grammy';
+import type { Bot, Context, RawApi, Transformer } from 'grammy';
 import type { ChatMember, ChatPermissions, Message, Poll, Update, User as TelegramUser } from 'grammy/types';
 
 import type { IdleTracker } from '../low-level/idle';
@@ -11,6 +11,7 @@ import type { Responses } from '../low-level/responses';
 
 import { ActionsLog } from './actions-log';
 import { BusinessAccount } from './business-account';
+import { type CallbackQueryAnswer, CallbackQueryHandle } from './callback-query';
 import { Channel } from './channel';
 import { type AnyChat, setBotRef } from './chat';
 import { type Deletion, DeletionsLog } from './deletions-log';
@@ -308,6 +309,15 @@ interface MessageAuthor {
   messageThreadId: number | undefined;
 }
 
+interface ClickRoutingContext {
+  userId: number;
+  chatId: number;
+}
+
+interface MutableTransformerConfig {
+  installedTransformers: () => Transformer[];
+}
+
 interface BotRef<TContext extends Context> {
   readonly bot: Bot<TContext> | undefined;
 }
@@ -351,8 +361,16 @@ export class Chats<TContext extends Context = Context> {
 
   private readonly chats = new Map<number, AnyChat<TContext>>();
 
-  /** click->user+chat association for the user.replies filter rule. */
-  private readonly clickers = new Map<string, { userId: number; chatId: number }>();
+  /** Final API payload -> originating callback dispatch for user.replies routing. */
+  private readonly clickRoutingByPayload = new WeakMap<object, ClickRoutingContext>();
+
+  /** Terminal capture transformer installed by prepareBot. */
+  private captureTransformer: Transformer | undefined;
+
+  /** Query IDs minted by this orchestrator and their strictly correlated answers. */
+  private readonly callbackQueryIds = new Set<string>();
+
+  private readonly callbackQueryAnswers = new Map<string, CallbackQueryAnswer>();
 
   /** chatId->messageId->Reply registry for reply.replyingTo and mutation resolution. */
   private readonly messageIdToReply = new Map<number, Map<number, Reply<TContext>>>();
@@ -445,7 +463,8 @@ export class Chats<TContext extends Context = Context> {
     this.guestQueryToUser.clear();
     this.messageIdToReply.clear();
     this.messageAuthors.clear();
-    this.clickers.clear();
+    this.callbackQueryIds.clear();
+    this.callbackQueryAnswers.clear();
     this.pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
     this.lastCapturedReply = undefined;
   }
@@ -462,6 +481,16 @@ export class Chats<TContext extends Context = Context> {
     for (const chat of this.chats.values()) {
       chat[setBotRef](bot);
     }
+  }
+
+  /**
+   * Records the terminal transformer so per-update routing can be inserted
+   * immediately outside it without depending on the user's transformer order.
+   * @param transformer - The terminal capture transformer installed by prepareBot.
+   * @internal
+   */
+  attachCaptureTransformer(transformer: Transformer): void {
+    this.captureTransformer = transformer;
   }
 
   /**
@@ -519,6 +548,8 @@ export class Chats<TContext extends Context = Context> {
         recordGuestQuery: (queryId, who) => {
           this.guestQueryToUser.set(queryId, who);
         },
+        createCallbackQuery: (queryId, callbackData) => this.createCallbackQuery(queryId, callbackData),
+        runWithClicker: (who, targetChatId, dispatch) => this.runWithClicker(who, targetChatId, dispatch),
         recordMessageAuthor: (message) => {
           if (message.sender_chat !== undefined) {
             this.recordMessageAuthor(message);
@@ -860,50 +891,9 @@ export class Chats<TContext extends Context = Context> {
    */
   deriveFromCapture(request: Request): void {
     const payload = request.payload as Record<string, unknown>;
+    const clickRouting = this.clickRoutingByPayload.get(payload);
 
-    if (CHAT_ACTION_METHODS.has(request.method)) {
-      this.deriveChatAction(payload);
-
-      return;
-    }
-
-    if (EDIT_METHODS.has(request.method)) {
-      this.deriveEdit(payload);
-
-      return;
-    }
-
-    if (DELETE_METHODS.has(request.method)) {
-      this.deriveDelete(payload);
-
-      return;
-    }
-
-    if (DRAFT_METHODS.has(request.method)) {
-      this.deriveDraft(request.method, payload);
-
-      return;
-    }
-
-    if (REACTION_REMOVAL_METHODS.has(request.method)) {
-      this.deriveReactionRemoval(request.method, payload);
-
-      return;
-    }
-
-    if (REACTION_CHANGE_METHODS.has(request.method)) {
-      this.deriveReactionChange(payload);
-
-      return;
-    }
-
-    if (MODERATION_METHODS.has(request.method)) {
-      this.deriveModeration(request, payload);
-
-      return;
-    }
-
-    if (!MESSAGE_METHODS.has(request.method)) {
+    if (this.deriveNonMessageCapture(request, payload)) {
       return;
     }
 
@@ -936,9 +926,11 @@ export class Chats<TContext extends Context = Context> {
     const reply = new Reply<TContext>(payload, chat, {
       bot,
       ids: this.ids,
-      recordClick: (callbackData, byUserId, byChatId) => {
-        this.clickers.set(callbackData, { userId: byUserId, chatId: byChatId });
+      assertClicker: (who) => {
+        this.assertClicker(who);
       },
+      createCallbackQuery: (queryId, callbackData) => this.createCallbackQuery(queryId, callbackData),
+      runWithClicker: (who, targetChatId, dispatch) => this.runWithClicker(who, targetChatId, dispatch),
       resolveReply: (messageId) => this.messageIdToReply.get(referencedChatId)?.get(messageId),
     });
 
@@ -951,10 +943,69 @@ export class Chats<TContext extends Context = Context> {
     reply.topic?.messages.push(reply);
 
     for (const entry of this.users.values()) {
-      if (this.userReceivesReply(entry, chat, reply)) {
+      if (this.userReceivesReply(entry, chat, reply, clickRouting)) {
         entry.replies.push(reply);
       }
     }
+  }
+
+  /**
+   * Dispatches capture-only API methods to their high-level derivations and
+   * filters methods that do not produce captured replies.
+   * @param request - Captured outgoing request.
+   * @param payload - Raw outgoing payload.
+   * @returns `true` when the caller should stop before message derivation.
+   */
+  private deriveNonMessageCapture(request: Request, payload: Record<string, unknown>): boolean {
+    if (request.method === 'answerCallbackQuery') {
+      this.deriveCallbackQueryAnswer(payload);
+
+      return true;
+    }
+
+    if (CHAT_ACTION_METHODS.has(request.method)) {
+      this.deriveChatAction(payload);
+
+      return true;
+    }
+
+    if (EDIT_METHODS.has(request.method)) {
+      this.deriveEdit(payload);
+
+      return true;
+    }
+
+    if (DELETE_METHODS.has(request.method)) {
+      this.deriveDelete(payload);
+
+      return true;
+    }
+
+    if (DRAFT_METHODS.has(request.method)) {
+      this.deriveDraft(request.method, payload);
+
+      return true;
+    }
+
+    if (REACTION_REMOVAL_METHODS.has(request.method)) {
+      this.deriveReactionRemoval(request.method, payload);
+
+      return true;
+    }
+
+    if (REACTION_CHANGE_METHODS.has(request.method)) {
+      this.deriveReactionChange(payload);
+
+      return true;
+    }
+
+    if (MODERATION_METHODS.has(request.method)) {
+      this.deriveModeration(request, payload);
+
+      return true;
+    }
+
+    return !MESSAGE_METHODS.has(request.method);
   }
 
   /**
@@ -1413,11 +1464,23 @@ export class Chats<TContext extends Context = Context> {
    * @param entry - The user entry to evaluate.
    * @param chat - The chat the reply was sent to.
    * @param reply - The reply to evaluate.
+   * @param click - Callback dispatch associated with the final API payload, if any.
    * @returns `true` if the user should receive the reply.
    */
-  private userReceivesReply(entry: UserEntry<TContext>, chat: AnyChat<TContext>, reply: Reply<TContext>): boolean {
+  private userReceivesReply(
+    entry: UserEntry<TContext>,
+    chat: AnyChat<TContext>,
+    reply: Reply<TContext>,
+    click: ClickRoutingContext | undefined,
+  ): boolean {
     // Rule 1: chat is private with this user
     if (chat.type === 'private' && chat.id === entry.user.id) {
+      return true;
+    }
+
+    // Channel subscribers are not represented in the membership map. An
+    // explicitly attributed channel click still receives its own handler reply.
+    if (chat.type === 'channel' && click?.userId === entry.user.id && click.chatId === chat.id) {
       return true;
     }
 
@@ -1445,14 +1508,132 @@ export class Chats<TContext extends Context = Context> {
       return true;
     }
 
-    // Rule 4: response after a clickButton by this user in this chat
-    for (const [, { userId: byUserId, chatId: byChatId }] of this.clickers) {
-      if (byUserId === entry.user.id && byChatId === chat.id) {
-        return true;
-      }
+    // Rule 4: response during a callback-query dispatch by this user in this chat.
+    if (click?.userId === entry.user.id && click.chatId === chat.id) {
+      return true;
     }
 
     return false;
+  }
+
+  /**
+   * Registers a synthetic callback query and returns its live answer handle.
+   * @param queryId - Generated callback-query ID.
+   * @param callbackData - Callback data carried by the query.
+   * @returns A live, strictly correlated callback-query handle.
+   */
+  private createCallbackQuery(queryId: string, callbackData: string): CallbackQueryHandle {
+    this.callbackQueryIds.add(queryId);
+
+    return new CallbackQueryHandle(queryId, callbackData, () => this.callbackQueryAnswers.get(queryId));
+  }
+
+  /**
+   * Rejects callback clickers minted by a different Chats orchestrator.
+   * @param user - Candidate callback-query sender.
+   */
+  private assertClicker(user: User<TContext>): void {
+    if (this.users.get(user.id)?.user !== user) {
+      throw new Error('Callback-query clicker must be a user minted by this Chats orchestrator');
+    }
+  }
+
+  /**
+   * Runs one callback-query dispatch with a routing transformer installed only
+   * on the per-update API instance that grammY creates for this dispatch.
+   * @param user - The minted user who dispatched the query.
+   * @param chatId - Chat containing the callback button or embedded message.
+   * @param dispatch - Callback-query update dispatch.
+   * @returns A promise that resolves when dispatch completes.
+   */
+  private async runWithClicker(user: User<TContext>, chatId: number, dispatch: () => Promise<void>): Promise<void> {
+    this.assertClicker(user);
+
+    const { bot } = this;
+
+    if (!bot) {
+      throw new Error('Bot not attached — call prepareBot() first');
+    }
+
+    const config = bot.api.config as MutableTransformerConfig;
+    const { installedTransformers } = config;
+    const { captureTransformer } = this;
+    const clickRouting = { userId: user.id, chatId };
+    let isRoutingActive = true;
+
+    if (!captureTransformer) {
+      throw new Error('Callback-query routing is unavailable before prepareBot installs its capture transformer');
+    }
+
+    const routingTransformer: Transformer = (previous, method, payload, signal) => {
+      if (!isRoutingActive) {
+        return previous(method, payload, signal);
+      }
+
+      this.clickRoutingByPayload.set(payload, clickRouting);
+
+      try {
+        return previous(method, payload, signal);
+      } finally {
+        this.clickRoutingByPayload.delete(payload);
+      }
+    };
+
+    config.installedTransformers = () => {
+      // grammY invokes middleware before handleUpdate returns its promise, so
+      // restore before the fresh per-update Api can start any nested updates.
+      config.installedTransformers = installedTransformers;
+
+      const transformers = installedTransformers();
+      const captureIndex = transformers.indexOf(captureTransformer);
+
+      if (captureIndex === -1) {
+        throw new Error('The grammy-testing capture transformer is no longer installed');
+      }
+
+      // Placing the routing transformer immediately outside the terminal one
+      // marks the final payload even when user transformers above it await or
+      // replace earlier payloads.
+      return [...transformers.slice(0, captureIndex + 1), routingTransformer, ...transformers.slice(captureIndex + 1)];
+    };
+
+    let dispatchPromise: Promise<void>;
+
+    try {
+      // Bot.handleUpdate synchronously snapshots installed transformers onto a
+      // fresh per-update Api before returning its promise.
+      dispatchPromise = dispatch();
+    } finally {
+      config.installedTransformers = installedTransformers;
+    }
+
+    try {
+      await dispatchPromise;
+    } finally {
+      isRoutingActive = false;
+    }
+  }
+
+  /**
+   * Captures `answerCallbackQuery` only when its exact query ID was generated by
+   * this orchestrator. Unrelated answers cannot attach to another click.
+   * @param payload - Raw outgoing `answerCallbackQuery` payload.
+   */
+  private deriveCallbackQueryAnswer(payload: Record<string, unknown>): void {
+    const callbackQueryId = payload.callback_query_id;
+
+    if (typeof callbackQueryId !== 'string' || !this.callbackQueryIds.has(callbackQueryId)) {
+      return;
+    }
+
+    this.callbackQueryAnswers.set(callbackQueryId, {
+      callbackQueryId,
+      text: typeof payload.text === 'string' ? payload.text : undefined,
+      showAlert: typeof payload.show_alert === 'boolean' ? payload.show_alert : undefined,
+      url: typeof payload.url === 'string' ? payload.url : undefined,
+      cacheTime: typeof payload.cache_time === 'number' ? payload.cache_time : undefined,
+      raw: payload,
+    });
   }
 
   /**

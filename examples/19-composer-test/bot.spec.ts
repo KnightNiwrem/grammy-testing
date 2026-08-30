@@ -54,11 +54,8 @@ describe('composer-test (language picker)', () => {
     const { chats } = await prepareComposer(createLanguagePickerComposer());
     const user = chats.newUser();
 
-    await user.sendCallbackQuery('lang:xx');
+    const query = await user.sendCallbackQuery('lang:xx');
 
-    const answerCall = chats.outgoing.requests.find((request) => request.method === 'answerCallbackQuery');
-
-    expect(answerCall).toBeDefined();
-    expect((answerCall?.payload as { text: string }).text).toBe('Unknown language');
+    expect(query.answer?.text).toBe('Unknown language');
   });
 });

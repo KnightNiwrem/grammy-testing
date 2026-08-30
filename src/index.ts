@@ -45,6 +45,8 @@ export type { ResponseResolver, Responses } from './low-level/responses';
 // v0.2 high-level surface (orchestrator, actors, replies, membership).
 export type { AnyChat } from './high-level/chat';
 
+export { type CallbackQueryAnswer, CallbackQueryHandle } from './high-level/callback-query';
+
 export { Channel, type ChannelPostOptions, type EditPostOptions } from './high-level/channel';
 
 export { Group, type PostRelayMessageOptions } from './high-level/group';
@@ -59,7 +61,15 @@ export type { ReactionChange, ReactionChangesLog } from './high-level/reaction-c
 
 export type { ReactionRemoval, ReactionRemovalsLog } from './high-level/reaction-removals-log';
 
-export { Reply, type MediaType, type ReplyButton, type ReplyMedia, type ReplyRichMessage } from './high-level/reply';
+export {
+  Reply,
+  type MediaType,
+  type ReplyButton,
+  type ReplyClickButtonMatcher,
+  type ReplyClickButtonOptions,
+  type ReplyMedia,
+  type ReplyRichMessage,
+} from './high-level/reply';
 
 export type { ParseMode } from 'grammy/types';
 

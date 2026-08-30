@@ -55,21 +55,22 @@ export async function prepareBot<TContext extends Context = Context, TApi extend
   // reinstall them on top — making the library transformer innermost (index 0).
   const existingTransformers = bot.api.config.installedTransformers();
 
-  bot.api.config.use(
-    asTransformer(
-      createTransformer({
-        outgoing,
-        idle,
-        responses,
-        onCapture: (request) => {
-          chats.deriveFromCapture(request);
-        },
-        onSettled: (request, ok, result) => {
-          chats.settleFromCapture(request, ok, result);
-        },
-      }),
-    ),
+  const captureTransformer = asTransformer(
+    createTransformer({
+      outgoing,
+      idle,
+      responses,
+      onCapture: (request) => {
+        chats.deriveFromCapture(request);
+      },
+      onSettled: (request, ok, result) => {
+        chats.settleFromCapture(request, ok, result);
+      },
+    }),
   );
+
+  bot.api.config.use(captureTransformer);
+  chats.attachCaptureTransformer(captureTransformer);
 
   if (existingTransformers.length > 0) {
     bot.api.config.use(...existingTransformers);
