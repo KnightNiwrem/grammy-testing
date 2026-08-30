@@ -192,6 +192,7 @@ interface ServiceMessageDispatch<TContext extends Context> {
   chat: Chat.GroupChat | Chat.SupergroupChat;
   messageId: number;
   updateId: number;
+  recordMessageAuthor: (message: Message) => void;
 }
 
 /**
@@ -225,6 +226,8 @@ export async function dispatchServiceMessage<TContext extends Context>(spec: Ser
     message,
   } as Update;
 
+  spec.recordMessageAuthor(message);
+
   await spec.bot.handleUpdate(update);
 }
 
@@ -235,6 +238,7 @@ interface EditedMessageDispatch<TContext extends Context> {
   messageId: number;
   text: string;
   updateId: number;
+  recordMessageAuthor: (message: Message) => void;
 }
 
 /**
@@ -252,17 +256,18 @@ export async function dispatchEditedMessage<TContext extends Context>(spec: Edit
 
   const now = Math.floor(Date.now() / 1000);
 
-  const update: Update = {
-    update_id: spec.updateId,
-    edited_message: {
-      message_id: spec.messageId,
-      date: now,
-      edit_date: now,
-      chat: spec.chat,
-      from: fromUser,
-      text: spec.text,
-    },
-  } as Update;
+  const message: Message = {
+    message_id: spec.messageId,
+    date: now,
+    edit_date: now,
+    chat: spec.chat,
+    from: fromUser,
+    text: spec.text,
+  } as Message;
+
+  const update: Update = { update_id: spec.updateId, edited_message: message } as Update;
+
+  spec.recordMessageAuthor(message);
 
   await spec.bot.handleUpdate(update);
 }
@@ -330,6 +335,8 @@ interface PrivateMessageDispatch<TContext extends Context> {
   senderChat?: Chat;
   /** When set, adds `message_thread_id` and `is_topic_message: true` to the dispatched message. */
   messageThreadId?: number;
+  /** Records the message author before middleware can synchronously reply. */
+  recordMessageAuthor: (message: Message) => void;
 }
 
 /**
@@ -363,6 +370,8 @@ export async function dispatchTextMessage<TContext extends Context>(spec: Privat
     update_id: spec.updateId,
     message,
   } as Update;
+
+  spec.recordMessageAuthor(message);
 
   await spec.bot.handleUpdate(update);
 

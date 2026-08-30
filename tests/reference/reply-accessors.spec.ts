@@ -95,5 +95,28 @@ describe('reference: reply accessors', () => {
       // The bot replied to the incoming user message — not a captured Reply
       expect(chats.repliesFor(user).last?.replyingTo).toBeUndefined();
     });
+
+    it('resolves an external reply from reply_parameters.chat_id', async () => {
+      const bot = new Bot('test-token');
+      const { chats } = await prepareBot(bot);
+      const source = chats.newSupergroup();
+      const destination = chats.newSupergroup();
+
+      await bot.api.sendMessage(source.id, 'source reply');
+
+      const sourceReply = source.messages.last;
+
+      expect(sourceReply).toBeDefined();
+
+      if (!sourceReply) {
+        throw new Error('Expected the source reply to be captured');
+      }
+
+      await bot.api.sendMessage(destination.id, 'external reply', {
+        reply_parameters: { chat_id: source.id, message_id: sourceReply.messageId },
+      });
+
+      expect(destination.messages.last?.replyingTo).toBe(sourceReply);
+    });
   });
 });

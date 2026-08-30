@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.32.0 — 2026-08-30
+
+### Reply-to-author routing in `user.replies`
+
+Bot replies to synthetic user messages in groups, supergroups, and channels now appear in
+the original author's `user.replies` inbox, completing the previously deferred second
+routing rule. (#14)
+
+- Incoming messages dispatched by user actor verbs record their author before bot
+  middleware runs, so synchronous `reply_parameters.message_id` responses are routed to
+  the correct user without relying on a mention or callback association. Text, media,
+  albums, service messages, Web App data, successful payments, edits, forwarded messages,
+  and guest messages share the author-recording path.
+- Message ownership and captured bot replies are keyed by `(chat_id, message_id)` instead
+  of a globally assumed message ID. This also prevents cross-chat collisions when resolving
+  `reply.replyingTo`, edits, and deletions; external replies use
+  `reply_parameters.chat_id` to resolve the referenced chat.
+- Reply-to-author routing remains subject to the active-membership gate, ignores
+  cross-chat/external replies and cross-topic references, and does not attribute
+  messages carrying `sender_chat` (including GroupAnonymousBot messages) to the user actor
+  that dispatched them; a non-routable sentinel preserves their identity across edits.
+  Edited-message updates preserve the original author/topic identity, and join/leave
+  service-message middleware observes the post-transition membership state.
+- `chats.clear()` now removes historical author associations alongside the other routing
+  registries.
+
 ## 0.31.0 — 2026-08-29
 
 ### Moderation capture: `chat.moderation` log + membership state sync

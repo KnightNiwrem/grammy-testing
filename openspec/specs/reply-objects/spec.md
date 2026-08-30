@@ -16,7 +16,7 @@ For every captured outgoing API call whose method produces a message in a chat (
 - `reply.buttons`: flat array of inline-keyboard buttons; each entry has `text` and either `callbackData` or `url` (other button types as appropriate).
 - `reply.replyMarkup`: the raw `reply_markup` object from the captured payload (`Record<string, unknown> | undefined`); escape hatch for markup types not covered by `reply.buttons`.
 - `reply.chat`: the destination chat (the `Chat` object from the `chats` orchestrator if known, else the captured payload's chat).
-- `reply.replyingTo`: the `Reply` object this is in reply to, if the captured payload had `reply_to_message_id`/`reply_parameters` pointing to a previously-captured outgoing reply; `undefined` when no matching Reply is found (including when replying to an incoming user message).
+- `reply.replyingTo`: the `Reply` object this is in reply to, if the captured payload had `reply_to_message_id`/`reply_parameters` pointing to a previously-captured outgoing reply; `reply_parameters.chat_id` selects the referenced chat's message registry when present; `undefined` when no matching Reply is found (including when replying to an incoming user message).
 - `reply.raw`: the original captured outgoing payload (escape hatch for anything not normalized).
 
 `Reply` instances SHALL be plain values (not proxies), safe to snapshot, log, and pass around.
@@ -55,6 +55,12 @@ The `ParseMode` type used in `reply.parseMode` SHALL be the same type exported b
 
 - **WHEN** the bot calls `ctx.reply('hi')` in response to a user's incoming message
 - **THEN** `reply.replyingTo` is `undefined` (the user's incoming message is not a captured Reply)
+
+#### Scenario: replyingTo resolves an external reply
+
+- **WHEN** the bot captures reply A in one chat
+- **AND** the bot captures reply B in another chat with `reply_parameters.chat_id` naming reply A's chat and `reply_parameters.message_id` naming reply A
+- **THEN** `replyB.replyingTo` is the same object as reply A
 
 #### Scenario: buttons accessor flattens inline keyboard
 
@@ -135,6 +141,8 @@ A captured message-shape outgoing call SHALL appear in `user.replies` if and onl
    - The captured `text` contains a `mention` entity whose body equals `'@' + user.username` (when `username` is set).
    - The captured payload is the immediate response to a `callback_query` synthesized by this user via `clickButton`.
 
+Incoming messages dispatched by user actor verbs SHALL have their authorship recorded before bot middleware runs, so a synchronous reply from that middleware can satisfy the reply-to-author rule. Messages carrying `sender_chat`, including anonymous `GroupAnonymousBot` messages, SHALL record a non-routable ownership sentinel because the named user actor is not their Telegram author. Message ownership SHALL be keyed by the composite `(chat_id, message_id)` identity, and an `edited_message` update SHALL preserve the original identity's author and forum topic. Join and leave membership transitions SHALL be visible while middleware handles the corresponding service message. A `reply_parameters.chat_id` that names another chat SHALL be treated as an external reply and SHALL NOT address that message's author through the destination chat's `user.replies` inbox. The source and destination `message_thread_id` values SHALL match exactly, including both being absent.
+
 A captured message-shape call that fails the rule but matches condition 1 SHALL still appear in `chat.messages` (see `chat-messages-log` capability) — `user.replies` is the filtered view, not the canonical log.
 
 #### Scenario: DM reply lands in user.replies
@@ -152,6 +160,19 @@ A captured message-shape call that fails the rule but matches condition 1 SHALL 
 
 - **WHEN** the bot replies to `user`'s message in a group via `ctx.reply(...)` with `reply_parameters.message_id`
 - **THEN** the corresponding `Reply` lands in `user.replies`
+
+#### Scenario: Cross-chat reply does not address the source author
+
+- **WHEN** a user authors a message in one group
+- **AND** the bot sends a message in another group with `reply_parameters.chat_id` pointing to the source group and `reply_parameters.message_id` pointing to that message
+- **THEN** the corresponding `Reply` does NOT land in the source author's `user.replies`
+
+#### Scenario: Clearing chats removes historical author routing
+
+- **WHEN** a user authors a message in a group
+- **AND** the test calls `chats.clear()`
+- **AND** the bot subsequently replies to the old message ID
+- **THEN** the corresponding `Reply` does NOT land in the former author's `user.replies`
 
 #### Scenario: Click-then-respond chain
 
