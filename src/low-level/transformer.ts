@@ -21,8 +21,10 @@ interface TransformerOptions {
    * before the caller's `await` resumes. `ok` is `true` only when the
    * call resolved with an `ok: true` envelope — overrides that throw
    * (`failNext` / `failAll`) and raw non-OK responses report `false`.
-   * Used by the v0.2 high-level layer to apply state transitions (e.g.
-   * moderation membership sync) only for calls the bot observed succeeding.
+   * `result` is the successful envelope's payload, or `undefined` when the
+   * call failed. Used by the v0.2 high-level layer to apply state transitions
+   * (e.g. moderation membership sync) and correlate mocked message identities
+   * only for calls the bot observed succeeding.
    *
    * Boundary: settlement reflects this terminal mock's resolution. A
    * user-installed transformer outside the terminal one (reinstalled on top
@@ -30,7 +32,7 @@ interface TransformerOptions {
    * observed — captured requests cannot be reliably correlated across outer
    * transformers, which may rewrite payloads, retry, or interleave calls.
    */
-  onSettled?: (request: Request, ok: boolean) => void;
+  onSettled?: (request: Request, ok: boolean, result?: unknown) => void;
 }
 
 interface OkReturn {
@@ -120,7 +122,7 @@ async function resolveCall<TM extends Methods>(
  * @param options.idle - The {@link IdleTracker} that wraps every returned promise.
  * @param options.responses - Optional canned-response map.
  * @param options.onCapture - Optional synchronous hook called after each request is captured.
- * @param options.onSettled - Optional hook called when each request's response settles, with its success state.
+ * @param options.onSettled - Optional hook called when each request's response settles, with its success state and result.
  * @returns A {@link TerminalTransformer} — adapt with {@link asTransformer} for grammY.
  */
 export function createTransformer({ outgoing, idle, responses, onCapture, onSettled }: TransformerOptions): TerminalTransformer {
@@ -138,7 +140,7 @@ export function createTransformer({ outgoing, idle, responses, onCapture, onSett
     if (onSettled) {
       call = call.then(
         (result) => {
-          onSettled(request, result.ok);
+          onSettled(request, result.ok, result.result);
 
           return result;
         },

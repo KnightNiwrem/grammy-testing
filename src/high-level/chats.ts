@@ -378,6 +378,9 @@ export class Chats<TContext extends Context = Context> {
    */
   private readonly pendingModerationTransitions = new WeakMap<Request, () => void>();
 
+  /** Message requests awaiting a successful mocked result whose message ID may differ. */
+  private readonly pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
+
   /** The Reply created by the most recent message-method `onCapture` call. Read by the default response resolvers. */
   private lastCapturedReply: Reply<TContext> | undefined;
 
@@ -941,6 +944,7 @@ export class Chats<TContext extends Context = Context> {
     this.lastCapturedReply = reply;
 
     this.setReplyForChat(chat.id, reply);
+    this.pendingMessageReplies.set(request, { chatId: chat.id, reply });
 
     chat.messages.push(reply);
     reply.topic?.messages.push(reply);
@@ -1165,13 +1169,31 @@ export class Chats<TContext extends Context = Context> {
   }
 
   /**
-   * Called when a captured request's mocked response settles. Applies the queued
-   * membership transition for a moderation call only when the call succeeded.
+   * Called when a captured request's mocked response settles. Registers the
+   * message ID returned by a successful mocked send against its captured reply,
+   * and applies queued moderation transitions only when the call succeeded.
    * @param request - The captured outgoing API request that settled.
    * @param ok - Whether the call resolved with an `ok: true` envelope.
+   * @param result - The successful envelope's result, or `undefined` on failure.
    * @internal
    */
-  settleFromCapture(request: Request, ok: boolean): void {
+  settleFromCapture(request: Request, ok: boolean, result: unknown): void {
+    const pendingReply = this.pendingMessageReplies.get(request);
+
+    this.pendingMessageReplies.delete(request);
+
+    if (ok && pendingReply !== undefined) {
+      const returnedMessage: unknown = Array.isArray(result) ? (result as unknown[])[0] : result;
+
+      if (typeof returnedMessage === 'object' && returnedMessage !== null && 'message_id' in returnedMessage) {
+        const messageId = returnedMessage.message_id;
+
+        if (typeof messageId === 'number') {
+          this.setReplyForChat(pendingReply.chatId, pendingReply.reply, messageId);
+        }
+      }
+    }
+
     const transition = this.pendingModerationTransitions.get(request);
 
     if (transition === undefined) {
@@ -1501,8 +1523,9 @@ export class Chats<TContext extends Context = Context> {
    * Registers a captured bot reply under its chat-scoped Telegram message identity.
    * @param chatId - The destination chat's Telegram ID.
    * @param reply - The captured bot reply.
+   * @param messageId - The Telegram message ID to register; defaults to the reply's synthetic ID.
    */
-  private setReplyForChat(chatId: number, reply: Reply<TContext>): void {
+  private setReplyForChat(chatId: number, reply: Reply<TContext>, messageId = reply.messageId): void {
     let replies = this.messageIdToReply.get(chatId);
 
     if (!replies) {
@@ -1510,7 +1533,7 @@ export class Chats<TContext extends Context = Context> {
       this.messageIdToReply.set(chatId, replies);
     }
 
-    replies.set(reply.messageId, reply);
+    replies.set(messageId, reply);
   }
 
   /**

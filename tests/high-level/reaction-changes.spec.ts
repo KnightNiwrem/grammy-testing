@@ -67,6 +67,53 @@ describe('ReactionChangesLog', () => {
         expect(chat.reactionChanges.lastOrThrow().reply).toBe(user.replies.lastOrThrow());
       });
 
+      it('resolves the target when a canned send response replaces the message ID', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:text', async (ctx) => {
+          const reply = await ctx.reply('target');
+
+          await ctx.api.setMessageReaction(ctx.chat.id, reply.message_id, [{ type: 'emoji', emoji: '👍' }]);
+        });
+
+        const { chats } = await prepareBot(bot, {
+          responses: { sendMessage: { message_id: 9999, date: 0 } },
+        });
+
+        const user = chats.newUser();
+        const chat = chats.newPrivateChat(user);
+
+        await user.sendText('react');
+
+        const change = chat.reactionChanges.lastOrThrow();
+
+        expect(change.messageId).toBe(9999);
+        expect(change.reply).toBe(user.replies.lastOrThrow());
+      });
+
+      it('resolves the target when respondNext replaces the message ID', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:text', async (ctx) => {
+          const reply = await ctx.reply('target');
+
+          await ctx.api.setMessageReaction(ctx.chat.id, reply.message_id, [{ type: 'emoji', emoji: '👍' }]);
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+        const chat = chats.newPrivateChat(user);
+
+        chats.outgoing.respondNext('sendMessage', { message_id: 8888, date: 0 });
+
+        await user.sendText('react');
+
+        const change = chat.reactionChanges.lastOrThrow();
+
+        expect(change.messageId).toBe(8888);
+        expect(change.reply).toBe(user.replies.lastOrThrow());
+      });
+
       it('keeps per-chat projections independent and preserves global order', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);

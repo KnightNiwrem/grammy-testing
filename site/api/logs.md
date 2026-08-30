@@ -126,7 +126,7 @@ interface ReactionChange<TContext extends Context = Context> {
 
 | Property/Method | Type                                    | Description            |
 | --------------- | --------------------------------------- | ---------------------- |
-| `all`           | `ReactionChange<TContext>[]`            | All captured attempts  |
+| `all`           | `readonly ReactionChange<TContext>[]`   | All captured attempts  |
 | `last`          | `ReactionChange<TContext> \| undefined` | Last captured attempt  |
 | `length`        | `number`                                | Count                  |
 | `lastOrThrow()` | `ReactionChange<TContext>`              | Last attempt or throws |

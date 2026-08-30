@@ -272,7 +272,7 @@ Each method SHALL link to the corresponding Guide or High-Level page for prose c
 
 The fourteen pages SHALL cover: `prepareBot`, `prepareComposer`, `prepareMiddleware`, `Chats`,
 `User`, `Group`, `Supergroup`, `Channel`, `PrivateChat`, `BusinessAccount`, `OutgoingRequests`,
-`Reply`, `Logs` (all five log classes), and `Types` (all exported type aliases and interfaces).
+`Reply`, `Logs` (all six log classes), and `Types` (all exported type aliases and interfaces).
 
 #### Scenario: prepareBot reference shows all options
 
