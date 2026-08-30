@@ -114,6 +114,30 @@ describe('ReactionChangesLog', () => {
         expect(change.reply).toBe(user.replies.lastOrThrow());
       });
 
+      it('reserves a returned message ID before generating later replies', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:text', async (ctx) => {
+          const first = await ctx.reply('first');
+
+          await ctx.reply('second');
+          await ctx.api.setMessageReaction(ctx.chat.id, first.message_id, [{ type: 'emoji', emoji: '👍' }]);
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+        const chat = chats.newPrivateChat(user);
+
+        chats.outgoing.respondNext('sendMessage', { message_id: 3, date: 0 });
+
+        await user.sendText('react');
+
+        const [first, second] = user.replies.all;
+
+        expect(second.messageId).not.toBe(3);
+        expect(chat.reactionChanges.lastOrThrow().reply).toBe(first);
+      });
+
       it('resolves every returned media-group message ID to the captured reply', async () => {
         const bot = new Bot('test-token');
 

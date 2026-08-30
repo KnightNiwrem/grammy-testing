@@ -1527,6 +1527,10 @@ export class Chats<TContext extends Context = Context> {
         const messageId = returnedMessage.message_id;
 
         if (typeof messageId === 'number') {
+          if (!this.ids.hasIssuedMessageId(messageId)) {
+            this.ids.reserveMessageId(messageId);
+          }
+
           this.setReplyForChat(chatId, reply, messageId);
           this.backfillReactionReply(chatId, messageId, reply);
         }
