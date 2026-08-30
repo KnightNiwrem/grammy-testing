@@ -906,13 +906,16 @@ export class Chats<TContext extends Context = Context> {
       return;
     }
 
+    const replyParameters = payload.reply_parameters as { chat_id?: ChatId } | undefined;
+    const referencedChatId = replyParameters?.chat_id === undefined ? chat.id : Number(replyParameters.chat_id);
+
     const reply = new Reply<TContext>(payload, chat, {
       bot,
       ids: this.ids,
       recordClick: (callbackData, byUserId, byChatId) => {
         this.clickers.set(callbackData, { userId: byUserId, chatId: byChatId });
       },
-      resolveReply: (messageId) => this.messageIdToReply.get(chat.id)?.get(messageId),
+      resolveReply: (messageId) => this.messageIdToReply.get(referencedChatId)?.get(messageId),
     });
 
     this.lastCapturedReply = reply;

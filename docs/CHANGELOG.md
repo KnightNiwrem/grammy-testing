@@ -15,7 +15,8 @@ routing rule. (#14)
   and guest messages share the author-recording path.
 - Message ownership and captured bot replies are keyed by `(chat_id, message_id)` instead
   of a globally assumed message ID. This also prevents cross-chat collisions when resolving
-  `reply.replyingTo`, edits, and deletions.
+  `reply.replyingTo`, edits, and deletions; external replies use
+  `reply_parameters.chat_id` to resolve the referenced chat.
 - Reply-to-author routing remains subject to the active-membership gate, ignores
   cross-chat/external replies and cross-topic references, and does not attribute
   GroupAnonymousBot messages to the user actor that dispatched them. Edited-message

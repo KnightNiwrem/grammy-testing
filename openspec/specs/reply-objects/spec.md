@@ -16,7 +16,7 @@ For every captured outgoing API call whose method produces a message in a chat (
 - `reply.buttons`: flat array of inline-keyboard buttons; each entry has `text` and either `callbackData` or `url` (other button types as appropriate).
 - `reply.replyMarkup`: the raw `reply_markup` object from the captured payload (`Record<string, unknown> | undefined`); escape hatch for markup types not covered by `reply.buttons`.
 - `reply.chat`: the destination chat (the `Chat` object from the `chats` orchestrator if known, else the captured payload's chat).
-- `reply.replyingTo`: the `Reply` object this is in reply to, if the captured payload had `reply_to_message_id`/`reply_parameters` pointing to a previously-captured outgoing reply; `undefined` when no matching Reply is found (including when replying to an incoming user message).
+- `reply.replyingTo`: the `Reply` object this is in reply to, if the captured payload had `reply_to_message_id`/`reply_parameters` pointing to a previously-captured outgoing reply; `reply_parameters.chat_id` selects the referenced chat's message registry when present; `undefined` when no matching Reply is found (including when replying to an incoming user message).
 - `reply.raw`: the original captured outgoing payload (escape hatch for anything not normalized).
 
 `Reply` instances SHALL be plain values (not proxies), safe to snapshot, log, and pass around.
@@ -55,6 +55,12 @@ The `ParseMode` type used in `reply.parseMode` SHALL be the same type exported b
 
 - **WHEN** the bot calls `ctx.reply('hi')` in response to a user's incoming message
 - **THEN** `reply.replyingTo` is `undefined` (the user's incoming message is not a captured Reply)
+
+#### Scenario: replyingTo resolves an external reply
+
+- **WHEN** the bot captures reply A in one chat
+- **AND** the bot captures reply B in another chat with `reply_parameters.chat_id` naming reply A's chat and `reply_parameters.message_id` naming reply A
+- **THEN** `replyB.replyingTo` is the same object as reply A
 
 #### Scenario: buttons accessor flattens inline keyboard
 
