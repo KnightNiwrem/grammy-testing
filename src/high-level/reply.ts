@@ -117,7 +117,7 @@ function deriveInvoice(payload: Record<string, unknown>): Invoice | undefined {
     return undefined;
   }
 
-  if (currency === 'XTR' && prices.length !== 1) {
+  if (prices.length === 0 || (currency === 'XTR' && prices.length !== 1)) {
     return undefined;
   }
 

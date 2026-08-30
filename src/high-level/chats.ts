@@ -436,6 +436,42 @@ function cloneOrderInfo(orderInfo: OrderInfo): OrderInfo {
 }
 
 /**
+ * Snapshots shipping options and their nested price portions.
+ * @param shippingOptions - Options accepted by `answerShippingQuery`.
+ * @returns Independent shipping-option snapshots.
+ */
+function cloneShippingOptions(shippingOptions: ShippingOption[]): ShippingOption[] {
+  return shippingOptions.map((option) => ({
+    ...option,
+    prices: option.prices.map((price) => ({ ...price })),
+  }));
+}
+
+/**
+ * Adds monetary components without losing integer precision.
+ * @param totalAmount - Existing checkout total.
+ * @param amounts - Additional price portions.
+ * @returns The safely accumulated total.
+ */
+function addInvoiceAmounts(totalAmount: number, amounts: readonly number[]): number {
+  let result = totalAmount;
+
+  for (const amount of amounts) {
+    if (!Number.isSafeInteger(amount)) {
+      throw new TypeError('payInvoice: monetary amounts must be safe integers');
+    }
+
+    result += amount;
+
+    if (!Number.isSafeInteger(result)) {
+      throw new TypeError('payInvoice: total_amount must remain a safe integer');
+    }
+  }
+
+  return result;
+}
+
+/**
  * Validates the optional tip and returns its normalized value.
  * @param invoice - Captured invoice reply.
  * @param options - Requested checkout options.
@@ -1964,7 +2000,7 @@ export class Chats<TContext extends Context = Context> {
       shippingQueryId: undefined,
       preCheckoutQueryId: undefined,
       selectedShippingOption: undefined,
-      totalAmount: publicInvoice.total_amount + tipAmount,
+      totalAmount: addInvoiceAmounts(publicInvoice.total_amount, [tipAmount]),
       successfulPayment: undefined,
       completionPromise: undefined,
     };
@@ -2098,7 +2134,11 @@ export class Chats<TContext extends Context = Context> {
     }
 
     state.selectedShippingOption = selected;
-    state.totalAmount += selected.prices.reduce((sum, { amount }) => sum + amount, 0);
+
+    state.totalAmount = addInvoiceAmounts(
+      state.totalAmount,
+      selected.prices.map(({ amount }) => amount),
+    );
   }
 
   /**
@@ -2199,7 +2239,9 @@ export class Chats<TContext extends Context = Context> {
     const answer: ShippingQueryAnswer = {
       shippingQueryId,
       ok: payload.ok,
-      shippingOptions: Array.isArray(payload.shipping_options) ? (payload.shipping_options as ShippingOption[]) : undefined,
+      shippingOptions: Array.isArray(payload.shipping_options)
+        ? cloneShippingOptions(payload.shipping_options as ShippingOption[])
+        : undefined,
       errorMessage: typeof payload.error_message === 'string' ? payload.error_message : undefined,
       raw: payload,
     };

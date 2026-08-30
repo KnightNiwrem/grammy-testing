@@ -112,7 +112,7 @@ describe('Payments', () => {
         expect(hasInvoiceField).toBe(false);
       });
 
-      it('does not derive invoices from invalid price amounts or Stars price lists', async () => {
+      it('does not derive invoices from invalid price breakdowns', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
         const user = chats.newUser();
@@ -152,7 +152,17 @@ describe('Payments', () => {
           { provider_token: '' },
         );
 
-        expect(privateChat.messages.all.slice(-4).map((reply) => reply.invoice)).toEqual([undefined, undefined, undefined, undefined]);
+        await bot.api.sendInvoice(user.id, 'Empty', 'Missing price breakdown', 'empty', 'USD', [], {
+          provider_token: 'provider-token',
+        });
+
+        expect(privateChat.messages.all.slice(-5).map((reply) => reply.invoice)).toEqual([
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+        ]);
       });
     });
   });
@@ -346,6 +356,54 @@ describe('Payments', () => {
         });
       });
 
+      it('snapshots accepted shipping options before the handler mutates them', async () => {
+        const bot = new Bot('test-token');
+        let observedTotal: number | undefined;
+        const shippingOptions = [{ id: 'standard', title: 'Standard', prices: [{ label: 'Delivery', amount: 20 }] }];
+
+        bot.command('buy', async (ctx) => {
+          await ctx.replyWithInvoice(
+            'Shipping snapshot',
+            'Preserves the accepted price',
+            'shipping-snapshot',
+            'USD',
+            [{ label: 'Item', amount: 100 }],
+            {
+              provider_token: 'provider-token',
+              need_shipping_address: true,
+              is_flexible: true,
+            },
+          );
+        });
+
+        bot.on('shipping_query', async (ctx) => {
+          await ctx.answerShippingQuery(true, { shipping_options: shippingOptions });
+          shippingOptions[0].prices[0].amount = 900;
+        });
+
+        bot.on('pre_checkout_query', async (ctx) => {
+          observedTotal = ctx.preCheckoutQuery.total_amount;
+          await ctx.answerPreCheckoutQuery(true);
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await user.sendCommand('/buy');
+
+        const payment = await user.payInvoice(user.replies.lastOrThrow(), {
+          orderInfo: { shipping_address: shippingAddress },
+          shippingOptionId: 'standard',
+        });
+
+        expect(payment.shippingAnswer?.shippingOptions?.[0].prices[0].amount).toBe(20);
+        expect(observedTotal).toBe(120);
+
+        const successful = await payment.completeSuccessfully();
+
+        expect(successful.successful_payment?.total_amount).toBe(120);
+      });
+
       it('waits for a pending successful sendInvoice settlement', async () => {
         const bot = new Bot('test-token');
         let resolveInvoice: ((value: { date: number; message_id: number }) => void) | undefined;
@@ -380,7 +438,19 @@ describe('Payments', () => {
 
         await user.sendCommand('/buy');
 
-        const paymentPromise = user.payInvoice(user.replies.lastOrThrow());
+        let isPaymentResolved = false;
+
+        const paymentPromise = user.payInvoice(user.replies.lastOrThrow()).then((payment) => {
+          isPaymentResolved = true;
+
+          return payment;
+        });
+
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
+
+        expect(isPaymentResolved).toBe(false);
 
         resolveInvoice?.({ message_id: 7777, date: 0 });
         assert.ok(pendingSend);
@@ -749,6 +819,79 @@ describe('Payments', () => {
     });
 
     describe('negative validation', () => {
+      it('rejects checkout totals that overflow safe integers', async () => {
+        const bot = new Bot('test-token');
+
+        bot.command('buy', async (ctx) => {
+          await ctx.replyWithInvoice(
+            'Unsafe checkout total',
+            'The tip overflows the total',
+            'unsafe-checkout-total',
+            'USD',
+            [{ label: 'Item', amount: Number.MAX_SAFE_INTEGER }],
+            {
+              provider_token: 'provider-token',
+              max_tip_amount: 1,
+            },
+          );
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await user.sendCommand('/buy');
+
+        await expect(user.payInvoice(user.replies.lastOrThrow(), { tipAmount: 1 })).rejects.toThrow(
+          /total_amount must remain a safe integer/,
+        );
+      });
+
+      it('rejects shipping accumulation that temporarily leaves the safe-integer range', async () => {
+        const bot = new Bot('test-token');
+
+        bot.command('buy', async (ctx) => {
+          await ctx.replyWithInvoice(
+            'Unsafe shipping total',
+            'The delivery cost overflows the total',
+            'unsafe-shipping-total',
+            'USD',
+            [{ label: 'Item', amount: 1 }],
+            {
+              provider_token: 'provider-token',
+              need_shipping_address: true,
+              is_flexible: true,
+            },
+          );
+        });
+
+        bot.on('shipping_query', async (ctx) => {
+          await ctx.answerShippingQuery(true, {
+            shipping_options: [
+              {
+                id: 'unsafe',
+                title: 'Unsafe',
+                prices: [
+                  { label: 'Delivery', amount: Number.MAX_SAFE_INTEGER },
+                  { label: 'Discount', amount: -1 },
+                ],
+              },
+            ],
+          });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await user.sendCommand('/buy');
+
+        await expect(
+          user.payInvoice(user.replies.lastOrThrow(), {
+            orderInfo: { shipping_address: shippingAddress },
+            shippingOptionId: 'unsafe',
+          }),
+        ).rejects.toThrow(/total_amount must remain a safe integer/);
+      });
+
       it('rejects checkout for an invoice whose send call failed', async () => {
         const bot = new Bot('test-token');
         let preCheckoutCount = 0;
