@@ -19,9 +19,9 @@ routing rule. (#14)
   `reply_parameters.chat_id` to resolve the referenced chat.
 - Reply-to-author routing remains subject to the active-membership gate, ignores
   cross-chat/external replies and cross-topic references, and does not attribute
-  GroupAnonymousBot messages to the user actor that dispatched them. Edited-message
-  updates preserve the original author/topic identity, and join/leave service-message
-  middleware observes the post-transition membership state.
+  messages carrying `sender_chat` (including GroupAnonymousBot messages) to the user actor
+  that dispatched them. Edited-message updates preserve the original author/topic identity,
+  and join/leave service-message middleware observes the post-transition membership state.
 - `chats.clear()` now removes historical author associations alongside the other routing
   registries.
 

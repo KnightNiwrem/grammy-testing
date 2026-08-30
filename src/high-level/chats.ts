@@ -504,7 +504,7 @@ export class Chats<TContext extends Context = Context> {
           this.guestQueryToUser.set(queryId, who);
         },
         recordMessageAuthor: (message) => {
-          if (message.from?.id === user.id) {
+          if (message.sender_chat === undefined && message.from?.id === user.id) {
             this.recordMessageAuthor(message, user.id);
           }
         },

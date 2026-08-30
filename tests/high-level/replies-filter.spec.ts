@@ -1,7 +1,7 @@
 import { Bot } from 'grammy';
 import { describe, expect, it } from 'vitest';
 
-import { prepareBot } from '../../src/index';
+import { GROUP_ANONYMOUS_BOT, prepareBot } from '../../src/index';
 
 describe('user.replies filter rule', () => {
   it('DM reply lands in user.replies', async () => {
@@ -65,7 +65,7 @@ describe('user.replies filter rule', () => {
     expect(chats.repliesFor(alice).last?.text).toContain('@alice');
   });
 
-  describe('reply-to-author routing', () => {
+  describe('sendText', () => {
     describe('positive cases', () => {
       it('routes a group reply to the author without routing it to other members', async () => {
         const bot = new Bot('test-token');
@@ -88,24 +88,6 @@ describe('user.replies filter rule', () => {
         expect(bob.replies.length).toBe(0);
       });
 
-      it('tracks authorship for non-text user message verbs', async () => {
-        const bot = new Bot('test-token');
-
-        bot.on('message:photo', async (ctx) => {
-          await ctx.reply('photo answer', { reply_parameters: { message_id: ctx.message.message_id } });
-        });
-
-        const { chats } = await prepareBot(bot);
-        const group = chats.newSupergroup();
-        const alice = chats.newUser();
-
-        group.promote(alice);
-
-        await alice.sendPhoto(undefined, { chat: group });
-
-        expect(alice.replies.lastOrThrow().text).toBe('photo answer');
-      });
-
       it('routes replies within the same forum topic', async () => {
         const bot = new Bot('test-token');
 
@@ -126,53 +108,6 @@ describe('user.replies filter rule', () => {
         await alice.sendText('topic question', { topic });
 
         expect(alice.replies.lastOrThrow().text).toBe('topic answer');
-      });
-
-      it('routes a synchronous reply to a user joining a group', async () => {
-        const bot = new Bot('test-token');
-
-        bot.on('message:new_chat_members', async (ctx) => {
-          await ctx.reply('welcome', { reply_parameters: { message_id: ctx.message.message_id } });
-        });
-
-        const { chats } = await prepareBot(bot);
-        const group = chats.newSupergroup();
-        const alice = chats.newUser();
-
-        await alice.joinChat(group);
-
-        expect(alice.replies.lastOrThrow().text).toBe('welcome');
-      });
-
-      it('preserves the original author and topic when a message is edited', async () => {
-        const bot = new Bot('test-token');
-        let editedThreadId: number | undefined;
-
-        bot.on('edited_message', async (ctx) => {
-          editedThreadId = ctx.editedMessage.message_thread_id;
-
-          await ctx.api.sendMessage(ctx.chat.id, 'edited answer', {
-            message_thread_id: ctx.editedMessage.message_thread_id,
-            reply_parameters: { message_id: ctx.editedMessage.message_id },
-          });
-        });
-
-        const { chats } = await prepareBot(bot);
-        const forum = chats.newSupergroup({ isForum: true });
-        const topic = forum.newTopic({ name: 'Support' });
-        const alice = chats.newUser();
-        const bob = chats.newUser();
-
-        forum.promote(alice);
-        forum.promote(bob);
-
-        const original = await alice.sendText('original', { topic });
-
-        await bob.editMessage(original.message_id, 'edited', { chat: forum });
-
-        expect(editedThreadId).toBe(topic.messageThreadId);
-        expect(alice.replies.lastOrThrow().text).toBe('edited answer');
-        expect(bob.replies.length).toBe(0);
       });
     });
 
@@ -277,25 +212,6 @@ describe('user.replies filter rule', () => {
         expect(alice.replies.length).toBe(0);
       });
 
-      it('does not route a synchronous reply to a user leaving a group', async () => {
-        const bot = new Bot('test-token');
-
-        bot.on('message:left_chat_member', async (ctx) => {
-          await ctx.reply('goodbye', { reply_parameters: { message_id: ctx.message.message_id } });
-        });
-
-        const { chats } = await prepareBot(bot);
-        const group = chats.newSupergroup();
-        const alice = chats.newUser();
-
-        group.promote(alice);
-
-        await alice.leaveChat(group);
-
-        expect(group.messages.last?.text).toBe('goodbye');
-        expect(alice.replies.length).toBe(0);
-      });
-
       it('clears author associations in chats.clear()', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
@@ -332,6 +248,125 @@ describe('user.replies filter rule', () => {
         await alice.sendText('anonymous question', { anonymous: true, chat: group });
 
         expect(group.messages.last?.text).toBe('anonymous answer');
+        expect(alice.replies.length).toBe(0);
+      });
+
+      it('does not attribute anonymous messages to an actor using the reserved pseudo-user ID', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:text', async (ctx) => {
+          await ctx.reply('anonymous answer', { reply_parameters: { message_id: ctx.message.message_id } });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newSupergroup();
+        const anonymousActor = chats.newUser({ id: GROUP_ANONYMOUS_BOT.id });
+
+        group.promote(anonymousActor);
+
+        await anonymousActor.sendText('anonymous question', { anonymous: true, chat: group });
+
+        expect(group.messages.last?.text).toBe('anonymous answer');
+        expect(anonymousActor.replies.length).toBe(0);
+      });
+    });
+  });
+
+  describe('sendPhoto', () => {
+    describe('positive cases', () => {
+      it('tracks authorship for non-text user message verbs', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:photo', async (ctx) => {
+          await ctx.reply('photo answer', { reply_parameters: { message_id: ctx.message.message_id } });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newSupergroup();
+        const alice = chats.newUser();
+
+        group.promote(alice);
+
+        await alice.sendPhoto(undefined, { chat: group });
+
+        expect(alice.replies.lastOrThrow().text).toBe('photo answer');
+      });
+    });
+  });
+
+  describe('editMessage', () => {
+    describe('positive cases', () => {
+      it('preserves the original author and topic when a message is edited', async () => {
+        const bot = new Bot('test-token');
+        let editedThreadId: number | undefined;
+
+        bot.on('edited_message', async (ctx) => {
+          editedThreadId = ctx.editedMessage.message_thread_id;
+
+          await ctx.api.sendMessage(ctx.chat.id, 'edited answer', {
+            message_thread_id: ctx.editedMessage.message_thread_id,
+            reply_parameters: { message_id: ctx.editedMessage.message_id },
+          });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ isForum: true });
+        const topic = forum.newTopic({ name: 'Support' });
+        const alice = chats.newUser();
+        const bob = chats.newUser();
+
+        forum.promote(alice);
+        forum.promote(bob);
+
+        const original = await alice.sendText('original', { topic });
+
+        await bob.editMessage(original.message_id, 'edited', { chat: forum });
+
+        expect(editedThreadId).toBe(topic.messageThreadId);
+        expect(alice.replies.lastOrThrow().text).toBe('edited answer');
+        expect(bob.replies.length).toBe(0);
+      });
+    });
+  });
+
+  describe('joinChat', () => {
+    describe('positive cases', () => {
+      it('routes a synchronous reply to a user joining a group', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:new_chat_members', async (ctx) => {
+          await ctx.reply('welcome', { reply_parameters: { message_id: ctx.message.message_id } });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newSupergroup();
+        const alice = chats.newUser();
+
+        await alice.joinChat(group);
+
+        expect(alice.replies.lastOrThrow().text).toBe('welcome');
+      });
+    });
+  });
+
+  describe('leaveChat', () => {
+    describe('negative cases', () => {
+      it('does not route a synchronous reply to a user leaving a group', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:left_chat_member', async (ctx) => {
+          await ctx.reply('goodbye', { reply_parameters: { message_id: ctx.message.message_id } });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newSupergroup();
+        const alice = chats.newUser();
+
+        group.promote(alice);
+
+        await alice.leaveChat(group);
+
+        expect(group.messages.last?.text).toBe('goodbye');
         expect(alice.replies.length).toBe(0);
       });
     });
