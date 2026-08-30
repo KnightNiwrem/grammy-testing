@@ -805,6 +805,63 @@ describe('Payments', () => {
         expect(payment.status).toBe('shipping-unanswered');
         expect(preCheckoutCount).toBe(0);
       });
+
+      it('does not commit an invalid late shipping selection when accumulation fails', async () => {
+        const bot = new Bot('test-token');
+        let preCheckoutCount = 0;
+
+        bot.command('buy', async (ctx) => {
+          await ctx.replyWithInvoice(
+            'Unsafe late shipping',
+            'The delivery cost overflows the total',
+            'unsafe-late-shipping',
+            'USD',
+            [{ label: 'Item', amount: 1 }],
+            {
+              provider_token: 'provider-token',
+              need_shipping_address: true,
+              is_flexible: true,
+            },
+          );
+        });
+
+        bot.on('shipping_query', () => {});
+
+        bot.on('pre_checkout_query', () => {
+          preCheckoutCount += 1;
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await user.sendCommand('/buy');
+
+        const payment = await user.payInvoice(user.replies.lastOrThrow(), {
+          orderInfo: { shipping_address: shippingAddress },
+          shippingOptionId: 'unsafe',
+        });
+
+        assert.ok(payment.shippingQueryId);
+
+        await bot.api.answerShippingQuery(payment.shippingQueryId, true, {
+          shipping_options: [
+            {
+              id: 'unsafe',
+              title: 'Unsafe',
+              prices: [
+                { label: 'Delivery', amount: Number.MAX_SAFE_INTEGER },
+                { label: 'Discount', amount: -1 },
+              ],
+            },
+          ],
+        });
+
+        await expect(payment.proceed()).rejects.toThrow(/total_amount must remain a safe integer/);
+        await expect(payment.proceed()).rejects.toThrow(/total_amount must remain a safe integer/);
+
+        expect(payment.preCheckoutQueryId).toBeUndefined();
+        expect(preCheckoutCount).toBe(0);
+      });
     });
 
     describe('positive progression', () => {

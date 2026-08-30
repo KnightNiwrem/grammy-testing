@@ -2167,12 +2167,13 @@ export class Chats<TContext extends Context = Context> {
       throw new Error(`payInvoice: shipping option "${String(state.options.shippingOptionId)}" was not offered by answerShippingQuery`);
     }
 
-    state.selectedShippingOption = selected;
-
-    state.totalAmount = addInvoiceAmounts(
+    const totalAmount = addInvoiceAmounts(
       state.totalAmount,
       selected.prices.map(({ amount }) => amount),
     );
+
+    state.selectedShippingOption = selected;
+    state.totalAmount = totalAmount;
   }
 
   /**
