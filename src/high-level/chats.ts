@@ -310,7 +310,19 @@ export class RepliesInbox<TContext extends Context = Context> {
         return false;
       }
 
-      return typeof matcher === 'string' ? title === matcher : matcher.test(title);
+      if (typeof matcher === 'string') {
+        return title === matcher;
+      }
+
+      const expression = matcher;
+
+      expression.lastIndex = 0;
+
+      const isMatch = expression.test(title);
+
+      expression.lastIndex = 0;
+
+      return isMatch;
     });
   }
 
@@ -355,11 +367,21 @@ interface InvoicePaymentState<TContext extends Context> {
   selectedShippingOption: ShippingOption | undefined;
   totalAmount: number;
   successfulPayment: Message | undefined;
+  completionPromise: Promise<Message> | undefined;
 }
 
 interface ValidatedInvoicePaymentOptions {
   isShippingRequired: boolean;
   tipAmount: number;
+}
+
+/**
+ * Reads pre-checkout state again after an asynchronous shipping transition.
+ * @param state - Internal live payment state.
+ * @returns Whether another progression call already created the query.
+ */
+function hasPreCheckoutQuery<TContext extends Context>(state: InvoicePaymentState<TContext>): boolean {
+  return state.preCheckoutQueryId !== undefined;
 }
 
 /**
@@ -1840,6 +1862,7 @@ export class Chats<TContext extends Context = Context> {
       selectedShippingOption: undefined,
       totalAmount: publicInvoice.total_amount + tipAmount,
       successfulPayment: undefined,
+      completionPromise: undefined,
     };
 
     const payment = new InvoicePayment<TContext>(invoice, {
@@ -1891,6 +1914,10 @@ export class Chats<TContext extends Context = Context> {
       }
 
       this.selectInvoiceShippingOption(state, shippingAnswer);
+    }
+
+    if (hasPreCheckoutQuery(state)) {
+      return;
     }
 
     state.preCheckoutQueryId = `pcq-${String(this.ids.nextMessageId())}`;
@@ -1981,6 +2008,10 @@ export class Chats<TContext extends Context = Context> {
       throw new Error('completeSuccessfully: this payment is already completed');
     }
 
+    if (state.completionPromise !== undefined) {
+      return state.completionPromise;
+    }
+
     const { preCheckoutQueryId } = state;
 
     if (preCheckoutQueryId === undefined) {
@@ -2025,11 +2056,23 @@ export class Chats<TContext extends Context = Context> {
       },
     } as Message;
 
-    this.recordMessageAuthor(message, state.user.id);
-    await bot.handleUpdate({ update_id: this.ids.nextUpdateId(), message } as Update);
-    state.successfulPayment = message;
+    const completionPromise = Promise.resolve().then(async (): Promise<Message> => {
+      this.recordMessageAuthor(message, state.user.id);
+      await bot.handleUpdate({ update_id: this.ids.nextUpdateId(), message } as Update);
+      state.successfulPayment = message;
 
-    return message;
+      return message;
+    });
+
+    state.completionPromise = completionPromise;
+
+    try {
+      return await completionPromise;
+    } finally {
+      if (state.completionPromise === completionPromise) {
+        state.completionPromise = undefined;
+      }
+    }
   }
 
   /**

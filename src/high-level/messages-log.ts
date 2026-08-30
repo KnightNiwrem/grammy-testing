@@ -73,7 +73,19 @@ export class MessagesLog<TContext extends Context = Context> {
         return false;
       }
 
-      return typeof matcher === 'string' ? title === matcher : matcher.test(title);
+      if (typeof matcher === 'string') {
+        return title === matcher;
+      }
+
+      const expression = matcher;
+
+      expression.lastIndex = 0;
+
+      const isMatch = expression.test(title);
+
+      expression.lastIndex = 0;
+
+      return isMatch;
     });
   }
 

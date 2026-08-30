@@ -228,7 +228,7 @@ const message = await payment.completeSuccessfully({
   providerPaymentChargeId: 'provider-charge-7',
 });
 
-expect(message.successful_payment?.invoice_payload).toBe('order-7');
+expect(message.successful_payment?.invoice_payload).toBe(invoice.raw.payload);
 expect(payment.status).toBe('completed');
 ```
 
