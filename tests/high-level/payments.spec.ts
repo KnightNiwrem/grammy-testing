@@ -528,10 +528,11 @@ describe('Payments', () => {
         expect(successful.successful_payment?.total_amount).toBe(120);
       });
 
-      it('waits for a pending successful sendInvoice settlement', async () => {
+      it('snapshots invoice fields before waiting for a pending successful settlement', async () => {
         const bot = new Bot('test-token');
         let resolveInvoice: ((value: { date: number; message_id: number }) => void) | undefined;
         let pendingSend: Promise<Message.InvoiceMessage> | undefined;
+        let observedPreCheckout: PreCheckoutQuery | undefined;
 
         const invoiceResponse = new Promise<{ date: number; message_id: number }>((resolve) => {
           resolveInvoice = resolve;
@@ -546,11 +547,14 @@ describe('Payments', () => {
             [{ label: 'Item', amount: 100 }],
             {
               provider_token: 'provider-token',
+              max_tip_amount: 20,
+              need_email: true,
             },
           );
         });
 
         bot.on('pre_checkout_query', async (ctx) => {
+          observedPreCheckout = ctx.preCheckoutQuery;
           await ctx.answerPreCheckoutQuery(true);
         });
 
@@ -564,11 +568,21 @@ describe('Payments', () => {
 
         let isPaymentResolved = false;
 
-        const paymentPromise = user.payInvoice(user.replies.lastOrThrow()).then((payment) => {
+        const invoice = user.replies.lastOrThrow();
+
+        const paymentPromise = user.payInvoice(invoice, { tipAmount: 10, orderInfo: { email: 'buyer@example.com' } }).then((payment) => {
           isPaymentResolved = true;
 
           return payment;
         });
+
+        assert.ok(invoice.invoice);
+        invoice.invoice.currency = 'EUR';
+        invoice.invoice.total_amount = 9999;
+        invoice.raw.payload = 'mutated-payload';
+        invoice.raw.max_tip_amount = 0;
+        invoice.raw.need_phone_number = true;
+        invoice.raw.is_flexible = true;
 
         await new Promise<void>((resolve) => {
           setImmediate(resolve);
@@ -583,6 +597,22 @@ describe('Payments', () => {
         const payment = await paymentPromise;
 
         expect(payment.status).toBe('ready');
+
+        expect(observedPreCheckout).toMatchObject({
+          currency: 'USD',
+          total_amount: 110,
+          invoice_payload: 'pending-order',
+          order_info: { email: 'buyer@example.com' },
+        });
+
+        const successful = await payment.completeSuccessfully();
+
+        expect(successful.successful_payment).toMatchObject({
+          currency: 'USD',
+          total_amount: 110,
+          invoice_payload: 'pending-order',
+          order_info: { email: 'buyer@example.com' },
+        });
       });
     });
 

@@ -501,12 +501,12 @@ function addInvoiceAmounts(totalAmount: number, amounts: readonly number[]): num
 
 /**
  * Validates the optional tip and returns its normalized value.
- * @param invoice - Captured invoice reply.
+ * @param invoiceRaw - Snapshotted invoice payload.
  * @param options - Requested checkout options.
  * @param isStars - Whether the invoice uses Telegram Stars.
  * @returns The normalized tip amount.
  */
-function validateInvoiceTip<TContext extends Context>(invoice: Reply<TContext>, options: PayInvoiceOptions, isStars: boolean): number {
+function validateInvoiceTip(invoiceRaw: Readonly<Record<string, unknown>>, options: PayInvoiceOptions, isStars: boolean): number {
   const tipAmount = options.tipAmount ?? 0;
 
   if (!Number.isSafeInteger(tipAmount) || tipAmount < 0) {
@@ -517,7 +517,7 @@ function validateInvoiceTip<TContext extends Context>(invoice: Reply<TContext>, 
     throw new Error('payInvoice: Telegram Stars invoices do not support tips');
   }
 
-  const maxTipAmount = typeof invoice.raw.max_tip_amount === 'number' ? invoice.raw.max_tip_amount : 0;
+  const maxTipAmount = typeof invoiceRaw.max_tip_amount === 'number' ? invoiceRaw.max_tip_amount : 0;
 
   if (tipAmount > maxTipAmount) {
     throw new Error(`payInvoice: tipAmount ${String(tipAmount)} exceeds max_tip_amount ${String(maxTipAmount)}`);
@@ -528,11 +528,11 @@ function validateInvoiceTip<TContext extends Context>(invoice: Reply<TContext>, 
 
 /**
  * Validates personal information requested by a non-Stars invoice.
- * @param invoice - Captured invoice reply.
+ * @param invoiceRaw - Snapshotted invoice payload.
  * @param options - Requested checkout options.
  * @param isStars - Whether the invoice uses Telegram Stars.
  */
-function validateInvoiceOrderInfo<TContext extends Context>(invoice: Reply<TContext>, options: PayInvoiceOptions, isStars: boolean): void {
+function validateInvoiceOrderInfo(invoiceRaw: Readonly<Record<string, unknown>>, options: PayInvoiceOptions, isStars: boolean): void {
   const { orderInfo } = options;
 
   if (isStars) {
@@ -543,36 +543,32 @@ function validateInvoiceOrderInfo<TContext extends Context>(invoice: Reply<TCont
     return;
   }
 
-  if (invoice.raw.need_name === true && !orderInfo?.name) {
+  if (invoiceRaw.need_name === true && !orderInfo?.name) {
     throw new Error('payInvoice: orderInfo.name is required by this invoice');
   }
 
-  if (invoice.raw.need_phone_number === true && !orderInfo?.phone_number) {
+  if (invoiceRaw.need_phone_number === true && !orderInfo?.phone_number) {
     throw new Error('payInvoice: orderInfo.phone_number is required by this invoice');
   }
 
-  if (invoice.raw.need_email === true && !orderInfo?.email) {
+  if (invoiceRaw.need_email === true && !orderInfo?.email) {
     throw new Error('payInvoice: orderInfo.email is required by this invoice');
   }
 
-  if (invoice.raw.need_shipping_address === true && !orderInfo?.shipping_address) {
+  if (invoiceRaw.need_shipping_address === true && !orderInfo?.shipping_address) {
     throw new Error('payInvoice: orderInfo.shipping_address is required by this invoice');
   }
 }
 
 /**
  * Validates shipping selection and reports whether a shipping query is needed.
- * @param invoice - Captured invoice reply.
+ * @param invoiceRaw - Snapshotted invoice payload.
  * @param options - Requested checkout options.
  * @param isStars - Whether the invoice uses Telegram Stars.
  * @returns Whether checkout requires a shipping query.
  */
-function validateInvoiceShipping<TContext extends Context>(
-  invoice: Reply<TContext>,
-  options: PayInvoiceOptions,
-  isStars: boolean,
-): boolean {
-  const isShippingRequired = !isStars && invoice.raw.is_flexible === true;
+function validateInvoiceShipping(invoiceRaw: Readonly<Record<string, unknown>>, options: PayInvoiceOptions, isStars: boolean): boolean {
+  const isShippingRequired = !isStars && invoiceRaw.is_flexible === true;
 
   if (isStars && options.shippingOptionId !== undefined) {
     throw new Error('payInvoice: Telegram Stars invoices do not support shipping');
@@ -591,22 +587,22 @@ function validateInvoiceShipping<TContext extends Context>(
 
 /**
  * Validates all checkout options for one captured invoice.
- * @param invoice - Captured invoice reply.
+ * @param invoiceRaw - Snapshotted invoice payload.
  * @param options - Requested checkout options.
  * @param isStars - Whether the invoice uses Telegram Stars.
  * @returns Normalized values needed to initialize payment state.
  */
-function validateInvoicePaymentOptions<TContext extends Context>(
-  invoice: Reply<TContext>,
+function validateInvoicePaymentOptions(
+  invoiceRaw: Readonly<Record<string, unknown>>,
   options: PayInvoiceOptions,
   isStars: boolean,
 ): ValidatedInvoicePaymentOptions {
-  const tipAmount = validateInvoiceTip(invoice, options, isStars);
+  const tipAmount = validateInvoiceTip(invoiceRaw, options, isStars);
 
-  validateInvoiceOrderInfo(invoice, options, isStars);
+  validateInvoiceOrderInfo(invoiceRaw, options, isStars);
 
   return {
-    isShippingRequired: validateInvoiceShipping(invoice, options, isStars),
+    isShippingRequired: validateInvoiceShipping(invoiceRaw, options, isStars),
     tipAmount,
   };
 }
@@ -2000,11 +1996,14 @@ export class Chats<TContext extends Context = Context> {
       ...(options.orderInfo !== undefined && { orderInfo: cloneOrderInfo(options.orderInfo) }),
     };
 
-    const publicInvoice = invoice.invoice;
+    const publicInvoice = invoice.invoice === undefined ? undefined : { ...invoice.invoice };
+    const invoiceRaw = { ...invoice.raw };
 
-    if (publicInvoice === undefined || typeof invoice.raw.payload !== 'string') {
+    if (publicInvoice === undefined || typeof invoiceRaw.payload !== 'string') {
       throw new Error('payInvoice: reply does not contain a captured sendInvoice payload');
     }
+
+    const invoicePayload = invoiceRaw.payload;
 
     const invoiceSettlement = this.invoiceSettlements.get(invoice);
 
@@ -2016,14 +2015,14 @@ export class Chats<TContext extends Context = Context> {
       throw new Error("payInvoice: payment completion is currently supported only for an invoice in this user's private chat");
     }
 
-    const { isShippingRequired, tipAmount } = validateInvoicePaymentOptions(invoice, paymentOptions, publicInvoice.currency === 'XTR');
+    const { isShippingRequired, tipAmount } = validateInvoicePaymentOptions(invoiceRaw, paymentOptions, publicInvoice.currency === 'XTR');
 
     const state: InvoicePaymentState<TContext> = {
       user,
       invoice,
       options: paymentOptions,
       currency: publicInvoice.currency,
-      invoicePayload: invoice.raw.payload,
+      invoicePayload,
       isShippingRequired,
       shippingQueryId: undefined,
       preCheckoutQueryId: undefined,
