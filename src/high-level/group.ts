@@ -6,6 +6,7 @@ import { type ChatRefHolder, setBotRef } from './chat';
 import { dispatchChatMember, dispatchMyChatMember, makeRelayUser } from './dispatch';
 import type { IdGenerator } from './id-generator';
 import type { MessagesLog } from './messages-log';
+import type { ModerationLog } from './moderation-log';
 import type {
   ChatMemberStatus,
   DispatchMemberUpdateOptions,
@@ -67,6 +68,13 @@ export class Group<TContext extends Context = Context> implements ChatRefHolder<
 
   /** @internal */
   messages!: MessagesLog<TContext>;
+
+  /**
+   * Captured moderation calls (`banChatMember` / `unbanChatMember` /
+   * `restrictChatMember` / `promoteChatMember`) targeting this group,
+   * with per-kind views such as `moderation.bans.byUser(user)`.
+   */
+  moderation!: ModerationLog<TContext>;
 
   /** @internal */
   bot!: Bot<TContext>;

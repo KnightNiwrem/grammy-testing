@@ -3,7 +3,7 @@
 /* eslint-disable no-param-reassign -- attachBot intentionally hands bot to each chat */
 
 import type { Bot, Context, RawApi } from 'grammy';
-import type { ChatMember, Message, Poll, Update, User as TelegramUser } from 'grammy/types';
+import type { ChatMember, ChatPermissions, Message, Poll, Update, User as TelegramUser } from 'grammy/types';
 
 import type { IdleTracker } from '../low-level/idle';
 import type { OutgoingRequests, Request } from '../low-level/outgoing-requests';
@@ -14,11 +14,20 @@ import { BusinessAccount } from './business-account';
 import { Channel } from './channel';
 import { type AnyChat, setBotRef } from './chat';
 import { type Deletion, DeletionsLog } from './deletions-log';
+import { makeChatMember } from './dispatch';
 import { DraftsLog } from './drafts-log';
 import { type Edit, EditsLog } from './edits-log';
 import { Group } from './group';
 import { IdGenerator } from './id-generator';
 import { MessagesLog } from './messages-log';
+import {
+  clampUntilDate,
+  expandChatPermissions,
+  extractPromoteFlags,
+  liftsAllRestrictions,
+  type ModerationAction,
+  ModerationLog,
+} from './moderation-log';
 import { PrivateChat } from './private-chat';
 import { ReactionRemovalsLog } from './reaction-removals-log';
 import { Reply } from './reply';
@@ -78,12 +87,20 @@ function resolveChatProfile(
 /**
  * Converts a `Membership` record to the `ChatMember` discriminated union shape expected by the Telegram API.
  * `User<TContext>` is structurally compatible with the Telegram `User` interface (same required fields).
- * For `'administrator'` and `'restricted'` statuses the permissions spread may not satisfy every required
- * field of the strict Telegram shape, so those branches use an explicit cast.
+ * For `'administrator'` and `'restricted'` statuses the record's flags are spread over a complete
+ * default-false base from `makeChatMember`, so required booleans real Telegram always returns
+ * (e.g. `can_change_info`) come back as `false` rather than missing when a membership stores only
+ * the granted flags. The spread may still carry flags beyond the strict shape, hence the casts.
  * @param membership - The membership record to convert.
+ * @param chatType - The chat's type; channels additionally default the channel-only
+ *   administrator booleans (`can_post_messages`, `can_edit_messages`,
+ *   `can_manage_direct_messages`) to `false`, as real Telegram returns them there.
  * @returns The corresponding `ChatMember` discriminated union value.
  */
-function membershipToChatMember<TContext extends Context>(membership: Membership<TContext>): ChatMember {
+function membershipToChatMember<TContext extends Context>(
+  membership: Membership<TContext>,
+  chatType: 'channel' | 'group' | 'supergroup',
+): ChatMember {
   const user = membership.user as unknown as TelegramUser;
   const { status, permissions, untilDate } = membership;
 
@@ -93,7 +110,13 @@ function membershipToChatMember<TContext extends Context>(membership: Membership
     }
 
     case 'administrator': {
-      return { status: 'administrator', user, is_anonymous: false, can_be_edited: true, ...permissions } as ChatMember;
+      // can_manage_tags is scoped to groups/supergroups; the other three are channel-only.
+      const chatScopedFields =
+        chatType === 'channel'
+          ? { can_post_messages: false, can_edit_messages: false, can_manage_direct_messages: false }
+          : { can_manage_tags: false };
+
+      return { ...makeChatMember(user, 'administrator', {}), ...chatScopedFields, can_be_edited: true, ...permissions } as ChatMember;
     }
 
     case 'member': {
@@ -101,7 +124,7 @@ function membershipToChatMember<TContext extends Context>(membership: Membership
     }
 
     case 'restricted': {
-      return { status: 'restricted', user, is_member: true, until_date: untilDate ?? 0, ...permissions } as ChatMember;
+      return { ...makeChatMember(user, 'restricted', {}, untilDate), ...permissions } as ChatMember;
     }
 
     case 'left': {
@@ -180,6 +203,15 @@ const REACTION_REMOVAL_METHODS_GUARD = {
 } satisfies Partial<Record<keyof RawApi, true>>;
 
 const REACTION_REMOVAL_METHODS = new Set(Object.keys(REACTION_REMOVAL_METHODS_GUARD));
+
+const MODERATION_METHODS_GUARD = {
+  banChatMember: true,
+  unbanChatMember: true,
+  restrictChatMember: true,
+  promoteChatMember: true,
+} satisfies Partial<Record<keyof RawApi, true>>;
+
+const MODERATION_METHODS = new Set(Object.keys(MODERATION_METHODS_GUARD));
 
 /**
  * Per-user inbox: filtered view of messages directed at this user.
@@ -289,6 +321,9 @@ function undefinedSafeBot<TContext extends Context>(ref: BotRef<TContext>): Bot<
 /** Telegram chat ID — either a numeric ID or a `@username` string. */
 type ChatId = number | string;
 
+/** A non-private chat actor — the kinds that track members and moderation state. */
+type GroupLikeChat<TContext extends Context> = Channel<TContext> | Group<TContext> | Supergroup<TContext>;
+
 /**
  * The orchestrator returned from every entry point's `chats` field.
  * Mints users and chats, exposes the v0.1 capture surface
@@ -318,6 +353,12 @@ export class Chats<TContext extends Context = Context> {
 
   /** guest_query_id->User registry, populated by `user.sendGuestMessage`, for answer correlation. */
   private readonly guestQueryToUser = new Map<string, User<TContext>>();
+
+  /**
+   * Membership transitions queued at capture time for in-flight moderation calls,
+   * applied by `settleFromCapture` only when the mocked response succeeds.
+   */
+  private readonly pendingModerationTransitions = new WeakMap<Request, () => void>();
 
   /** The Reply created by the most recent message-method `onCapture` call. Read by the default response resolvers. */
   private lastCapturedReply: Reply<TContext> | undefined;
@@ -361,6 +402,10 @@ export class Chats<TContext extends Context = Context> {
 
     for (const chat of this.chats.values()) {
       chat.messages.clear();
+
+      if (chat.type !== 'private') {
+        chat.moderation.clear();
+      }
 
       if (chat.type === 'supergroup') {
         for (const topic of chat.allTopics) {
@@ -689,7 +734,7 @@ export class Chats<TContext extends Context = Context> {
       const membership = chat.members.get(payload.user_id);
 
       if (membership) {
-        return membershipToChatMember(membership);
+        return membershipToChatMember(membership, chat.type);
       }
 
       const userEntry = this.users.get(payload.user_id);
@@ -712,7 +757,7 @@ export class Chats<TContext extends Context = Context> {
 
       const admins = [...chat.members.values()]
         .filter((membership) => membership.status === 'creator' || membership.status === 'administrator')
-        .map((membership) => membershipToChatMember(membership));
+        .map((membership) => membershipToChatMember(membership, chat.type));
 
       // Bot API 10.0: return_bots: false excludes bot administrators.
       if (payload.return_bots === false) {
@@ -810,6 +855,12 @@ export class Chats<TContext extends Context = Context> {
 
     if (REACTION_REMOVAL_METHODS.has(request.method)) {
       this.deriveReactionRemoval(request.method, payload);
+
+      return;
+    }
+
+    if (MODERATION_METHODS.has(request.method)) {
+      this.deriveModeration(request, payload);
 
       return;
     }
@@ -993,6 +1044,282 @@ export class Chats<TContext extends Context = Context> {
   }
 
   /**
+   * Routes a captured `banChatMember` / `unbanChatMember` / `restrictChatMember` /
+   * `promoteChatMember` payload to the target chat's moderation log and queues the
+   * membership transition so `user.in(chat)` and the `getChatMember` resolver reflect
+   * the bot's own moderation calls. The log records the attempt immediately (matching
+   * `chat.messages` semantics), but the members-map mutation is deferred until the
+   * mocked response settles successfully — a `failNext`/`failAll` override or a raw
+   * non-OK response means Telegram performed no action, so state must not change.
+   * No `chat_member` update is dispatched — captures only mutate state
+   * (auto-dispatching would re-enter the bot's own handlers); compose with
+   * `chat.dispatchMemberUpdate(...)` to drive `chat_member` handlers.
+   * @param request - The captured outgoing API request.
+   * @param payload - The raw outgoing API payload.
+   */
+  private deriveModeration(request: Request, payload: Record<string, unknown>): void {
+    const { method } = request;
+    const chatId = payload.chat_id as ChatId | undefined;
+    const userId = payload.user_id as number | undefined;
+
+    if (chatId === undefined || userId === undefined) {
+      return;
+    }
+
+    const chat = this.findChatByTelegramId(Number(chatId));
+
+    if (!chat) {
+      this.warnUnregisteredChat(method, chatId);
+
+      return;
+    }
+
+    if (chat.type === 'private') {
+      return; // moderation methods target groups/supergroups/channels; real Telegram rejects private chats
+    }
+
+    const user = this.users.get(userId)?.user;
+    const action = this.buildModerationAction(method, payload, chatId, userId, user, chat.type);
+
+    chat.moderation.push(action);
+
+    if (user !== undefined) {
+      this.pendingModerationTransitions.set(request, () => {
+        this.applyModerationTransition(chat, user, action);
+      });
+    }
+  }
+
+  /**
+   * Called when a captured request's mocked response settles. Applies the queued
+   * membership transition for a moderation call only when the call succeeded.
+   * @param request - The captured outgoing API request that settled.
+   * @param ok - Whether the call resolved with an `ok: true` envelope.
+   * @internal
+   */
+  settleFromCapture(request: Request, ok: boolean): void {
+    const transition = this.pendingModerationTransitions.get(request);
+
+    if (transition === undefined) {
+      return;
+    }
+
+    this.pendingModerationTransitions.delete(request);
+
+    if (ok) {
+      transition();
+    }
+  }
+
+  /**
+   * Normalises a moderation payload into a `ModerationAction` record.
+   * @param method - The moderation method name.
+   * @param payload - The raw outgoing API payload.
+   * @param chatId - The target chat ID from the payload.
+   * @param userId - The target user ID from the payload.
+   * @param user - The resolved `User` actor, when minted by this orchestrator.
+   * @param chatType - The target chat's type, for chat-type-specific flag defaults.
+   * @returns The normalised action.
+   */
+  private buildModerationAction(
+    method: string,
+    payload: Record<string, unknown>,
+    chatId: ChatId,
+    userId: number,
+    user: User<TContext> | undefined,
+    chatType: GroupLikeChat<TContext>['type'],
+  ): ModerationAction<TContext> {
+    const base = { method, chatId, userId, user, raw: payload };
+
+    switch (method) {
+      case 'banChatMember': {
+        return {
+          ...base,
+          kind: 'ban',
+          untilDate: payload.until_date as number | undefined,
+          revokeMessages: payload.revoke_messages as boolean | undefined,
+        };
+      }
+
+      case 'unbanChatMember': {
+        return { ...base, kind: 'unban', onlyIfBanned: payload.only_if_banned as boolean | undefined };
+      }
+
+      case 'restrictChatMember': {
+        const permissions = expandChatPermissions(
+          (payload.permissions ?? {}) as ChatPermissions,
+          payload.use_independent_chat_permissions as boolean | undefined,
+        );
+
+        return { ...base, kind: 'restrict', permissions, untilDate: payload.until_date as number | undefined };
+      }
+
+      default: {
+        // promoteChatMember: all-false/absent boolean rights demote (per the Bot API docs).
+        const flags = extractPromoteFlags(payload);
+
+        // For backward compatibility, can_restrict_members defaults to true for
+        // promotions of channel administrators (Bot API docs).
+        if (chatType === 'channel') {
+          flags.can_restrict_members ??= true;
+        }
+
+        const hasGrantedRight = Object.values(flags).includes(true);
+
+        if (!hasGrantedRight) {
+          return { ...base, kind: 'demote', permissions: {} };
+        }
+
+        // can_manage_chat is documented as implied by any other administrator privilege,
+        // so it wins over an explicit false in the payload.
+        return { ...base, kind: 'promote', permissions: { ...flags, can_manage_chat: true } };
+      }
+    }
+  }
+
+  /**
+   * Applies a captured moderation action to the chat's `members` map, mirroring real
+   * Telegram semantics: bans set `'kicked'` (with `until_date` clamped to forever when
+   * under 30 seconds or over 366 days away, and ignored in basic groups), unbans set
+   * `'left'` (removing an active member unless `only_if_banned` guards it), restricts
+   * set `'restricted'` (or lift back to `'member'` when every permission is granted),
+   * and promotes set `'administrator'` (all-false demotes an administrator back to
+   * `'member'`). Creators are never mutated — real Telegram rejects moderating the owner.
+   * @param chat - The group, supergroup, or channel the action targets.
+   * @param user - The minted target user.
+   * @param action - The normalised moderation action.
+   */
+  private applyModerationTransition(chat: GroupLikeChat<TContext>, user: User<TContext>, action: ModerationAction<TContext>): void {
+    const current = chat.members.get(user.id);
+
+    if (current?.status === 'creator') {
+      return;
+    }
+
+    // Real Telegram rejects banning, unbanning (removing), or restricting an
+    // administrator until they are demoted — only promoteChatMember (promote/demote)
+    // may rewrite an administrator record.
+    if (current?.status === 'administrator' && action.kind !== 'promote' && action.kind !== 'demote') {
+      return;
+    }
+
+    const next = this.nextModerationMembership(chat, user, current, action);
+
+    if (next !== undefined) {
+      chat.members.set(user.id, next);
+    }
+  }
+
+  /**
+   * Computes the membership record a moderation action transitions the target to,
+   * or `undefined` when the action leaves the current state untouched (an
+   * `only_if_banned` unban of a non-banned user, or a demotion of a non-administrator).
+   * @param chat - The group, supergroup, or channel the action targets.
+   * @param user - The minted target user.
+   * @param current - The target's current membership record, if any.
+   * @param action - The normalised moderation action.
+   * @returns The next membership record, or `undefined` for no change.
+   */
+  private nextModerationMembership(
+    chat: GroupLikeChat<TContext>,
+    user: User<TContext>,
+    current: Membership<TContext> | undefined,
+    action: ModerationAction<TContext>,
+  ): Membership<TContext> | undefined {
+    const now = Math.floor(Date.now() / 1000);
+
+    switch (action.kind) {
+      case 'ban': {
+        // until_date is applied for supergroups and channels only (Bot API docs).
+        const untilDate = chat.type === 'group' ? undefined : clampUntilDate(action.untilDate, now);
+
+        return { user, chat, status: 'kicked', permissions: {}, untilDate };
+      }
+
+      case 'unban': {
+        // unbanChatMember is supported in supergroups and channels only (Bot API docs).
+        if (chat.type === 'group') {
+          return undefined;
+        }
+
+        if (action.onlyIfBanned === true && current?.status !== 'kicked') {
+          return undefined;
+        }
+
+        return { user, chat, status: 'left', permissions: {} };
+      }
+
+      case 'restrict': {
+        return this.nextRestrictMembership(chat, user, action, now);
+      }
+
+      case 'demote': {
+        // promoteChatMember is supported in supergroups and channels only (Bot API docs).
+        if (chat.type === 'group') {
+          return undefined;
+        }
+
+        return current?.status === 'administrator' ? { user, chat, status: 'member', permissions: {} } : undefined;
+      }
+
+      case 'promote': {
+        // promoteChatMember is supported in supergroups and channels only (Bot API docs).
+        if (chat.type === 'group') {
+          return undefined;
+        }
+
+        return { user, chat, status: 'administrator', permissions: action.permissions ?? {} };
+      }
+
+      default: {
+        throw new Error(`Unknown moderation action kind: ${String(action.kind)}`);
+      }
+    }
+  }
+
+  /**
+   * Computes the membership record a captured `restrictChatMember` call transitions the
+   * target to. The method is supported in supergroups only (Bot API docs) — real
+   * Telegram rejects it elsewhere, so no state changes for other chat types. Granting
+   * every permission lifts the restriction back to `'member'`.
+   * @param chat - The group, supergroup, or channel the action targets.
+   * @param user - The minted target user.
+   * @param action - The normalised restrict action.
+   * @param now - The current Unix timestamp in seconds, for `until_date` clamping.
+   * @returns The next membership record, or `undefined` for no change.
+   */
+  private nextRestrictMembership(
+    chat: GroupLikeChat<TContext>,
+    user: User<TContext>,
+    action: ModerationAction<TContext>,
+    now: number,
+  ): Membership<TContext> | undefined {
+    if (chat.type !== 'supergroup') {
+      return undefined;
+    }
+
+    // Restricting a user who is not currently in the chat keeps them out:
+    // real Telegram stores the restriction with is_member: false, and lifting
+    // it leaves them 'left' rather than making them a member.
+    const current = chat.members.get(user.id);
+    const isMember = current?.status === 'member' || (current?.status === 'restricted' && current.permissions.is_member !== false);
+
+    const permissions = action.permissions ?? {};
+
+    if (liftsAllRestrictions(permissions)) {
+      return isMember ? { user, chat, status: 'member', permissions: {} } : { user, chat, status: 'left', permissions: {} };
+    }
+
+    return {
+      user,
+      chat,
+      status: 'restricted',
+      permissions: { ...permissions, is_member: isMember },
+      untilDate: clampUntilDate(action.untilDate, now),
+    };
+  }
+
+  /**
    * Returns `true` if `entry`'s user should receive `reply` in their inbox.
    * @param entry - The user entry to evaluate.
    * @param chat - The chat the reply was sent to.
@@ -1134,7 +1461,7 @@ export class Chats<TContext extends Context = Context> {
    *   registration would silently re-route captured messages, deletions, and `getChat`-style
    *   resolvers to the new actor while the original actor's logs stay empty.
    */
-  private registerChat(chat: Channel<TContext> | Group<TContext> | Supergroup<TContext>): void {
+  private registerChat(chat: GroupLikeChat<TContext>): void {
     const existing = this.chats.get(chat.id);
 
     if (existing !== undefined) {
@@ -1148,6 +1475,7 @@ export class Chats<TContext extends Context = Context> {
     }
 
     chat.messages = new MessagesLog<TContext>();
+    chat.moderation = new ModerationLog<TContext>();
     this.chats.set(chat.id, chat);
     this.chatDeletions.set(chat.id, new DeletionsLog<TContext>());
 

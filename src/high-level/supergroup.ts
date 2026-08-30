@@ -7,6 +7,7 @@ import { ForumTopic, type NewTopicOptions } from './forum-topic';
 import type { PostRelayMessageOptions } from './group';
 import type { IdGenerator } from './id-generator';
 import type { MessagesLog } from './messages-log';
+import type { ModerationLog } from './moderation-log';
 import type {
   ChatMemberStatus,
   DispatchMemberUpdateOptions,
@@ -48,6 +49,13 @@ export class Supergroup<TContext extends Context = Context> implements ChatRefHo
 
   /** @internal */
   messages!: MessagesLog<TContext>;
+
+  /**
+   * Captured moderation calls (`banChatMember` / `unbanChatMember` /
+   * `restrictChatMember` / `promoteChatMember`) targeting this supergroup,
+   * with per-kind views such as `moderation.bans.byUser(user)`.
+   */
+  moderation!: ModerationLog<TContext>;
 
   /** @internal */
   bot!: Bot<TContext>;

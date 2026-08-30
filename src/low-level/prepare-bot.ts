@@ -64,6 +64,9 @@ export async function prepareBot<TContext extends Context = Context, TApi extend
         onCapture: (request) => {
           chats.deriveFromCapture(request);
         },
+        onSettled: (request, ok) => {
+          chats.settleFromCapture(request, ok);
+        },
       }),
     ),
   );

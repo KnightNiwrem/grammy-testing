@@ -11,14 +11,15 @@ describe('moderation-bot', () => {
     const target = chats.newUser({ id: 777 });
     const group = chats.defaultGroup ?? chats.newSupergroup();
 
-    group.own(target);
+    group.join(target);
 
     await admin.sendCommand('/ban', '777', { chat: group });
 
-    const banCall = chats.outgoing.requests.find((request) => request.method === 'banChatMember');
+    const ban = group.moderation.bans.byUser(target).lastOrThrow();
 
-    expect(banCall).toBeDefined();
-    expect((banCall?.payload as { user_id: number }).user_id).toBe(777);
+    expect(ban.userId).toBe(777);
+    expect(ban.user).toBe(target);
+    expect(target.in(group)?.status).toBe('kicked');
     expect(group.messages.last?.text).toBe('User 777 has been banned.');
   });
 
@@ -28,13 +29,14 @@ describe('moderation-bot', () => {
     const target = chats.newUser({ id: 888 });
     const group = chats.defaultGroup ?? chats.newSupergroup();
 
-    group.own(target);
+    group.join(target);
 
     await admin.sendCommand('/restrict', '888', { chat: group });
 
-    const restrictCall = chats.outgoing.requests.find((request) => request.method === 'restrictChatMember');
+    const restriction = group.moderation.restrictions.byUser(target).lastOrThrow();
 
-    expect(restrictCall).toBeDefined();
+    expect(restriction.permissions?.can_send_messages).toBe(false);
+    expect(target.in(group)?.status).toBe('restricted');
     expect(group.messages.last?.text).toBe('User 888 has been restricted.');
   });
 
@@ -45,6 +47,7 @@ describe('moderation-bot', () => {
 
     await admin.sendCommand('/ban', undefined, { chat: group });
 
+    expect(group.moderation.bans.length).toBe(0);
     expect(group.messages.last?.text).toBe('Usage: /ban <user_id>');
   });
 
@@ -55,6 +58,7 @@ describe('moderation-bot', () => {
 
     await admin.sendCommand('/ban', 'notanumber', { chat: group });
 
+    expect(group.moderation.bans.length).toBe(0);
     expect(group.messages.last?.text).toBe('Invalid user ID.');
   });
 });

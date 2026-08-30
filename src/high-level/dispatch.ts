@@ -121,6 +121,8 @@ export function makeChatMember(user: TelegramUser, status: ChatMemberStatus, per
         can_invite_users: permissions.can_invite_users ?? false,
         can_pin_messages: permissions.can_pin_messages ?? false,
         can_manage_topics: permissions.can_manage_topics ?? false,
+        can_react_to_messages: permissions.can_react_to_messages ?? false,
+        can_edit_tag: permissions.can_edit_tag ?? false,
         until_date: untilDate ?? 0,
       } as ChatMember;
     }
