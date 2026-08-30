@@ -2072,7 +2072,7 @@ export class Chats<TContext extends Context = Context> {
         total_amount: state.totalAmount,
         invoice_payload: state.invoicePayload,
         ...(state.selectedShippingOption !== undefined && { shipping_option_id: state.selectedShippingOption.id }),
-        ...(state.options.orderInfo !== undefined && { order_info: state.options.orderInfo }),
+        ...(state.options.orderInfo !== undefined && { order_info: cloneOrderInfo(state.options.orderInfo) }),
       },
     } as Update);
 

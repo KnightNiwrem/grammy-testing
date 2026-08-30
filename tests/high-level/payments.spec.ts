@@ -334,6 +334,12 @@ describe('Payments', () => {
         bot.on('pre_checkout_query', async (ctx) => {
           observedEmail = ctx.preCheckoutQuery.order_info?.email;
           observedCity = ctx.preCheckoutQuery.order_info?.shipping_address?.city;
+
+          const dispatchedOrderInfo = ctx.preCheckoutQuery.order_info;
+
+          assert.ok(dispatchedOrderInfo?.shipping_address);
+          dispatchedOrderInfo.email = 'middleware-mutated@example.com';
+          dispatchedOrderInfo.shipping_address.city = 'Middleware Mutated City';
           orderInfo.email = 'mutated@example.com';
           orderInfo.shipping_address.city = 'Mutated City';
           await ctx.answerPreCheckoutQuery(true);
