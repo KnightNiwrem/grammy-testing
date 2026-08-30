@@ -517,6 +517,11 @@ describe('Payments', () => {
         });
 
         expect(payment.shippingAnswer?.shippingOptions?.[0].prices[0].amount).toBe(20);
+
+        expect(payment.shippingAnswer?.raw).toMatchObject({
+          shipping_options: [{ id: 'standard', title: 'Standard', prices: [{ label: 'Delivery', amount: 20 }] }],
+        });
+
         expect(observedCity).toBe('San Francisco');
         expect(observedFirstName).toBe('Original Name');
         expect(observedTotal).toBe(120);

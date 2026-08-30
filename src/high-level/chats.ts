@@ -2271,14 +2271,19 @@ export class Chats<TContext extends Context = Context> {
       return;
     }
 
+    const shippingOptions = Array.isArray(payload.shipping_options)
+      ? cloneShippingOptions(payload.shipping_options as ShippingOption[])
+      : undefined;
+
     const answer: ShippingQueryAnswer = {
       shippingQueryId,
       ok: payload.ok,
-      shippingOptions: Array.isArray(payload.shipping_options)
-        ? cloneShippingOptions(payload.shipping_options as ShippingOption[])
-        : undefined,
+      shippingOptions,
       errorMessage: typeof payload.error_message === 'string' ? payload.error_message : undefined,
-      raw: payload,
+      raw: {
+        ...payload,
+        ...(shippingOptions !== undefined && { shipping_options: cloneShippingOptions(shippingOptions) }),
+      },
     };
 
     this.pendingPaymentAnswers.set(request, () => {
