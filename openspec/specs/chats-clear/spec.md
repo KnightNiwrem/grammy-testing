@@ -15,6 +15,7 @@ The `Chats` class SHALL expose a `clear()` method that atomically resets all cap
 - Every registered chat's `messages` log
 - Every registered chat's `DeletionsLog`
 - The `messageIdToReply` routing registry
+- The incoming-message author routing registry
 - The `clickers` routing registry
 - The `lastCapturedReply` transient field
 

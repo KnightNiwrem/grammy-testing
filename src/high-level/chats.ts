@@ -296,6 +296,11 @@ interface UserEntry<TContext extends Context = Context> {
   privateChat?: PrivateChat<TContext>;
 }
 
+interface MessageAuthor {
+  userId: number;
+  messageThreadId: number | undefined;
+}
+
 interface BotRef<TContext extends Context> {
   readonly bot: Bot<TContext> | undefined;
 }
@@ -342,8 +347,11 @@ export class Chats<TContext extends Context = Context> {
   /** click->user+chat association for the user.replies filter rule. */
   private readonly clickers = new Map<string, { userId: number; chatId: number }>();
 
-  /** messageId->Reply registry for reply.replyingTo resolution. */
-  private readonly messageIdToReply = new Map<number, Reply<TContext>>();
+  /** chatId->messageId->Reply registry for reply.replyingTo and mutation resolution. */
+  private readonly messageIdToReply = new Map<number, Map<number, Reply<TContext>>>();
+
+  /** chatId->messageId->author registry for the user.replies reply-to-author rule. */
+  private readonly messageAuthors = new Map<number, Map<number, MessageAuthor>>();
 
   /** chatId->DeletionsLog registry for deleteMessage routing. */
   private readonly chatDeletions = new Map<number, DeletionsLog<TContext>>();
@@ -421,6 +429,7 @@ export class Chats<TContext extends Context = Context> {
     this.reactionRemovals.clear();
     this.guestQueryToUser.clear();
     this.messageIdToReply.clear();
+    this.messageAuthors.clear();
     this.clickers.clear();
     this.lastCapturedReply = undefined;
   }
@@ -493,6 +502,11 @@ export class Chats<TContext extends Context = Context> {
         drafts,
         recordGuestQuery: (queryId, who) => {
           this.guestQueryToUser.set(queryId, who);
+        },
+        recordMessageAuthor: (message) => {
+          if (message.from?.id === user.id) {
+            this.recordMessageAuthor(message, user.id);
+          }
         },
       },
       (chat: AnyChat<TContext>) => this.readMembership(user, chat),
@@ -898,12 +912,12 @@ export class Chats<TContext extends Context = Context> {
       recordClick: (callbackData, byUserId, byChatId) => {
         this.clickers.set(callbackData, { userId: byUserId, chatId: byChatId });
       },
-      resolveReply: (messageId) => this.messageIdToReply.get(messageId),
+      resolveReply: (messageId) => this.messageIdToReply.get(chat.id)?.get(messageId),
     });
 
     this.lastCapturedReply = reply;
 
-    this.messageIdToReply.set(reply.messageId, reply);
+    this.setReplyForChat(chat.id, reply);
 
     chat.messages.push(reply);
     reply.topic?.messages.push(reply);
@@ -948,13 +962,14 @@ export class Chats<TContext extends Context = Context> {
    * @param payload - The raw outgoing API payload.
    */
   private deriveEdit(payload: Record<string, unknown>): void {
+    const chatId = payload.chat_id as ChatId | undefined;
     const messageId = payload.message_id as number | undefined;
 
-    if (messageId === undefined) {
+    if (chatId === undefined || messageId === undefined) {
       return;
     }
 
-    const originalReply = this.messageIdToReply.get(messageId);
+    const originalReply = this.messageIdToReply.get(Number(chatId))?.get(messageId);
 
     if (!originalReply?.chat) {
       return; // edit targets a message not captured during this test — skip silently
@@ -992,7 +1007,7 @@ export class Chats<TContext extends Context = Context> {
       return;
     }
 
-    const reply = this.messageIdToReply.get(messageId);
+    const reply = this.messageIdToReply.get(Number(chatId))?.get(messageId);
     const deletion: Deletion<TContext> = { messageId, reply, raw: payload };
 
     log.push(deletion);
@@ -1346,8 +1361,10 @@ export class Chats<TContext extends Context = Context> {
       }
     }
 
-    // Rule 2: reply_to_message points at a message authored by this user
-    // (we don't track historical message authors yet — defer to v0.2.x)
+    // Rule 2: reply_to_message points at a message authored by this user in this chat.
+    if (this.replyAddressesUser(entry.user.id, chat, reply)) {
+      return true;
+    }
 
     // Rule 3: mention of @user.username
     if (entry.user.username && reply.mentionUsernames.has(entry.user.username)) {
@@ -1362,6 +1379,67 @@ export class Chats<TContext extends Context = Context> {
     }
 
     return false;
+  }
+
+  /**
+   * Tests whether a reply targets a message authored by a user in the same chat/topic.
+   * @param userId - The candidate addressee's Telegram user ID.
+   * @param chat - The destination chat of the bot reply.
+   * @param reply - The captured bot reply.
+   * @returns Whether the reply-to-author rule addresses this user.
+   */
+  private replyAddressesUser(userId: number, chat: AnyChat<TContext>, reply: Reply<TContext>): boolean {
+    if (reply.replyToMessageId === undefined) {
+      return false;
+    }
+
+    const replyParameters = reply.raw.reply_parameters as { chat_id?: ChatId } | undefined;
+    const referencedChatId = replyParameters?.chat_id;
+
+    // Cross-chat ReplyParameters describe an external reply and do not address the author
+    // through the destination chat's inbox.
+    if (referencedChatId !== undefined && Number(referencedChatId) !== chat.id) {
+      return false;
+    }
+
+    const author = this.messageAuthors.get(chat.id)?.get(reply.replyToMessageId);
+
+    const isSameTopic =
+      author?.messageThreadId === undefined || reply.messageThreadId === undefined || author.messageThreadId === reply.messageThreadId;
+
+    return author?.userId === userId && isSameTopic;
+  }
+
+  /**
+   * Records a synthetic user-authored message before its middleware dispatch begins.
+   * @param message - The synthetic incoming message.
+   * @param userId - The authoring user actor's Telegram ID.
+   */
+  private recordMessageAuthor(message: Message, userId: number): void {
+    let authors = this.messageAuthors.get(message.chat.id);
+
+    if (!authors) {
+      authors = new Map<number, MessageAuthor>();
+      this.messageAuthors.set(message.chat.id, authors);
+    }
+
+    authors.set(message.message_id, { userId, messageThreadId: message.message_thread_id });
+  }
+
+  /**
+   * Registers a captured bot reply under its chat-scoped Telegram message identity.
+   * @param chatId - The destination chat's Telegram ID.
+   * @param reply - The captured bot reply.
+   */
+  private setReplyForChat(chatId: number, reply: Reply<TContext>): void {
+    let replies = this.messageIdToReply.get(chatId);
+
+    if (!replies) {
+      replies = new Map<number, Reply<TContext>>();
+      this.messageIdToReply.set(chatId, replies);
+    }
+
+    replies.set(reply.messageId, reply);
   }
 
   /**

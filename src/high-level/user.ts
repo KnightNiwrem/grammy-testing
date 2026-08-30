@@ -241,6 +241,8 @@ interface UserContext<TContext extends Context = Context> {
   drafts: DraftsLog;
   /** Records a guest_query_id → user association so `answerGuestQuery` can be correlated. */
   recordGuestQuery: (guestQueryId: string, user: User<TContext>) => void;
+  /** Records a user-authored message before middleware can synchronously reply to it. */
+  recordMessageAuthor: (message: Message) => void;
 }
 
 export interface UserSendMediaGroupItem<TContext extends Context = Context> {
@@ -434,6 +436,8 @@ export class User<TContext extends Context = Context> {
       ...(target.messageThreadId !== undefined && { message_thread_id: target.messageThreadId, is_topic_message: true }),
     } as Message;
 
+    this.ctx.recordMessageAuthor(message);
+
     await this.ctx.bot.handleUpdate({
       update_id: this.ctx.ids.nextUpdateId(),
       message,
@@ -475,6 +479,7 @@ export class User<TContext extends Context = Context> {
       replyToMessageId: options.reply_parameters?.message_id,
       replyToMessage: target.replyToMessage,
       messageThreadId: target.messageThreadId,
+      recordMessageAuthor: this.ctx.recordMessageAuthor,
       ...(options.anonymous && {
         fromOverride: target.from,
         senderChat: target.senderChat,
@@ -509,6 +514,7 @@ export class User<TContext extends Context = Context> {
       messageId: this.ctx.ids.nextMessageId(),
       updateId: this.ctx.ids.nextUpdateId(),
       forwardOrigin: options.forwardOrigin,
+      recordMessageAuthor: this.ctx.recordMessageAuthor,
     });
   }
 
@@ -529,6 +535,7 @@ export class User<TContext extends Context = Context> {
       messageId,
       text,
       updateId: this.ctx.ids.nextUpdateId(),
+      recordMessageAuthor: this.ctx.recordMessageAuthor,
     });
   }
 
@@ -552,6 +559,7 @@ export class User<TContext extends Context = Context> {
       chat: chat.toTelegramChat(),
       messageId: this.ctx.ids.nextMessageId(),
       updateId: this.ctx.ids.nextUpdateId(),
+      recordMessageAuthor: this.ctx.recordMessageAuthor,
     });
 
     this.ctx.updateMembership(chat, this, 'join');
@@ -577,6 +585,7 @@ export class User<TContext extends Context = Context> {
       chat: chat.toTelegramChat(),
       messageId: this.ctx.ids.nextMessageId(),
       updateId: this.ctx.ids.nextUpdateId(),
+      recordMessageAuthor: this.ctx.recordMessageAuthor,
     });
 
     this.ctx.updateMembership(chat, this, 'leave');
@@ -825,6 +834,8 @@ export class User<TContext extends Context = Context> {
       web_app_data: { data: webAppData, button_text: buttonText },
     } as Message;
 
+    this.ctx.recordMessageAuthor(message);
+
     await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
 
     return message;
@@ -859,6 +870,8 @@ export class User<TContext extends Context = Context> {
         provider_payment_charge_id: 'charge-provider-stub',
       },
     } as Message;
+
+    this.ctx.recordMessageAuthor(message);
 
     await this.ctx.bot.handleUpdate({ update_id: this.ctx.ids.nextUpdateId(), message } as Update);
 
@@ -1077,6 +1090,8 @@ export class User<TContext extends Context = Context> {
         update_id: this.ctx.ids.nextUpdateId(),
         message,
       } as Update;
+
+      this.ctx.recordMessageAuthor(message);
 
       // eslint-disable-next-line no-await-in-loop -- preserve dispatch order
       await this.ctx.bot.handleUpdate(update);
@@ -1332,22 +1347,26 @@ export class User<TContext extends Context = Context> {
 
     this.ctx.recordGuestQuery(guestQueryId, this);
 
+    const message: Message = {
+      message_id: this.ctx.ids.nextMessageId(),
+      date: Math.floor(Date.now() / 1000),
+      chat: targetChat,
+      from: {
+        id: this.id,
+        is_bot: false,
+        first_name: this.first_name,
+        last_name: this.last_name,
+        username: this.username,
+      },
+      text,
+      guest_query_id: guestQueryId,
+    } as Message;
+
+    this.ctx.recordMessageAuthor(message);
+
     await this.ctx.bot.handleUpdate({
       update_id: options.updateId ?? this.ctx.ids.nextUpdateId(),
-      guest_message: {
-        message_id: this.ctx.ids.nextMessageId(),
-        date: Math.floor(Date.now() / 1000),
-        chat: targetChat,
-        from: {
-          id: this.id,
-          is_bot: false,
-          first_name: this.first_name,
-          last_name: this.last_name,
-          username: this.username,
-        },
-        text,
-        guest_query_id: guestQueryId,
-      },
+      guest_message: message,
     } as Update);
 
     return guestQueryId;

@@ -135,6 +135,8 @@ A captured message-shape outgoing call SHALL appear in `user.replies` if and onl
    - The captured `text` contains a `mention` entity whose body equals `'@' + user.username` (when `username` is set).
    - The captured payload is the immediate response to a `callback_query` synthesized by this user via `clickButton`.
 
+Incoming messages dispatched by user actor verbs SHALL have their authorship recorded before bot middleware runs, so a synchronous reply from that middleware can satisfy the reply-to-author rule. Message ownership SHALL be keyed by the composite `(chat_id, message_id)` identity. A `reply_parameters.chat_id` that names another chat SHALL be treated as an external reply and SHALL NOT address that message's author through the destination chat's `user.replies` inbox. When both messages carry explicit forum-topic IDs, those IDs SHALL also match.
+
 A captured message-shape call that fails the rule but matches condition 1 SHALL still appear in `chat.messages` (see `chat-messages-log` capability) — `user.replies` is the filtered view, not the canonical log.
 
 #### Scenario: DM reply lands in user.replies
@@ -152,6 +154,19 @@ A captured message-shape call that fails the rule but matches condition 1 SHALL 
 
 - **WHEN** the bot replies to `user`'s message in a group via `ctx.reply(...)` with `reply_parameters.message_id`
 - **THEN** the corresponding `Reply` lands in `user.replies`
+
+#### Scenario: Cross-chat reply does not address the source author
+
+- **WHEN** a user authors a message in one group
+- **AND** the bot sends a message in another group with `reply_parameters.chat_id` pointing to the source group and `reply_parameters.message_id` pointing to that message
+- **THEN** the corresponding `Reply` does NOT land in the source author's `user.replies`
+
+#### Scenario: Clearing chats removes historical author routing
+
+- **WHEN** a user authors a message in a group
+- **AND** the test calls `chats.clear()`
+- **AND** the bot subsequently replies to the old message ID
+- **THEN** the corresponding `Reply` does NOT land in the former author's `user.replies`
 
 #### Scenario: Click-then-respond chain
 
