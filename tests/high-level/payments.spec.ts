@@ -300,6 +300,96 @@ describe('Payments', () => {
         expect(second).toBe(first);
         expect(first.successful_payment?.telegram_payment_charge_id).toBe('first-tg-charge');
       });
+
+      it('snapshots checkout information before pre-checkout middleware can mutate it', async () => {
+        const bot = new Bot('test-token');
+        const orderInfo = { email: 'original@example.com', shipping_address: { ...shippingAddress } };
+        let observedEmail: string | undefined;
+        let observedCity: string | undefined;
+
+        bot.command('buy', async (ctx) => {
+          await ctx.replyWithInvoice(
+            'Snapshot order',
+            'Immutable checkout details',
+            'snapshot-order',
+            'USD',
+            [{ label: 'Item', amount: 100 }],
+            {
+              provider_token: 'provider-token',
+              need_email: true,
+            },
+          );
+        });
+
+        bot.on('pre_checkout_query', async (ctx) => {
+          observedEmail = ctx.preCheckoutQuery.order_info?.email;
+          observedCity = ctx.preCheckoutQuery.order_info?.shipping_address?.city;
+          orderInfo.email = 'mutated@example.com';
+          orderInfo.shipping_address.city = 'Mutated City';
+          await ctx.answerPreCheckoutQuery(true);
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+
+        await user.sendCommand('/buy');
+
+        const payment = await user.payInvoice(user.replies.lastOrThrow(), { orderInfo });
+        const successful = await payment.completeSuccessfully();
+
+        expect(observedEmail).toBe('original@example.com');
+        expect(observedCity).toBe('San Francisco');
+
+        expect(successful.successful_payment?.order_info).toMatchObject({
+          email: 'original@example.com',
+          shipping_address: { city: 'San Francisco' },
+        });
+      });
+
+      it('waits for a pending successful sendInvoice settlement', async () => {
+        const bot = new Bot('test-token');
+        let resolveInvoice: ((value: { date: number; message_id: number }) => void) | undefined;
+        let pendingSend: Promise<Message.InvoiceMessage> | undefined;
+
+        const invoiceResponse = new Promise<{ date: number; message_id: number }>((resolve) => {
+          resolveInvoice = resolve;
+        });
+
+        bot.command('buy', (ctx) => {
+          pendingSend = ctx.replyWithInvoice(
+            'Pending order',
+            'The send is still settling',
+            'pending-order',
+            'USD',
+            [{ label: 'Item', amount: 100 }],
+            {
+              provider_token: 'provider-token',
+            },
+          );
+        });
+
+        bot.on('pre_checkout_query', async (ctx) => {
+          await ctx.answerPreCheckoutQuery(true);
+        });
+
+        const { chats } = await prepareBot(bot, {
+          responses: { sendInvoice: async () => invoiceResponse },
+        });
+
+        const user = chats.newUser();
+
+        await user.sendCommand('/buy');
+
+        const paymentPromise = user.payInvoice(user.replies.lastOrThrow());
+
+        resolveInvoice?.({ message_id: 7777, date: 0 });
+        assert.ok(pendingSend);
+        await pendingSend;
+
+        const payment = await paymentPromise;
+
+        expect(payment.status).toBe('ready');
+      });
     });
 
     describe('negative completion', () => {

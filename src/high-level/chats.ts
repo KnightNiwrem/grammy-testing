@@ -5,7 +5,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import type { Bot, Context, RawApi, Transformer } from 'grammy';
-import type { ChatMember, ChatPermissions, Message, Poll, ShippingOption, Update, User as TelegramUser } from 'grammy/types';
+import type { ChatMember, ChatPermissions, Message, OrderInfo, Poll, ShippingOption, Update, User as TelegramUser } from 'grammy/types';
 
 import type { IdleTracker } from '../low-level/idle';
 import type { OutgoingRequests, Request } from '../low-level/outgoing-requests';
@@ -384,6 +384,17 @@ interface InvoicePaymentState<TContext extends Context> {
   completionPromise: Promise<Message> | undefined;
 }
 
+interface InvoiceReplySettlement {
+  promise: Promise<boolean>;
+  settle: (ok: boolean) => void;
+}
+
+interface PendingMessageReply<TContext extends Context> {
+  chatId: number;
+  reply: Reply<TContext>;
+  settlement: InvoiceReplySettlement | undefined;
+}
+
 interface ValidatedInvoicePaymentOptions {
   isShippingRequired: boolean;
   tipAmount: number;
@@ -396,6 +407,32 @@ interface ValidatedInvoicePaymentOptions {
  */
 function hasPreCheckoutQuery<TContext extends Context>(state: InvoicePaymentState<TContext>): boolean {
   return state.preCheckoutQueryId !== undefined;
+}
+
+/**
+ * Creates an externally settled promise for one captured invoice API call.
+ * @returns The promise and its settlement callback.
+ */
+function createInvoiceReplySettlement(): InvoiceReplySettlement {
+  let settle!: (ok: boolean) => void;
+
+  const promise = new Promise<boolean>((resolve) => {
+    settle = resolve;
+  });
+
+  return { promise, settle };
+}
+
+/**
+ * Snapshots caller-owned checkout information, including its nested address.
+ * @param orderInfo - Checkout information supplied to `payInvoice`.
+ * @returns An independent checkout-information snapshot.
+ */
+function cloneOrderInfo(orderInfo: OrderInfo): OrderInfo {
+  return {
+    ...orderInfo,
+    ...(orderInfo.shipping_address !== undefined && { shipping_address: { ...orderInfo.shipping_address } }),
+  };
 }
 
 /**
@@ -603,11 +640,14 @@ export class Chats<TContext extends Context = Context> {
   /** Payment-query answers awaiting a successful mocked API response. */
   private pendingPaymentAnswers = new WeakMap<Request, () => void>();
 
-  /** Message requests awaiting a successful mocked result whose message ID may differ. */
-  private pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
+  /** Message requests awaiting a mocked result whose message ID may differ. */
+  private pendingMessageReplies = new WeakMap<Request, PendingMessageReply<TContext>>();
 
-  /** Captured message replies whose mocked API call settled successfully. */
-  private deliveredMessageReplies = new WeakSet<Reply<TContext>>();
+  /** Captured invoice replies mapped to their eventual mocked API success state. */
+  private invoiceSettlements = new WeakMap<Reply<TContext>, Promise<boolean>>();
+
+  /** Pending invoice settlements retained so `clear()` can reject in-flight replies. */
+  private readonly pendingInvoiceSettlements = new Set<InvoiceReplySettlement>();
 
   /** The Reply created by the most recent message-method `onCapture` call. Read by the default response resolvers. */
   private lastCapturedReply: Reply<TContext> | undefined;
@@ -680,8 +720,14 @@ export class Chats<TContext extends Context = Context> {
     this.preCheckoutQueryIds.clear();
     this.preCheckoutQueryAnswers.clear();
     this.pendingPaymentAnswers = new WeakMap<Request, () => void>();
-    this.pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
-    this.deliveredMessageReplies = new WeakSet<Reply<TContext>>();
+
+    for (const settlement of this.pendingInvoiceSettlements) {
+      settlement.settle(false);
+    }
+
+    this.pendingInvoiceSettlements.clear();
+    this.pendingMessageReplies = new WeakMap<Request, PendingMessageReply<TContext>>();
+    this.invoiceSettlements = new WeakMap<Reply<TContext>, Promise<boolean>>();
     this.lastCapturedReply = undefined;
   }
 
@@ -1162,7 +1208,15 @@ export class Chats<TContext extends Context = Context> {
     this.lastCapturedReply = reply;
 
     this.setReplyForChat(chat.id, reply);
-    this.pendingMessageReplies.set(request, { chatId: chat.id, reply });
+
+    const settlement = request.method === 'sendInvoice' ? createInvoiceReplySettlement() : undefined;
+
+    if (settlement !== undefined) {
+      this.invoiceSettlements.set(reply, settlement.promise);
+      this.pendingInvoiceSettlements.add(settlement);
+    }
+
+    this.pendingMessageReplies.set(request, { chatId: chat.id, reply, settlement });
 
     chat.messages.push(reply);
     reply.topic?.messages.push(reply);
@@ -1472,8 +1526,12 @@ export class Chats<TContext extends Context = Context> {
 
     this.pendingMessageReplies.delete(request);
 
+    if (pendingReply?.settlement !== undefined) {
+      pendingReply.settlement.settle(ok);
+      this.pendingInvoiceSettlements.delete(pendingReply.settlement);
+    }
+
     if (ok && pendingReply !== undefined) {
-      this.deliveredMessageReplies.add(pendingReply.reply);
       this.registerReturnedMessageIds(pendingReply.chatId, pendingReply.reply, result);
     }
 
@@ -1873,13 +1931,20 @@ export class Chats<TContext extends Context = Context> {
       throw new Error('payInvoice: user must be minted by this Chats orchestrator');
     }
 
+    const paymentOptions: PayInvoiceOptions = {
+      ...options,
+      ...(options.orderInfo !== undefined && { orderInfo: cloneOrderInfo(options.orderInfo) }),
+    };
+
     const publicInvoice = invoice.invoice;
 
     if (publicInvoice === undefined || typeof invoice.raw.payload !== 'string') {
       throw new Error('payInvoice: reply does not contain a captured sendInvoice payload');
     }
 
-    if (!this.deliveredMessageReplies.has(invoice)) {
+    const invoiceSettlement = this.invoiceSettlements.get(invoice);
+
+    if (invoiceSettlement === undefined || !(await invoiceSettlement)) {
       throw new Error('payInvoice: captured sendInvoice call did not settle successfully');
     }
 
@@ -1887,12 +1952,12 @@ export class Chats<TContext extends Context = Context> {
       throw new Error("payInvoice: payment completion is currently supported only for an invoice in this user's private chat");
     }
 
-    const { isShippingRequired, tipAmount } = validateInvoicePaymentOptions(invoice, options, publicInvoice.currency === 'XTR');
+    const { isShippingRequired, tipAmount } = validateInvoicePaymentOptions(invoice, paymentOptions, publicInvoice.currency === 'XTR');
 
     const state: InvoicePaymentState<TContext> = {
       user,
       invoice,
-      options,
+      options: paymentOptions,
       currency: publicInvoice.currency,
       invoicePayload: invoice.raw.payload,
       isShippingRequired,
