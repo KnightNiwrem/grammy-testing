@@ -55,6 +55,8 @@ export { ModerationActionsView, ModerationLog, type ModerationAction, type Moder
 
 export { PrivateChat } from './high-level/private-chat';
 
+export type { ReactionChange, ReactionChangesLog } from './high-level/reaction-changes-log';
+
 export type { ReactionRemoval, ReactionRemovalsLog } from './high-level/reaction-removals-log';
 
 export { Reply, type MediaType, type ReplyButton, type ReplyMedia, type ReplyRichMessage } from './high-level/reply';

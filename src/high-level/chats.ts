@@ -29,6 +29,7 @@ import {
   ModerationLog,
 } from './moderation-log';
 import { PrivateChat } from './private-chat';
+import { type ReactionChange, ReactionChangesLog } from './reaction-changes-log';
 import { ReactionRemovalsLog } from './reaction-removals-log';
 import { Reply } from './reply';
 import { Supergroup } from './supergroup';
@@ -204,6 +205,12 @@ const REACTION_REMOVAL_METHODS_GUARD = {
 
 const REACTION_REMOVAL_METHODS = new Set(Object.keys(REACTION_REMOVAL_METHODS_GUARD));
 
+const REACTION_CHANGE_METHODS_GUARD = {
+  setMessageReaction: true,
+} satisfies Partial<Record<keyof RawApi, true>>;
+
+const REACTION_CHANGE_METHODS = new Set(Object.keys(REACTION_CHANGE_METHODS_GUARD));
+
 const MODERATION_METHODS_GUARD = {
   banChatMember: true,
   unbanChatMember: true,
@@ -359,6 +366,9 @@ export class Chats<TContext extends Context = Context> {
   /** Orchestrator-wide log of captured `deleteMessageReaction` / `deleteAllMessageReactions` calls. */
   readonly reactionRemovals = new ReactionRemovalsLog();
 
+  /** Orchestrator-wide log of captured `setMessageReaction` calls. */
+  readonly reactionChanges = new ReactionChangesLog<TContext>();
+
   /** guest_query_id->User registry, populated by `user.sendGuestMessage`, for answer correlation. */
   private readonly guestQueryToUser = new Map<string, User<TContext>>();
 
@@ -410,6 +420,7 @@ export class Chats<TContext extends Context = Context> {
 
     for (const chat of this.chats.values()) {
       chat.messages.clear();
+      chat.reactionChanges.clear();
 
       if (chat.type !== 'private') {
         chat.moderation.clear();
@@ -427,6 +438,7 @@ export class Chats<TContext extends Context = Context> {
     }
 
     this.reactionRemovals.clear();
+    this.reactionChanges.clear();
     this.guestQueryToUser.clear();
     this.messageIdToReply.clear();
     this.messageAuthors.clear();
@@ -875,6 +887,12 @@ export class Chats<TContext extends Context = Context> {
       return;
     }
 
+    if (REACTION_CHANGE_METHODS.has(request.method)) {
+      this.deriveReactionChange(payload);
+
+      return;
+    }
+
     if (MODERATION_METHODS.has(request.method)) {
       this.deriveModeration(request, payload);
 
@@ -1061,6 +1079,42 @@ export class Chats<TContext extends Context = Context> {
     const messageId = payload.message_id as number | undefined;
 
     this.reactionRemovals.push({ method, chatId, messageId, raw: payload });
+  }
+
+  /**
+   * Routes a captured `setMessageReaction` payload to the orchestrator-wide log and,
+   * when the target chat is registered, that chat's scoped log.
+   * @param payload - The raw outgoing API payload.
+   */
+  private deriveReactionChange(payload: Record<string, unknown>): void {
+    const chatId = payload.chat_id as ChatId | undefined;
+    const messageId = payload.message_id as number | undefined;
+
+    if (chatId === undefined || messageId === undefined) {
+      return;
+    }
+
+    const numericChatId = Number(chatId);
+    const chat = this.findChatByTelegramId(numericChatId);
+
+    const change: ReactionChange<TContext> = {
+      chatId,
+      messageId,
+      reaction: (payload.reaction as ReactionChange<TContext>['reaction'] | undefined) ?? [],
+      isBig: payload.is_big as boolean | undefined,
+      reply: this.messageIdToReply.get(numericChatId)?.get(messageId),
+      raw: payload,
+    };
+
+    this.reactionChanges.push(change);
+
+    if (!chat) {
+      this.warnUnregisteredChat('setMessageReaction', chatId);
+
+      return;
+    }
+
+    chat.reactionChanges.push(change);
   }
 
   /**
@@ -1524,6 +1578,7 @@ export class Chats<TContext extends Context = Context> {
 
     this.chats.set(chat.id, chat);
     this.chatDeletions.set(chat.id, new DeletionsLog<TContext>());
+    chat.reactionChanges = new ReactionChangesLog<TContext>();
 
     if (this.bot) {
       chat[setBotRef](this.bot);
@@ -1571,6 +1626,7 @@ export class Chats<TContext extends Context = Context> {
 
     chat.messages = new MessagesLog<TContext>();
     chat.moderation = new ModerationLog<TContext>();
+    chat.reactionChanges = new ReactionChangesLog<TContext>();
     this.chats.set(chat.id, chat);
     this.chatDeletions.set(chat.id, new DeletionsLog<TContext>());
 

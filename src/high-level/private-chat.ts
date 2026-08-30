@@ -3,6 +3,7 @@ import type { Chat } from 'grammy/types';
 
 import { type ChatRefHolder, setBotRef } from './chat';
 import { MessagesLog } from './messages-log';
+import type { ReactionChangesLog } from './reaction-changes-log';
 import type { User } from './user';
 
 /**
@@ -21,6 +22,9 @@ export class PrivateChat<TContext extends Context = Context> implements ChatRefH
   readonly username?: string;
 
   messages: MessagesLog<TContext>;
+
+  /** Captured `setMessageReaction` calls targeting this private chat. */
+  reactionChanges!: ReactionChangesLog<TContext>;
 
   /** @internal */
   bot!: Bot<TContext>;
