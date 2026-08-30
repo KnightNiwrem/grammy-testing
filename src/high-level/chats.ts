@@ -1183,15 +1183,7 @@ export class Chats<TContext extends Context = Context> {
     this.pendingMessageReplies.delete(request);
 
     if (ok && pendingReply !== undefined) {
-      const returnedMessage: unknown = Array.isArray(result) ? (result as unknown[])[0] : result;
-
-      if (typeof returnedMessage === 'object' && returnedMessage !== null && 'message_id' in returnedMessage) {
-        const messageId = returnedMessage.message_id;
-
-        if (typeof messageId === 'number') {
-          this.setReplyForChat(pendingReply.chatId, pendingReply.reply, messageId);
-        }
-      }
+      this.registerReturnedMessageIds(pendingReply.chatId, pendingReply.reply, result);
     }
 
     const transition = this.pendingModerationTransitions.get(request);
@@ -1517,6 +1509,27 @@ export class Chats<TContext extends Context = Context> {
     }
 
     authors.set(message.message_id, { userId, messageThreadId: message.message_thread_id });
+  }
+
+  /**
+   * Registers every Telegram message identity from a successful mocked send result.
+   * Media-group sends return multiple messages that all represent the same captured reply.
+   * @param chatId - The destination chat's Telegram ID.
+   * @param reply - The captured bot reply.
+   * @param result - The mocked API result, either one message-like object or an array.
+   */
+  private registerReturnedMessageIds(chatId: number, reply: Reply<TContext>, result: unknown): void {
+    const returnedMessages: unknown[] = Array.isArray(result) ? (result as unknown[]) : [result];
+
+    for (const returnedMessage of returnedMessages) {
+      if (typeof returnedMessage === 'object' && returnedMessage !== null && 'message_id' in returnedMessage) {
+        const messageId = returnedMessage.message_id;
+
+        if (typeof messageId === 'number') {
+          this.setReplyForChat(chatId, reply, messageId);
+        }
+      }
+    }
   }
 
   /**

@@ -114,6 +114,30 @@ describe('ReactionChangesLog', () => {
         expect(change.reply).toBe(user.replies.lastOrThrow());
       });
 
+      it('resolves every returned media-group message ID to the captured reply', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:text', async (ctx) => {
+          const replies = await ctx.api.sendMediaGroup(ctx.chat.id, [
+            { type: 'photo', media: 'file-a' },
+            { type: 'photo', media: 'file-b' },
+          ]);
+
+          await ctx.api.setMessageReaction(ctx.chat.id, replies[1].message_id, [{ type: 'emoji', emoji: '👍' }]);
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+        const chat = chats.newPrivateChat(user);
+
+        await user.sendText('react');
+
+        const change = chat.reactionChanges.lastOrThrow();
+
+        expect(change.messageId).not.toBe(user.replies.lastOrThrow().messageId);
+        expect(change.reply).toBe(user.replies.lastOrThrow());
+      });
+
       it('keeps per-chat projections independent and preserves global order', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
