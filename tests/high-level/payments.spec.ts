@@ -227,12 +227,14 @@ describe('Payments', () => {
           shipping_address: shippingAddress,
         });
 
-        expect(payment.shippingAnswer).toMatchObject({
+        const exposedShippingAnswer = payment.shippingAnswer;
+
+        expect(exposedShippingAnswer).toMatchObject({
           shippingQueryId: payment.shippingQueryId,
           ok: true,
         });
 
-        expect(payment.shippingAnswer?.shippingOptions?.map(({ id }) => id)).toContain('express');
+        expect(exposedShippingAnswer?.shippingOptions?.map(({ id }) => id)).toContain('express');
 
         expect(observedPreCheckout).toMatchObject({
           id: payment.preCheckoutQueryId,
@@ -243,10 +245,22 @@ describe('Payments', () => {
           order_info: { email: 'ada@example.com', shipping_address: shippingAddress },
         });
 
-        expect(payment.preCheckoutAnswer).toMatchObject({ preCheckoutQueryId: payment.preCheckoutQueryId, ok: true });
+        const exposedPreCheckoutAnswer = payment.preCheckoutAnswer;
+
+        expect(exposedPreCheckoutAnswer).toMatchObject({ preCheckoutQueryId: payment.preCheckoutQueryId, ok: true });
         expect(payment.status).toBe('ready');
         expect(payment.successfulPayment).toBeUndefined();
         expect(observedSuccessfulPayment).toBeUndefined();
+
+        const exposedSelectedOption = exposedShippingAnswer?.shippingOptions?.find(({ id }) => id === 'express');
+
+        assert.ok(exposedSelectedOption);
+        exposedSelectedOption.id = 'mutated-express';
+        exposedSelectedOption.prices[0].amount = 9999;
+        assert.ok(exposedPreCheckoutAnswer);
+        exposedPreCheckoutAnswer.ok = false;
+
+        expect(payment.status).toBe('ready');
 
         const successfulMessage = await payment.completeSuccessfully({
           telegramPaymentChargeId: 'tg-charge-7',
@@ -486,6 +500,7 @@ describe('Payments', () => {
         bot.command('buy', async (ctx) => {
           await ctx.replyWithInvoice('Retry order', 'Retry one failed dispatch', 'retry-order', 'USD', [{ label: 'Item', amount: 100 }], {
             provider_token: 'provider-token',
+            need_email: true,
           });
         });
 
@@ -493,10 +508,16 @@ describe('Payments', () => {
           await ctx.answerPreCheckoutQuery(true);
         });
 
-        bot.on('message:successful_payment', () => {
+        bot.on('message:successful_payment', (ctx) => {
           successfulPaymentAttempts += 1;
 
           if (successfulPaymentAttempts === 1) {
+            const orderInfo = ctx.message.successful_payment.order_info;
+
+            assert.ok(orderInfo?.shipping_address);
+            orderInfo.email = 'middleware-mutated@example.com';
+            orderInfo.shipping_address.city = 'Middleware Mutated City';
+
             throw new Error('successful-payment dispatch failed');
           }
         });
@@ -506,13 +527,21 @@ describe('Payments', () => {
 
         await user.sendCommand('/buy');
 
-        const payment = await user.payInvoice(user.replies.lastOrThrow());
+        const payment = await user.payInvoice(user.replies.lastOrThrow(), {
+          orderInfo: { email: 'original@example.com', shipping_address: shippingAddress },
+        });
 
         await expect(payment.completeSuccessfully()).rejects.toThrow(/dispatch failed/);
 
         const successful = await payment.completeSuccessfully();
 
         expect(successfulPaymentAttempts).toBe(2);
+
+        expect(successful.successful_payment?.order_info).toMatchObject({
+          email: 'original@example.com',
+          shipping_address: { city: 'San Francisco' },
+        });
+
         expect(payment.successfulPayment).toBe(successful);
         expect(payment.status).toBe('completed');
       });
@@ -658,6 +687,7 @@ describe('Payments', () => {
       it('serializes concurrent progression after a late shipping answer', async () => {
         const bot = new Bot('test-token');
         let preCheckoutCount = 0;
+        let preCheckoutTotal: number | undefined;
 
         bot.command('buy', async (ctx) => {
           await ctx.replyWithInvoice(
@@ -678,6 +708,7 @@ describe('Payments', () => {
 
         bot.on('pre_checkout_query', async (ctx) => {
           preCheckoutCount += 1;
+          preCheckoutTotal = ctx.preCheckoutQuery.total_amount;
           await ctx.answerPreCheckoutQuery(true);
         });
 
@@ -700,10 +731,16 @@ describe('Payments', () => {
 
         expect(payment.status).toBe('awaiting-pre-checkout');
 
+        const exposedShippingAnswer = payment.shippingAnswer;
+
+        assert.ok(exposedShippingAnswer?.shippingOptions?.[0]);
+        exposedShippingAnswer.shippingOptions[0].prices[0].amount = 900;
+
         await Promise.all([payment.proceed(), payment.proceed()]);
 
         expect(payment.status).toBe('ready');
         expect(preCheckoutCount).toBe(1);
+        expect(preCheckoutTotal).toBe(600);
       });
     });
 

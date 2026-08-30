@@ -448,6 +448,34 @@ function cloneShippingOptions(shippingOptions: ShippingOption[]): ShippingOption
 }
 
 /**
+ * Creates a detached public snapshot of a correlated shipping answer.
+ * @param answer - Internal shipping answer.
+ * @returns A snapshot callers can mutate without changing payment state.
+ */
+function cloneShippingQueryAnswer(answer: ShippingQueryAnswer): ShippingQueryAnswer {
+  const raw = { ...answer.raw };
+
+  if (Array.isArray(raw.shipping_options)) {
+    raw.shipping_options = cloneShippingOptions(raw.shipping_options as ShippingOption[]);
+  }
+
+  return {
+    ...answer,
+    shippingOptions: answer.shippingOptions === undefined ? undefined : cloneShippingOptions([...answer.shippingOptions]),
+    raw,
+  };
+}
+
+/**
+ * Creates a detached public snapshot of a correlated pre-checkout answer.
+ * @param answer - Internal pre-checkout answer.
+ * @returns A snapshot callers can mutate without changing payment state.
+ */
+function clonePreCheckoutQueryAnswer(answer: PreCheckoutQueryAnswer): PreCheckoutQueryAnswer {
+  return { ...answer, raw: { ...answer.raw } };
+}
+
+/**
  * Adds monetary components without losing integer precision.
  * @param totalAmount - Existing checkout total.
  * @param amounts - Additional price portions.
@@ -2006,14 +2034,21 @@ export class Chats<TContext extends Context = Context> {
     };
 
     const payment = new InvoicePayment<TContext>(invoice, {
-      snapshot: () => ({
-        requiresShipping: state.isShippingRequired,
-        shippingQueryId: state.shippingQueryId,
-        preCheckoutQueryId: state.preCheckoutQueryId,
-        shippingAnswer: state.shippingQueryId === undefined ? undefined : this.shippingQueryAnswers.get(state.shippingQueryId),
-        preCheckoutAnswer: state.preCheckoutQueryId === undefined ? undefined : this.preCheckoutQueryAnswers.get(state.preCheckoutQueryId),
-        successfulPayment: state.successfulPayment,
-      }),
+      snapshot: () => {
+        const shippingAnswer = state.shippingQueryId === undefined ? undefined : this.shippingQueryAnswers.get(state.shippingQueryId);
+
+        const preCheckoutAnswer =
+          state.preCheckoutQueryId === undefined ? undefined : this.preCheckoutQueryAnswers.get(state.preCheckoutQueryId);
+
+        return {
+          requiresShipping: state.isShippingRequired,
+          shippingQueryId: state.shippingQueryId,
+          preCheckoutQueryId: state.preCheckoutQueryId,
+          shippingAnswer: shippingAnswer === undefined ? undefined : cloneShippingQueryAnswer(shippingAnswer),
+          preCheckoutAnswer: preCheckoutAnswer === undefined ? undefined : clonePreCheckoutQueryAnswer(preCheckoutAnswer),
+          successfulPayment: state.successfulPayment,
+        };
+      },
       proceed: () => this.proceedInvoicePayment(state),
       completeSuccessfully: (completionOptions) => this.completeInvoicePayment(state, completionOptions),
     });
@@ -2198,7 +2233,7 @@ export class Chats<TContext extends Context = Context> {
         total_amount: state.totalAmount,
         invoice_payload: state.invoicePayload,
         ...(state.selectedShippingOption !== undefined && { shipping_option_id: state.selectedShippingOption.id }),
-        ...(state.options.orderInfo !== undefined && { order_info: state.options.orderInfo }),
+        ...(state.options.orderInfo !== undefined && { order_info: cloneOrderInfo(state.options.orderInfo) }),
         telegram_payment_charge_id: options.telegramPaymentChargeId ?? `charge-tg-${preCheckoutQueryId}`,
         provider_payment_charge_id: options.providerPaymentChargeId ?? `charge-provider-${preCheckoutQueryId}`,
       },
