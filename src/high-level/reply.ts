@@ -106,6 +106,8 @@ function deriveRichMessage(payload: Record<string, unknown>): ReplyRichMessage |
 interface ReplyDeps<TContext extends Context = Context> {
   bot: Bot<TContext>;
   ids: IdGenerator;
+  /** Rejects users minted by another Chats orchestrator before query registration. */
+  assertClicker: (user: User<TContext>) => void;
   /** Creates a live callback-query handle before the update is dispatched. */
   createCallbackQuery: (id: string, callbackData: string) => CallbackQueryHandle;
   /** Runs the update within a clicker-scoped reply-routing context. */
@@ -375,6 +377,8 @@ export class Reply<TContext extends Context = Context> {
     if (!clicker) {
       throw new Error('clickButton: options.by is required for group, supergroup, and channel replies');
     }
+
+    this.deps.assertClicker(clicker);
 
     const id = `cbq-${String(this.deps.ids.nextMessageId())}`;
     const query = this.deps.createCallbackQuery(id, callbackData);

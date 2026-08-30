@@ -117,6 +117,9 @@ If the bot does not call `answerCallbackQuery`, `click.answer` is `undefined`.
 Correlation always uses the generated query ID, so concurrent clicks and repeated
 `callback_data` values cannot steal one another's answers.
 
+If the bot starts `answerCallbackQuery` without awaiting it, wait for the pending
+API call with `await chats.idle()`, then read the live `click.answer` getter again.
+
 After clicking, check the edit that followed:
 
 ```ts

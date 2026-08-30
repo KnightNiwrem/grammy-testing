@@ -926,6 +926,9 @@ export class Chats<TContext extends Context = Context> {
     const reply = new Reply<TContext>(payload, chat, {
       bot,
       ids: this.ids,
+      assertClicker: (who) => {
+        this.assertClicker(who);
+      },
       createCallbackQuery: (queryId, callbackData) => this.createCallbackQuery(queryId, callbackData),
       runWithClicker: (who, targetChatId, dispatch) => this.runWithClicker(who, targetChatId, dispatch),
       resolveReply: (messageId) => this.messageIdToReply.get(referencedChatId)?.get(messageId),
@@ -1475,6 +1478,12 @@ export class Chats<TContext extends Context = Context> {
       return true;
     }
 
+    // Channel subscribers are not represented in the membership map. An
+    // explicitly attributed channel click still receives its own handler reply.
+    if (chat.type === 'channel' && click?.userId === entry.user.id && click.chatId === chat.id) {
+      return true;
+    }
+
     // Rule 1 cont'd: user must be an *active* participant of the
     // group/supergroup/channel. 'left' and 'kicked' are NOT participants.
     if (chat.type !== 'private') {
@@ -1520,6 +1529,16 @@ export class Chats<TContext extends Context = Context> {
   }
 
   /**
+   * Rejects callback clickers minted by a different Chats orchestrator.
+   * @param user - Candidate callback-query sender.
+   */
+  private assertClicker(user: User<TContext>): void {
+    if (this.users.get(user.id)?.user !== user) {
+      throw new Error('Callback-query clicker must be a user minted by this Chats orchestrator');
+    }
+  }
+
+  /**
    * Runs one callback-query dispatch with a routing transformer installed only
    * on the per-update API instance that grammY creates for this dispatch.
    * @param user - The minted user who dispatched the query.
@@ -1528,9 +1547,7 @@ export class Chats<TContext extends Context = Context> {
    * @returns A promise that resolves when dispatch completes.
    */
   private async runWithClicker(user: User<TContext>, chatId: number, dispatch: () => Promise<void>): Promise<void> {
-    if (this.users.get(user.id)?.user !== user) {
-      throw new Error('Callback-query clicker must be a user minted by this Chats orchestrator');
-    }
+    this.assertClicker(user);
 
     const { bot } = this;
 

@@ -158,6 +158,28 @@ describe('CallbackQueryHandle', () => {
         expect(user.replies.length).toBe(repliesAfterClick);
       });
 
+      it('routes a channel click response to its explicit clicker without channel membership', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('callback_query:data', async (ctx) => {
+          await ctx.reply('channel click response');
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+        const channel = chats.newChannel();
+
+        await bot.api.sendMessage(channel.id, 'choose', { reply_markup: new InlineKeyboard().text('Go', 'go') });
+
+        const reply = channel.messages.last;
+
+        assert.ok(reply);
+
+        await reply.clickButton('Go', { by: user });
+
+        expect(user.replies.all.map(({ text }) => text)).toEqual(['channel click response']);
+      });
+
       it('isolates concurrent group clicks by different users', async () => {
         const bot = new Bot('test-token');
         let startedHandlers = 0;
@@ -279,6 +301,26 @@ describe('CallbackQueryHandle', () => {
         assert.ok(reply);
 
         await expect(reply.clickButton('Go')).rejects.toThrow(/options\.by is required/);
+      });
+
+      it('rejects a foreign clicker before registering its callback-query ID', async () => {
+        const bot = new Bot('test-token');
+        const { chats } = await prepareBot(bot);
+        const group = chats.newGroup();
+        const { chats: otherChats } = await prepareBot(new Bot('other-token'));
+        const foreign = otherChats.newUser();
+
+        await bot.api.sendMessage(group.id, 'choose', { reply_markup: new InlineKeyboard().text('Go', 'go') });
+
+        const reply = group.messages.last;
+        const { callbackQueryIds } = chats as unknown as { callbackQueryIds: Set<string> };
+
+        assert.ok(reply);
+        expect(callbackQueryIds.size).toBe(0);
+
+        await expect(reply.clickButton('Go', { by: foreign })).rejects.toThrow(/minted by this Chats orchestrator/);
+
+        expect(callbackQueryIds.size).toBe(0);
       });
 
       it('rejects buttons that do not produce callback_query.data', async () => {

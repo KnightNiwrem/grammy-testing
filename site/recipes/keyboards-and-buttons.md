@@ -18,7 +18,7 @@ export function createBot() {
 
   bot.callbackQuery('answer:yes', async (ctx) => {
     await ctx.editMessageText('Great choice!');
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery({ text: 'Thanks for answering!', show_alert: false });
   });
 
   bot.callbackQuery('answer:no', async (ctx) => {
