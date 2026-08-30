@@ -265,6 +265,41 @@ describe('CallbackQueryHandle', () => {
 
         expect(user.replies.all.map(({ text }) => text)).toEqual(['click response']);
       });
+
+      it('deactivates click routing on the per-update API after dispatch completes', async () => {
+        const bot = new Bot('test-token');
+        let sendAfterDispatch: (() => Promise<unknown>) | undefined;
+
+        bot.on('callback_query:data', async (ctx) => {
+          const chatId = ctx.chat?.id;
+
+          assert.ok(chatId);
+
+          sendAfterDispatch = () => ctx.api.sendMessage(chatId, 'deferred ctx.api send');
+          await ctx.reply('click response');
+        });
+
+        const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
+        const group = chats.newGroup();
+
+        group.join(user);
+
+        await bot.api.sendMessage(group.id, 'choose', { reply_markup: new InlineKeyboard().text('Go', 'go') });
+
+        const reply = group.messages.last;
+
+        assert.ok(reply);
+
+        await reply.clickButton('Go', { by: user });
+
+        expect(user.replies.all.map(({ text }) => text)).toEqual(['click response']);
+        assert.ok(sendAfterDispatch);
+
+        await sendAfterDispatch();
+
+        expect(user.replies.all.map(({ text }) => text)).toEqual(['click response']);
+      });
     });
 
     describe('negative cases', () => {

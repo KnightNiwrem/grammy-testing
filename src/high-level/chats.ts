@@ -1559,12 +1559,17 @@ export class Chats<TContext extends Context = Context> {
     const { installedTransformers } = config;
     const { captureTransformer } = this;
     const clickRouting = { userId: user.id, chatId };
+    let isRoutingActive = true;
 
     if (!captureTransformer) {
       throw new Error('Callback-query routing is unavailable before prepareBot installs its capture transformer');
     }
 
     const routingTransformer: Transformer = (previous, method, payload, signal) => {
+      if (!isRoutingActive) {
+        return previous(method, payload, signal);
+      }
+
       this.clickRoutingByPayload.set(payload, clickRouting);
 
       try {
@@ -1598,7 +1603,11 @@ export class Chats<TContext extends Context = Context> {
       config.installedTransformers = installedTransformers;
     }
 
-    await dispatchPromise;
+    try {
+      await dispatchPromise;
+    } finally {
+      isRoutingActive = false;
+    }
   }
 
   /**
