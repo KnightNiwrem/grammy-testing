@@ -297,7 +297,7 @@ interface UserEntry<TContext extends Context = Context> {
 }
 
 interface MessageAuthor {
-  userId: number;
+  userId: number | undefined;
   messageThreadId: number | undefined;
 }
 
@@ -504,7 +504,9 @@ export class Chats<TContext extends Context = Context> {
           this.guestQueryToUser.set(queryId, who);
         },
         recordMessageAuthor: (message) => {
-          if (message.sender_chat === undefined && message.from?.id === user.id) {
+          if (message.sender_chat !== undefined) {
+            this.recordMessageAuthor(message);
+          } else if (message.from?.id === user.id) {
             this.recordMessageAuthor(message, user.id);
           }
         },
@@ -1415,9 +1417,9 @@ export class Chats<TContext extends Context = Context> {
   /**
    * Records a synthetic user-authored message before its middleware dispatch begins.
    * @param message - The synthetic incoming message.
-   * @param userId - The authoring user actor's Telegram ID.
+   * @param userId - The authoring user actor's Telegram ID, or undefined for chat-authored messages.
    */
-  private recordMessageAuthor(message: Message, userId: number): void {
+  private recordMessageAuthor(message: Message, userId?: number): void {
     let authors = this.messageAuthors.get(message.chat.id);
 
     if (!authors) {

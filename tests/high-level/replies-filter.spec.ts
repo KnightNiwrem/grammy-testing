@@ -327,6 +327,33 @@ describe('user.replies filter rule', () => {
         expect(bob.replies.length).toBe(0);
       });
     });
+
+    describe('negative cases', () => {
+      it('does not let an edit claim an anonymous message identity', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('edited_message', async (ctx) => {
+          await ctx.api.sendMessage(ctx.chat.id, 'edited answer', {
+            message_thread_id: ctx.editedMessage.message_thread_id,
+            reply_parameters: { message_id: ctx.editedMessage.message_id },
+          });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const forum = chats.newSupergroup({ isForum: true });
+        const topic = forum.newTopic({ name: 'Support' });
+        const alice = chats.newUser();
+
+        forum.promote(alice);
+
+        const original = await alice.sendText('anonymous original', { anonymous: true, topic });
+
+        await alice.editMessage(original.message_id, 'edited', { chat: forum });
+
+        expect(topic.messages.last?.text).toBe('edited answer');
+        expect(alice.replies.length).toBe(0);
+      });
+    });
   });
 
   describe('joinChat', () => {
