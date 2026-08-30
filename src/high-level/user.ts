@@ -580,6 +580,10 @@ export class User<TContext extends Context = Context> {
       );
     }
 
+    // Telegram has already applied the departure by the time this service message is
+    // delivered, so middleware and synchronous reply routing must see the left state.
+    this.ctx.updateMembership(chat, this, 'leave');
+
     await dispatchServiceMessage({
       bot: this.ctx.bot,
       kind: 'left_chat_member',
@@ -589,8 +593,6 @@ export class User<TContext extends Context = Context> {
       updateId: this.ctx.ids.nextUpdateId(),
       recordMessageAuthor: this.ctx.recordMessageAuthor,
     });
-
-    this.ctx.updateMembership(chat, this, 'leave');
   }
 
   /**

@@ -277,6 +277,25 @@ describe('user.replies filter rule', () => {
         expect(alice.replies.length).toBe(0);
       });
 
+      it('does not route a synchronous reply to a user leaving a group', async () => {
+        const bot = new Bot('test-token');
+
+        bot.on('message:left_chat_member', async (ctx) => {
+          await ctx.reply('goodbye', { reply_parameters: { message_id: ctx.message.message_id } });
+        });
+
+        const { chats } = await prepareBot(bot);
+        const group = chats.newSupergroup();
+        const alice = chats.newUser();
+
+        group.promote(alice);
+
+        await alice.leaveChat(group);
+
+        expect(group.messages.last?.text).toBe('goodbye');
+        expect(alice.replies.length).toBe(0);
+      });
+
       it('clears author associations in chats.clear()', async () => {
         const bot = new Bot('test-token');
         const { chats } = await prepareBot(bot);
