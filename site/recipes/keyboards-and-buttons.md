@@ -86,6 +86,23 @@ await reply.clickButton('Yes');
 await reply.clickButton({ callbackData: 'answer:yes' });
 ```
 
+## Assert the callback answer
+
+```ts
+const click = await reply.clickButton('Yes');
+
+expect(click.answer?.text).toBe('Thanks for answering!');
+expect(click.answer?.showAlert).toBe(false);
+```
+
+An unanswered callback remains explicit as `click.answer === undefined`.
+
+For a button in a group, supergroup, or channel, pass the clicking user:
+
+```ts
+await groupReply.clickButton('Yes', { by: alice });
+```
+
 ## Asserting on button structure
 
 ```ts

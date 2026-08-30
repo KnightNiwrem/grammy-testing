@@ -484,15 +484,18 @@ describe('Reply', () => {
         });
 
         const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
         const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
         const billing = forum.newTopic({ name: 'Billing', messageThreadId: 42 });
+
+        forum.join(user);
 
         await bot.api.sendMessage(forum.id, 'pick one', {
           message_thread_id: billing.messageThreadId,
           reply_markup: { inline_keyboard: [[{ text: 'Invoices', callback_data: 'invoices' }]] },
         });
 
-        await forum.messages.last?.clickButton('Invoices');
+        await forum.messages.last?.clickButton('Invoices', { by: user });
 
         expect(captured.messageThreadId).toBe(42);
         expect(captured.isTopicMessage).toBe(true);
@@ -515,7 +518,10 @@ describe('Reply', () => {
         });
 
         const { chats } = await prepareBot(bot);
+        const user = chats.newUser();
         const forum = chats.newSupergroup({ title: 'Support Forum', isForum: true });
+
+        forum.join(user);
 
         forum.newTopic({ name: 'Billing', messageThreadId: 42 });
 
@@ -523,7 +529,7 @@ describe('Reply', () => {
           reply_markup: { inline_keyboard: [[{ text: 'Invoices', callback_data: 'invoices' }]] },
         });
 
-        await forum.messages.last?.clickButton('Invoices');
+        await forum.messages.last?.clickButton('Invoices', { by: user });
 
         expect(didHandle).toBe(true);
         expect(captured.messageThreadId).toBeUndefined();

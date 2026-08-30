@@ -169,10 +169,13 @@ await user.chooseInlineResult('result_001');
 ### `sendCallbackQuery(data, options?)`
 
 Sends a standalone callback query (not associated with a button click). For button clicks,
-use `reply.clickButton()`.
+use `reply.clickButton()`. Returns the same live `CallbackQueryHandle`, so the bot's
+answer can be asserted without searching raw outgoing requests.
 
 ```ts
-await user.sendCallbackQuery('my_action');
+const query = await user.sendCallbackQuery('my_action');
+
+expect(query.answer?.text).toBe('Done');
 ```
 
 ## Reactions & polls

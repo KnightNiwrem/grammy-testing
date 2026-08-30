@@ -11,6 +11,7 @@ import type { Responses } from '../low-level/responses';
 
 import { ActionsLog } from './actions-log';
 import { BusinessAccount } from './business-account';
+import { type CallbackQueryAnswer, CallbackQueryHandle } from './callback-query';
 import { Channel } from './channel';
 import { type AnyChat, setBotRef } from './chat';
 import { type Deletion, DeletionsLog } from './deletions-log';
@@ -308,6 +309,11 @@ interface MessageAuthor {
   messageThreadId: number | undefined;
 }
 
+interface ClickRoutingContext {
+  userId: number;
+  chatId: number;
+}
+
 interface BotRef<TContext extends Context> {
   readonly bot: Bot<TContext> | undefined;
 }
@@ -351,8 +357,16 @@ export class Chats<TContext extends Context = Context> {
 
   private readonly chats = new Map<number, AnyChat<TContext>>();
 
-  /** click->user+chat association for the user.replies filter rule. */
-  private readonly clickers = new Map<string, { userId: number; chatId: number }>();
+  /** Current serialized callback-query dispatch for the user.replies filter rule. */
+  private activeClickRouting: ClickRoutingContext | undefined;
+
+  /** Serializes callback-query dispatches so concurrent clicks cannot cross-route replies. */
+  private clickRoutingTail = Promise.resolve();
+
+  /** Query IDs minted by this orchestrator and their strictly correlated answers. */
+  private readonly callbackQueryIds = new Set<string>();
+
+  private readonly callbackQueryAnswers = new Map<string, CallbackQueryAnswer>();
 
   /** chatId->messageId->Reply registry for reply.replyingTo and mutation resolution. */
   private readonly messageIdToReply = new Map<number, Map<number, Reply<TContext>>>();
@@ -445,7 +459,9 @@ export class Chats<TContext extends Context = Context> {
     this.guestQueryToUser.clear();
     this.messageIdToReply.clear();
     this.messageAuthors.clear();
-    this.clickers.clear();
+    this.activeClickRouting = undefined;
+    this.callbackQueryIds.clear();
+    this.callbackQueryAnswers.clear();
     this.pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
     this.lastCapturedReply = undefined;
   }
@@ -519,6 +535,8 @@ export class Chats<TContext extends Context = Context> {
         recordGuestQuery: (queryId, who) => {
           this.guestQueryToUser.set(queryId, who);
         },
+        createCallbackQuery: (queryId, callbackData) => this.createCallbackQuery(queryId, callbackData),
+        runWithClicker: (who, targetChatId, dispatch) => this.runWithClicker(who, targetChatId, dispatch),
         recordMessageAuthor: (message) => {
           if (message.sender_chat !== undefined) {
             this.recordMessageAuthor(message);
@@ -861,49 +879,7 @@ export class Chats<TContext extends Context = Context> {
   deriveFromCapture(request: Request): void {
     const payload = request.payload as Record<string, unknown>;
 
-    if (CHAT_ACTION_METHODS.has(request.method)) {
-      this.deriveChatAction(payload);
-
-      return;
-    }
-
-    if (EDIT_METHODS.has(request.method)) {
-      this.deriveEdit(payload);
-
-      return;
-    }
-
-    if (DELETE_METHODS.has(request.method)) {
-      this.deriveDelete(payload);
-
-      return;
-    }
-
-    if (DRAFT_METHODS.has(request.method)) {
-      this.deriveDraft(request.method, payload);
-
-      return;
-    }
-
-    if (REACTION_REMOVAL_METHODS.has(request.method)) {
-      this.deriveReactionRemoval(request.method, payload);
-
-      return;
-    }
-
-    if (REACTION_CHANGE_METHODS.has(request.method)) {
-      this.deriveReactionChange(payload);
-
-      return;
-    }
-
-    if (MODERATION_METHODS.has(request.method)) {
-      this.deriveModeration(request, payload);
-
-      return;
-    }
-
-    if (!MESSAGE_METHODS.has(request.method)) {
+    if (this.deriveNonMessageCapture(request, payload)) {
       return;
     }
 
@@ -936,9 +912,8 @@ export class Chats<TContext extends Context = Context> {
     const reply = new Reply<TContext>(payload, chat, {
       bot,
       ids: this.ids,
-      recordClick: (callbackData, byUserId, byChatId) => {
-        this.clickers.set(callbackData, { userId: byUserId, chatId: byChatId });
-      },
+      createCallbackQuery: (queryId, callbackData) => this.createCallbackQuery(queryId, callbackData),
+      runWithClicker: (who, targetChatId, dispatch) => this.runWithClicker(who, targetChatId, dispatch),
       resolveReply: (messageId) => this.messageIdToReply.get(referencedChatId)?.get(messageId),
     });
 
@@ -955,6 +930,65 @@ export class Chats<TContext extends Context = Context> {
         entry.replies.push(reply);
       }
     }
+  }
+
+  /**
+   * Dispatches capture-only API methods to their high-level derivations and
+   * filters methods that do not produce captured replies.
+   * @param request - Captured outgoing request.
+   * @param payload - Raw outgoing payload.
+   * @returns `true` when the caller should stop before message derivation.
+   */
+  private deriveNonMessageCapture(request: Request, payload: Record<string, unknown>): boolean {
+    if (request.method === 'answerCallbackQuery') {
+      this.deriveCallbackQueryAnswer(payload);
+
+      return true;
+    }
+
+    if (CHAT_ACTION_METHODS.has(request.method)) {
+      this.deriveChatAction(payload);
+
+      return true;
+    }
+
+    if (EDIT_METHODS.has(request.method)) {
+      this.deriveEdit(payload);
+
+      return true;
+    }
+
+    if (DELETE_METHODS.has(request.method)) {
+      this.deriveDelete(payload);
+
+      return true;
+    }
+
+    if (DRAFT_METHODS.has(request.method)) {
+      this.deriveDraft(request.method, payload);
+
+      return true;
+    }
+
+    if (REACTION_REMOVAL_METHODS.has(request.method)) {
+      this.deriveReactionRemoval(request.method, payload);
+
+      return true;
+    }
+
+    if (REACTION_CHANGE_METHODS.has(request.method)) {
+      this.deriveReactionChange(payload);
+
+      return true;
+    }
+
+    if (MODERATION_METHODS.has(request.method)) {
+      this.deriveModeration(request, payload);
+
+      return true;
+    }
+
+    return !MESSAGE_METHODS.has(request.method);
   }
 
   /**
@@ -1445,14 +1479,78 @@ export class Chats<TContext extends Context = Context> {
       return true;
     }
 
-    // Rule 4: response after a clickButton by this user in this chat
-    for (const [, { userId: byUserId, chatId: byChatId }] of this.clickers) {
-      if (byUserId === entry.user.id && byChatId === chat.id) {
-        return true;
-      }
+    // Rule 4: response during a callback-query dispatch by this user in this chat.
+    const click = this.activeClickRouting;
+
+    if (click?.userId === entry.user.id && click.chatId === chat.id) {
+      return true;
     }
 
     return false;
+  }
+
+  /**
+   * Registers a synthetic callback query and returns its live answer handle.
+   * @param queryId - Generated callback-query ID.
+   * @param callbackData - Callback data carried by the query.
+   * @returns A live, strictly correlated callback-query handle.
+   */
+  private createCallbackQuery(queryId: string, callbackData: string): CallbackQueryHandle {
+    this.callbackQueryIds.add(queryId);
+
+    return new CallbackQueryHandle(queryId, callbackData, () => this.callbackQueryAnswers.get(queryId));
+  }
+
+  /**
+   * Runs one callback-query dispatch in a serialized click-routing scope.
+   * @param user - The minted user who dispatched the query.
+   * @param chatId - Chat containing the callback button or embedded message.
+   * @param dispatch - Callback-query update dispatch.
+   * @returns A promise that resolves when dispatch completes.
+   */
+  private async runWithClicker(user: User<TContext>, chatId: number, dispatch: () => Promise<void>): Promise<void> {
+    if (this.users.get(user.id)?.user !== user) {
+      throw new Error('Callback-query clicker must be a user minted by this Chats orchestrator');
+    }
+
+    const previousDispatch = this.clickRoutingTail;
+    let completeDispatch!: () => void;
+
+    this.clickRoutingTail = new Promise<void>((resolve) => {
+      completeDispatch = resolve;
+    });
+
+    await previousDispatch;
+    this.activeClickRouting = { userId: user.id, chatId };
+
+    try {
+      await dispatch();
+    } finally {
+      this.activeClickRouting = undefined;
+      completeDispatch();
+    }
+  }
+
+  /**
+   * Captures `answerCallbackQuery` only when its exact query ID was generated by
+   * this orchestrator. Unrelated answers cannot attach to another click.
+   * @param payload - Raw outgoing `answerCallbackQuery` payload.
+   */
+  private deriveCallbackQueryAnswer(payload: Record<string, unknown>): void {
+    const callbackQueryId = payload.callback_query_id;
+
+    if (typeof callbackQueryId !== 'string' || !this.callbackQueryIds.has(callbackQueryId)) {
+      return;
+    }
+
+    this.callbackQueryAnswers.set(callbackQueryId, {
+      callbackQueryId,
+      text: typeof payload.text === 'string' ? payload.text : undefined,
+      showAlert: typeof payload.show_alert === 'boolean' ? payload.show_alert : undefined,
+      url: typeof payload.url === 'string' ? payload.url : undefined,
+      cacheTime: typeof payload.cache_time === 'number' ? payload.cache_time : undefined,
+      raw: payload,
+    });
   }
 
   /**

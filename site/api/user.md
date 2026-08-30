@@ -98,11 +98,11 @@ All methods return `Promise<Message>` unless noted.
 
 ### Inline & callback
 
-| Method               | Signature                                                             |
-| -------------------- | --------------------------------------------------------------------- |
-| `sendInlineQuery`    | `(query: string, options?: SendInlineQueryOptions) => Promise<void>`  |
-| `chooseInlineResult` | `(resultId: string, options?) => Promise<void>`                       |
-| `sendCallbackQuery`  | `(data: string, options?: SendCallbackQueryOptions) => Promise<void>` |
+| Method               | Signature                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| `sendInlineQuery`    | `(query: string, options?: SendInlineQueryOptions) => Promise<void>`                 |
+| `chooseInlineResult` | `(resultId: string, options?) => Promise<void>`                                      |
+| `sendCallbackQuery`  | `(data: string, options?: SendCallbackQueryOptions) => Promise<CallbackQueryHandle>` |
 
 ### Reactions & polls
 

@@ -6,7 +6,8 @@
  * bot's callback handler runs. Includes chained-keyboard flows where
  * the callback handler replies with a new keyboard.
  *
- * v0.2 API expression: reply.clickButton(textOrSpec). The Reply object
+ * v0.2 API expression: reply.clickButton(textOrSpec). The returned
+ * CallbackQueryHandle exposes a strictly correlated answer. The Reply object
  * is obtained from chats.repliesFor(user).last after the bot replies
  * with an inline keyboard.
  *

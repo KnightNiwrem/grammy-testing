@@ -89,18 +89,33 @@ const botReply = user.replies.all[1];
 expect(botReply.replyingTo?.messageId).toBe(original.messageId);
 ```
 
-## `clickButton(matcher)`
+## `clickButton(matcher, options?)`
 
-Dispatches a `callback_query` as if the user clicked a button in this message. Returns a
-promise that resolves when the bot finishes handling the callback.
+Dispatches a `callback_query` as if the user clicked a callback-data button in this
+message. Returns a live handle for the exact query, including its correlated
+`answerCallbackQuery` call.
 
 ```ts
 // By button text
-await reply.clickButton('Yes');
+const click = await reply.clickButton('Yes');
+
+expect(click.answer?.text).toBe('Saved');
+expect(click.answer?.showAlert).toBe(false);
 
 // By callback data
 await reply.clickButton({ callbackData: 'answer:yes' });
 ```
+
+Private-chat clicks infer the user. In groups, supergroups, and channels, specify
+who clicked so `callback_query.from` and reply routing stay realistic:
+
+```ts
+await groupMenu.clickButton('Confirm', { by: alice });
+```
+
+If the bot does not call `answerCallbackQuery`, `click.answer` is `undefined`.
+Correlation always uses the generated query ID, so concurrent clicks and repeated
+`callback_data` values cannot steal one another's answers.
 
 After clicking, check the edit that followed:
 

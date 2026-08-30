@@ -21,16 +21,23 @@ class Reply<TContext extends Context = Context>
 
 ## Methods
 
-### `clickButton(matcher): Promise<void>`
+### `clickButton(matcher, options?): Promise<CallbackQueryHandle>`
 
-Dispatches a callback query as if the user clicked the button.
+Dispatches a callback query as if the user clicked the button. The returned handle
+exposes the bot's strictly correlated `answerCallbackQuery` call through a live
+`answer` getter.
 
 ```ts
 // By visible text:
-await reply.clickButton('Yes');
+const click = await reply.clickButton('Yes');
+
+expect(click.answer?.text).toBe('Thanks!');
 
 // By callback data:
 await reply.clickButton({ callbackData: 'answer:yes' });
+
+// Group, supergroup, and channel clicks require the user identity:
+await groupReply.clickButton('Yes', { by: alice });
 ```
 
 ## ReplyButton
@@ -61,10 +68,37 @@ interface ReplyMedia {
 interface ReplyClickButtonMatcher {
   callbackData: string;
 }
+
+interface ReplyClickButtonOptions<TContext extends Context = Context> {
+  by?: User<TContext>;
+}
 ```
 
 `clickButton` accepts either a `string` (matched against button text) or a
-`ReplyClickButtonMatcher` (matched against `callbackData`).
+`ReplyClickButtonMatcher` (matched against `callbackData`). `options.by` is
+inferred in private chats and required elsewhere.
+
+## CallbackQueryHandle
+
+```ts
+class CallbackQueryHandle {
+  readonly id: string;
+  readonly callbackData: string;
+  readonly answer: CallbackQueryAnswer | undefined;
+}
+
+interface CallbackQueryAnswer {
+  callbackQueryId: string;
+  text: string | undefined;
+  showAlert: boolean | undefined;
+  url: string | undefined;
+  cacheTime: number | undefined;
+  raw: Record<string, unknown>;
+}
+```
+
+`answer` remains `undefined` when the bot does not answer. It is a live getter,
+so it can be read again after `await chats.idle()` for a fire-and-forget API call.
 
 ## See also
 

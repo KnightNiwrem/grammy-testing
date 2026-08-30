@@ -254,7 +254,7 @@ describe('User actor', () => {
       expect(messageId).toBeGreaterThan(0);
     });
 
-    it('returns void', async () => {
+    it('returns a callback-query handle', async () => {
       const bot = new Bot('test-token');
 
       bot.on('callback_query', () => {});
@@ -262,10 +262,10 @@ describe('User actor', () => {
       const { chats } = await prepareBot(bot);
       const user = chats.newUser();
 
-      // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
       const result = await user.sendCallbackQuery('data');
 
-      expect(result).toBeUndefined();
+      expect(result.callbackData).toBe('data');
+      expect(result.id).toMatch(/^cbq-/);
     });
   });
 });

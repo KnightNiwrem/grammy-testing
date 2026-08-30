@@ -10,6 +10,7 @@ import type {
   User as TelegramUser,
 } from 'grammy/types';
 
+import { callbackChatInstance, type CallbackQueryHandle } from './callback-query';
 import type { AnyChat } from './chat';
 import type { RepliesInbox } from './chats';
 import { dispatchEditedMessage, dispatchServiceMessage, dispatchTextMessage } from './dispatch';
@@ -241,6 +242,10 @@ interface UserContext<TContext extends Context = Context> {
   drafts: DraftsLog;
   /** Records a guest_query_id → user association so `answerGuestQuery` can be correlated. */
   recordGuestQuery: (guestQueryId: string, user: User<TContext>) => void;
+  /** Creates a live callback-query handle before the update is dispatched. */
+  createCallbackQuery: (queryId: string, callbackData: string) => CallbackQueryHandle;
+  /** Runs the update within a clicker-scoped reply-routing context. */
+  runWithClicker: (user: User<TContext>, chatId: number, dispatch: () => Promise<void>) => Promise<void>;
   /** Records a user-authored message before middleware can synchronously reply to it. */
   recordMessageAuthor: (message: Message) => void;
 }
@@ -886,8 +891,9 @@ export class User<TContext extends Context = Context> {
    * Dispatches a `callback_query` update from this user without requiring a prior captured reply.
    * @param callbackData - The callback payload string (`callback_query.data`).
    * @param options - Optional message context, chat override, and forum topic for the embedded message.
+   * @returns A live handle whose `answer` is correlated by callback-query ID.
    */
-  async sendCallbackQuery(callbackData: string, options: SendCallbackQueryOptions<TContext> = {}): Promise<void> {
+  async sendCallbackQuery(callbackData: string, options: SendCallbackQueryOptions<TContext> = {}): Promise<CallbackQueryHandle> {
     // `options.chat` is documented as ignored when `options.message.chat` is set, so topic
     // validation applies only to the effective chat (the topic's forum then stands in as the
     // chat actor). Reuses the shared topic validation; `from` / reply / anonymous fields are
@@ -926,10 +932,13 @@ export class User<TContext extends Context = Context> {
       message_id: messageId,
     } as Message;
 
+    const id = `cbq-${String(this.ctx.ids.nextMessageId())}`;
+    const query = this.ctx.createCallbackQuery(id, callbackData);
+
     const update: Update = {
       update_id: this.ctx.ids.nextUpdateId(),
       callback_query: {
-        id: `cbq-${String(this.ctx.ids.nextMessageId())}`,
+        id,
         from: {
           id: this.id,
           is_bot: false,
@@ -937,13 +946,15 @@ export class User<TContext extends Context = Context> {
           last_name: this.last_name,
           username: this.username,
         },
-        chat_instance: `inst-${String(this.ctx.ids.nextMessageId())}`,
+        chat_instance: callbackChatInstance(message.chat.id),
         message,
         data: callbackData,
       },
     } as Update;
 
-    await this.ctx.bot.handleUpdate(update);
+    await this.ctx.runWithClicker(this, message.chat.id, () => this.ctx.bot.handleUpdate(update));
+
+    return query;
   }
 
   /**

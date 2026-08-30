@@ -1,9 +1,11 @@
 import type { Bot, Context } from 'grammy';
 import type { InlineKeyboardButton, InputRichMessage, Message, MessageEntity, ParseMode, Update } from 'grammy/types';
 
+import { callbackChatInstance, type CallbackQueryHandle } from './callback-query';
 import type { AnyChat } from './chat';
 import type { ForumTopic } from './forum-topic';
 import type { IdGenerator } from './id-generator';
+import type { User } from './user';
 
 export type MediaType = 'animation' | 'audio' | 'document' | 'photo' | 'sticker' | 'video' | 'video_note' | 'voice';
 
@@ -104,8 +106,10 @@ function deriveRichMessage(payload: Record<string, unknown>): ReplyRichMessage |
 interface ReplyDeps<TContext extends Context = Context> {
   bot: Bot<TContext>;
   ids: IdGenerator;
-  /** Records a click association so user.replies can include the resulting message. */
-  recordClick: (callbackData: string, byUserId: number, byChatId: number) => void;
+  /** Creates a live callback-query handle before the update is dispatched. */
+  createCallbackQuery: (id: string, callbackData: string) => CallbackQueryHandle;
+  /** Runs the update within a clicker-scoped reply-routing context. */
+  runWithClicker: (user: User<TContext>, chatId: number, dispatch: () => Promise<void>) => Promise<void>;
   /** Looks up an earlier captured Reply by its synthetic messageId. */
   resolveReply: (messageId: number) => Reply<TContext> | undefined;
 }
@@ -114,20 +118,16 @@ export interface ReplyClickButtonMatcher {
   callbackData: string;
 }
 
+export interface ReplyClickButtonOptions<TContext extends Context = Context> {
+  /**
+   * User who clicks the button. Optional in private chats, where the participant
+   * is inferred; required for group, supergroup, and channel replies.
+   */
+  by?: User<TContext>;
+}
+
 interface FindButtonMatcher {
   callbackData: string;
-}
-
-interface ClickerFrom {
-  id: number;
-  is_bot: boolean;
-  first_name: string;
-  username?: string;
-}
-
-interface Clicker {
-  userId: number;
-  from: ClickerFrom;
 }
 
 /**
@@ -236,23 +236,15 @@ function findButton(buttons: ReplyButton[], matcher: FindButtonMatcher | string)
  * Infers the clicker identity from a private-chat context.
  * Returns `undefined` for group/channel chats where the clicker cannot be identified.
  * @param chat - The chat associated with the reply.
- * @returns A {@link Clicker} with user ID and Telegram `from` shape, or `undefined`.
+ * @returns The private-chat user actor, or `undefined`.
  */
-function inferClicker<TContext extends Context>(chat: AnyChat<TContext> | undefined): Clicker | undefined {
+function inferClicker<TContext extends Context>(chat: AnyChat<TContext> | undefined): User<TContext> | undefined {
   if (!chat) {
     return undefined;
   }
 
   if (chat.type === 'private') {
-    return {
-      userId: chat.user.id,
-      from: {
-        id: chat.user.id,
-        is_bot: false,
-        first_name: chat.user.first_name,
-        username: chat.user.username,
-      },
-    };
+    return chat.user;
   }
 
   return undefined;
@@ -313,7 +305,7 @@ export class Reply<TContext extends Context = Context> {
    * Constructs a `Reply` from a captured outgoing API payload, deriving text, buttons, media, and mention metadata.
    * @param rawPayload - The raw captured outgoing API payload.
    * @param chat - The chat associated with this reply, or `undefined` if not resolved.
-   * @param deps - Internal dependencies (bot, ids, recordClick, resolveReply).
+   * @param deps - Internal dependencies (bot, ids, callback correlation, click routing, reply resolution).
    */
   constructor(
     rawPayload: Record<string, unknown>,
@@ -348,8 +340,13 @@ export class Reply<TContext extends Context = Context> {
   /**
    * Simulates a user clicking an inline keyboard button on this reply.
    * @param matcher - A button text string or a `{ callbackData }` matcher to identify the button.
+   * @param options - Optional explicit clicker. Required outside private chats.
+   * @returns A live handle whose `answer` is correlated by callback-query ID.
    */
-  async clickButton(matcher: ReplyClickButtonMatcher | string): Promise<void> {
+  async clickButton(
+    matcher: ReplyClickButtonMatcher | string,
+    options: ReplyClickButtonOptions<TContext> = {},
+  ): Promise<CallbackQueryHandle> {
     const button = findButton(this.buttons, matcher);
 
     if (!button) {
@@ -361,32 +358,47 @@ export class Reply<TContext extends Context = Context> {
     }
 
     if (button.callbackData === undefined) {
-      throw new Error(`clickButton: button "${button.text}" has no callback data`);
+      throw new Error(`clickButton: button "${button.text}" has no callback data; only callback-data buttons produce callback_query.data`);
+    }
+
+    if (!this.chat) {
+      throw new Error('clickButton: the captured reply has no registered chat');
+    }
+
+    if (this.chat.type === 'private' && options.by !== undefined && options.by !== this.chat.user) {
+      throw new Error("clickButton: a private-chat button can only be clicked by that chat's user");
     }
 
     const { callbackData } = button;
-    const clicker = inferClicker(this.chat);
+    const clicker = options.by ?? inferClicker(this.chat);
 
-    if (clicker && this.chat) {
-      this.deps.recordClick(callbackData, clicker.userId, this.chat.id);
+    if (!clicker) {
+      throw new Error('clickButton: options.by is required for group, supergroup, and channel replies');
     }
+
+    const id = `cbq-${String(this.deps.ids.nextMessageId())}`;
+    const query = this.deps.createCallbackQuery(id, callbackData);
 
     const update: Update = {
       update_id: this.deps.ids.nextUpdateId(),
       callback_query: {
-        id: `cbq-${String(this.deps.ids.nextMessageId())}`,
-        from: clicker?.from ?? {
-          id: 0,
+        id,
+        from: {
+          id: clicker.id,
           is_bot: false,
-          first_name: 'unknown',
+          first_name: clicker.first_name,
+          last_name: clicker.last_name,
+          username: clicker.username,
         },
-        chat_instance: `inst-${String(this.messageId)}`,
+        chat_instance: callbackChatInstance(this.chat.id),
         message: this.toCapturedMessage(),
         data: callbackData,
       },
     } as Update;
 
-    await this.deps.bot.handleUpdate(update);
+    await this.deps.runWithClicker(clicker, this.chat.id, () => this.deps.bot.handleUpdate(update));
+
+    return query;
   }
 
   /**
