@@ -379,7 +379,7 @@ export class Chats<TContext extends Context = Context> {
   private readonly pendingModerationTransitions = new WeakMap<Request, () => void>();
 
   /** Message requests awaiting a successful mocked result whose message ID may differ. */
-  private readonly pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
+  private pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
 
   /** The Reply created by the most recent message-method `onCapture` call. Read by the default response resolvers. */
   private lastCapturedReply: Reply<TContext> | undefined;
@@ -446,6 +446,7 @@ export class Chats<TContext extends Context = Context> {
     this.messageIdToReply.clear();
     this.messageAuthors.clear();
     this.clickers.clear();
+    this.pendingMessageReplies = new WeakMap<Request, { chatId: number; reply: Reply<TContext> }>();
     this.lastCapturedReply = undefined;
   }
 

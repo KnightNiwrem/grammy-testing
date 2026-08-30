@@ -174,6 +174,48 @@ describe('ReactionChangesLog', () => {
         expect(chat.reactionChanges.length).toBe(0);
         expect(chats.reactionChanges.length).toBe(0);
       });
+
+      it('does not restore a pre-clear reply when its mocked response settles later', async () => {
+        const bot = new Bot('test-token');
+        let markResponseStarted: (() => void) | undefined;
+        let resolveResponse: ((value: { date: number; message_id: number }) => void) | undefined;
+
+        const responseStarted = new Promise<void>((resolve) => {
+          markResponseStarted = resolve;
+        });
+
+        const response = new Promise<{ date: number; message_id: number }>((resolve) => {
+          resolveResponse = resolve;
+        });
+
+        bot.on('message:text', async (ctx) => {
+          const reply = await ctx.reply('target');
+
+          await ctx.api.setMessageReaction(ctx.chat.id, reply.message_id, [{ type: 'emoji', emoji: '👍' }]);
+        });
+
+        const { chats } = await prepareBot(bot, {
+          responses: {
+            sendMessage: async () => {
+              markResponseStarted?.();
+
+              return response;
+            },
+          },
+        });
+
+        const user = chats.newUser();
+        const chat = chats.newPrivateChat(user);
+        const dispatch = user.sendText('react');
+
+        await responseStarted;
+        chats.clear();
+        resolveResponse?.({ message_id: 7777, date: 0 });
+        await dispatch;
+
+        expect(user.replies.length).toBe(0);
+        expect(chat.reactionChanges.lastOrThrow()).toMatchObject({ messageId: 7777, reply: undefined });
+      });
     });
 
     describe('negative cases', () => {
