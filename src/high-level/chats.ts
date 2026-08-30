@@ -1528,7 +1528,23 @@ export class Chats<TContext extends Context = Context> {
 
         if (typeof messageId === 'number') {
           this.setReplyForChat(chatId, reply, messageId);
+          this.backfillReactionReply(chatId, messageId, reply);
         }
+      }
+    }
+  }
+
+  /**
+   * Resolves reaction attempts captured while an asynchronous send response was still pending.
+   * Global and per-chat logs share each `ReactionChange` object, so one mutation updates both.
+   * @param chatId - The destination chat's Telegram ID.
+   * @param messageId - The message identity returned by the mocked send.
+   * @param reply - The captured bot reply associated with that identity.
+   */
+  private backfillReactionReply(chatId: number, messageId: number, reply: Reply<TContext>): void {
+    for (const change of this.reactionChanges.all) {
+      if (change.reply === undefined && Number(change.chatId) === chatId && change.messageId === messageId) {
+        change.reply = reply;
       }
     }
   }

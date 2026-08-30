@@ -216,6 +216,47 @@ describe('ReactionChangesLog', () => {
         expect(user.replies.length).toBe(0);
         expect(chat.reactionChanges.lastOrThrow()).toMatchObject({ messageId: 7777, reply: undefined });
       });
+
+      it('backfills a reaction captured before its asynchronous send settles', async () => {
+        const bot = new Bot('test-token');
+        let markReactionCaptured: (() => void) | undefined;
+        let resolveResponse: ((value: { date: number; message_id: number }) => void) | undefined;
+
+        const reactionCaptured = new Promise<void>((resolve) => {
+          markReactionCaptured = resolve;
+        });
+
+        const response = new Promise<{ date: number; message_id: number }>((resolve) => {
+          resolveResponse = resolve;
+        });
+
+        bot.on('message:text', async (ctx) => {
+          const pendingReply = ctx.reply('target');
+
+          await ctx.api.setMessageReaction(ctx.chat.id, 6666, [{ type: 'emoji', emoji: '👍' }]);
+          markReactionCaptured?.();
+          await pendingReply;
+        });
+
+        const { chats } = await prepareBot(bot, {
+          responses: { sendMessage: async () => response },
+        });
+
+        const user = chats.newUser();
+        const chat = chats.newPrivateChat(user);
+        const dispatch = user.sendText('react');
+
+        await reactionCaptured;
+
+        const change = chat.reactionChanges.lastOrThrow();
+
+        expect(change.reply).toBeUndefined();
+
+        resolveResponse?.({ message_id: 6666, date: 0 });
+        await dispatch;
+
+        expect(change.reply).toBe(user.replies.lastOrThrow());
+      });
     });
 
     describe('negative cases', () => {
