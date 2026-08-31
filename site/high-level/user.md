@@ -194,17 +194,52 @@ await user.answerPoll(pollReply, [0, 2]);
 
 ## Payment
 
-### `sendSuccessfulPayment(options?)`
+### `payInvoice(invoice, options?)`
+
+Runs a captured private-chat invoice through Telegram's payment stages. Flexible invoices
+first dispatch a `shipping_query`; accepted checkout then dispatches a
+`pre_checkout_query`. Both bot answers are correlated to the exact generated query IDs.
 
 ```ts
-await user.sendSuccessfulPayment({ total_amount: 1000, currency: 'USD' });
+const invoice = user.replies.byInvoiceTitle('Running shoes');
+
+if (!invoice) throw new Error('Invoice not found');
+
+const payment = await user.payInvoice(invoice, {
+  orderInfo: {
+    email: 'alice@example.com',
+    shipping_address: shippingAddress,
+  },
+  shippingOptionId: 'express',
+  tipAmount: 250,
+});
+
+expect(payment.shippingAnswer?.ok).toBe(true);
+expect(payment.preCheckoutAnswer?.ok).toBe(true);
+expect(payment.status).toBe('ready');
 ```
 
-### `sendShippingQuery(options?)` / `sendPreCheckoutQuery(options?)`
+Pre-checkout approval does not mean the provider completed the charge, so success is a
+separate explicit step:
 
 ```ts
-await user.sendShippingQuery({ invoice_payload: 'order_42' });
+const message = await payment.completeSuccessfully({
+  telegramPaymentChargeId: 'tg-charge-7',
+  providerPaymentChargeId: 'provider-charge-7',
+});
+
+expect(message.successful_payment?.invoice_payload).toBe(invoice.raw.payload);
+expect(payment.status).toBe('completed');
 ```
+
+Telegram Stars invoices (`currency: 'XTR'`) skip shipping and personal-information stages.
+Payment completion is currently limited to invoices sent in the paying user's private chat;
+group and channel invoices are still captured and inspectable.
+
+The lower-level `sendShippingQuery(invoicePayload, shippingAddress)`,
+`sendPreCheckoutQuery(invoicePayload, currency, totalAmount)`, and
+`sendSuccessfulPayment(invoicePayload, currency, totalAmount, options?)` verbs remain
+available when a test needs to dispatch an isolated update without an invoice flow.
 
 ### `purchasePaidMedia(payload, options?)`
 

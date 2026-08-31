@@ -13,6 +13,8 @@ user.replies.all; // Reply<TContext>[]
 user.replies.last; // Reply<TContext> | undefined
 user.replies.length; // number
 user.replies.lastOrThrow(); // Reply<TContext> — throws if empty
+user.replies.byText('Hello'); // Reply<TContext> | undefined
+user.replies.byInvoiceTitle('Running shoes'); // Reply<TContext> | undefined
 user.replies.clear();
 ```
 
@@ -38,6 +40,7 @@ group.messages.last; // Reply<TContext> | undefined
 group.messages.length; // number
 group.messages.byText('Hello'); // Reply<TContext> | undefined — exact match
 group.messages.byText(/hello/i); // Reply<TContext> | undefined — regex match
+group.messages.byInvoiceTitle(/running/i); // Reply<TContext> | undefined
 group.messages.clear();
 ```
 

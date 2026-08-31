@@ -206,6 +206,7 @@ describe('Reply objects', () => {
 
     it('byText finds by regex', async () => {
       const bot = new Bot('test-token');
+      const matcher = /welcome/gi;
 
       bot.on('message:text', async (ctx) => {
         await ctx.reply('Welcome, alice!');
@@ -216,7 +217,8 @@ describe('Reply objects', () => {
 
       await user.sendText('hi');
 
-      expect(chats.repliesFor(user).byText(/welcome/i)?.text).toBe('Welcome, alice!');
+      expect(chats.repliesFor(user).byText(matcher)?.text).toBe('Welcome, alice!');
+      expect(chats.repliesFor(user).byText(matcher)?.text).toBe('Welcome, alice!');
     });
   });
 });

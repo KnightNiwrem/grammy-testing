@@ -44,6 +44,21 @@ expect(reply.buttons[0].callbackData).toBe('answer:yes');
 expect(reply.buttons[0].url).toBeUndefined();
 ```
 
+### `invoice`
+
+The public Telegram `Invoice` returned for a captured `sendInvoice` call. It contains the
+title, description, start parameter, currency, and calculated total amount. As in the Bot
+API, the private bot payload is not part of this object; inspect `reply.raw.payload` when a
+test needs it.
+
+```ts
+const invoice = user.replies.byInvoiceTitle('Running shoes');
+
+expect(invoice?.invoice?.currency).toBe('USD');
+expect(invoice?.invoice?.total_amount).toBe(7500);
+expect(invoice?.raw.payload).toBe('order-7');
+```
+
 ### `replyMarkup`
 
 The raw `reply_markup` from the outgoing payload — useful for asserting on reply keyboards,
@@ -72,10 +87,11 @@ expect(reply.messageId).toBeGreaterThan(0);
 
 ### `raw`
 
-The full `Message` object as returned by the canned response. Useful for edge-case assertions.
+The full outgoing Bot API request payload. Useful for edge-case assertions and private
+invoice payloads that Telegram does not expose on its returned public objects.
 
 ```ts
-expect(reply.raw.date).toBeGreaterThan(0);
+expect(reply.raw.disable_notification).toBe(true);
 ```
 
 ### `replyingTo`

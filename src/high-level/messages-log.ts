@@ -56,7 +56,44 @@ export class MessagesLog<TContext extends Context = Context> {
         return reply.text === matcher;
       }
 
-      return matcher.test(reply.text);
+      const expression = matcher;
+
+      expression.lastIndex = 0;
+
+      const isMatch = expression.test(reply.text);
+
+      expression.lastIndex = 0;
+
+      return isMatch;
+    });
+  }
+
+  /**
+   * Returns the first invoice reply whose product title matches `matcher`.
+   * @param matcher - A string for exact match or a `RegExp` for pattern match.
+   * @returns The first matching invoice reply, or `undefined`.
+   */
+  byInvoiceTitle(matcher: RegExp | string): Reply<TContext> | undefined {
+    return this.items.find((reply) => {
+      const title = reply.invoice?.title;
+
+      if (title === undefined) {
+        return false;
+      }
+
+      if (typeof matcher === 'string') {
+        return title === matcher;
+      }
+
+      const expression = matcher;
+
+      expression.lastIndex = 0;
+
+      const isMatch = expression.test(title);
+
+      expression.lastIndex = 0;
+
+      return isMatch;
     });
   }
 

@@ -1,5 +1,5 @@
 import type { Bot, Context } from 'grammy';
-import type { InlineKeyboardButton, InputRichMessage, Message, MessageEntity, ParseMode, Update } from 'grammy/types';
+import type { InlineKeyboardButton, InputRichMessage, Invoice, Message, MessageEntity, ParseMode, Update } from 'grammy/types';
 
 import { callbackChatInstance, type CallbackQueryHandle } from './callback-query';
 import type { AnyChat } from './chat';
@@ -101,6 +101,53 @@ function deriveRichMessage(payload: Record<string, unknown>): ReplyRichMessage |
   }
 
   return { ...rich, plainText };
+}
+
+/**
+ * Derives the public Bot API `Invoice` view from a captured `sendInvoice`
+ * payload. The private bot payload intentionally remains available only as
+ * `reply.raw.payload`, matching Telegram's returned `Invoice` object.
+ * @param payload - Raw captured outgoing API payload.
+ * @returns A public invoice view, or `undefined` for non-invoice replies.
+ */
+function deriveInvoice(payload: Record<string, unknown>): Invoice | undefined {
+  const { title, description, currency, prices } = payload;
+
+  if (typeof title !== 'string' || typeof description !== 'string' || typeof currency !== 'string' || !Array.isArray(prices)) {
+    return undefined;
+  }
+
+  if (prices.length === 0 || (currency === 'XTR' && prices.length !== 1)) {
+    return undefined;
+  }
+
+  let totalAmount = 0;
+
+  for (const price of prices) {
+    if (typeof price !== 'object' || price === null) {
+      return undefined;
+    }
+
+    const { amount } = price as { amount?: unknown };
+
+    if (typeof amount !== 'number' || !Number.isSafeInteger(amount)) {
+      return undefined;
+    }
+
+    totalAmount += amount;
+
+    if (!Number.isSafeInteger(totalAmount)) {
+      return undefined;
+    }
+  }
+
+  return {
+    title,
+    description,
+    start_parameter: typeof payload.start_parameter === 'string' ? payload.start_parameter : '',
+    currency,
+    total_amount: totalAmount,
+  };
 }
 
 interface ReplyDeps<TContext extends Context = Context> {
@@ -271,6 +318,9 @@ export class Reply<TContext extends Context = Context> {
   /** The sent `InputRichMessage` for `sendRichMessage` / `sendRichMessageDraft` calls, else `undefined`. */
   readonly richMessage: ReplyRichMessage | undefined;
 
+  /** Public invoice fields returned by Telegram for `sendInvoice`, else `undefined`. */
+  readonly invoice: Invoice | undefined;
+
   readonly replyMarkup: Record<string, unknown> | undefined;
 
   readonly replyingTo: Reply<TContext> | undefined;
@@ -330,6 +380,7 @@ export class Reply<TContext extends Context = Context> {
     this.buttons = collectButtons(rawPayload);
     this.media = deriveMedia(rawPayload);
     this.richMessage = deriveRichMessage(rawPayload);
+    this.invoice = deriveInvoice(rawPayload);
     this.replyMarkup = rawPayload.reply_markup as Record<string, unknown> | undefined;
 
     this.messageThreadId = typeof rawPayload.message_thread_id === 'number' ? rawPayload.message_thread_id : undefined;
@@ -416,6 +467,7 @@ export class Reply<TContext extends Context = Context> {
       chat: this.chat ? this.chat.toTelegramChat() : ({ id: 0, type: 'private' } as Message['chat']),
       text: this.text,
       entities: this.entities,
+      ...(this.invoice !== undefined && { invoice: { ...this.invoice } }),
       ...(this.messageThreadId !== undefined && { message_thread_id: this.messageThreadId, is_topic_message: true }),
       ...(this.replyMarkup !== undefined && { reply_markup: this.replyMarkup }),
     } as Message;
