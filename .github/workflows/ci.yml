@@ -30,5 +30,16 @@ jobs:
         with:
           deno-version: v2.x
 
+      - name: Start emulation server
+        if: matrix.task == 'test'
+        run: |
+          deno task serve &
+          for attempt in $(seq 1 50); do
+            curl --silent --fail --request POST http://localhost:8081/admin/sessions > /dev/null && break
+            sleep 0.2
+          done
+
       - name: ${{ matrix.task_name }}
         run: deno task ${{ matrix.task }}
+        env:
+          BOT_API_EMULATOR_URL: ${{ matrix.task == 'test' && 'http://localhost:8081' || '' }}
