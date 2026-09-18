@@ -70,6 +70,18 @@ Deno.test('createPrivateChat rejects inconsistent definitions', () => {
   );
 });
 
+Deno.test('waitForUpdates registers a pending long poll until it is aborted', async () => {
+  const session = new Session('s');
+  const controller = new AbortController();
+  const pending = session.waitForUpdates(30, controller.signal);
+  assertEquals(session.pendingLongPolls.size, 1);
+  controller.abort();
+  assertEquals(await pending, []);
+  assertEquals(session.pendingLongPolls.size, 0);
+  assertEquals(await session.waitForUpdates(0, new AbortController().signal), []);
+  assertEquals(session.pendingLongPolls.size, 0);
+});
+
 Deno.test('appendTextMessage numbers messages sequentially per chat', () => {
   const session = new Session('s');
   const user = session.createUser({ first_name: 'Alice' });

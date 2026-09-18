@@ -24,8 +24,12 @@ bot) then sends a message to that chat through the emulated API and receives a T
   `bot.init()` work in grammY. `bot.start()` additionally calls `deleteWebhook` and then long-polls
   `getUpdates`, so both are stubbed: `deleteWebhook` always answers `true`, and `getUpdates` holds
   the response for `timeout` seconds or until the client aborts the request, then answers an empty
-  batch. No update is ever produced and `offset` is ignored; update generation and delivery are
-  future work. Every other method answers a Telegram-style `404 Not Found` envelope.
+  batch. `timeout` must be an integer in `0 .. 2^31 - 1`, Telegram's default integer width, and
+  anything else answers 400; a testing library should fail loudly on a malformed value. Strings are
+  accepted only as the exact decimal spelling of an integer, the same rule as `chat_id`. Held polls
+  are registered on the session (`pendingLongPolls`) so that update delivery can wake a waiting bot
+  once it exists. No update is ever produced and `offset` is ignored; update generation and delivery
+  are future work. Every other method answers a Telegram-style `404 Not Found` envelope.
 - **Membership lives on the Chat record, not on the session.** Members are declared when the chat is
   created. Adding a member mid-test is a later feature, but the `memberIds` set on the record is the
   seam that operation will mutate. For private chats the client takes `{ user, bot }`, because a
@@ -136,6 +140,8 @@ await session.destroy();
 
 - Only private chats, only text messages, only `getMe`, `sendMessage`, and the polling stubs.
 - A polling bot never receives an update; `getUpdates` only idles and answers an empty batch.
+- A `getUpdates` timeout above `setTimeout`'s limit of about 24.8 days ends early; timers are not
+  chained. Accepted for now and noted in the code.
 - Chat membership can only be declared at creation, and the client cannot declare a private chat
   without the bot; the `403 Forbidden` path is covered at the handler level only.
 - Several bots sharing a private chat with the same user is not validated.

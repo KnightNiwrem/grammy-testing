@@ -196,53 +196,65 @@ conversations and when keeping private-chat behavior separate from group members
 
 ## Polling stub follow-up findings
 
-### 11. [P2] Malformed `getUpdates` timeout values can produce internal-server errors
+### 11. [FIXED] [P2] Malformed `getUpdates` timeout values can produce internal-server errors
 
-Location: [bot_api_methods.ts](src/server/bot_api_methods.ts), `getUpdates`.
+Location: [bot_api_methods.ts](src/server/bot_api_methods.ts), `parsePollTimeoutSeconds`.
 
-`Number(payload.timeout)` coerces arbitrary JSON values before checking whether the result is finite
-and positive. A request with `{ timeout: { toString: 'invalid' } }` throws
-`TypeError: Cannot convert object to primitive value` and returns `500 Internal Server Error`.
-Boolean `true` and the array `[1]` also become one-second polling durations.
+Before the fix, `Number(payload.timeout)` coerced arbitrary JSON values before checking whether the
+result was finite and positive. A request with `{ timeout: { toString: 'invalid' } }` threw
+`TypeError: Cannot convert object to primitive value` and returned `500 Internal Server Error`.
+Boolean `true` and the array `[1]` also became one-second polling durations.
 
-Accept only the intended numeric and string wire types before conversion, and define how invalid
-values are handled without throwing an internal error. Keep the omitted-timeout short-poll behavior
-and support numeric strings from query and form inputs. Add regression coverage for malformed JSON
-types and the chosen invalid-value behavior.
+**Resolution:** `parsePollTimeoutSeconds` accepts numbers and canonical decimal strings representing
+integers in `0 .. 2^31 - 1`. Other values return 400 with the Telegram error envelope; omitted or
+zero timeouts retain immediate short polling. Regression tests cover malformed JSON types,
+noncanonical strings, fractional and negative values, and values outside the range. Diagnostic
+probes also verified positive numeric strings through JSON, query, URL-encoded, and multipart
+inputs.
 
-### 12. [P2] Oversized `getUpdates` timeouts overflow the timer and return immediately
+### 12. [FIXED] [P2] Oversized `getUpdates` timeouts overflow the timer and return immediately
 
-Locations: [bot_api_methods.ts](src/server/bot_api_methods.ts), `getUpdates` and
-`waitForTimeoutOrAbort`.
+Locations: [bot_api_methods.ts](src/server/bot_api_methods.ts), `parsePollTimeoutSeconds`, and
+[session_store.ts](src/server/session_store.ts), `Session.waitForUpdates` (replaces
+`waitForTimeoutOrAbort`).
 
-A finite positive timeout is passed to `setTimeout` after multiplication by 1000, without an upper
-bound. `{ timeout: 2147484 }` produces a delay of `2147484000` milliseconds, exceeding the timer's
-signed 32-bit range. Deno emits `TimeoutOverflowWarning` and resets the delay to one millisecond.
-The diagnostic request returned in approximately 27 milliseconds; `{ timeout: 1e308 }` overflowed
-the multiplication to infinity and also returned almost immediately.
+Before the fix, a finite positive timeout was passed to `setTimeout` after multiplication by 1000,
+without an upper bound. `{ timeout: 2147484 }` produced a delay of `2147484000` milliseconds,
+exceeding the timer's signed 32-bit range. Deno emitted `TimeoutOverflowWarning` and reset the delay
+to one millisecond. The diagnostic request returned in approximately 27 milliseconds;
+`{ timeout: 1e308 }` overflowed the multiplication to infinity and also returned almost immediately.
 
-Repeated polling with these values can spin instead of idling and violates the documented positive
-timeout behavior. Bound the polling duration before converting seconds to milliseconds. Telegram's
+**Resolution:** The parser rejects timeouts above `2^31 - 1` seconds, and `Session.waitForUpdates`
+clamps the timer delay to `2^31 - 1` milliseconds. Oversized valid inputs therefore remain pending
+instead of overflowing into an immediate response. Requested durations above about 24.8 days end
+early; PLAN.md and README.md document this limitation. Telegram's
 [server implementation](https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/Client.cpp)
-also bounds polling timeouts using a
+uses a shorter
 [50-second maximum](https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/Client.h).
-Document the chosen bound and add regression coverage that verifies oversized inputs cannot collapse
-into an immediate successful long poll.
 
-### 13. [P3] Polling lifecycle tests do not establish that a long poll is pending
+**Regression-coverage limitation:** The oversized-timeout test uses FakeTime, which does not
+reproduce Deno's timer overflow. Removing the clamp in an isolated copy still passes that test.
+Native-timer diagnostic probes verified that the fix keeps oversized valid inputs pending and that
+removing the clamp reproduces the overflow. A permanent native-timer regression test remains a
+coverage improvement.
+
+### 13. [FIXED] [P3] Polling lifecycle tests do not establish that a long poll is pending
 
 Locations: [e2e_grammy_test.ts](tests/e2e_grammy_test.ts), `runPrivateChatFlow`, and
 [bot_api_handler_test.ts](tests/bot_api_handler_test.ts), the `getUpdates` tests.
 
-The lifecycle test waits for `onStart` and then sleeps for 20 milliseconds before stopping the bot.
-grammY invokes `onStart` before entering its polling loop, so the callback and elapsed delay do not
-establish that the server has a pending long poll. The test can complete without exercising the
-in-flight cancellation its comment describes.
+Before the fix, the lifecycle test waited for `onStart` and then slept for 20 milliseconds before
+stopping the bot. grammY invokes `onStart` before entering its polling loop, so the callback and
+elapsed delay did not establish that the server had a pending long poll. The test could complete
+without exercising the in-flight cancellation its comment described.
 
-Synchronize with an observed polling request before stopping, and verify cancellation releases the
-pending handler. The handler suite covers short polling and cancellation but does not cover natural
-expiry of a positive timeout. Add that behavior check as well. Temporary probes verified expiry and
-HTTP cancellation in the current implementation, but those checks are absent from the test suite.
+**Resolution:** `Session.waitForUpdates` registers held polls in `pendingLongPolls` after arming the
+timer and abort listener. The in-process grammY lifecycle test waits for a registered poll before
+calling `bot.stop()`, awaits polling completion, and verifies that no poll remains. A separate HTTP
+test waits for a registered server poll, aborts fetch, and verifies server-side release. The handler
+suite also covers natural expiry of a positive timeout with FakeTime, and the store suite covers
+poll registration and removal on abort. Disabling abort handling in an isolated copy correctly fails
+the HTTP test with `the server kept the poll pending`.
 
 ## Verification and analyzer triage
 
@@ -284,3 +296,10 @@ Fallow's follow-up maintainability analysis covered all 15 source and test files
 discovered all four test entry points; a temporary configuration supplied `src/main.ts` and
 `src/client/mod.ts` as additional entry points. The payload-decoding and port-parsing signals still
 used estimated coverage and did not establish new actionable maintainability issues.
+
+The fixes for findings 11–13 passed type, lint, formatting, and whitespace checks. The final
+cancellation review passed 26 tests with the standalone test ignored; with a standalone server on
+port 18085 and `BOT_API_EMULATOR_URL=http://localhost:18085`, all 27 tests passed. Fallow's
+maintainability analysis covered all 15 source and test files and reported only the existing
+estimated-coverage signals for payload decoding and port parsing. Diagnostic and mutation probes
+were temporary; finding 12 records the remaining limitation in permanent regression coverage.

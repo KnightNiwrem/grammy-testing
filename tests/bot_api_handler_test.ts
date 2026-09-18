@@ -1,4 +1,5 @@
-import { assert, assertEquals } from '@std/assert';
+import { assert, assertEquals, assertRejects } from '@std/assert';
+import { FakeTime } from '@std/testing/time';
 import type { Message } from 'grammy/types';
 import { createEmulationServerHandler } from '../src/server/handler.ts';
 import { SessionStore } from '../src/server/session_store.ts';
@@ -157,10 +158,72 @@ Deno.test('deleteWebhook answers true', async () => {
 
 Deno.test('getUpdates answers an empty batch at once without a timeout', async () => {
   const { call } = setUp();
-  for (const payload of [{}, { timeout: 0 }, { offset: 5, limit: 1 }, { timeout: 'soon' }]) {
+  for (const payload of [{}, { timeout: 0 }, { timeout: '0' }, { offset: 5, limit: 1 }]) {
     const response = await call('getUpdates', payload);
     assertEquals(response.status, 200);
     assertEquals(await response.json(), { ok: true, result: [] });
+  }
+});
+
+Deno.test('getUpdates rejects a timeout that is not a 32-bit non-negative integer', async () => {
+  const { call } = setUp();
+  const invalid = [
+    { toString: 'invalid' },
+    true,
+    [1],
+    null,
+    -5,
+    0.5,
+    'soon',
+    '1e308',
+    ' 3',
+    1e308,
+    2 ** 31,
+  ];
+  for (const timeout of invalid) {
+    await expectTelegramError(
+      await call('getUpdates', { timeout }),
+      400,
+      'Bad Request: timeout must be an integer between 0 and 2147483647',
+    );
+  }
+});
+
+Deno.test('getUpdates holds a long poll for the whole timeout', async () => {
+  const { call } = setUp();
+  const realSetTimeout = setTimeout;
+  const time = new FakeTime();
+  try {
+    const settle = (response: Promise<Response>) => {
+      const state = { settled: false };
+      response.then(() => (state.settled = true));
+      return state;
+    };
+    // Decoding the request body is an event-loop operation, not a microtask, so give the handler
+    // a real turn to arm its (fake) timer before the fake clock advances.
+    const armTimers = () => new Promise((resolve) => realSetTimeout(resolve, 10));
+
+    const expiring = settle(call('getUpdates', { timeout: 2 }));
+    await armTimers();
+    await time.tickAsync(1999);
+    assertEquals(expiring.settled, false);
+    await time.tickAsync(1);
+    await time.runMicrotasks();
+    assertEquals(expiring.settled, true);
+
+    // Large valid timeouts are held rather than collapsing into an immediate answer.
+    const controller = new AbortController();
+    const long = [2147483647, '2147483647'].map((timeout) =>
+      settle(call('getUpdates', { timeout }, { signal: controller.signal }))
+    );
+    await armTimers();
+    await time.tickAsync(3_600_000);
+    assertEquals(long.map((state) => state.settled), [false, false]);
+    controller.abort();
+    await time.runMicrotasks();
+    assertEquals(long.map((state) => state.settled), [true, true]);
+  } finally {
+    time.restore();
   }
 });
 
@@ -176,6 +239,38 @@ Deno.test('getUpdates holds a long poll until the client aborts it', async () =>
   assertEquals(await response.json(), { ok: true, result: [] });
   assert(elapsedMs >= 50 && elapsedMs < 2000, `long poll ended after ${elapsedMs} ms`);
 });
+
+Deno.test('cancelling the HTTP request releases a long poll held by the server', async () => {
+  const { store, session, bot } = setUp();
+  const server = Deno.serve({ port: 0, onListen() {} }, createEmulationServerHandler(store));
+  try {
+    const controller = new AbortController();
+    const request = fetch(
+      `http://localhost:${server.addr.port}/bot-api/${session.id}/bot${bot.token}/getUpdates`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ timeout: 30 }),
+        signal: controller.signal,
+      },
+    );
+    await until(() => session.pendingLongPolls.size === 1, 'the server never armed the poll');
+    controller.abort();
+    await assertRejects(() => request, DOMException, undefined, 'the client fetch was aborted');
+    await until(() => session.pendingLongPolls.size === 0, 'the server kept the poll pending');
+  } finally {
+    await server.shutdown();
+  }
+});
+
+/** Polls a condition every millisecond and fails if it does not hold within a few seconds. */
+async function until(condition: () => boolean, failure: string) {
+  const deadline = Date.now() + 5000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(failure);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
 
 Deno.test('routing errors use Telegram error codes', async () => {
   const { call } = setUp();

@@ -57,6 +57,7 @@ user and the bot, which corresponds to the user having started the bot.
   Returns the stored `Message` with a per-chat sequential `message_id`.
 - `deleteWebhook`: stub, always returns `true`.
 - `getUpdates`: stub, waits `timeout` seconds or until the request is aborted, then returns `[]`.
+  `timeout` must be an integer in `0 .. 2^31 - 1` (400 otherwise); 0 or absent answers at once.
   Together with `deleteWebhook` this lets `bot.start()` and `bot.stop()` run; no update is ever
   delivered.
 
@@ -73,6 +74,8 @@ guarantee that these match, and the emulator makes sure tests cannot accidentall
 
 - Only private chats, only text messages, only `getMe`, `sendMessage`, and the polling stubs.
 - A polling bot never receives an update; update generation is not implemented.
+- A `getUpdates` timeout above about 24.8 days ends early: `setTimeout` cannot represent longer
+  delays and the wait is not chained.
 - Chat membership can only be declared when the chat is created. The client cannot yet declare a
   private chat the bot is not a member of, so the `403 Forbidden` path is only reachable through the
   admin API directly.

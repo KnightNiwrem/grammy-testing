@@ -50,36 +50,41 @@ function deleteWebhook(): true {
 /**
  * Stub: no updates are ever produced. The long-poll contract is honored so that a polling bot idles
  * instead of spinning: the response is held for `timeout` seconds or until the client aborts the
- * request, then an empty batch is returned. Without a positive `timeout` the empty batch is
- * returned at once, which is Telegram's short polling. `offset` and the other parameters are
- * ignored until update generation exists.
+ * request, then an empty batch is returned. A `timeout` of 0, or none at all, returns the empty
+ * batch at once, which is Telegram's short polling. `offset` and the other parameters are ignored
+ * until update generation exists.
  */
-async function getUpdates(
-  _session: Session,
+function getUpdates(
+  session: Session,
   _bot: BotRecord,
   payload: BotApiPayload,
   signal: AbortSignal,
 ): Promise<Update[]> {
-  const timeoutSeconds = Number(payload.timeout);
-  if (Number.isFinite(timeoutSeconds) && timeoutSeconds > 0) {
-    await waitForTimeoutOrAbort(timeoutSeconds, signal);
-  }
-  return [];
+  return session.waitForUpdates(parsePollTimeoutSeconds(payload.timeout), signal);
 }
 
-function waitForTimeoutOrAbort(seconds: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) return resolve();
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, seconds * 1000);
-    function onAbort() {
-      clearTimeout(timer);
-      resolve();
-    }
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
+/** Telegram integers are 32-bit unless documented otherwise; `timeout` is not documented otherwise. */
+const MAX_POLL_TIMEOUT_SECONDS = 2 ** 31 - 1;
+
+/**
+ * grammY sends `timeout` as a JSON number. A string is accepted only when it is exactly the decimal
+ * spelling of a number, the same rule as `toChatKey`, so that query and form inputs work. Because
+ * this is a testing library, anything else is a client error rather than a lenient default: a bot
+ * that sends a malformed timeout should learn about it.
+ */
+function parsePollTimeoutSeconds(value: unknown): number {
+  if (value === undefined) return 0;
+  const seconds = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && String(Number(value)) === value
+    ? Number(value)
+    : NaN;
+  if (!Number.isInteger(seconds) || seconds < 0 || seconds > MAX_POLL_TIMEOUT_SECONDS) {
+    throw TelegramApiError.badRequest(
+      `timeout must be an integer between 0 and ${MAX_POLL_TIMEOUT_SECONDS}`,
+    );
+  }
+  return seconds;
 }
 
 /**

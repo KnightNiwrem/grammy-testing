@@ -2,7 +2,7 @@
  * In-memory state of every isolated test session: the bots, users, and chats a tester has
  * declared, and the messages exchanged in those chats.
  */
-import type { Chat, Message, User, UserFromGetMe } from 'grammy/types';
+import type { Chat, Message, Update, User, UserFromGetMe } from 'grammy/types';
 
 /** Raised when a tester's entity definition is inconsistent with the session's current state. */
 export class SessionValidationError extends Error {
@@ -45,6 +45,12 @@ export interface CreatePrivateChatDefinition {
 
 /** Telegram identifiers use at most 52 significant bits. */
 const TELEGRAM_ID_BITS = 52;
+/**
+ * Largest delay `setTimeout` can represent, about 24.8 days. A `getUpdates` timeout above that is
+ * valid for Telegram but ends early here instead of chaining timers; that deviation is accepted
+ * for now.
+ */
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
 const BOT_TOKEN_SECRET_LENGTH = 35;
 const BOT_TOKEN_SECRET_ALPHABET =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
@@ -55,6 +61,12 @@ export class Session {
   /** Users and bots keyed by identifier. */
   readonly users = new Map<number, User>();
   readonly chats = new Map<number, ChatRecord>();
+  /**
+   * Long polls currently held open by `getUpdates`; calling an entry ends that poll. Nothing
+   * produces updates yet, so a poll ends only by timeout or abort, but this is the seam update
+   * delivery will use to wake a waiting bot.
+   */
+  readonly pendingLongPolls = new Set<() => void>();
 
   constructor(readonly id: string) {}
 
@@ -136,6 +148,26 @@ export class Session {
 
   findBotByToken(token: string): BotRecord | undefined {
     return this.bots.get(token);
+  }
+
+  /**
+   * Holds a `getUpdates` call open for `timeoutSeconds` or until the client aborts the request,
+   * then answers an empty batch. A timeout of 0 answers at once, which is Telegram's short
+   * polling.
+   */
+  waitForUpdates(timeoutSeconds: number, signal: AbortSignal): Promise<Update[]> {
+    if (timeoutSeconds <= 0 || signal.aborted) return Promise.resolve([]);
+    return new Promise((resolve) => {
+      const end = () => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', end);
+        this.pendingLongPolls.delete(end);
+        resolve([]);
+      };
+      const timer = setTimeout(end, Math.min(timeoutSeconds * 1000, MAX_TIMER_DELAY_MS));
+      signal.addEventListener('abort', end, { once: true });
+      this.pendingLongPolls.add(end);
+    });
   }
 
   appendTextMessage(chat: ChatRecord, from: User, text: string): Message {
