@@ -5,6 +5,9 @@ The review covers implementation commit `07c4492`
 and test client`), the sole implementation commit
 ahead of `main`, against [PLAN.md](PLAN.md).
 
+The polling-stub follow-up review covers the unstaged changes addressing finding 6. Its additional
+findings are appended as findings 11–13.
+
 The intended minimal flow works, and the implementation largely matches the planned architecture:
 standalone serving, isolated session routes, entity handles, chat-owned messages, and the `getMe`
 and `sendMessage` methods. Unsupported methods, group chats, uploads, and incomplete Telegram
@@ -104,20 +107,24 @@ multiple-bot exception. Additional humans also violate the private-chat model. R
 human members while preserving the intended fixture for testing a bot without permission to send.
 The broader conversation-ownership problem is described under future convergence risks.
 
-### 6. [P2, documentation] `getMe` does not make `bot.start()` work
+### 6. [FIXED] [P2, documentation] `getMe` does not make `bot.start()` work
 
 Location: [PLAN.md](PLAN.md), the emulated-methods decision.
 
-Invoking the installed grammY version against the handler called `getMe`, then `deleteWebhook`, and
-rejected with `404 Not Found`. Polling also requires `getUpdates`. This agrees with
-[grammY's startup implementation](https://github.com/grammyjs/grammY/blob/main/src/bot.ts).
+Before the fix, invoking the installed grammY version against the handler called `getMe`, then
+`deleteWebhook`, and rejected with `404 Not Found`. Polling also requires `getUpdates`. This agrees
+with [grammY's startup implementation](https://github.com/grammyjs/grammY/blob/main/src/bot.ts).
 
-The smallest correction is to say that `getMe` supports `bot.init()`. Expanding polling support
-would exceed the stated two-method scope.
+**Resolution:** Expand the scope to include `deleteWebhook` and `getUpdates` stubs. `deleteWebhook`
+returns `true`; `getUpdates` waits for a positive `timeout` or request cancellation and returns an
+empty batch. No updates are produced, and `offset` and other update-selection parameters are
+ignored. PLAN.md and README.md distinguish `bot.init()` support through `getMe` from polling
+lifecycle support through the stubs and explicitly defer update generation and delivery.
 
-There is another wording mismatch in the plan's emulated Bot API section: the plan specifies
-`Bad Request: chat not found` for missing `chat_id`, while the implementation and its tests specify
-`Bad Request: chat_id is empty`. Align the plan with the intended error contract.
+The plan's missing-`chat_id` wording now matches the implementation and tests:
+`Bad Request: chat_id is empty`. The polling-stub audit verified that grammY starts and stops
+against both the direct handler and a standalone server. Findings 11–13 describe separate timeout
+and test issues introduced by the expanded scope.
 
 ## Smaller engineering issues
 
@@ -187,9 +194,59 @@ inability to initiate or send messages is not a reason to turn a private convers
 arbitrary member set. This distinction will matter when representing blocked or unstarted
 conversations and when keeping private-chat behavior separate from group membership and roles.
 
+## Polling stub follow-up findings
+
+### 11. [P2] Malformed `getUpdates` timeout values can produce internal-server errors
+
+Location: [bot_api_methods.ts](src/server/bot_api_methods.ts), `getUpdates`.
+
+`Number(payload.timeout)` coerces arbitrary JSON values before checking whether the result is finite
+and positive. A request with `{ timeout: { toString: 'invalid' } }` throws
+`TypeError: Cannot convert object to primitive value` and returns `500 Internal Server Error`.
+Boolean `true` and the array `[1]` also become one-second polling durations.
+
+Accept only the intended numeric and string wire types before conversion, and define how invalid
+values are handled without throwing an internal error. Keep the omitted-timeout short-poll behavior
+and support numeric strings from query and form inputs. Add regression coverage for malformed JSON
+types and the chosen invalid-value behavior.
+
+### 12. [P2] Oversized `getUpdates` timeouts overflow the timer and return immediately
+
+Locations: [bot_api_methods.ts](src/server/bot_api_methods.ts), `getUpdates` and
+`waitForTimeoutOrAbort`.
+
+A finite positive timeout is passed to `setTimeout` after multiplication by 1000, without an upper
+bound. `{ timeout: 2147484 }` produces a delay of `2147484000` milliseconds, exceeding the timer's
+signed 32-bit range. Deno emits `TimeoutOverflowWarning` and resets the delay to one millisecond.
+The diagnostic request returned in approximately 27 milliseconds; `{ timeout: 1e308 }` overflowed
+the multiplication to infinity and also returned almost immediately.
+
+Repeated polling with these values can spin instead of idling and violates the documented positive
+timeout behavior. Bound the polling duration before converting seconds to milliseconds. Telegram's
+[server implementation](https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/Client.cpp)
+also bounds polling timeouts using a
+[50-second maximum](https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/Client.h).
+Document the chosen bound and add regression coverage that verifies oversized inputs cannot collapse
+into an immediate successful long poll.
+
+### 13. [P3] Polling lifecycle tests do not establish that a long poll is pending
+
+Locations: [e2e_grammy_test.ts](tests/e2e_grammy_test.ts), `runPrivateChatFlow`, and
+[bot_api_handler_test.ts](tests/bot_api_handler_test.ts), the `getUpdates` tests.
+
+The lifecycle test waits for `onStart` and then sleeps for 20 milliseconds before stopping the bot.
+grammY invokes `onStart` before entering its polling loop, so the callback and elapsed delay do not
+establish that the server has a pending long poll. The test can complete without exercising the
+in-flight cancellation its comment describes.
+
+Synchronize with an observed polling request before stopping, and verify cancellation releases the
+pending handler. The handler suite covers short polling and cancellation but does not cover natural
+expiry of a positive timeout. Add that behavior check as well. Temporary probes verified expiry and
+HTTP cancellation in the current implementation, but those checks are absent from the test suite.
+
 ## Verification and analyzer triage
 
-The following checks passed against the reviewed implementation:
+The following checks passed against the original reviewed implementation:
 
 - `deno task check`
 - `deno task lint`
@@ -212,3 +269,18 @@ The remaining reachability signals were an unused `ListMessagesQuery` protocol t
 false positives. A five-line duplication candidate concerned setup in separate test suites and did
 not establish a reason to couple them. Complexity signals for payload decoding and port parsing used
 estimated coverage, not measured coverage, and did not establish a need for structural refactoring.
+
+The polling-stub follow-up review passed `deno task check`, `deno task lint`, `deno task fmt:check`,
+and `git diff --check`. `deno task test` passed 22 tests with the standalone test ignored; with a
+standalone server on port 18083 and `BOT_API_EMULATOR_URL=http://localhost:18083`, all 23 tests
+passed.
+
+Temporary probes reproduced findings 11 and 12. They also verified one-second timeout completion
+through JSON, query, and URL-encoded inputs, immediate completion for an already-aborted request,
+and prompt release of a pending server handler when its HTTP client cancelled the request. These
+probes were not added to the repository's test suite.
+
+Fallow's follow-up maintainability analysis covered all 15 source and test files. Its Deno plugin
+discovered all four test entry points; a temporary configuration supplied `src/main.ts` and
+`src/client/mod.ts` as additional entry points. The payload-decoding and port-parsing signals still
+used estimated coverage and did not establish new actionable maintainability issues.

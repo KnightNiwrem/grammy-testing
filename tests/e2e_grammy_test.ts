@@ -23,6 +23,15 @@ async function runPrivateChatFlow(clientOptions: EmulationClientOptions) {
     await bot.init();
     assertEquals(bot.botInfo, testBot.user);
 
+    // Polling is served by the deleteWebhook and getUpdates stubs: start, then stop while the
+    // long poll is pending, which aborts it and issues the final offset acknowledgement.
+    const started = Promise.withResolvers<void>();
+    const polling = bot.start({ onStart: () => started.resolve() });
+    await started.promise;
+    await new Promise((resolve) => setTimeout(resolve, 20)); // let the long poll be issued
+    await bot.stop();
+    await polling;
+
     const sent = await bot.api.sendMessage(chat.id, 'hello from grammY');
     assertEquals(sent.text, 'hello from grammY');
     assertEquals(sent.chat, chat.chat);

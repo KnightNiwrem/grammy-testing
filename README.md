@@ -55,6 +55,10 @@ user and the bot, which corresponds to the user having started the bot.
 - `getMe`: returns the bot declared with `createBot`.
 - `sendMessage`: requires `chat_id` and non-empty `text`; the bot must be a member of the chat.
   Returns the stored `Message` with a per-chat sequential `message_id`.
+- `deleteWebhook`: stub, always returns `true`.
+- `getUpdates`: stub, waits `timeout` seconds or until the request is aborted, then returns `[]`.
+  Together with `deleteWebhook` this lets `bot.start()` and `bot.stop()` run; no update is ever
+  delivered.
 
 Any other method answers `404 Not Found` in Telegram's `{ ok: false, error_code, description }`
 envelope. Unknown tokens answer `401 Unauthorized`.
@@ -67,7 +71,8 @@ guarantee that these match, and the emulator makes sure tests cannot accidentall
 
 ## Current limitations
 
-- Only private chats, only text messages, only `getMe` and `sendMessage`.
+- Only private chats, only text messages, only `getMe`, `sendMessage`, and the polling stubs.
+- A polling bot never receives an update; update generation is not implemented.
 - Chat membership can only be declared when the chat is created. The client cannot yet declare a
   private chat the bot is not a member of, so the `403 Forbidden` path is only reachable through the
   admin API directly.

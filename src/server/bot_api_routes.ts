@@ -28,7 +28,7 @@ export async function handleBotApiRequest(
       : undefined;
     if (implementation === undefined) throw TelegramApiError.notFound();
     const payload = await decodePayload(request);
-    return toSuccessResponse(implementation(session, bot, payload));
+    return toSuccessResponse(await implementation(session, bot, payload, request.signal));
   } catch (error) {
     if (error instanceof TelegramApiError) return toErrorResponse(error);
     console.error('Unhandled error while emulating Bot API request', error);

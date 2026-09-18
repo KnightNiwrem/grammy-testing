@@ -1,4 +1,4 @@
-import { assertEquals } from '@std/assert';
+import { assert, assertEquals } from '@std/assert';
 import type { Message } from 'grammy/types';
 import { createEmulationServerHandler } from '../src/server/handler.ts';
 import { SessionStore } from '../src/server/session_store.ts';
@@ -15,7 +15,7 @@ function setUp() {
   const call = (
     method: string,
     payload: Record<string, unknown>,
-    options: { sessionId?: string; token?: string } = {},
+    options: { sessionId?: string; token?: string; signal?: AbortSignal } = {},
   ) =>
     handler(
       new Request(
@@ -26,6 +26,7 @@ function setUp() {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(payload),
+          signal: options.signal,
         },
       ),
     );
@@ -147,11 +148,40 @@ Deno.test('malformed form bodies answer a client error', async () => {
   assertEquals(chat.messages, []);
 });
 
+Deno.test('deleteWebhook answers true', async () => {
+  const { call } = setUp();
+  const response = await call('deleteWebhook', { drop_pending_updates: true });
+  assertEquals(response.status, 200);
+  assertEquals(await response.json(), { ok: true, result: true });
+});
+
+Deno.test('getUpdates answers an empty batch at once without a timeout', async () => {
+  const { call } = setUp();
+  for (const payload of [{}, { timeout: 0 }, { offset: 5, limit: 1 }, { timeout: 'soon' }]) {
+    const response = await call('getUpdates', payload);
+    assertEquals(response.status, 200);
+    assertEquals(await response.json(), { ok: true, result: [] });
+  }
+});
+
+Deno.test('getUpdates holds a long poll until the client aborts it', async () => {
+  const { call } = setUp();
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  const pending = call('getUpdates', { timeout: 30 }, { signal: controller.signal });
+  setTimeout(() => controller.abort(), 50);
+  const response = await pending;
+  const elapsedMs = Date.now() - startedAt;
+  assertEquals(response.status, 200);
+  assertEquals(await response.json(), { ok: true, result: [] });
+  assert(elapsedMs >= 50 && elapsedMs < 2000, `long poll ended after ${elapsedMs} ms`);
+});
+
 Deno.test('routing errors use Telegram error codes', async () => {
   const { call } = setUp();
   await expectTelegramError(await call('getMe', {}, { sessionId: 'missing' }), 404, 'Not Found');
   await expectTelegramError(await call('getMe', {}, { token: '1:wrong' }), 401, 'Unauthorized');
-  await expectTelegramError(await call('getUpdates', {}), 404, 'Not Found');
+  await expectTelegramError(await call('sendPhoto', {}), 404, 'Not Found');
   await expectTelegramError(await call('toString', {}), 404, 'Not Found');
 });
 

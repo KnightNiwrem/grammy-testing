@@ -20,8 +20,12 @@ bot) then sends a message to that chat through the emulated API and receives a T
 - **The server is standalone only.** Tests connect to an already-running server by URL. There is no
   in-process "start server" helper. Unit tests reach the handler directly through a `fetch` override
   instead, which needs no socket.
-- **Emulated methods are `sendMessage` and `getMe`.** `getMe` makes `bot.init()` and `bot.start()`
-  work in grammY. Every other method answers a Telegram-style `404 Not Found` envelope.
+- **Emulated methods are `sendMessage`, `getMe`, `deleteWebhook`, and `getUpdates`.** `getMe` makes
+  `bot.init()` work in grammY. `bot.start()` additionally calls `deleteWebhook` and then long-polls
+  `getUpdates`, so both are stubbed: `deleteWebhook` always answers `true`, and `getUpdates` holds
+  the response for `timeout` seconds or until the client aborts the request, then answers an empty
+  batch. No update is ever produced and `offset` is ignored; update generation and delivery are
+  future work. Every other method answers a Telegram-style `404 Not Found` envelope.
 - **Membership lives on the Chat record, not on the session.** Members are declared when the chat is
   created. Adding a member mid-test is a later feature, but the `memberIds` set on the record is the
   seam that operation will mutate. For private chats the client takes `{ user, bot }`, because a
@@ -102,9 +106,9 @@ inconsistent entity definitions answer 400 with `{ error }`.
 - Success answers `{ ok: true, result }`. Failure answers `{ ok: false, error_code, description }`
   with the HTTP status equal to `error_code`, as Telegram does.
 - Error wording follows Telegram: unknown session or method `404 Not Found`, unknown token
-  `401 Unauthorized`, missing or unknown chat `400 Bad Request: chat not found`, empty text
-  `400 Bad Request: message text is empty`, bot not a member of the private chat
-  `403 Forbidden: bot can't initiate conversation with a user`.
+  `401 Unauthorized`, missing `chat_id` `400 Bad Request: chat_id is empty`, unknown chat
+  `400 Bad Request: chat not found`, empty text `400 Bad Request: message text is empty`, bot not a
+  member of the private chat `403 Forbidden: bot can't initiate conversation with a user`.
 
 ## Client usage
 
@@ -130,7 +134,8 @@ await session.destroy();
 
 ## Known limitations of this step
 
-- Only private chats, only text messages, only `getMe` and `sendMessage`.
+- Only private chats, only text messages, only `getMe`, `sendMessage`, and the polling stubs.
+- A polling bot never receives an update; `getUpdates` only idles and answers an empty batch.
 - Chat membership can only be declared at creation, and the client cannot declare a private chat
   without the bot; the `403 Forbidden` path is covered at the handler level only.
 - Several bots sharing a private chat with the same user is not validated.
