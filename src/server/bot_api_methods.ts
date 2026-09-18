@@ -21,9 +21,12 @@ function getMe(_session: Session, bot: BotRecord): UserFromGetMe {
 }
 
 function sendMessage(session: Session, bot: BotRecord, payload: BotApiPayload): Message {
-  const chatId = parseChatId(payload.chat_id);
+  if (payload.chat_id === undefined || payload.chat_id === null || payload.chat_id === '') {
+    throw TelegramApiError.badRequest('chat_id is empty');
+  }
   const text = parseMessageText(payload.text);
-  const chat = session.chats.get(chatId);
+  const chatKey = toChatKey(payload.chat_id);
+  const chat = chatKey === undefined ? undefined : session.chats.get(chatKey);
   if (chat === undefined) throw TelegramApiError.badRequest('chat not found');
   if (!chat.memberIds.has(bot.user.id)) {
     throw TelegramApiError.forbidden("bot can't initiate conversation with a user");
@@ -31,12 +34,16 @@ function sendMessage(session: Session, bot: BotRecord, payload: BotApiPayload): 
   return session.appendTextMessage(chat, bot.user, text);
 }
 
-/** Accepts the integer or numeric-string forms Telegram allows; usernames resolve to no chat. */
-function parseChatId(value: unknown): number {
-  if (value === undefined || value === '') throw TelegramApiError.badRequest('chat_id is empty');
-  const chatId = typeof value === 'number' ? value : Number(value);
-  if (!Number.isSafeInteger(chatId)) throw TelegramApiError.badRequest('chat not found');
-  return chatId;
+/**
+ * Derives the chat map key from the wire value. Telegram accepts `chat_id` as an integer or as
+ * a string, so a string is accepted only when it is exactly the decimal spelling of a number.
+ * Anything else, including `@username` targets and other JSON types, yields no key and therefore
+ * matches no chat. Ids are never validated: one that was not handed out cannot match anyway.
+ */
+function toChatKey(value: unknown): number | undefined {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string' && String(Number(value)) === value) return Number(value);
+  return undefined;
 }
 
 function parseMessageText(value: unknown): string {

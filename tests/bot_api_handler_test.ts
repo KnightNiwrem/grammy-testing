@@ -106,6 +106,31 @@ Deno.test('sendMessage validates its payload with Telegram-style errors', async 
   );
 });
 
+Deno.test('sendMessage answers chat not found for values that are not a chat id', async () => {
+  const { chat, call } = setUp();
+  const notAChatId: unknown[] = [
+    [chat.chat.id],
+    { toString: 'invalid' },
+    true,
+    1.5,
+    `${chat.chat.id}.0`,
+    ` ${chat.chat.id}`,
+  ];
+  for (const chat_id of notAChatId) {
+    await expectTelegramError(
+      await call('sendMessage', { chat_id, text: 'hello' }),
+      400,
+      'Bad Request: chat not found',
+    );
+  }
+  await expectTelegramError(
+    await call('sendMessage', { chat_id: null, text: 'hello' }),
+    400,
+    'Bad Request: chat_id is empty',
+  );
+  assertEquals(chat.messages, []);
+});
+
 Deno.test('routing errors use Telegram error codes', async () => {
   const { call } = setUp();
   await expectTelegramError(await call('getMe', {}, { sessionId: 'missing' }), 404, 'Not Found');

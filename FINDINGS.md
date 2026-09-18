@@ -10,25 +10,31 @@ standalone serving, isolated session routes, entity handles, chat-owned messages
 and `sendMessage` methods. Unsupported methods, group chats, uploads, and incomplete Telegram
 behavior are intentional limits of this step.
 
-The findings below remain open. P2 denotes a current correctness or contract issue worth resolving;
-P3 denotes a smaller validation or test issue. Future convergence risks describe design choices that
-would require changes to identity or stored state to match Telegram more closely.
+Findings remain open unless marked FIXED. P2 denotes a correctness or contract issue worth
+resolving; P3 denotes a smaller validation or test issue. Future convergence risks describe design
+choices that would require changes to identity or stored state to match Telegram more closely.
 
 ## Current correctness and contract issues
 
-### 1. [P2] Invalid `chat_id` types can succeed or produce internal-server errors
+### 1. [FIXED] [P2] Invalid `chat_id` types can succeed or produce internal-server errors
 
-Location: [bot_api_methods.ts](src/server/bot_api_methods.ts), `parseChatId`.
+Location: [bot_api_methods.ts](src/server/bot_api_methods.ts), `toChatKey` (replaces `parseChatId`).
 
-`Number(value)` coerces arbitrary JSON values before validating them. Reproductions against an
-existing chat showed:
+Before the fix, `Number(value)` coerced arbitrary JSON values before validating them. Reproductions
+against an existing chat showed:
 
-- `{ chat_id: [validChatId], text: 'hello' }` returns 200 and stores a message.
-- `{ chat_id: { toString: 'invalid' }, text: 'hello' }` returns 500 because conversion throws.
+- `{ chat_id: [validChatId], text: 'hello' }` returned 200 and stored a message.
+- `{ chat_id: { toString: 'invalid' }, text: 'hello' }` returned 500 because conversion threw.
 
-This contradicts the function's stated integer-or-numeric-string contract and the requirement to
-validate external input. Accept only numbers and strings before conversion, and return a 400 for
-unsupported types. Rejected requests should leave the chat's messages unchanged.
+**Resolution:** `toChatKey` accepts numbers and strings that round-trip through numeric conversion;
+other types produce no key. Chat IDs are generated internally as positive integers and cannot be
+supplied during chat creation, so fractional and out-of-range values fail lookup without a separate
+range check. Invalid targets return 400 and leave message state unchanged. Regression tests cover
+invalid types and noncanonical string forms.
+
+The fix passed type, lint, formatting, and whitespace checks, plus 18 tests with the standalone test
+ignored. Additional diagnostic probes verified 112 requests at the minimum and maximum generated
+chat IDs across JSON, query, URL-encoded, and multipart inputs.
 
 ### 2. [P2] Malformed multipart requests produce 500 responses
 
