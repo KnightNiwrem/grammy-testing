@@ -116,7 +116,6 @@ async function createUser(
   const session = requireSession(store, params.sessionId);
   const body = await readJsonObject(request);
   const definition: CreateUserRequest = {
-    id: optionalInteger(body, 'id'),
     first_name: requireString(body, 'first_name'),
     last_name: optionalString(body, 'last_name'),
     username: optionalString(body, 'username'),

@@ -13,28 +13,18 @@ Deno.test('createBot issues a Telegram-shaped token whose prefix is the bot id',
   assertEquals(session.users.get(bot.user.id), bot.user);
 });
 
-Deno.test('createUser draws ids inside the 52-bit range and honours explicit ids', () => {
+Deno.test('createUser draws an id inside the 52-bit range and stores the given names', () => {
   const session = new Session('s');
-  const drawn = session.createUser({ first_name: 'Alice' });
-  assert(drawn.id >= 1 && drawn.id <= MAX_TELEGRAM_ID);
-  const explicit = session.createUser({
-    id: 42,
-    first_name: 'Bob',
-    last_name: 'B',
-    username: 'bob',
-  });
-  assertEquals(explicit, {
-    id: 42,
+  const user = session.createUser({ first_name: 'Bob', last_name: 'B', username: 'bob' });
+  assert(user.id >= 1 && user.id <= MAX_TELEGRAM_ID);
+  assertEquals(user, {
+    id: user.id,
     is_bot: false,
     first_name: 'Bob',
     last_name: 'B',
     username: 'bob',
   });
-  assertThrows(
-    () => session.createUser({ id: 42, first_name: 'Duplicate' }),
-    SessionValidationError,
-    'already exists',
-  );
+  assertEquals(session.users.get(user.id), user);
 });
 
 Deno.test('createPrivateChat copies the user names but not the user id', () => {

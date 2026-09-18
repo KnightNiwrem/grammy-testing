@@ -34,7 +34,8 @@ bot) then sends a message to that chat through the emulated API and receives a T
   equals the user's id, so the server never makes them match. User ids and chat ids come from two
   independent random draws over the documented identifier range (positive integers of at most 52
   significant bits, `1 .. 2^52 - 1`). A match would be pure coincidence. This tightens the code
-  under test by making the convention unavailable to rely on.
+  under test by making the convention unavailable to rely on. No entity accepts a tester-supplied
+  id; explicit ids can be added for users and chats together if a concrete test needs them.
 - **The session generates bot tokens.** `createBot` returns a `<bot id>:<35 char secret>` token. One
   session may hold several bots.
 - **Returned client objects are handles.** `TestBot`, `TestUser`, and `TestChat` carry the raw
@@ -82,14 +83,14 @@ tests/
 
 ## Admin protocol
 
-| Method | Path                                                  | Body                                         | Response                 |
-| ------ | ----------------------------------------------------- | -------------------------------------------- | ------------------------ |
-| POST   | `/admin/sessions`                                     | –                                            | `{ sessionId, apiRoot }` |
-| DELETE | `/admin/sessions/:id`                                 | –                                            | 204                      |
-| POST   | `/admin/sessions/:id/bots`                            | `{ username, first_name }`                   | `{ token, user }`        |
-| POST   | `/admin/sessions/:id/users`                           | `{ first_name, last_name?, username?, id? }` | `User`                   |
-| POST   | `/admin/sessions/:id/chats`                           | `{ type: 'private', user_id, member_ids }`   | `{ chat, member_ids }`   |
-| GET    | `/admin/sessions/:id/chats/:chatId/messages?from_id=` | –                                            | `Message[]`              |
+| Method | Path                                                  | Body                                       | Response                 |
+| ------ | ----------------------------------------------------- | ------------------------------------------ | ------------------------ |
+| POST   | `/admin/sessions`                                     | –                                          | `{ sessionId, apiRoot }` |
+| DELETE | `/admin/sessions/:id`                                 | –                                          | 204                      |
+| POST   | `/admin/sessions/:id/bots`                            | `{ username, first_name }`                 | `{ token, user }`        |
+| POST   | `/admin/sessions/:id/users`                           | `{ first_name, last_name?, username? }`    | `User`                   |
+| POST   | `/admin/sessions/:id/chats`                           | `{ type: 'private', user_id, member_ids }` | `{ chat, member_ids }`   |
+| GET    | `/admin/sessions/:id/chats/:chatId/messages?from_id=` | –                                          | `Message[]`              |
 
 Input is validated at the boundary: unknown session or chat answers 404, malformed bodies and
 inconsistent entity definitions answer 400 with `{ error }`.

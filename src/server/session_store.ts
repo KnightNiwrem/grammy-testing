@@ -33,7 +33,6 @@ export interface CreateBotDefinition {
 }
 
 export interface CreateUserDefinition {
-  id?: number;
   first_name: string;
   last_name?: string;
   username?: string;
@@ -82,11 +81,8 @@ export class Session {
   }
 
   createUser(definition: CreateUserDefinition): User {
-    if (definition.id !== undefined && this.users.has(definition.id)) {
-      throw new SessionValidationError(`user id ${definition.id} already exists`);
-    }
     const user: User = {
-      id: definition.id ?? this.allocateUserId(),
+      id: this.allocateUserId(),
       is_bot: false,
       first_name: definition.first_name,
       ...(definition.last_name !== undefined && { last_name: definition.last_name }),
