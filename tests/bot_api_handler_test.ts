@@ -131,6 +131,22 @@ Deno.test('sendMessage answers chat not found for values that are not a chat id'
   assertEquals(chat.messages, []);
 });
 
+Deno.test('malformed form bodies answer a client error', async () => {
+  const { session, bot, chat, handler } = setUp();
+  const url = `${ORIGIN}/bot-api/${session.id}/bot${bot.token}/sendMessage`;
+  const malformed: [string, string][] = [
+    ['multipart/form-data', 'garbage'],
+    ['multipart/form-data; boundary=xyz', 'not a multipart body'],
+  ];
+  for (const [contentType, body] of malformed) {
+    const response = await handler(
+      new Request(url, { method: 'POST', headers: { 'content-type': contentType }, body }),
+    );
+    await expectTelegramError(response, 400, 'Bad Request: request body is not valid form data');
+  }
+  assertEquals(chat.messages, []);
+});
+
 Deno.test('routing errors use Telegram error codes', async () => {
   const { call } = setUp();
   await expectTelegramError(await call('getMe', {}, { sessionId: 'missing' }), 404, 'Not Found');

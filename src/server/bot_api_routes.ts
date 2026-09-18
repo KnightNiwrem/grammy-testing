@@ -57,7 +57,9 @@ async function decodePayload(request: Request): Promise<BotApiPayload> {
     contentType.includes('multipart/form-data') ||
     contentType.includes('application/x-www-form-urlencoded')
   ) {
-    const form = await request.formData();
+    const form = await request.formData().catch(() => {
+      throw TelegramApiError.badRequest('request body is not valid form data');
+    });
     for (const [key, value] of form) {
       if (typeof value === 'string') payload[key] = value;
     }

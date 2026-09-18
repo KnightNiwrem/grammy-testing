@@ -36,16 +36,23 @@ The fix passed type, lint, formatting, and whitespace checks, plus 18 tests with
 ignored. Additional diagnostic probes verified 112 requests at the minimum and maximum generated
 chat IDs across JSON, query, URL-encoded, and multipart inputs.
 
-### 2. [P2] Malformed multipart requests produce 500 responses
+### 2. [FIXED] [P2] Malformed multipart requests produce 500 responses
 
 Location: [bot_api_routes.ts](src/server/bot_api_routes.ts), `decodePayload`.
 
-JSON decoding translates parse failures into a client error, but `request.formData()` has no
-equivalent handling. A POST request with `Content-Type: multipart/form-data`, no boundary, and an
-invalid multipart body returns `500 Internal Server Error`.
+Before the fix, JSON decoding translated parse failures into a client error, but
+`request.formData()` had no equivalent handling. A POST request with
+`Content-Type: multipart/form-data`, no boundary, and an invalid multipart body returned
+`500 Internal Server Error`.
 
-Translate malformed form bodies into 400 responses. This is a bug within the advertised decoding
-support. Valid multipart requests worked during review.
+**Resolution:** `decodePayload` catches form-decoding failures and returns 400 with the Telegram
+error envelope and description `Bad Request: request body is not valid form data`. Regression tests
+cover missing multipart boundaries and invalid multipart bodies. The fix translates parser failures;
+it does not add stricter validation beyond Deno's form parser.
+
+The fix passed type, lint, formatting, and whitespace checks, plus 19 tests with the standalone test
+ignored. Diagnostic probes confirmed valid multipart and URL-encoded requests, body parameters
+overriding query parameters, and unchanged message state and numbering after decoding failures.
 
 ### 3. [P2] Entity handles do not preserve session ownership
 
