@@ -1,0 +1,194 @@
+# Review findings: minimal Bot API emulator
+
+The review covers implementation commit `07c4492`
+(`Add minimal Telegram Bot API emulation server
+and test client`), the sole implementation commit
+ahead of `main`, against [PLAN.md](PLAN.md).
+
+The intended minimal flow works, and the implementation largely matches the planned architecture:
+standalone serving, isolated session routes, entity handles, chat-owned messages, and the `getMe`
+and `sendMessage` methods. Unsupported methods, group chats, uploads, and incomplete Telegram
+behavior are intentional limits of this step.
+
+The findings below remain open. P2 denotes a current correctness or contract issue worth resolving;
+P3 denotes a smaller validation or test issue. Future convergence risks describe design choices that
+would require changes to identity or stored state to match Telegram more closely.
+
+## Current correctness and contract issues
+
+### 1. [P2] Invalid `chat_id` types can succeed or produce internal-server errors
+
+Location: [bot_api_methods.ts](src/server/bot_api_methods.ts), `parseChatId`.
+
+`Number(value)` coerces arbitrary JSON values before validating them. Reproductions against an
+existing chat showed:
+
+- `{ chat_id: [validChatId], text: 'hello' }` returns 200 and stores a message.
+- `{ chat_id: { toString: 'invalid' }, text: 'hello' }` returns 500 because conversion throws.
+
+This contradicts the function's stated integer-or-numeric-string contract and the requirement to
+validate external input. Accept only numbers and strings before conversion, and return a 400 for
+unsupported types. Rejected requests should leave the chat's messages unchanged.
+
+### 2. [P2] Malformed multipart requests produce 500 responses
+
+Location: [bot_api_routes.ts](src/server/bot_api_routes.ts), `decodePayload`.
+
+JSON decoding translates parse failures into a client error, but `request.formData()` has no
+equivalent handling. A POST request with `Content-Type: multipart/form-data`, no boundary, and an
+invalid multipart body returns `500 Internal Server Error`.
+
+Translate malformed form bodies into 400 responses. This is a bug within the advertised decoding
+support. Valid multipart requests worked during review.
+
+### 3. [P2] Entity handles do not preserve session ownership
+
+Locations: [client/mod.ts](src/client/mod.ts), `TestSession.createPrivateChat`, and
+[handles.ts](src/client/handles.ts), `TestUser` and `TestBot`.
+
+`createPrivateChat` sends only the handles' numeric IDs. If two sessions explicitly create different
+users with ID `42`, passing session A's user handle into session B silently creates a chat with
+session B's user. This substitution was reproduced with different names for the two users.
+
+The existing foreign-bot test catches an absent ID; it does not establish that handles belong to the
+receiving session. Give entity handles an internal ownership identity and validate it before sending
+the request. Ownership should distinguish sessions on different servers as well as different
+sessions on the same server.
+
+The server's session namespaces remain isolated, but the client can silently select an unintended
+entity within one. Add a regression case using overlapping explicit user IDs.
+
+### 4. [P2] Explicit user IDs bypass the documented identifier range
+
+Locations: [admin_routes.ts](src/server/admin_routes.ts), `createUser` and `optionalInteger`, and
+[session_store.ts](src/server/session_store.ts), `Session.createUser`.
+
+Validation checks JavaScript's safe-integer range, which is broader than the plan's positive 52-bit
+range. IDs `0`, `-7`, and `2 ** 52` all receive 201 responses and become stored users.
+
+Validate explicit user IDs against `1 .. 2^52 - 1`, alongside the duplicate check. This is a
+mismatch with the project's own current contract, independently of exact Telegram fidelity. Cover
+valid endpoints and invalid values immediately outside the range.
+
+### 5. [P2] Private-chat validation permits additional human parties
+
+Locations: [session_store.ts](src/server/session_store.ts), `Session.createPrivateChat`, and
+[PLAN.md](PLAN.md), the membership decision.
+
+The store checks that the named human exists, is included, and that all members exist. It accepts a
+private chat containing Alice, Bob, and a bot; that definition received a 201 response during
+review.
+
+The plan describes a private chat as a conversation between one human and one bot and documents a
+multiple-bot exception. Additional humans also violate the private-chat model. Reject additional
+human members while preserving the intended fixture for testing a bot without permission to send.
+The broader conversation-ownership problem is described under future convergence risks.
+
+### 6. [P2, documentation] `getMe` does not make `bot.start()` work
+
+Location: [PLAN.md](PLAN.md), the emulated-methods decision.
+
+Invoking the installed grammY version against the handler called `getMe`, then `deleteWebhook`, and
+rejected with `404 Not Found`. Polling also requires `getUpdates`. This agrees with
+[grammY's startup implementation](https://github.com/grammyjs/grammY/blob/main/src/bot.ts).
+
+The smallest correction is to say that `getMe` supports `bot.init()`. Expanding polling support
+would exceed the stated two-method scope.
+
+There is another wording mismatch in the plan's emulated Bot API section: the plan specifies
+`Bad Request: chat not found` for missing `chat_id`, while the implementation and its tests specify
+`Bad Request: chat_id is empty`. Align the plan with the intended error contract.
+
+## Smaller engineering issues
+
+### 7. [P3] Successful admin responses are unchecked
+
+Location: [admin_transport.ts](src/client/admin_transport.ts), `AdminTransport.request`.
+
+The transport asserts arbitrary response JSON as `TResponse`. A fetch override returning a 200
+response containing `{}` makes `createSession()` return a handle whose supposedly required `id` and
+`apiRoot` are both `undefined`.
+
+Validate required protocol fields at the client boundary and report malformed successful responses
+explicitly. Request-specific response validators can establish the promised types; the generic type
+assertion does not establish them at runtime.
+
+### 8. [P3] Identifier tests assert more than independent random draws guarantee
+
+Locations: [session_store_test.ts](tests/session_store_test.ts),
+[client_test.ts](tests/client_test.ts), and [e2e_grammy_test.ts](tests/e2e_grammy_test.ts), the
+user/chat ID inequality assertions.
+
+The tests require unequal user and chat IDs. The allocator allows equality, which the plan
+explicitly acknowledges as a possible coincidence. Controlled random draws reproduced equal IDs for
+a user and its private chat.
+
+Choose whether independence or guaranteed inequality is the contract, then align the tests and
+README wording. The current random tests can fail for a permitted allocator outcome, although that
+outcome is extremely unlikely with uncontrolled draws.
+
+## Future convergence risks
+
+### 9. Independent private-chat IDs depart from Telegram's current implementation
+
+Locations: [PLAN.md](PLAN.md), the identifier decision, and
+[session_store.ts](src/server/session_store.ts), `Session.createPrivateChat`.
+
+Telegram's current TDLib implementation constructs a private dialog ID directly from the peer user
+ID, and the Bot API server serializes that chat ID. See
+[TDLib's identity mapping](https://github.com/tdlib/td/blob/master/td/telegram/DialogId.cpp) and
+[Bot API chat serialization](https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/Client.cpp).
+
+Although the public type documentation does not explicitly promise equality, the plan's rationale
+should distinguish that omission from actual Telegram behavior. Code that sends to a private user by
+user ID can work against Telegram and fail here.
+
+If independent IDs remain useful for adversarial testing, describe them as that choice. Future
+convergence would change chat lookup, fixtures, and the existing inequality assertions. Changing the
+allocator alone would not resolve the ownership issue below.
+
+### 10. The session-global chat map cannot directly represent bot-specific private conversations
+
+Location: [session_store.ts](src/server/session_store.ts), `ChatRecord`, `Session.chats`, and
+`Session.createPrivateChat`.
+
+Each bot's conversation with Alice needs separate history and sending permissions, while its exposed
+private-chat ID identifies Alice. The current map is keyed only by chat ID. It also permits several
+bots to append to one private history, and repeated creation of the same bot/user pair creates
+unrelated histories. Both behaviors were reproduced.
+
+Simply switching private-chat IDs to user IDs would cause collisions between conversations belonging
+to different bots. A private conversation needs ownership by the bot/user pair, or an internal
+conversation identity separate from its exposed Telegram chat ID. The existing `{ user, bot }`
+client interface already provides the necessary parties.
+
+Private sending permission should also be distinct from the parties to a conversation. A bot's
+inability to initiate or send messages is not a reason to turn a private conversation into an
+arbitrary member set. This distinction will matter when representing blocked or unstarted
+conversations and when keeping private-chat behavior separate from group membership and roles.
+
+## Verification and analyzer triage
+
+The following checks passed against the reviewed implementation:
+
+- `deno task check`
+- `deno task lint`
+- `deno task fmt:check`
+- `git diff --check main...HEAD`
+- `deno task test`: 17 passed, with the standalone test ignored.
+- `BOT_API_EMULATOR_URL=http://localhost:18081 deno task test`, with a standalone server running on
+  that port: all 18 tests passed.
+
+Temporary diagnostic probes established the findings above. They also verified valid multipart
+requests and body parameters overriding query parameters. These probes were not added to the
+repository's test suite; the existing passing tests do not cover the reproduced defects.
+
+Fallow's combined dead-code, duplication, and maintainability analysis covered all 15 source and
+test files. A temporary analysis configuration declared both `src/main.ts` and `src/client/mod.ts`
+as entry points, in addition to the four test entry points discovered by its Deno plugin.
+
+The remaining reachability signals were an unused `ListMessagesQuery` protocol type and
+`TestChat.id` and `TestChat.listMessages`, which are demonstrably used by tests. The latter are
+false positives. A five-line duplication candidate concerned setup in separate test suites and did
+not establish a reason to couple them. Complexity signals for payload decoding and port parsing used
+estimated coverage, not measured coverage, and did not establish a need for structural refactoring.
