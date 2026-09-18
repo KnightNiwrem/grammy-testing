@@ -140,19 +140,23 @@ Validate required protocol fields at the client boundary and report malformed su
 explicitly. Request-specific response validators can establish the promised types; the generic type
 assertion does not establish them at runtime.
 
-### 8. [P3] Identifier tests assert more than independent random draws guarantee
+### 8. [FIXED] [P3] Identifier tests assert more than independent random draws guarantee
 
 Locations: [session_store_test.ts](tests/session_store_test.ts),
 [client_test.ts](tests/client_test.ts), and [e2e_grammy_test.ts](tests/e2e_grammy_test.ts), the
 user/chat ID inequality assertions.
 
-The tests require unequal user and chat IDs. The allocator allows equality, which the plan
-explicitly acknowledges as a possible coincidence. Controlled random draws reproduced equal IDs for
-a user and its private chat.
+Before the fix, the tests required unequal user and chat IDs. The allocator allows equality, which
+the plan explicitly acknowledges as a possible coincidence. Controlled random draws reproduced equal
+IDs for a user and its private chat.
 
-Choose whether independence or guaranteed inequality is the contract, then align the tests and
-README wording. The current random tests can fail for a permitted allocator outcome, although that
-outcome is extremely unlikely with uncontrolled draws.
+**Resolution:** Retain independent allocation as the contract, including permitted coincidental
+equality. Remove the user/chat ID inequality assertions from all three test suites and rename the
+store test to describe independent allocation. README.md now explicitly states that equality is
+permitted as a coincidence.
+
+The fix passed type, lint, formatting, and whitespace checks, plus all 27 tests with a standalone
+server. Controlled random draws confirmed that each revised test accepts equal user and chat IDs.
 
 ## Future convergence risks
 

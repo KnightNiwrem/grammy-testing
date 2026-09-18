@@ -1,4 +1,4 @@
-import { assertEquals, assertNotEquals, assertRejects } from '@std/assert';
+import { assertEquals, assertRejects } from '@std/assert';
 import { EmulationClient, EmulationServerError } from '../src/client/mod.ts';
 import { createEmulationServerHandler } from '../src/server/handler.ts';
 
@@ -32,7 +32,6 @@ Deno.test('declared entities round-trip through the admin api', async () => {
   assertEquals(user.user.first_name, 'Alice');
   assertEquals(chat.chat.type, 'private');
   assertEquals(chat.chat.username, 'alice');
-  assertNotEquals(chat.id, user.id);
   assertEquals(chat.memberIds, [user.id, bot.id]);
   assertEquals(await chat.listMessages(), []);
 

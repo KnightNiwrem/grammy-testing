@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch, assertNotEquals, assertThrows } from '@std/assert';
+import { assert, assertEquals, assertMatch, assertThrows } from '@std/assert';
 import { Session, SessionValidationError } from '../src/server/session_store.ts';
 
 const MAX_TELEGRAM_ID = 2 ** 52 - 1;
@@ -27,7 +27,7 @@ Deno.test('createUser draws an id inside the 52-bit range and stores the given n
   assertEquals(session.users.get(user.id), user);
 });
 
-Deno.test('createPrivateChat copies the user names but not the user id', () => {
+Deno.test('createPrivateChat copies the user names and draws its own id', () => {
   const session = new Session('s');
   const user = session.createUser({ first_name: 'Alice', last_name: 'A', username: 'alice' });
   const bot = session.createBot({ username: 'test_bot', first_name: 'Test' });
@@ -39,7 +39,6 @@ Deno.test('createPrivateChat copies the user names but not the user id', () => {
     last_name: 'A',
     username: 'alice',
   });
-  assertNotEquals(chat.chat.id, user.id);
   assertEquals([...chat.memberIds], [user.id, bot.user.id]);
   assertEquals(session.chats.get(chat.chat.id), chat);
 });

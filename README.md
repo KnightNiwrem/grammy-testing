@@ -68,7 +68,9 @@ envelope. Unknown tokens answer `401 Unauthorized`.
 
 User ids and chat ids are drawn independently from the range Telegram documents (positive integers
 of at most 52 bits). A private chat's id is therefore unrelated to its user's id. Telegram does not
-guarantee that these match, and the emulator makes sure tests cannot accidentally depend on it.
+guarantee that these match, so the emulator never makes them match on purpose: a test that relies on
+the two being equal will fail almost surely. Equality is not prevented either; it would be a
+coincidence.
 
 ## Current limitations
 

@@ -2,7 +2,7 @@
  * End-to-end flow with a real grammY bot: declare a bot, a user, and their private chat, point
  * the bot at the session, and send a message through the emulated Bot API.
  */
-import { assert, assertEquals, assertNotEquals } from '@std/assert';
+import { assert, assertEquals } from '@std/assert';
 import { Bot } from 'grammy';
 import { EmulationClient, type EmulationClientOptions } from '../src/client/mod.ts';
 import { createEmulationServerHandler } from '../src/server/handler.ts';
@@ -59,7 +59,6 @@ async function runPrivateChatFlow(clientOptions: EmulationClientOptions, probe?:
     assertEquals(sent.chat, chat.chat);
     assertEquals(sent.from, testBot.user);
     assertEquals(sent.message_id, 1);
-    assertNotEquals(sent.chat.id, user.id);
     assertEquals(await chat.listMessages(), [sent]);
   } finally {
     await session.destroy();
