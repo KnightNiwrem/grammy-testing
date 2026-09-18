@@ -1,309 +1,175 @@
 # Review findings: minimal Bot API emulator
 
-The review covers implementation commit `07c4492`
-(`Add minimal Telegram Bot API emulation server
-and test client`), the sole implementation commit
-ahead of `main`, against [PLAN.md](PLAN.md).
+Reviewed on 2026-09-18. This review covers all eight commits ahead of `main` (`05bb7d7`), through
+`52974e4`, including the server, client, tests, configuration, CI workflow, and documentation
+against [PLAN.md](PLAN.md). The original finding numbers are retained for reference; finding 14 is
+new in the final pass.
 
-The polling-stub follow-up review covers the unstaged changes addressing finding 6. Its additional
-findings are appended as findings 11–13.
+The minimal message flow and grammY polling lifecycle work. Four findings are deferred to a separate
+design and implementation review, two risks remain accepted, and eight findings are fixed. Deferred
+does not mean resolved or accepted. P2 denotes a correctness or contract issue; P3 denotes a smaller
+validation or coverage issue. Finding 10 is a future design concern without a runtime severity
+assignment.
 
-The intended minimal flow works, and the implementation largely matches the planned architecture:
-standalone serving, isolated session routes, entity handles, chat-owned messages, and the `getMe`
-and `sendMessage` methods. Unsupported methods, group chats, uploads, and incomplete Telegram
-behavior are intentional limits of this step.
+## Deferred findings
 
-Findings remain open unless marked FIXED or RISK ACCEPTED. Accepted risks require no action in the
-current scope. P2 denotes a correctness or contract issue worth resolving; P3 is the lowest priority
-and covers smaller validation or test issues and accepted risks. Future convergence risks describe
-design choices that would require changes to identity or stored state to match Telegram more
-closely.
+### 5. [DEFERRED] [P2] Private-chat validation permits additional human parties
 
-## Current correctness and contract issues
+Locations: [session_store.ts](src/server/session_store.ts), `Session.createPrivateChat`, and
+[admin_routes.ts](src/server/admin_routes.ts), `createChat`.
 
-### 1. [FIXED] [P2] Invalid `chat_id` types can succeed or produce internal-server errors
+The store verifies that the named human exists, is included, and that every member exists. It does
+not reject other human members. An admin request declaring Alice, Bob, and a bot as members of a
+private chat returns 201. This contradicts the planned private conversation between one human and
+one bot; the documented multiple-bot exception does not justify additional humans.
 
-Location: [bot_api_methods.ts](src/server/bot_api_methods.ts), `toChatKey` (replaces `parseChatId`).
+The follow-up should enforce the human-party invariant while preserving a way to test a bot that
+cannot send. Resolve this alongside finding 10 so that a permission fixture does not dictate the
+conversation's parties.
 
-Before the fix, `Number(value)` coerced arbitrary JSON values before validating them. Reproductions
-against an existing chat showed:
+### 10. [DEFERRED] Private conversations lack ownership by the bot/user pair
 
-- `{ chat_id: [validChatId], text: 'hello' }` returned 200 and stored a message.
-- `{ chat_id: { toString: 'invalid' }, text: 'hello' }` returned 500 because conversion threw.
+Location: [session_store.ts](src/server/session_store.ts), `ChatRecord`, `Session.chats`, and
+`Session.createPrivateChat`.
 
-**Resolution:** `toChatKey` accepts numbers and strings that round-trip through numeric conversion;
-other types produce no key. Chat IDs are generated internally as positive integers and cannot be
-supplied during chat creation, so fractional and out-of-range values fail lookup without a separate
-range check. Invalid targets return 400 and leave message state unchanged. Regression tests cover
-invalid types and noncanonical string forms.
+The session-global map is keyed only by independently generated chat ID. Several bots can append to
+one private history, while repeated creation for the same bot/user pair creates unrelated histories.
+Both outcomes remain reproducible. The records do not distinguish conversation ownership from
+sending permission.
 
-The fix passed type, lint, formatting, and whitespace checks, plus 18 tests with the standalone test
-ignored. Additional diagnostic probes verified 112 requests at the minimum and maximum generated
-chat IDs across JSON, query, URL-encoded, and multipart inputs.
+To converge toward Telegram's private-conversation model, each bot's conversation with a human needs
+its own history and sending permissions. If exposed private-chat IDs were changed to user IDs, the
+current map could not distinguish conversations belonging to different bots. The design should
+consider ownership by the bot/user pair, or a separate internal conversation identity, and decide
+how repeated creation behaves. The existing client `{ user, bot }` interface supplies the parties.
 
-### 2. [FIXED] [P2] Malformed multipart requests produce 500 responses
+Model blocked or unstarted conversations through sending permission rather than arbitrary private
+membership. Finding 5 concerns the current validation gap; this finding concerns the representation
+needed for future behavior. Independent exposed chat IDs remain an accepted choice in finding 9.
 
-Location: [bot_api_routes.ts](src/server/bot_api_routes.ts), `decodePayload`.
+### 14. [DEFERRED] [P2] Deleting a session leaves active long polls pending
 
-Before the fix, JSON decoding translated parse failures into a client error, but
-`request.formData()` had no equivalent handling. A POST request with
-`Content-Type: multipart/form-data`, no boundary, and an invalid multipart body returned
-`500 Internal Server Error`.
+Locations: [session_store.ts](src/server/session_store.ts), `SessionStore.delete` and
+`Session.waitForUpdates`; [admin_routes.ts](src/server/admin_routes.ts), `deleteSession`;
+[client/mod.ts](src/client/mod.ts), `TestSession.destroy`.
 
-**Resolution:** `decodePayload` catches form-decoding failures and returns 400 with the Telegram
-error envelope and description `Bad Request: request body is not valid form data`. Regression tests
-cover missing multipart boundaries and invalid multipart bodies. The fix translates parser failures;
-it does not add stricter validation beyond Deno's form parser.
+Session deletion removes the map entry without ending registered polls. A probe started a 30-second
+`getUpdates` request, waited until it was registered, and deleted the session. DELETE returned 204
+and the store no longer contained the session, but the handler was still unresolved and
+`pendingLongPolls.size` remained 1. Aborting the original request released it.
 
-The fix passed type, lint, formatting, and whitespace checks, plus 19 tests with the standalone test
-ignored. Diagnostic probes confirmed valid multipart and URL-encoded requests, body parameters
-overriding query parameters, and unchanged message state and numbering after decoding failures.
+The pending timer and abort listener retain the deleted session and its state until timeout or
+client cancellation. A maximum valid timeout can retain it for about 24.8 days. This conflicts with
+the client's promise that `destroy()` removes the session and everything declared in it.
+
+Define session disposal, including how active requests finish, and release held polls as part of
+deletion. A regression test should establish a registered poll before deletion, then verify its
+completion and removal. The existing destroy test checks only that subsequent requests return 404.
+
+### 7. [DEFERRED] [P3] Successful admin responses are unchecked
+
+Location: [admin_transport.ts](src/client/admin_transport.ts), `AdminTransport.request`.
+
+The transport asserts arbitrary successful response JSON as `TResponse`; a 204 similarly becomes
+`undefined` for any requested response type. A fetch override returning 200 with `{}` makes
+`createSession()` return a handle whose required `id` and `apiRoot` are both `undefined`.
+
+Validate required protocol fields at the client boundary and report malformed successful responses
+explicitly. Request-specific validators should establish the promised types and expected empty
+responses. The current generic assertion cannot provide that runtime guarantee.
+
+## Accepted risks
 
 ### 3. [RISK ACCEPTED] [P3] Entity handles do not preserve session ownership
 
 Locations: [client/mod.ts](src/client/mod.ts), `TestSession.createPrivateChat`, and
 [handles.ts](src/client/handles.ts), `TestUser` and `TestBot`.
 
-`createPrivateChat` sends only the handles' numeric IDs. User and bot IDs are now generated by the
-server and are unique within each session. If a foreign handle's ID coincides with a local entity's
-ID, the client can silently select the local entity. Controlled random draws reproduced this
-substitution for users and bots across sessions on one server and across separate servers.
+Chat creation sends only numeric entity IDs. If a foreign handle's ID coincides with a local
+entity's ID, the client silently selects the local entity. Controlled random draws in the original
+review reproduced this across sessions and across servers. The foreign-bot test covers an absent ID,
+not ownership; the server's session namespaces remain isolated.
 
-The existing foreign-bot test catches an absent ID; it does not establish ownership. The server's
-session namespaces remain isolated.
+**Decision:** Accept the residual risk because an uncontrolled collision is extremely unlikely.
+Reassess ownership validation if explicit IDs or another use case make overlapping IDs likely.
 
-**Decision:** Accept the residual risk because an uncontrolled ID collision is extremely unlikely.
-Ownership validation is deferred. Reassess this risk if explicit IDs or another concrete use case
-make overlapping IDs likely.
-
-### 4. [FIXED] [P2] Explicit user IDs bypass the documented identifier range
-
-Locations: [admin_routes.ts](src/server/admin_routes.ts), `createUser`,
-[session_store.ts](src/server/session_store.ts), `Session.createUser`, and
-[admin_protocol.ts](src/shared/admin_protocol.ts), `CreateUserRequest`.
-
-Before the fix, validation checked JavaScript's safe-integer range, which is broader than the plan's
-positive 52-bit range. IDs `0`, `-7`, and `2 ** 52` received 201 responses and became stored users.
-
-**Resolution:** Remove explicit user IDs from the creation protocol, route, and store definition.
-Every user ID now goes through the server's allocator, which generates IDs in `1 .. 2^52 - 1` and
-retries collisions within the session. Supplied HTTP `id` fields are ignored, consistent with chat
-creation.
-
-Explicit IDs remain a future design option when a concrete use case warrants them. No regression
-test is required to preserve the absence of explicit-ID support.
-
-### 5. [P2] Private-chat validation permits additional human parties
-
-Locations: [session_store.ts](src/server/session_store.ts), `Session.createPrivateChat`, and
-[PLAN.md](PLAN.md), the membership decision.
-
-The store checks that the named human exists, is included, and that all members exist. It accepts a
-private chat containing Alice, Bob, and a bot; that definition received a 201 response during
-review.
-
-The plan describes a private chat as a conversation between one human and one bot and documents a
-multiple-bot exception. Additional humans also violate the private-chat model. Reject additional
-human members while preserving the intended fixture for testing a bot without permission to send.
-The broader conversation-ownership problem is described under future convergence risks.
-
-### 6. [FIXED] [P2, documentation] `getMe` does not make `bot.start()` work
-
-Location: [PLAN.md](PLAN.md), the emulated-methods decision.
-
-Before the fix, invoking the installed grammY version against the handler called `getMe`, then
-`deleteWebhook`, and rejected with `404 Not Found`. Polling also requires `getUpdates`. This agrees
-with [grammY's startup implementation](https://github.com/grammyjs/grammY/blob/main/src/bot.ts).
-
-**Resolution:** Expand the scope to include `deleteWebhook` and `getUpdates` stubs. `deleteWebhook`
-returns `true`; `getUpdates` waits for a positive `timeout` or request cancellation and returns an
-empty batch. No updates are produced, and `offset` and other update-selection parameters are
-ignored. PLAN.md and README.md distinguish `bot.init()` support through `getMe` from polling
-lifecycle support through the stubs and explicitly defer update generation and delivery.
-
-The plan's missing-`chat_id` wording now matches the implementation and tests:
-`Bad Request: chat_id is empty`. The polling-stub audit verified that grammY starts and stops
-against both the direct handler and a standalone server. Findings 11–13 describe separate timeout
-and test issues introduced by the expanded scope.
-
-## Smaller engineering issues
-
-### 7. [P3] Successful admin responses are unchecked
-
-Location: [admin_transport.ts](src/client/admin_transport.ts), `AdminTransport.request`.
-
-The transport asserts arbitrary response JSON as `TResponse`. A fetch override returning a 200
-response containing `{}` makes `createSession()` return a handle whose supposedly required `id` and
-`apiRoot` are both `undefined`.
-
-Validate required protocol fields at the client boundary and report malformed successful responses
-explicitly. Request-specific response validators can establish the promised types; the generic type
-assertion does not establish them at runtime.
-
-### 8. [FIXED] [P3] Identifier tests assert more than independent random draws guarantee
-
-Locations: [session_store_test.ts](tests/session_store_test.ts),
-[client_test.ts](tests/client_test.ts), and [e2e_grammy_test.ts](tests/e2e_grammy_test.ts), the
-user/chat ID inequality assertions.
-
-Before the fix, the tests required unequal user and chat IDs. The allocator allows equality, which
-the plan explicitly acknowledges as a possible coincidence. Controlled random draws reproduced equal
-IDs for a user and its private chat.
-
-**Resolution:** Retain independent allocation as the contract, including permitted coincidental
-equality. Remove the user/chat ID inequality assertions from all three test suites and rename the
-store test to describe independent allocation. README.md now explicitly states that equality is
-permitted as a coincidence.
-
-The fix passed type, lint, formatting, and whitespace checks, plus all 27 tests with a standalone
-server. Controlled random draws confirmed that each revised test accepts equal user and chat IDs.
-
-## Future convergence risks
-
-### 9. [RISK ACCEPTED] [P3] Independent private-chat IDs depart from Telegram's current implementation
+### 9. [RISK ACCEPTED] [P3] Independent private-chat IDs differ from Telegram's implementation
 
 Locations: [PLAN.md](PLAN.md), the identifier decision, and
 [session_store.ts](src/server/session_store.ts), `Session.createPrivateChat`.
 
-Telegram's current TDLib implementation constructs a private dialog ID directly from the peer user
-ID, and the Bot API server serializes that chat ID. See
+Telegram's TDLib constructs a private dialog ID from the peer user ID, and the Bot API server
+serializes that chat ID. See
 [TDLib's identity mapping](https://github.com/tdlib/td/blob/master/td/telegram/DialogId.cpp) and
 [Bot API chat serialization](https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/Client.cpp).
+Code that addresses a private chat by user ID can therefore work against Telegram and fail here.
 
-Code that sends to a private user by user ID can work against Telegram and fail here.
+**Decision:** Keep independent allocation of chat and user IDs, including permitted coincidental
+equality. Accept this compatibility deviation; it is not a separate implementation defect.
+Conversation ownership in finding 10 remains a distinct design concern.
 
-**Decision:** Independent generation of chat and user IDs, including private-chat IDs, is
-intentional. Accept the compatibility risk at the lowest priority. This finding identifies that
-deviation and no separate implementation defect. The permitted equality outcome remains a separate
-test-contract issue in finding 8, and bot-specific conversation ownership remains a separate risk in
-finding 10.
+## Fixed findings
 
-### 10. The session-global chat map cannot directly represent bot-specific private conversations
+| Finding                                                   | Resolution in the reviewed branch                                                                                                                                      |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Invalid `chat_id` types could succeed or produce 500   | Lookup accepts numbers and canonical numeric strings without coercing other JSON types. Invalid targets return 400 without storing messages.                           |
+| 2. Malformed multipart requests produced 500              | Form-decoding failures return 400 with the Telegram error envelope.                                                                                                    |
+| 4. Explicit user IDs bypassed the documented range        | Every user ID is server-assigned in `1 .. 2^52 - 1`; explicit IDs are absent from the creation protocol.                                                               |
+| 6. `getMe` did not make `bot.start()` work                | `deleteWebhook` and `getUpdates` stubs support grammY startup and shutdown. Documentation distinguishes initialization, polling lifecycle, and future update delivery. |
+| 8. Identifier tests required unequal user and chat IDs    | Store, client, and grammY tests permit coincidental equality; README documents it.                                                                                     |
+| 11. Malformed polling timeouts could produce 500          | Timeout validation accepts only numbers or canonical decimal strings representing integers in `0 .. 2^31 - 1`; other values return 400.                                |
+| 12. Oversized timeouts overflowed native timers           | The wait clamps the timer delay to `2^31 - 1` milliseconds. Longer valid requests end early, as documented. A coverage limitation remains below.                       |
+| 13. Lifecycle tests did not prove a long poll was pending | In-process grammY and HTTP cancellation tests wait for server-side poll registration and verify release; store tests cover registration and abort cleanup.             |
 
-Location: [session_store.ts](src/server/session_store.ts), `ChatRecord`, `Session.chats`, and
-`Session.createPrivateChat`.
+## Remaining coverage limitation
 
-Each bot's conversation with Alice needs separate history and sending permissions, while its exposed
-private-chat ID identifies Alice. The current map is keyed only by chat ID. It also permits several
-bots to append to one private history, and repeated creation of the same bot/user pair creates
-unrelated histories. Both behaviors were reproduced.
+**[P3] Finding 12's native timer overflow guard lacks an effective permanent regression test.** The
+oversized-timeout cases in [bot_api_handler_test.ts](tests/bot_api_handler_test.ts) use FakeTime,
+which does not reproduce Deno's timer overflow. The original review verified that removing the clamp
+in an isolated copy still passed that test. A native-timer probe against the current branch
+confirmed that a maximum valid timeout remains registered and pending until aborted.
 
-Simply switching private-chat IDs to user IDs would cause collisions between conversations belonging
-to different bots. A private conversation needs ownership by the bot/user pair, or an internal
-conversation identity separate from its exposed Telegram chat ID. The existing `{ user, bot }`
-client interface already provides the necessary parties.
-
-Private sending permission should also be distinct from the parties to a conversation. A bot's
-inability to initiate or send messages is not a reason to turn a private conversation into an
-arbitrary member set. This distinction will matter when representing blocked or unstarted
-conversations and when keeping private-chat behavior separate from group membership and roles.
-
-## Polling stub follow-up findings
-
-### 11. [FIXED] [P2] Malformed `getUpdates` timeout values can produce internal-server errors
-
-Location: [bot_api_methods.ts](src/server/bot_api_methods.ts), `parsePollTimeoutSeconds`.
-
-Before the fix, `Number(payload.timeout)` coerced arbitrary JSON values before checking whether the
-result was finite and positive. A request with `{ timeout: { toString: 'invalid' } }` threw
-`TypeError: Cannot convert object to primitive value` and returned `500 Internal Server Error`.
-Boolean `true` and the array `[1]` also became one-second polling durations.
-
-**Resolution:** `parsePollTimeoutSeconds` accepts numbers and canonical decimal strings representing
-integers in `0 .. 2^31 - 1`. Other values return 400 with the Telegram error envelope; omitted or
-zero timeouts retain immediate short polling. Regression tests cover malformed JSON types,
-noncanonical strings, fractional and negative values, and values outside the range. Diagnostic
-probes also verified positive numeric strings through JSON, query, URL-encoded, and multipart
-inputs.
-
-### 12. [FIXED] [P2] Oversized `getUpdates` timeouts overflow the timer and return immediately
-
-Locations: [bot_api_methods.ts](src/server/bot_api_methods.ts), `parsePollTimeoutSeconds`, and
-[session_store.ts](src/server/session_store.ts), `Session.waitForUpdates` (replaces
-`waitForTimeoutOrAbort`).
-
-Before the fix, a finite positive timeout was passed to `setTimeout` after multiplication by 1000,
-without an upper bound. `{ timeout: 2147484 }` produced a delay of `2147484000` milliseconds,
-exceeding the timer's signed 32-bit range. Deno emitted `TimeoutOverflowWarning` and reset the delay
-to one millisecond. The diagnostic request returned in approximately 27 milliseconds;
-`{ timeout: 1e308 }` overflowed the multiplication to infinity and also returned almost immediately.
-
-**Resolution:** The parser rejects timeouts above `2^31 - 1` seconds, and `Session.waitForUpdates`
-clamps the timer delay to `2^31 - 1` milliseconds. Oversized valid inputs therefore remain pending
-instead of overflowing into an immediate response. Requested durations above about 24.8 days end
-early; PLAN.md and README.md document this limitation. Telegram's
-[server implementation](https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/Client.cpp)
-uses a shorter
-[50-second maximum](https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/Client.h).
-
-**Regression-coverage limitation:** The oversized-timeout test uses FakeTime, which does not
-reproduce Deno's timer overflow. Removing the clamp in an isolated copy still passes that test.
-Native-timer diagnostic probes verified that the fix keeps oversized valid inputs pending and that
-removing the clamp reproduces the overflow. A permanent native-timer regression test remains a
-coverage improvement.
-
-### 13. [FIXED] [P3] Polling lifecycle tests do not establish that a long poll is pending
-
-Locations: [e2e_grammy_test.ts](tests/e2e_grammy_test.ts), `runPrivateChatFlow`, and
-[bot_api_handler_test.ts](tests/bot_api_handler_test.ts), the `getUpdates` tests.
-
-Before the fix, the lifecycle test waited for `onStart` and then slept for 20 milliseconds before
-stopping the bot. grammY invokes `onStart` before entering its polling loop, so the callback and
-elapsed delay did not establish that the server had a pending long poll. The test could complete
-without exercising the in-flight cancellation its comment described.
-
-**Resolution:** `Session.waitForUpdates` registers held polls in `pendingLongPolls` after arming the
-timer and abort listener. The in-process grammY lifecycle test waits for a registered poll before
-calling `bot.stop()`, awaits polling completion, and verifies that no poll remains. A separate HTTP
-test waits for a registered server poll, aborts fetch, and verifies server-side release. The handler
-suite also covers natural expiry of a positive timeout with FakeTime, and the store suite covers
-poll registration and removal on abort. Disabling abort handling in an isolated copy correctly fails
-the HTTP test with `the server kept the poll pending`.
+Add a native-timer regression test that establishes poll registration, proves an oversized valid
+timeout stays pending, then aborts and verifies cleanup. This is a test improvement; the overflow
+fix remains in place.
 
 ## Verification and analyzer triage
 
-The following checks passed against the original reviewed implementation:
+The final pass used Deno 2.9.6 and passed:
 
 - `deno task check`
 - `deno task lint`
 - `deno task fmt:check`
 - `git diff --check main...HEAD`
-- `deno task test`: 17 passed, with the standalone test ignored.
-- `BOT_API_EMULATOR_URL=http://localhost:18081 deno task test`, with a standalone server running on
-  that port: all 18 tests passed.
+- `deno task test`: 26 passed, 1 standalone test ignored.
+- `BOT_API_EMULATOR_URL=http://localhost:18087 deno task test`, with a standalone server running:
+  all 27 tests passed.
 
-Temporary diagnostic probes established the findings above. They also verified valid multipart
-requests and body parameters overriding query parameters. These probes were not added to the
-repository's test suite; the existing passing tests do not cover the reproduced defects.
+Temporary probes reconfirmed extra-human membership, duplicate bot/user conversations, shared
+multiple-bot membership, unchecked client responses, and native oversized-timeout retention. They
+also established finding 14. These probes are diagnostic evidence, not permanent regression
+coverage.
 
-Fallow's combined dead-code, duplication, and maintainability analysis covered all 15 source and
-test files. A temporary analysis configuration declared both `src/main.ts` and `src/client/mod.ts`
-as entry points, in addition to the four test entry points discovered by its Deno plugin.
+Fallow 3.27.0 ran the combined dead-code, duplication, and maintainability analyses. Discovery
+covered all 15 source and test files. A temporary configuration explicitly supplied `src/main.ts`
+and `src/client/mod.ts`; the Deno plugin discovered all four test entry points. No project tooling
+or analysis configuration was changed.
 
-The remaining reachability signals were an unused `ListMessagesQuery` protocol type and
-`TestChat.id` and `TestChat.listMessages`, which are demonstrably used by tests. The latter are
-false positives. A five-line duplication candidate concerned setup in separate test suites and did
-not establish a reason to couple them. Complexity signals for payload decoding and port parsing used
-estimated coverage, not measured coverage, and did not establish a need for structural refactoring.
+- **Unused type:** `ListMessagesQuery` has no consumers. This is a minor protocol cleanup candidate,
+  separate from the deferred behavioral findings.
+- **False positives:** `TestChat.id` and `TestChat.listMessages` are exercised by client and grammY
+  tests. The reported unlisted `@std/testing` dependency is declared in `deno.json`; its
+  `@std/testing/time` import resolves and passes Deno checking.
+- **Duplication:** The five-line entity setup fragments belong to separate test responsibilities and
+  do not justify coupling them. The identical `until` helpers share waiting behavior and could be
+  consolidated during test maintenance; no correctness defect was established.
+- **Maintainability:** Signals for `decodePayload` and `readPort` use estimated coverage, not
+  measured coverage. Inspection did not establish a structural refactoring requirement. Change
+  frequency signals alone likewise do not justify redesign.
 
-The polling-stub follow-up review passed `deno task check`, `deno task lint`, `deno task fmt:check`,
-and `git diff --check`. `deno task test` passed 22 tests with the standalone test ignored; with a
-standalone server on port 18083 and `BOT_API_EMULATOR_URL=http://localhost:18083`, all 23 tests
-passed.
+Fallow's file discovery does not establish complete understanding of remote Deno dependencies or
+runtime behavior. No measured coverage was supplied, and architecture-boundary and policy analyses
+were not configured; their zero counts are not clean results for those checks.
 
-Temporary probes reproduced findings 11 and 12. They also verified one-second timeout completion
-through JSON, query, and URL-encoded inputs, immediate completion for an already-aborted request,
-and prompt release of a pending server handler when its HTTP client cancelled the request. These
-probes were not added to the repository's test suite.
-
-Fallow's follow-up maintainability analysis covered all 15 source and test files. Its Deno plugin
-discovered all four test entry points; a temporary configuration supplied `src/main.ts` and
-`src/client/mod.ts` as additional entry points. The payload-decoding and port-parsing signals still
-used estimated coverage and did not establish new actionable maintainability issues.
-
-The fixes for findings 11–13 passed type, lint, formatting, and whitespace checks. The final
-cancellation review passed 26 tests with the standalone test ignored; with a standalone server on
-port 18085 and `BOT_API_EMULATOR_URL=http://localhost:18085`, all 27 tests passed. Fallow's
-maintainability analysis covered all 15 source and test files and reported only the existing
-estimated-coverage signals for payload decoding and port parsing. Diagnostic and mutation probes
-were temporary; finding 12 records the remaining limitation in permanent regression coverage.
+Unsupported methods, groups, uploads, update generation and delivery, ignored update-selection
+parameters, and the documented timer cap remain intentional limits of this step.
