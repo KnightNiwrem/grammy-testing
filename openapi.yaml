@@ -1,0 +1,59 @@
+openapi: 3.1.1
+info:
+  title: grammY Testing Emulation Server
+  version: 0.0.0
+  description: >-
+    HTTP interface for isolated Telegram Bot API test sessions. Path items marked with
+    `x-implementation-status: unimplemented` record agreed routing topology only; their HTTP
+    operations, payloads, and responses have not been specified or implemented.
+servers:
+  - url: http://localhost:8081
+paths:
+  /sessions:
+    description: Collection of isolated Telegram test sessions.
+    x-implementation-status: unimplemented
+  /sessions/{sessionId}:
+    description: One isolated Telegram test session and the lifecycle of everything it owns.
+    x-implementation-status: unimplemented
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+  /sessions/{sessionId}/bots:
+    description: Virtual bots owned by a test session.
+    x-implementation-status: unimplemented
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+  /sessions/{sessionId}/users:
+    description: Virtual Telegram users owned by a test session.
+    x-implementation-status: unimplemented
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+  /sessions/{sessionId}/bot-api/bot{token}/{method}:
+    description: Telegram Bot API methods invoked for a virtual bot within a test session.
+    x-implementation-status: unimplemented
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+      - $ref: '#/components/parameters/BotApiMethod'
+components:
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: Identifier of the test session that owns the addressed state.
+      schema:
+        type: string
+    BotToken:
+      name: token
+      in: path
+      required: true
+      description: Token of a virtual bot owned by the addressed test session.
+      schema:
+        type: string
+    BotApiMethod:
+      name: method
+      in: path
+      required: true
+      description: Telegram Bot API method name.
+      schema:
+        type: string
