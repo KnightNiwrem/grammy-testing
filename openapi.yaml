@@ -3,9 +3,9 @@ info:
   title: grammY Testing Emulation Server
   version: 0.0.0
   description: >-
-    HTTP interface for isolated Telegram Bot API test sessions. Path items marked with
-    `x-implementation-status: unimplemented` record agreed routing topology only; their HTTP
-    operations, payloads, and responses have not been specified or implemented.
+    HTTP interface for isolated Telegram Bot API test sessions. Objects marked with
+    `x-implementation-status: unimplemented` describe agreed API surface that is not available
+    from the server yet. Marked path items without operations record routing topology only.
 servers:
   - url: http://{domain}:{port}
     variables:
@@ -18,7 +18,24 @@ servers:
 paths:
   /sessions:
     description: Collection of isolated Telegram test sessions.
-    x-implementation-status: unimplemented
+    post:
+      operationId: createSession
+      summary: Create an isolated test session
+      x-implementation-status: unimplemented
+      responses:
+        '201':
+          description: The test session was created.
+          headers:
+            Location:
+              description: Relative URL of the created test session.
+              required: true
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
   /sessions/{sessionId}:
     description: One isolated Telegram test session and the lifecycle of everything it owns.
     x-implementation-status: unimplemented
@@ -42,6 +59,22 @@ paths:
       - $ref: '#/components/parameters/BotToken'
       - $ref: '#/components/parameters/BotApiMethod'
 components:
+  schemas:
+    Session:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - botApiRoot
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Server-assigned identifier of the test session.
+        botApiRoot:
+          type: string
+          format: uri
+          description: Absolute API root for bots operating in this test session.
   parameters:
     SessionId:
       name: sessionId
