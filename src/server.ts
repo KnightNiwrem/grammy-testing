@@ -5,6 +5,8 @@ export interface TelegramEmulationServerOptions {
   port?: number;
 }
 
+export type HttpRequestHandler = (request: Request) => Response | Promise<Response>;
+
 /** Owns the standalone HTTP listener for the Telegram emulation service. */
 export class TelegramEmulationServer {
   readonly #hostname: string;
@@ -21,14 +23,14 @@ export class TelegramEmulationServer {
     this.#port = port;
   }
 
-  start(): Deno.HttpServer<Deno.NetAddr> {
+  start(handler: HttpRequestHandler): Deno.HttpServer<Deno.NetAddr> {
     if (this.#httpServer !== undefined) {
       throw new Error('Telegram emulation server has already been started');
     }
 
     this.#httpServer = Deno.serve(
       { hostname: this.#hostname, port: this.#port },
-      () => new Response(null, { status: 404 }),
+      handler,
     );
     return this.#httpServer;
   }

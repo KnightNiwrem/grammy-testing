@@ -21,7 +21,6 @@ paths:
     post:
       operationId: createSession
       summary: Create an isolated test session
-      x-implementation-status: unimplemented
       responses:
         '201':
           description: The test session was created.

@@ -3,8 +3,9 @@
 An HTTP server for emulating the Telegram Bot API in end-to-end tests. The server will expose both
 the emulated Bot API and an admin API for controlling isolated test sessions.
 
-The standalone server currently listens for requests but does not define routes. Until routes are
-added, every request receives an empty `404 Not Found` response.
+The standalone server currently supports creating an isolated test session with `POST /sessions`.
+The response identifies the session and its future Bot API root. Other routes described in
+`openapi.yaml` are not implemented yet.
 
 ## Commands
 

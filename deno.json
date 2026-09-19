@@ -11,6 +11,8 @@
   },
   "imports": {
     "grammy/types": "https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/types.ts",
+    "hono": "jsr:@hono/hono@^4.13.7",
+    "hono/route": "jsr:@hono/hono@^4.13.7/route",
     "zod": "npm:zod@^4.6.5"
   },
   "fmt": {
