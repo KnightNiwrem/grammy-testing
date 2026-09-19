@@ -101,14 +101,20 @@ export interface TestUser {
   readonly id: number;
   readonly user: User;
   /**
-   * Starts (or returns) this user's private conversation with the given bot. A private
-   * conversation exists per (user, bot) pair and only the user can bring it into existence,
-   * exactly as on Telegram; calling this twice yields the same chat. Until a user has opened the
-   * conversation, the bot cannot message them (`403: bot can't initiate conversation with a
-   * user`).
+   * The address of this user's private conversation with the given bot. Constructing the handle
+   * has no observable effect on the world — Telegram sends a bot nothing when a user merely
+   * opens its chat screen. The conversation itself comes into existence with the user's first
+   * message to it (a history now exists); until then the bot's sends fail with `403: bot can't
+   * initiate conversation with a user`. The handle is synchronous because a private chat's id is
+   * the user's id, and it is one address per (user, bot) pair: calling this twice addresses the
+   * same conversation.
    */
-  openPrivateChat(bot: TestBotAccount): Promise<TestPrivateChat>;
-  /** Sends a text message to a chat this user belongs to; returns the stored message. */
+  chatWith(bot: TestBotAccount): TestPrivateChat;
+  /**
+   * Sends a text message to a chat, as this user; returns the stored message. The first message
+   * to a not-yet-existing private conversation is what creates it, as pressing Start does on
+   * Telegram.
+   */
   sendText(chat: TestChat, text: string): Promise<Message>;
   /**
    * Presses an inline keyboard button on a message this user can see, selected by visible label
@@ -116,7 +122,11 @@ export interface TestUser {
    * message's keyboard.
    */
   tapInlineButton(message: Message, button: InlineButtonSelector): Promise<PendingCallbackQuery>;
-  /** Blocks the bot: its next send answers `403: bot was blocked by the user`. */
+  /**
+   * Blocks the bot: its next send answers `403: bot was blocked by the user`. Unlike opening a
+   * chat, blocking and unblocking are real Telegram events — a private chat's `my_chat_member`
+   * update is documented to fire exactly for these — so they are actions here.
+   */
   block(bot: TestBotAccount): Promise<void>;
   unblock(bot: TestBotAccount): Promise<void>;
   /** Joins a group; returns the service message announcing the join. */
@@ -169,7 +179,10 @@ export interface TestChat {
   waitForEdit(wait: EditWait): Promise<Message>;
 }
 
-/** A private conversation; exists only as the (user, bot) pair that owns it. */
+/**
+ * The address of a (user, bot) pair's private conversation. The handle is only an address plus
+ * an observation surface; the conversation it names exists once the user has sent it a message.
+ */
 export interface TestPrivateChat extends TestChat {
   readonly user: TestUser;
   readonly bot: TestBotAccount;

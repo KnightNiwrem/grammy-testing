@@ -31,7 +31,7 @@ Deno.test('the call log exposes payloads and failures of the bot under test', as
   await using _running = await startBot(bot);
 
   const alice = await session.createUser({ firstName: 'Alice' });
-  const chat = await alice.openPrivateChat(account);
+  const chat = alice.chatWith(account);
   const sent = await alice.sendText(chat, '/deals');
   await chat.waitForMessage({ from: account, after: sent });
 
@@ -61,10 +61,10 @@ Deno.test('two sessions are hermetic worlds', async () => {
   const accountB = await sessionB.createBot({ username: 'shop_bot' });
   assert(accountA.token !== accountB.token);
 
-  // An open conversation in session B is invisible to session A's bot: same failure as any
+  // A live conversation in session B is invisible to session A's bot: same failure as any
   // unknown chat, because the id simply does not exist in A's world.
   const bea = await sessionB.createUser({ firstName: 'Bea' });
-  await bea.openPrivateChat(accountB);
+  await bea.sendText(bea.chatWith(accountB), 'hi');
   const botA = new Bot(accountA.token, { client: { apiRoot: sessionA.apiRoot } });
   await assertRejects(() => botA.api.sendMessage(bea.id, 'hello?'), GrammyError, 'chat not found');
 });

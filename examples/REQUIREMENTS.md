@@ -14,21 +14,27 @@ things (`answerCallbackQuery` payloads, member status, failed calls) that are in
 history. Re-implementing Bot API methods alone cannot support these tests. _(All examples;
 especially 6.)_
 
-## R2. Private conversations are (user, bot) pairs
+## R2. Private conversations are (user, bot) pairs, created by first contact
 
-A private conversation is identified by its user–bot pair and comes into existence only through the
-user's `openPrivateChat`. Consequences:
+A private conversation is identified by its user–bot pair, and it comes into existence with the
+user's **first message** to the bot: "the conversation exists" and "a history exists" are the same
+fact. Telegram has no user-side "open a chat" event — a user who finds a bot sees an empty chat
+screen with a Start button, and pressing it simply sends `/start`; the Bots FAQ states the rule as
+"Bots can't initiate conversations with users. A user must either add them to a group or send them a
+message first." The library therefore has no chat-opening action: `chatWith` is a pure, synchronous
+address (made possible by R3), and sending to it is what creates the conversation. Consequences:
 
 - There is no admin endpoint that creates a "private chat with a member list". A private chat with
   two humans, or with no bot, is unrepresentable — settling finding 5 by construction rather than by
   validation.
-- `openPrivateChat` is idempotent: one pair, one history. Two bots talking to the same user hold two
-  unrelated conversations — settling finding 10.
-- Conversation state is a per-pair permission progression: **not started** (bot sends fail with
-  `403: bot can't initiate conversation with a user`) → **open** → **blocked**
-  (`403: bot was
-  blocked by the user`, reversible, history retained). Blocking is a permission
-  flip, not a membership change. _(Example 3.)_
+- One pair, one conversation: every `chatWith(bot)` handle addresses the same history. Two bots
+  talking to the same user hold two unrelated conversations — settling finding 10.
+- Conversation state is a per-pair permission progression: **no history yet** (bot sends fail with
+  `403: bot can't initiate conversation with a user`) → **live** (the user has sent a message) →
+  **blocked** (`403: bot was blocked by the user`, reversible, history retained). Blocking is a
+  permission flip, not a membership change — and unlike opening a chat it is a real Telegram event:
+  a private chat's `my_chat_member` update is documented to fire exactly when the user blocks or
+  unblocks the bot, which is why block/unblock are actor actions while "open" is not. _(Example 3.)_
 
 ## R3. Private chat id equals user id
 
@@ -103,6 +109,8 @@ grammY `Bot`. The rest of the client library is framework-agnostic. _(All exampl
 These did not surface as requirements in any example and should wait for an example that needs them,
 in this same usage-first manner:
 
+- **Deep-link starts** — `t.me/<bot_username>?start=<payload>`: an action like
+  `sendStart(bot, { payload })` whose `/start` message carries the payload.
 - **Failure injection** — making the emulator answer 429/500 or drop connections to test bot
   resilience and rate-limit handling.
 - **Time control** — freezing or advancing emulator time for scheduled behavior.

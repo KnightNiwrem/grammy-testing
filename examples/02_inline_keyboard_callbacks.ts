@@ -38,7 +38,7 @@ Deno.test('bot answers a button press and edits its menu message', async () => {
   await using _running = await startBot(bot);
 
   const alice = await session.createUser({ firstName: 'Alice' });
-  const chat = await alice.openPrivateChat(account);
+  const chat = alice.chatWith(account);
 
   const sent = await alice.sendText(chat, '/start');
   const menu = await chat.waitForMessage({ from: account, after: sent });

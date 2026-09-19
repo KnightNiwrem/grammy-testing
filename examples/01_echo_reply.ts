@@ -5,8 +5,9 @@
  *
  * - A test builds a world in four lines: session, bot account, user, private chat. Everything
  *   else is the real grammY bot under test, configured only through `token` and `apiRoot`.
- * - The private conversation is opened *by the user*; the test never assembles a chat out of a
- *   member list. This mirrors Telegram, where a human always speaks first.
+ * - The private conversation begins with the user's first message; the test never assembles a
+ *   chat out of a member list. This mirrors Telegram, where a human always speaks first and
+ *   "the conversation exists" means "a history exists".
  * - `alice.sendText(...)` is not just storage: it must synthesize a `message` update and deliver
  *   it to the bot's long poll, or the handler below never runs.
  * - Sending returns the stored message, and the reply is awaited with `after: sent`, so the test
@@ -28,7 +29,7 @@ Deno.test('echo bot replies to a text message in a private chat', async () => {
   await using _running = await startBot(bot);
 
   const alice = await session.createUser({ firstName: 'Alice' });
-  const chat = await alice.openPrivateChat(account);
+  const chat = alice.chatWith(account);
 
   const sent = await alice.sendText(chat, 'hello');
   const reply = await chat.waitForMessage({ from: account, after: sent });

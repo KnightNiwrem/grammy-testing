@@ -23,19 +23,21 @@ exist yet. When it does, they become its acceptance tests.
 
 ## The examples
 
-| Example                                                                | Establishes                                                                                                |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| [01_echo_reply.ts](01_echo_reply.ts)                                   | The core loop: build a world, run a real bot against it, act as a user, await the reply race-free.         |
-| [02_inline_keyboard_callbacks.ts](02_inline_keyboard_callbacks.ts)     | Button taps as user actions on received messages; observing `answerCallbackQuery` and message edits.       |
-| [03_private_chat_boundaries.ts](03_private_chat_boundaries.ts)         | The private-chat model: (user, bot) pair ownership, user-only initiation, chat id = user id, blocking.     |
-| [04_group_membership.ts](04_group_membership.ts)                       | Groups grow by actions; roles and promotion; privacy-mode delivery; moderation observed via member status. |
-| [05_multi_turn_dialogue.ts](05_multi_turn_dialogue.ts)                 | Stateful dialogues need only ordered delivery per chat; concurrent conversations stay independent.         |
-| [06_introspection_and_isolation.ts](06_introspection_and_isolation.ts) | The admin surface beyond Telegram: the recorded API call log, hermetic sessions, structural cleanup.       |
+| Example                                                                | Establishes                                                                                                 |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| [01_echo_reply.ts](01_echo_reply.ts)                                   | The core loop: build a world, run a real bot against it, act as a user, await the reply race-free.          |
+| [02_inline_keyboard_callbacks.ts](02_inline_keyboard_callbacks.ts)     | Button taps as user actions on received messages; observing `answerCallbackQuery` and message edits.        |
+| [03_private_chat_boundaries.ts](03_private_chat_boundaries.ts)         | The private-chat model: (user, bot) pair ownership, creation by first message, chat id = user id, blocking. |
+| [04_group_membership.ts](04_group_membership.ts)                       | Groups grow by actions; roles and promotion; privacy-mode delivery; moderation observed via member status.  |
+| [05_multi_turn_dialogue.ts](05_multi_turn_dialogue.ts)                 | Stateful dialogues need only ordered delivery per chat; concurrent conversations stay independent.          |
+| [06_introspection_and_isolation.ts](06_introspection_and_isolation.ts) | The admin surface beyond Telegram: the recorded API call log, hermetic sessions, structural cleanup.        |
 
 ## Conventions the examples settled on
 
 - **Actors act, chats observe.** World changes are phrased as actions of a simulated user, because
-  actions are what synthesize updates for the bot. Chat handles only address and observe.
+  actions are what synthesize updates for the bot. Chat handles only address and observe — there is
+  no "open a private chat" action, because Telegram has no such event: a private conversation is
+  created by the user's first message to it.
 - **Every action returns its artifact**, and every wait anchors on one (`after: sent`, `of: menu`).
   Tests contain no sleeps and no polling loops of their own.
 - **Assertions read Telegram shapes** (`Message`, `ChatMember` from `grammy/types`), so a test reads

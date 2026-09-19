@@ -27,7 +27,7 @@ interface SignupState {
 type SignupContext = Context & SessionFlavor<SignupState>;
 
 async function runSignup(account: TestBotAccount, user: TestUser, name: string) {
-  const chat = await user.openPrivateChat(account);
+  const chat = user.chatWith(account);
   let sent = await user.sendText(chat, '/signup');
   let reply = await chat.waitForMessage({ from: account, after: sent });
   assertEquals(reply.text, 'What is your name?');
