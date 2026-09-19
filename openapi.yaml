@@ -37,9 +37,17 @@ paths:
                 $ref: '#/components/schemas/Session'
   /sessions/{sessionId}:
     description: One isolated Telegram test session and the lifecycle of everything it owns.
-    x-implementation-status: unimplemented
     parameters:
       - $ref: '#/components/parameters/SessionId'
+    delete:
+      operationId: deleteSession
+      summary: End an isolated test session
+      description: Discards the session and all virtual entities and state that it owns.
+      responses:
+        '204':
+          description: The test session and all of its state were discarded.
+        '404':
+          description: No active test session has the supplied identifier.
   /sessions/{sessionId}/bots:
     description: Virtual bots owned by a test session.
     x-implementation-status: unimplemented

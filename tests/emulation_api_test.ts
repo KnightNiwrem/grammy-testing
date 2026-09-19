@@ -27,6 +27,23 @@ Deno.test('POST /sessions creates a session and returns its API locations', asyn
   }
 });
 
+Deno.test('DELETE /sessions/:sessionId ends an active session', async () => {
+  const api = createEmulationApi({
+    sessions: new SessionRegistry(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const createResponse = await api.request('/sessions', { method: 'POST' });
+  const sessionPath = createResponse.headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+
+  const deleteResponse = await api.request(sessionPath, { method: 'DELETE' });
+  if (deleteResponse.status !== 204) {
+    throw new Error(`Expected status 204, received ${deleteResponse.status}`);
+  }
+});
+
 function isSessionResponse(value: unknown): value is { id: string; botApiRoot: string } {
   if (typeof value !== 'object' || value === null) {
     return false;

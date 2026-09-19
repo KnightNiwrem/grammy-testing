@@ -27,5 +27,10 @@ export function createSessionRoutes(
     );
   });
 
+  sessionRoutes.delete('/:sessionId', (context) => {
+    const sessionWasDeleted = sessions.delete(context.req.param('sessionId'));
+    return context.body(null, sessionWasDeleted ? 204 : 404);
+  });
+
   return sessionRoutes;
 }

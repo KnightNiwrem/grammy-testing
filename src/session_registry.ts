@@ -23,4 +23,8 @@ export class SessionRegistry {
       `Unable to generate a unique session ID after ${MAX_SESSION_ID_GENERATION_ATTEMPTS} attempts`,
     );
   }
+
+  delete(id: string): boolean {
+    return this.#sessions.delete(id);
+  }
 }
