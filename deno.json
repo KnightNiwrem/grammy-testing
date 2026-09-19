@@ -1,19 +1,23 @@
 {
+  "lock": false,
   "tasks": {
     "dev": "deno run --watch src/main.ts",
     "start": "deno run src/main.ts",
     "fmt:check": "deno fmt --check",
     "fmt": "deno fmt",
     "lint": "deno lint",
-    "check": "deno check src/main.ts",
+    "check": "deno check --allow-import=cdn.jsdelivr.net,cdn.skypack.dev,jsr.io src/ examples/",
     "test": "deno test"
   },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1",
+    "grammy": "https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/mod.ts",
+    "grammy/types": "https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/types.ts"
+  },
   "fmt": {
-    "options": {
-      "lineWidth": 100,
-      "indentWidth": 2,
-      "singleQuote": true
-    }
+    "lineWidth": 100,
+    "indentWidth": 2,
+    "singleQuote": true
   },
   "lint": {
     "rules": {
