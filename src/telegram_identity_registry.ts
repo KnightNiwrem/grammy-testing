@@ -5,6 +5,10 @@ export interface TelegramIdentity {
   readonly username?: string;
 }
 
+export type IdentityReservationFailureReason =
+  | 'username_taken'
+  | 'identity_limit_reached';
+
 export type IdentityReservationResult =
   | {
     readonly reserved: true;
@@ -12,7 +16,7 @@ export type IdentityReservationResult =
   }
   | {
     readonly reserved: false;
-    readonly reason: 'username_taken' | 'identity_limit_reached';
+    readonly reason: IdentityReservationFailureReason;
   };
 
 export class TelegramIdentityRegistry {

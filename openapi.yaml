@@ -76,6 +76,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreatedBot'
+        '400':
+          description: The request body is malformed or does not match the bot creation schema.
+        '404':
+          description: No active test session has the supplied identifier.
+        '409':
+          description: The username is already assigned within the test session.
+        '507':
+          description: The test session cannot allocate another Telegram user identifier.
   /sessions/{sessionId}/bots/{botId}:
     description: One virtual bot owned by a test session.
     x-implementation-status: unimplemented

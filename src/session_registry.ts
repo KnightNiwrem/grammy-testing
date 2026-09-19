@@ -1,5 +1,13 @@
+import { BotRegistry } from './bot_registry.ts';
+import { TelegramIdentityRegistry } from './telegram_identity_registry.ts';
+
 export class EmulationSession {
-  constructor(readonly id: string) {}
+  readonly bots: BotRegistry;
+
+  constructor(readonly id: string) {
+    const identities = new TelegramIdentityRegistry();
+    this.bots = new BotRegistry(identities);
+  }
 }
 
 const MAX_SESSION_ID_GENERATION_ATTEMPTS = 10;
