@@ -27,4 +27,8 @@ export class SessionRegistry {
   delete(id: string): boolean {
     return this.#sessions.delete(id);
   }
+
+  get(id: string): EmulationSession | undefined {
+    return this.#sessions.get(id);
+  }
 }

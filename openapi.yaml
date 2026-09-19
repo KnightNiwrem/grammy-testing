@@ -50,9 +50,38 @@ paths:
           description: No active test session has the supplied identifier.
   /sessions/{sessionId}/bots:
     description: Virtual bots owned by a test session.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      operationId: createBot
+      summary: Create a virtual bot
+      x-implementation-status: unimplemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBotRequest'
+      responses:
+        '201':
+          description: The virtual bot was created.
+          headers:
+            Location:
+              description: Relative URL of the created virtual bot.
+              required: true
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedBot'
+  /sessions/{sessionId}/bots/{botId}:
+    description: One virtual bot owned by a test session.
     x-implementation-status: unimplemented
     parameters:
       - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotId'
   /sessions/{sessionId}/users:
     description: Virtual Telegram users owned by a test session.
     x-implementation-status: unimplemented
@@ -67,6 +96,52 @@ paths:
       - $ref: '#/components/parameters/BotApiMethod'
 components:
   schemas:
+    Bot:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - is_bot
+        - first_name
+        - username
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          maximum: 4503599627370495
+          description: Server-assigned Telegram user identifier for the bot.
+        is_bot:
+          type: boolean
+          const: true
+        first_name:
+          type: string
+        username:
+          type: string
+    CreateBotRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - first_name
+        - username
+      properties:
+        first_name:
+          type: string
+          minLength: 1
+        username:
+          type: string
+          minLength: 1
+    CreatedBot:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - bot
+      properties:
+        token:
+          type: string
+          description: Emulator-issued token used to call the Bot API as this bot.
+        bot:
+          $ref: '#/components/schemas/Bot'
     Session:
       type: object
       additionalProperties: false
@@ -97,6 +172,15 @@ components:
       description: Token of a virtual bot owned by the addressed test session.
       schema:
         type: string
+    BotId:
+      name: botId
+      in: path
+      required: true
+      description: Server-assigned identifier of a virtual bot.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 4503599627370495
     BotApiMethod:
       name: method
       in: path
