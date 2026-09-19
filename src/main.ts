@@ -1,9 +1,12 @@
-import { DEFAULT_PORT, TelegramEmulationServer } from './server.ts';
+import { parseServerConfiguration } from './config.ts';
+import { TelegramEmulationServer } from './server.ts';
 
 if (import.meta.main) {
-  const configuredPort = Deno.env.get('PORT');
-  const port = configuredPort === undefined ? DEFAULT_PORT : Number(configuredPort);
+  const configuration = parseServerConfiguration({
+    DOMAIN: Deno.env.get('DOMAIN'),
+    PORT: Deno.env.get('PORT'),
+  });
 
-  const server = new TelegramEmulationServer({ port }).start();
+  const server = new TelegramEmulationServer({ port: configuration.port }).start();
   await server.finished;
 }

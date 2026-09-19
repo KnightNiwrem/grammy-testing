@@ -7,7 +7,14 @@ info:
     `x-implementation-status: unimplemented` record agreed routing topology only; their HTTP
     operations, payloads, and responses have not been specified or implemented.
 servers:
-  - url: http://localhost:8081
+  - url: http://{domain}:{port}
+    variables:
+      domain:
+        default: localhost
+        description: Domain advertised to clients.
+      port:
+        default: '8081'
+        description: Port on which the standalone server listens.
 paths:
   /sessions:
     description: Collection of isolated Telegram test sessions.

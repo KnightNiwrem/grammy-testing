@@ -8,10 +8,15 @@ added, every request receives an empty `404 Not Found` response.
 
 ## Commands
 
-- `deno task start` — start the server on port 8081, or the port specified by `PORT`
+- `deno task start` — start the server using the environment described below
 - `deno task dev` — start the server with file watching
 - `deno task test` — run tests
 - `deno task lint` — lint files
 - `deno task fmt` — format files
 - `deno task fmt:check` — check formatting
-- `deno task check` — type-check `src/main.ts`
+- `deno task check` — type-check source and test files
+
+## Environment
+
+- `DOMAIN` — domain advertised to clients; defaults to `localhost`
+- `PORT` — listening and advertised port; defaults to `8081`

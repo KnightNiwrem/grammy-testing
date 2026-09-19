@@ -1,8 +1,8 @@
 {
   "lock": false,
   "tasks": {
-    "dev": "deno run --watch --allow-net --allow-env=PORT --allow-import=cdn.jsdelivr.net,jsr.io src/main.ts",
-    "start": "deno run --allow-net --allow-env=PORT --allow-import=cdn.jsdelivr.net,jsr.io src/main.ts",
+    "dev": "deno run --watch --allow-net --allow-env=DOMAIN,PORT --allow-import=cdn.jsdelivr.net,jsr.io src/main.ts",
+    "start": "deno run --allow-net --allow-env=DOMAIN,PORT --allow-import=cdn.jsdelivr.net,jsr.io src/main.ts",
     "fmt:check": "deno fmt --check",
     "fmt": "deno fmt",
     "lint": "deno lint",
@@ -10,7 +10,8 @@
     "test": "deno test --allow-net=127.0.0.1 --allow-import=cdn.jsdelivr.net,jsr.io"
   },
   "imports": {
-    "grammy/types": "https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/types.ts"
+    "grammy/types": "https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/types.ts",
+    "zod": "npm:zod@^4.6.5"
   },
   "fmt": {
     "options": {
