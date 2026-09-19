@@ -1,5 +1,5 @@
-export interface EmulationSession {
-  readonly id: string;
+export class EmulationSession {
+  constructor(readonly id: string) {}
 }
 
 const MAX_SESSION_ID_GENERATION_ATTEMPTS = 10;
@@ -14,7 +14,7 @@ export class SessionRegistry {
         continue;
       }
 
-      const session = { id };
+      const session = new EmulationSession(id);
       this.#sessions.set(id, session);
       return session;
     }
