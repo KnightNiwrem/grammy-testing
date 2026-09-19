@@ -1,12 +1,16 @@
 {
+  "lock": false,
   "tasks": {
-    "dev": "deno run --watch src/main.ts",
-    "start": "deno run src/main.ts",
+    "dev": "deno run --watch --allow-net --allow-env=PORT --allow-import=cdn.jsdelivr.net,jsr.io src/main.ts",
+    "start": "deno run --allow-net --allow-env=PORT --allow-import=cdn.jsdelivr.net,jsr.io src/main.ts",
     "fmt:check": "deno fmt --check",
     "fmt": "deno fmt",
     "lint": "deno lint",
-    "check": "deno check src/main.ts",
-    "test": "deno test"
+    "check": "deno check --allow-import=cdn.jsdelivr.net,jsr.io src/ tests/",
+    "test": "deno test --allow-net=127.0.0.1 --allow-import=cdn.jsdelivr.net,jsr.io"
+  },
+  "imports": {
+    "grammy/types": "https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/types.ts"
   },
   "fmt": {
     "options": {
