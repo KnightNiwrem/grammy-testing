@@ -16,11 +16,9 @@
     "zod": "npm:zod@^4.6.5"
   },
   "fmt": {
-    "options": {
-      "lineWidth": 100,
-      "indentWidth": 2,
-      "singleQuote": true
-    }
+    "lineWidth": 100,
+    "indentWidth": 2,
+    "singleQuote": true
   },
   "lint": {
     "rules": {
