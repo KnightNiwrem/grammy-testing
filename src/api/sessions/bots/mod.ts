@@ -25,7 +25,7 @@ export function createBotRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 400);
     }
 
-    const result = context.get('emulationSession').bots.create(parsedRequest.data);
+    const result = context.get('emulationSession').virtualUsers.createBot(parsedRequest.data);
     if (!result.created) {
       return context.body(null, result.reason === 'username_taken' ? 409 : 507);
     }

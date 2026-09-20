@@ -3,18 +3,25 @@ import { BotRegistry } from './bot_registry.ts';
 import { ChatInteractionService } from './chat_interaction_service.ts';
 import { ChatRegistry } from './chat_registry.ts';
 import { TelegramIdentityRegistry } from './telegram_identity_registry.ts';
+import { VirtualUserService } from './virtual_user_service.ts';
 
 export class EmulationSession {
   readonly identities: TelegramIdentityRegistry;
   readonly accounts: AccountRegistry;
   readonly bots: BotRegistry;
+  readonly virtualUsers: VirtualUserService;
   readonly chats: ChatRegistry;
   readonly chatInteractions: ChatInteractionService;
 
   constructor(readonly id: string) {
     this.identities = new TelegramIdentityRegistry();
-    this.accounts = new AccountRegistry(this.identities);
-    this.bots = new BotRegistry(this.identities);
+    this.accounts = new AccountRegistry();
+    this.bots = new BotRegistry();
+    this.virtualUsers = new VirtualUserService({
+      identities: this.identities,
+      accounts: this.accounts,
+      bots: this.bots,
+    });
     this.chats = new ChatRegistry();
     this.chatInteractions = new ChatInteractionService({
       accounts: this.accounts,
