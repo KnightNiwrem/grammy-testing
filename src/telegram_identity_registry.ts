@@ -1,9 +1,55 @@
 const MAX_TELEGRAM_USER_ID = 4_503_599_627_370_495;
+const LOWEST_BASIC_GROUP_ID = -999_999_999_999;
+const HIGHEST_BASIC_GROUP_ID = -1;
+const LOWEST_SUPERGROUP_OR_CHANNEL_ID = -1_997_852_516_352;
+const HIGHEST_SUPERGROUP_OR_CHANNEL_ID = -1_000_000_000_001;
 
-export interface TelegramIdentity {
-  readonly id: number;
-  readonly username?: string;
-}
+export type TelegramIdentity =
+  | {
+    readonly kind: 'account';
+    readonly id: number;
+    readonly username?: string;
+  }
+  | {
+    readonly kind: 'bot';
+    readonly id: number;
+    readonly username: string;
+  }
+  | {
+    readonly kind: 'basic_group';
+    readonly id: number;
+  }
+  | {
+    readonly kind: 'supergroup';
+    readonly id: number;
+    readonly username?: string;
+  }
+  | {
+    readonly kind: 'channel';
+    readonly id: number;
+    readonly username?: string;
+  };
+
+export type IdentityReservationInput =
+  | {
+    readonly kind: 'account';
+    readonly username?: string;
+  }
+  | {
+    readonly kind: 'bot';
+    readonly username: string;
+  }
+  | {
+    readonly kind: 'basic_group';
+  }
+  | {
+    readonly kind: 'supergroup';
+    readonly username?: string;
+  }
+  | {
+    readonly kind: 'channel';
+    readonly username?: string;
+  };
 
 export type IdentityReservationFailureReason =
   | 'username_taken'
@@ -23,8 +69,11 @@ export class TelegramIdentityRegistry {
   readonly #identitiesById = new Map<number, TelegramIdentity>();
   readonly #identitiesByNormalizedUsername = new Map<string, TelegramIdentity>();
   #nextUserId = 1;
+  #nextBasicGroupId = HIGHEST_BASIC_GROUP_ID;
+  #nextSupergroupOrChannelId = HIGHEST_SUPERGROUP_OR_CHANNEL_ID;
 
-  reserveIdentity(username?: string): IdentityReservationResult {
+  reserveIdentity(input: IdentityReservationInput): IdentityReservationResult {
+    const username = 'username' in input ? input.username : undefined;
     const normalizedUsername = username?.toLowerCase();
     if (
       normalizedUsername !== undefined &&
@@ -32,17 +81,47 @@ export class TelegramIdentityRegistry {
     ) {
       return { reserved: false, reason: 'username_taken' };
     }
-    if (this.#nextUserId > MAX_TELEGRAM_USER_ID) {
+    const id = this.#allocateId(input.kind);
+    if (id === undefined) {
       return { reserved: false, reason: 'identity_limit_reached' };
     }
 
-    const id = this.#nextUserId++;
-    const identity: TelegramIdentity = username === undefined ? { id } : { id, username };
+    const identity: TelegramIdentity = { id, ...input };
     this.#identitiesById.set(id, identity);
     if (normalizedUsername !== undefined) {
       this.#identitiesByNormalizedUsername.set(normalizedUsername, identity);
     }
 
     return { reserved: true, identity };
+  }
+
+  getById(id: number): TelegramIdentity | undefined {
+    return this.#identitiesById.get(id);
+  }
+
+  getByUsername(username: string): TelegramIdentity | undefined {
+    return this.#identitiesByNormalizedUsername.get(username.toLowerCase());
+  }
+
+  #allocateId(kind: TelegramIdentity['kind']): number | undefined {
+    switch (kind) {
+      case 'account':
+      case 'bot':
+        if (this.#nextUserId > MAX_TELEGRAM_USER_ID) {
+          return undefined;
+        }
+        return this.#nextUserId++;
+      case 'basic_group':
+        if (this.#nextBasicGroupId < LOWEST_BASIC_GROUP_ID) {
+          return undefined;
+        }
+        return this.#nextBasicGroupId--;
+      case 'supergroup':
+      case 'channel':
+        if (this.#nextSupergroupOrChannelId < LOWEST_SUPERGROUP_OR_CHANNEL_ID) {
+          return undefined;
+        }
+        return this.#nextSupergroupOrChannelId--;
+    }
   }
 }

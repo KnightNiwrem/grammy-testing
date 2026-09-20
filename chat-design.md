@@ -63,6 +63,14 @@ A private conversation uses `(accountId, botId)` as its internal key. Its Bot AP
 observed by that bot, is `accountId`. Looking up a private conversation by `chatId` without the
 authenticated bot would therefore be ambiguous in a session containing multiple bots.
 
+Accounts, bots, supergroups, and channels share one case-insensitive public username namespace
+within an emulation session. Basic groups do not have public usernames. The session identity
+registry owns username reservation and resolution alongside the distinct numeric ID sequences, so a
+username cannot be assigned to two different identity kinds. This follows Telegram's generic
+[`contacts.resolveUsername`](https://core.telegram.org/method/contacts.resolveUsername) lookup and
+its support for assigning usernames to
+[`channels` and supergroups](https://core.telegram.org/method/channels.checkUsername).
+
 See [Bot API dialog IDs](https://core.telegram.org/api/bots/ids) for Telegram's identifier ranges.
 
 ## Chat types

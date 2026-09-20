@@ -1,15 +1,26 @@
 import { AccountRegistry } from './account_registry.ts';
 import { BotRegistry } from './bot_registry.ts';
+import { ChatInteractionService } from './chat_interaction_service.ts';
+import { ChatRegistry } from './chat_registry.ts';
 import { TelegramIdentityRegistry } from './telegram_identity_registry.ts';
 
 export class EmulationSession {
+  readonly identities: TelegramIdentityRegistry;
   readonly accounts: AccountRegistry;
   readonly bots: BotRegistry;
+  readonly chats: ChatRegistry;
+  readonly chatInteractions: ChatInteractionService;
 
   constructor(readonly id: string) {
-    const identities = new TelegramIdentityRegistry();
-    this.accounts = new AccountRegistry(identities);
-    this.bots = new BotRegistry(identities);
+    this.identities = new TelegramIdentityRegistry();
+    this.accounts = new AccountRegistry(this.identities);
+    this.bots = new BotRegistry(this.identities);
+    this.chats = new ChatRegistry();
+    this.chatInteractions = new ChatInteractionService({
+      accounts: this.accounts,
+      bots: this.bots,
+      chats: this.chats,
+    });
   }
 }
 

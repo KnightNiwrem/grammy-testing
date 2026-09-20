@@ -32,7 +32,10 @@ export class AccountRegistry {
   }
 
   create(input: CreateVirtualAccountInput): AccountCreationResult {
-    const identityReservation = this.#identities.reserveIdentity(input.username);
+    const identityReservation = this.#identities.reserveIdentity({
+      kind: 'account',
+      username: input.username,
+    });
     if (!identityReservation.reserved) {
       return { created: false, reason: identityReservation.reason };
     }
@@ -46,5 +49,9 @@ export class AccountRegistry {
     this.#accountsById.set(profile.id, account);
 
     return { created: true, account };
+  }
+
+  getById(id: number): VirtualAccount | undefined {
+    return this.#accountsById.get(id);
   }
 }

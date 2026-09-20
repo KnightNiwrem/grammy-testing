@@ -27,7 +27,10 @@ export class BotRegistry {
 
   create(input: CreateVirtualBotInput): BotCreationResult {
     const tokenSecret = crypto.randomUUID();
-    const identityReservation = this.#identities.reserveIdentity(input.username);
+    const identityReservation = this.#identities.reserveIdentity({
+      kind: 'bot',
+      username: input.username,
+    });
     if (!identityReservation.reserved) {
       return { created: false, reason: identityReservation.reason };
     }
@@ -55,6 +58,10 @@ export class BotRegistry {
     this.#botsByToken.set(bot.token, bot);
 
     return { created: true, bot };
+  }
+
+  getById(id: number): VirtualBot | undefined {
+    return this.#botsById.get(id);
   }
 
   getByToken(token: string): VirtualBot | undefined {
