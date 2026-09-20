@@ -47,4 +47,8 @@ export class BotRegistry {
 
     return { created: true, bot };
   }
+
+  getByToken(token: string): VirtualBot | undefined {
+    return this.#botsByToken.get(token);
+  }
 }

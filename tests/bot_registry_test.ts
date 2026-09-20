@@ -1,7 +1,7 @@
 import { BotRegistry } from '../src/bot_registry.ts';
 import { TelegramIdentityRegistry } from '../src/telegram_identity_registry.ts';
 
-Deno.test('BotRegistry creates a virtual bot', () => {
+Deno.test('BotRegistry creates and retrieves a virtual bot', () => {
   const bots = new BotRegistry(new TelegramIdentityRegistry());
 
   const result = bots.create({
@@ -22,5 +22,8 @@ Deno.test('BotRegistry creates a virtual bot', () => {
   }
   if (!result.bot.token.startsWith(`${result.bot.profile.id}:`)) {
     throw new Error('Expected the bot token to be prefixed with its user ID');
+  }
+  if (bots.getByToken(result.bot.token) !== result.bot) {
+    throw new Error('Expected token lookup to return the created bot');
   }
 });
