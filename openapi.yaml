@@ -94,6 +94,29 @@ paths:
     x-implementation-status: unimplemented
     parameters:
       - $ref: '#/components/parameters/SessionId'
+  /sessions/{sessionId}/bot-api/bot{token}/getMe:
+    description: Telegram Bot API method for retrieving the authenticated virtual bot's profile.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getMe
+      summary: Return the authenticated virtual bot's profile
+      responses:
+        '200':
+          description: The virtual bot was authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetMeResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
   /sessions/{sessionId}/bot-api/bot{token}/{method}:
     description: Telegram Bot API methods invoked for a virtual bot within a test session.
     x-implementation-status: unimplemented
@@ -178,6 +201,33 @@ components:
           description: Emulator-issued token used to call the Bot API as this bot.
         bot:
           $ref: '#/components/schemas/Bot'
+    GetMeResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          $ref: '#/components/schemas/Bot'
+    BotApiErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - error_code
+        - description
+      properties:
+        ok:
+          type: boolean
+          const: false
+        error_code:
+          type: integer
+        description:
+          type: string
     Session:
       type: object
       additionalProperties: false

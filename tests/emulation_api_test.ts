@@ -85,6 +85,44 @@ Deno.test('POST /sessions/:sessionId/bots creates a virtual bot', async () => {
   }
 });
 
+Deno.test('POST /sessions/:sessionId/bot-api/bot:token/getMe returns the bot profile', async () => {
+  const api = createEmulationApi({
+    sessions: new SessionRegistry(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
+  const sessionPath = createSessionResponse.headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+
+  const createBotResponse = await api.request(`${sessionPath}/bots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
+  });
+  const createdBot: unknown = await createBotResponse.json();
+  if (!isCreatedBotResponse(createdBot)) {
+    throw new Error('Expected a created bot response');
+  }
+
+  const response = await api.request(
+    `${sessionPath}/bot-api/bot${createdBot.token}/getMe`,
+    { method: 'POST' },
+  );
+  const body: unknown = await response.json();
+
+  if (response.status !== 200) {
+    throw new Error(`Expected status 200, received ${response.status}`);
+  }
+  if (!isGetMeResponse(body)) {
+    throw new Error('Expected a successful getMe response');
+  }
+  if (JSON.stringify(body.result) !== JSON.stringify(createdBot.bot)) {
+    throw new Error('Expected getMe to return the stored virtual bot profile');
+  }
+});
+
 function isSessionResponse(value: unknown): value is { id: string; botApiRoot: string } {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -103,11 +141,32 @@ function isCreatedBotResponse(value: unknown): value is {
   }
 
   const { token, bot } = value as Record<string, unknown>;
-  if (typeof token !== 'string' || typeof bot !== 'object' || bot === null) {
+  return typeof token === 'string' && isBotProfile(bot);
+}
+
+function isGetMeResponse(value: unknown): value is {
+  ok: true;
+  result: { id: number; is_bot: boolean; first_name: string; username: string };
+} {
+  if (typeof value !== 'object' || value === null) {
     return false;
   }
 
-  const profile = bot as Record<string, unknown>;
+  const { ok, result } = value as Record<string, unknown>;
+  return ok === true && isBotProfile(result);
+}
+
+function isBotProfile(value: unknown): value is {
+  id: number;
+  is_bot: boolean;
+  first_name: string;
+  username: string;
+} {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const profile = value as Record<string, unknown>;
   return (
     typeof profile.id === 'number' &&
     typeof profile.is_bot === 'boolean' &&
