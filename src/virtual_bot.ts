@@ -1,9 +1,6 @@
-import type { User } from 'grammy/types';
+import type { UserFromGetMe } from 'grammy/types';
 
-export type VirtualBotProfile = Readonly<User> & {
-  readonly is_bot: true;
-  readonly username: string;
-};
+export type VirtualBotProfile = Readonly<UserFromGetMe>;
 
 export interface VirtualBot {
   readonly token: string;

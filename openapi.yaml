@@ -111,6 +111,15 @@ components:
         - is_bot
         - first_name
         - username
+        - can_join_groups
+        - can_read_all_group_messages
+        - supports_inline_queries
+        - can_connect_to_business
+        - has_main_web_app
+        - has_topics_enabled
+        - allows_users_to_create_topics
+        - can_manage_bots
+        - supports_join_request_queries
       properties:
         id:
           type: integer
@@ -124,6 +133,26 @@ components:
           type: string
         username:
           type: string
+        can_join_groups:
+          type: boolean
+        can_read_all_group_messages:
+          type: boolean
+        supports_guest_queries:
+          type: boolean
+        supports_inline_queries:
+          type: boolean
+        can_connect_to_business:
+          type: boolean
+        has_main_web_app:
+          type: boolean
+        has_topics_enabled:
+          type: boolean
+        allows_users_to_create_topics:
+          type: boolean
+        can_manage_bots:
+          type: boolean
+        supports_join_request_queries:
+          type: boolean
     CreateBotRequest:
       type: object
       additionalProperties: false
