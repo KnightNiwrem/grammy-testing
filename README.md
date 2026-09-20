@@ -3,10 +3,34 @@
 An HTTP server for emulating the Telegram Bot API in end-to-end tests. The server will expose both
 the emulated Bot API and an admin API for controlling isolated test sessions.
 
-The standalone server currently supports creating an isolated test session with `POST /sessions`,
-adding virtual bots with `POST /sessions/{sessionId}/bots`, and ending a session with
-`DELETE /sessions/{sessionId}`. The session creation response identifies its future Bot API root.
-Other routes described in `openapi.yaml` are not implemented yet.
+The standalone server currently supports creating and ending isolated test sessions, adding virtual
+bots and accounts to them, and calling the Bot API `getMe` method for a virtual bot. The session
+creation response identifies its Bot API root. Other routes described in `openapi.yaml` are not
+implemented yet.
+
+## TypeScript client
+
+Tests can use the TypeScript client instead of constructing emulation server URLs directly:
+
+```ts
+import { TelegramEmulationClient } from './clients/typescript/mod.ts';
+
+const emulator = new TelegramEmulationClient('http://localhost:8081');
+const session = await emulator.createSession();
+
+try {
+  const { token, bot } = await session.createBot({
+    first_name: 'Test Bot',
+    username: 'test_bot',
+  });
+  const { account } = await session.createAccount({ first_name: 'Ada' });
+
+  // Configure grammY with token and session.botApiRoot.
+  console.log(token, bot, account, session.botApiRoot);
+} finally {
+  await session.end();
+}
+```
 
 ## Commands
 
