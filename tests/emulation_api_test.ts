@@ -44,6 +44,47 @@ Deno.test('DELETE /sessions/:sessionId ends an active session', async () => {
   }
 });
 
+Deno.test('POST /sessions/:sessionId/bots creates a virtual bot', async () => {
+  const api = createEmulationApi({
+    sessions: new SessionRegistry(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
+  const sessionPath = createSessionResponse.headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+
+  const response = await api.request(`${sessionPath}/bots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
+  });
+  const body: unknown = await response.json();
+
+  if (response.status !== 201) {
+    throw new Error(`Expected status 201, received ${response.status}`);
+  }
+  if (!isCreatedBotResponse(body)) {
+    throw new Error('Expected a created bot response');
+  }
+
+  const botPath = `${sessionPath}/bots/${body.bot.id}`;
+  if (response.headers.get('Location') !== botPath) {
+    throw new Error('Expected Location to identify the created bot');
+  }
+  if (!body.token.startsWith(`${body.bot.id}:`)) {
+    throw new Error('Expected the bot token to be prefixed with its user ID');
+  }
+  if (
+    body.bot.is_bot !== true ||
+    body.bot.first_name !== 'Test Bot' ||
+    body.bot.username !== 'test_bot'
+  ) {
+    throw new Error('Expected the response to contain the virtual bot profile');
+  }
+});
+
 function isSessionResponse(value: unknown): value is { id: string; botApiRoot: string } {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -51,4 +92,26 @@ function isSessionResponse(value: unknown): value is { id: string; botApiRoot: s
 
   const { id, botApiRoot } = value as Record<string, unknown>;
   return typeof id === 'string' && id.length > 0 && typeof botApiRoot === 'string';
+}
+
+function isCreatedBotResponse(value: unknown): value is {
+  token: string;
+  bot: { id: number; is_bot: boolean; first_name: string; username: string };
+} {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const { token, bot } = value as Record<string, unknown>;
+  if (typeof token !== 'string' || typeof bot !== 'object' || bot === null) {
+    return false;
+  }
+
+  const profile = bot as Record<string, unknown>;
+  return (
+    typeof profile.id === 'number' &&
+    typeof profile.is_bot === 'boolean' &&
+    typeof profile.first_name === 'string' &&
+    typeof profile.username === 'string'
+  );
 }

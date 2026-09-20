@@ -55,7 +55,6 @@ paths:
     post:
       operationId: createBot
       summary: Create a virtual bot
-      x-implementation-status: unimplemented
       requestBody:
         required: true
         content:

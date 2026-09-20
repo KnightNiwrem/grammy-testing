@@ -1,17 +1,14 @@
 import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 
-import type { EmulationSession, SessionRegistry } from '../../session_registry.ts';
+import type { SessionRegistry } from '../../session_registry.ts';
+import { createBotRoutes } from './bots/mod.ts';
+import type { SessionRouteEnvironment } from './environment.ts';
 
 const SESSION_ID_PARAMETER = 'sessionId';
 const SESSION_PATH = `/:${SESSION_ID_PARAMETER}` as const;
 const SESSION_SUBRESOURCE_PATH = `${SESSION_PATH}/*` as const;
-
-interface SessionRouteEnvironment {
-  readonly Variables: {
-    readonly emulationSession: EmulationSession;
-  };
-}
+const BOT_COLLECTION_PATH = `${SESSION_PATH}/bots` as const;
 
 interface SessionRouteDependencies {
   readonly sessions: SessionRegistry;
@@ -51,6 +48,8 @@ export function createSessionRoutes(
     context.set('emulationSession', session);
     await next();
   });
+
+  sessionRoutes.route(BOT_COLLECTION_PATH, createBotRoutes());
 
   return sessionRoutes;
 }
