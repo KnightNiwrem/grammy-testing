@@ -49,7 +49,7 @@ export async function requestJson<T>(
   return parsedResponse.data;
 }
 
-export async function requestWithoutBody(
+export async function requestEmptyResponse(
   fetchImplementation: typeof globalThis.fetch,
   request: EmptyResponseRequest,
 ): Promise<void> {

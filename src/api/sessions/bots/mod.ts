@@ -2,15 +2,15 @@ import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 import { z } from 'zod';
 
-import type { SessionRouteEnvironment } from '../environment.ts';
+import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 
 const createBotRequestSchema = z.strictObject({
   first_name: z.string().min(1),
   username: z.string().min(1),
 });
 
-export function createBotRoutes(): Hono<SessionRouteEnvironment> {
-  const botRoutes = new Hono<SessionRouteEnvironment>();
+export function createBotRoutes(): Hono<SessionRouteContextTypes> {
+  const botRoutes = new Hono<SessionRouteContextTypes>();
 
   botRoutes.post('/', async (context) => {
     let requestBody: unknown;

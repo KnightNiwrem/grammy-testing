@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { TELEGRAM_USER_ID_MAXIMUM } from './constants.ts';
+import { MAX_TELEGRAM_USER_ID } from './constants.ts';
 import type {
   CreatedVirtualAccount,
   CreatedVirtualBot,
@@ -9,7 +9,7 @@ import type {
   VirtualBotProfile,
 } from './types.ts';
 
-const telegramUserIdSchema = z.number().int().min(1).max(TELEGRAM_USER_ID_MAXIMUM);
+const telegramUserIdSchema = z.number().int().min(1).max(MAX_TELEGRAM_USER_ID);
 
 export const virtualBotProfileSchema: z.ZodType<VirtualBotProfile> = z.strictObject({
   id: telegramUserIdSchema,

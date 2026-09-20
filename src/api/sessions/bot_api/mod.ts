@@ -1,13 +1,13 @@
 import { Hono } from 'hono';
 
-import type { SessionRouteEnvironment } from '../environment.ts';
+import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 
 const BOT_TOKEN_PATH_PARAMETER = 'botTokenPathSegment';
 const BOT_TOKEN_PATH_PREFIX = 'bot';
 const GET_ME_PATH = `/:${BOT_TOKEN_PATH_PARAMETER}{${BOT_TOKEN_PATH_PREFIX}.+}/getMe` as const;
 
-export function createBotApiRoutes(): Hono<SessionRouteEnvironment> {
-  const botApiRoutes = new Hono<SessionRouteEnvironment>();
+export function createBotApiRoutes(): Hono<SessionRouteContextTypes> {
+  const botApiRoutes = new Hono<SessionRouteContextTypes>();
 
   botApiRoutes.post(GET_ME_PATH, (context) => {
     const botTokenPathSegment = context.req.param(BOT_TOKEN_PATH_PARAMETER);

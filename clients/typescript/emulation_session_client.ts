@@ -12,7 +12,7 @@ import type {
   EmulationSession,
   VirtualBotProfile,
 } from './types.ts';
-import { normalizeUrlRoot, requestJson, requestWithoutBody } from './utils.ts';
+import { normalizeUrlRoot, requestEmptyResponse, requestJson } from './utils.ts';
 
 export interface EmulationSessionClient extends EmulationSession {
   /** Ends the session and discards all state owned by it. */
@@ -51,7 +51,7 @@ class HttpEmulationSessionClient implements EmulationSessionClient {
   }
 
   async end(): Promise<void> {
-    await requestWithoutBody(this.#fetch, {
+    await requestEmptyResponse(this.#fetch, {
       method: 'DELETE',
       url: this.#sessionUrl,
       expectedStatus: HTTP_STATUS_NO_CONTENT,

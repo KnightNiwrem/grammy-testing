@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 import { z } from 'zod';
 
-import type { SessionRouteEnvironment } from '../environment.ts';
+import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 
 const createAccountRequestSchema = z.strictObject({
   first_name: z.string().min(1),
@@ -11,8 +11,8 @@ const createAccountRequestSchema = z.strictObject({
   language_code: z.string().min(1).optional(),
 });
 
-export function createAccountRoutes(): Hono<SessionRouteEnvironment> {
-  const accountRoutes = new Hono<SessionRouteEnvironment>();
+export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
+  const accountRoutes = new Hono<SessionRouteContextTypes>();
 
   accountRoutes.post('/', async (context) => {
     let requestBody: unknown;

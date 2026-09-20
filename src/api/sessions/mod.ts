@@ -5,7 +5,7 @@ import type { SessionRegistry } from '../../session_registry.ts';
 import { createAccountRoutes } from './accounts/mod.ts';
 import { createBotApiRoutes } from './bot_api/mod.ts';
 import { createBotRoutes } from './bots/mod.ts';
-import type { SessionRouteEnvironment } from './environment.ts';
+import type { SessionRouteContextTypes } from './session_route_context_types.ts';
 
 const SESSION_ID_PARAMETER = 'sessionId';
 const SESSION_PATH = `/:${SESSION_ID_PARAMETER}` as const;
@@ -21,8 +21,8 @@ interface SessionRouteDependencies {
 
 export function createSessionRoutes(
   { sessions, publicOrigin }: SessionRouteDependencies,
-): Hono<SessionRouteEnvironment> {
-  const sessionRoutes = new Hono<SessionRouteEnvironment>();
+): Hono<SessionRouteContextTypes> {
+  const sessionRoutes = new Hono<SessionRouteContextTypes>();
 
   sessionRoutes.post('/', (context) => {
     const session = sessions.create();
