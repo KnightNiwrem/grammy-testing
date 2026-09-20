@@ -85,6 +85,55 @@ Deno.test('POST /sessions/:sessionId/bots creates a virtual bot', async () => {
   }
 });
 
+Deno.test('POST /sessions/:sessionId/accounts creates an account in the shared ID namespace', async () => {
+  const api = createEmulationApi({
+    sessions: new SessionRegistry(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
+  const sessionPath = createSessionResponse.headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+
+  await api.request(`${sessionPath}/bots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
+  });
+  const response = await api.request(`${sessionPath}/accounts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+      username: 'ada',
+      language_code: 'en',
+    }),
+  });
+  const body: unknown = await response.json();
+
+  if (response.status !== 201) {
+    throw new Error(`Expected status 201, received ${response.status}`);
+  }
+  if (!isCreatedAccountResponse(body)) {
+    throw new Error('Expected a created account response');
+  }
+  if (response.headers.get('Location') !== `${sessionPath}/accounts/${body.account.id}`) {
+    throw new Error('Expected Location to identify the created account');
+  }
+  if (
+    body.account.id !== 2 ||
+    body.account.is_bot !== false ||
+    body.account.first_name !== 'Ada' ||
+    body.account.last_name !== 'Lovelace' ||
+    body.account.username !== 'ada' ||
+    body.account.language_code !== 'en'
+  ) {
+    throw new Error('Expected the response to contain the virtual account profile');
+  }
+});
+
 Deno.test('POST /sessions/:sessionId/bot-api/bot:token/getMe returns the bot profile', async () => {
   const api = createEmulationApi({
     sessions: new SessionRegistry(),
@@ -141,7 +190,11 @@ function isCreatedBotResponse(value: unknown): value is {
   }
 
   const { token, bot } = value as Record<string, unknown>;
-  return typeof token === 'string' && isBotProfile(bot);
+  return (
+    typeof token === 'string' &&
+    isUserProfile(bot) &&
+    typeof bot.username === 'string'
+  );
 }
 
 function isGetMeResponse(value: unknown): value is {
@@ -153,14 +206,34 @@ function isGetMeResponse(value: unknown): value is {
   }
 
   const { ok, result } = value as Record<string, unknown>;
-  return ok === true && isBotProfile(result);
+  return ok === true && isUserProfile(result) && typeof result.username === 'string';
 }
 
-function isBotProfile(value: unknown): value is {
+function isCreatedAccountResponse(value: unknown): value is {
+  account: {
+    id: number;
+    is_bot: boolean;
+    first_name: string;
+    last_name?: string;
+    username?: string;
+    language_code?: string;
+  };
+} {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const { account } = value as Record<string, unknown>;
+  return isUserProfile(account);
+}
+
+function isUserProfile(value: unknown): value is {
   id: number;
   is_bot: boolean;
   first_name: string;
-  username: string;
+  last_name?: string;
+  username?: string;
+  language_code?: string;
 } {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -171,6 +244,8 @@ function isBotProfile(value: unknown): value is {
     typeof profile.id === 'number' &&
     typeof profile.is_bot === 'boolean' &&
     typeof profile.first_name === 'string' &&
-    typeof profile.username === 'string'
+    (profile.last_name === undefined || typeof profile.last_name === 'string') &&
+    (profile.username === undefined || typeof profile.username === 'string') &&
+    (profile.language_code === undefined || typeof profile.language_code === 'string')
   );
 }

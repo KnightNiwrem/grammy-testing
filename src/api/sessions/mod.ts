@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 
 import type { SessionRegistry } from '../../session_registry.ts';
+import { createAccountRoutes } from './accounts/mod.ts';
 import { createBotApiRoutes } from './bot_api/mod.ts';
 import { createBotRoutes } from './bots/mod.ts';
 import type { SessionRouteEnvironment } from './environment.ts';
@@ -9,6 +10,7 @@ import type { SessionRouteEnvironment } from './environment.ts';
 const SESSION_ID_PARAMETER = 'sessionId';
 const SESSION_PATH = `/:${SESSION_ID_PARAMETER}` as const;
 const SESSION_SUBRESOURCE_PATH = `${SESSION_PATH}/*` as const;
+const ACCOUNT_COLLECTION_PATH = `${SESSION_PATH}/accounts` as const;
 const BOT_COLLECTION_PATH = `${SESSION_PATH}/bots` as const;
 const BOT_API_PATH = `${SESSION_PATH}/bot-api` as const;
 
@@ -51,6 +53,7 @@ export function createSessionRoutes(
     await next();
   });
 
+  sessionRoutes.route(ACCOUNT_COLLECTION_PATH, createAccountRoutes());
   sessionRoutes.route(BOT_COLLECTION_PATH, createBotRoutes());
   sessionRoutes.route(BOT_API_PATH, createBotApiRoutes());
 

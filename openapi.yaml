@@ -89,11 +89,47 @@ paths:
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotId'
-  /sessions/{sessionId}/users:
-    description: Virtual Telegram users owned by a test session.
+  /sessions/{sessionId}/accounts:
+    description: Virtual Telegram accounts owned by a test session.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      operationId: createAccount
+      summary: Create a virtual Telegram account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+      responses:
+        '201':
+          description: The virtual account was created.
+          headers:
+            Location:
+              description: Relative URL of the created virtual account.
+              required: true
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedAccount'
+        '400':
+          description: The request body is malformed or does not match the account creation schema.
+        '404':
+          description: No active test session has the supplied identifier.
+        '409':
+          description: The username is already assigned within the test session.
+        '507':
+          description: The test session cannot allocate another Telegram user identifier.
+  /sessions/{sessionId}/accounts/{accountId}:
+    description: One virtual Telegram account owned by a test session.
     x-implementation-status: unimplemented
     parameters:
       - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
   /sessions/{sessionId}/bot-api/bot{token}/getMe:
     description: Telegram Bot API method for retrieving the authenticated virtual bot's profile.
     parameters:
@@ -201,6 +237,56 @@ components:
           description: Emulator-issued token used to call the Bot API as this bot.
         bot:
           $ref: '#/components/schemas/Bot'
+    Account:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - is_bot
+        - first_name
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          maximum: 4503599627370495
+          description: Server-assigned Telegram user identifier for the account.
+        is_bot:
+          type: boolean
+          const: false
+        first_name:
+          type: string
+        last_name:
+          type: string
+        username:
+          type: string
+        language_code:
+          type: string
+    CreateAccountRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - first_name
+      properties:
+        first_name:
+          type: string
+          minLength: 1
+        last_name:
+          type: string
+          minLength: 1
+        username:
+          type: string
+          minLength: 1
+        language_code:
+          type: string
+          minLength: 1
+    CreatedAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - account
+      properties:
+        account:
+          $ref: '#/components/schemas/Account'
     GetMeResponse:
       type: object
       additionalProperties: false
@@ -263,6 +349,15 @@ components:
       in: path
       required: true
       description: Server-assigned identifier of a virtual bot.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 4503599627370495
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      description: Server-assigned Telegram user identifier for a virtual account.
       schema:
         type: integer
         minimum: 1

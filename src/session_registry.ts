@@ -1,11 +1,14 @@
+import { AccountRegistry } from './account_registry.ts';
 import { BotRegistry } from './bot_registry.ts';
 import { TelegramIdentityRegistry } from './telegram_identity_registry.ts';
 
 export class EmulationSession {
+  readonly accounts: AccountRegistry;
   readonly bots: BotRegistry;
 
   constructor(readonly id: string) {
     const identities = new TelegramIdentityRegistry();
+    this.accounts = new AccountRegistry(identities);
     this.bots = new BotRegistry(identities);
   }
 }

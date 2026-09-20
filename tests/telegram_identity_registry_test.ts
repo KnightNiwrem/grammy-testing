@@ -13,8 +13,8 @@ Deno.test('TelegramIdentityRegistry shares sequential IDs across username reserv
     throw new Error('Expected usernames to be reserved case-insensitively');
   }
 
-  const userIdentity = identities.reserveIdentity();
-  if (!userIdentity.reserved || userIdentity.identity.id !== 2) {
+  const nextIdentity = identities.reserveIdentity();
+  if (!nextIdentity.reserved || nextIdentity.identity.id !== 2) {
     throw new Error('Expected a rejected username not to consume a user ID');
   }
 });
