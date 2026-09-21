@@ -1,6 +1,8 @@
 import {
   type BasicGroupRegistrationFailureReason,
   type BasicGroupRegistrationResult,
+  type ChatMemberAdditionFailureReason,
+  type ChatMemberAdditionResult,
   ChatRegistry,
 } from '../src/chat_registry.ts';
 
@@ -139,3 +141,58 @@ Deno.test('ChatRegistry preserves an existing shared chat when its ID is registe
     throw new Error('Expected duplicate registration not to overwrite existing chat state');
   }
 });
+
+Deno.test('ChatRegistry adds a member to an existing shared chat', () => {
+  const chats = new ChatRegistry();
+  const group = { kind: 'basic_group', id: -1, title: 'Test Group' } as const;
+  const registration = chats.registerBasicGroup(group, 1, []);
+  if (!registration.registered) {
+    throw new Error('Expected group registration to succeed');
+  }
+
+  const addition = chats.addChatMember(group.id, 2);
+  if (!addition.added) {
+    throw new Error(`Expected member addition to succeed, received ${addition.reason}`);
+  }
+  if (chats.getChatMembership(group.id, 2)?.status !== 'member') {
+    throw new Error('Expected the added identity to have member status');
+  }
+});
+
+Deno.test('ChatRegistry rejects member addition without changing existing state', () => {
+  const chats = new ChatRegistry();
+  const group = { kind: 'basic_group', id: -1, title: 'Test Group' } as const;
+  const registration = chats.registerBasicGroup(group, 1, [2]);
+  if (!registration.registered) {
+    throw new Error('Expected group registration to succeed');
+  }
+
+  const missingChat = chats.addChatMember(-2, 3);
+  assertMemberAdditionFailure(missingChat, 'chat_not_found');
+
+  const duplicateMember = chats.addChatMember(group.id, 2);
+  assertMemberAdditionFailure(duplicateMember, 'member_already_present');
+  assertMembershipsPreservedAfterRejectedAdditions(chats, group.id);
+});
+
+function assertMemberAdditionFailure(
+  result: ChatMemberAdditionResult,
+  expectedReason: ChatMemberAdditionFailureReason,
+): void {
+  if (result.added || result.reason !== expectedReason) {
+    throw new Error(`Expected member addition to fail with ${expectedReason}`);
+  }
+}
+
+function assertMembershipsPreservedAfterRejectedAdditions(
+  chats: ChatRegistry,
+  chatId: number,
+): void {
+  if (
+    chats.getChatMembership(chatId, 1)?.status !== 'owner' ||
+    chats.getChatMembership(chatId, 2)?.status !== 'member' ||
+    chats.getChatMembership(chatId, 3) !== undefined
+  ) {
+    throw new Error('Expected rejected additions to preserve existing memberships');
+  }
+}

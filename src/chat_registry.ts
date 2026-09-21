@@ -28,6 +28,17 @@ export type BasicGroupRegistrationResult =
     readonly reason: BasicGroupRegistrationFailureReason;
   };
 
+export type ChatMemberAdditionFailureReason =
+  | 'chat_not_found'
+  | 'member_already_present';
+
+export type ChatMemberAdditionResult =
+  | { readonly added: true }
+  | {
+    readonly added: false;
+    readonly reason: ChatMemberAdditionFailureReason;
+  };
+
 export class ChatRegistry {
   readonly #privateConversationsByAccountId = new Map<number, Map<number, PrivateConversation>>();
   readonly #sharedChatsById = new Map<number, SharedChat>();
@@ -134,5 +145,21 @@ export class ChatRegistry {
     identityId: number,
   ): ChatMembership | undefined {
     return this.#sharedChatMembershipsByChatId.get(chatId)?.get(identityId);
+  }
+
+  addChatMember(chatId: number, memberId: number): ChatMemberAdditionResult {
+    const membershipsByIdentityId = this.#sharedChatMembershipsByChatId.get(chatId);
+    if (membershipsByIdentityId === undefined) {
+      return { added: false, reason: 'chat_not_found' };
+    }
+    if (membershipsByIdentityId.has(memberId)) {
+      return { added: false, reason: 'member_already_present' };
+    }
+
+    membershipsByIdentityId.set(memberId, {
+      status: 'member',
+      identityId: memberId,
+    });
+    return { added: true };
   }
 }

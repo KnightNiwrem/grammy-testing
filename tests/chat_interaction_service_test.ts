@@ -1,5 +1,7 @@
 import { EmulationSession } from '../src/session_registry.ts';
 import type {
+  AddChatMemberFailureReason,
+  AddChatMemberResult,
   BasicGroupCreationFailureReason,
   BasicGroupCreationResult,
   ChannelCreationResult,
@@ -192,6 +194,119 @@ Deno.test('ChatInteractionService validates owners before reserving shared-chat 
   }
 });
 
+Deno.test('ChatInteractionService adds permitted members to shared chats', () => {
+  const { virtualUsers, chats, chatInteractions } = new EmulationSession('test-session');
+  const owner = createAccount(virtualUsers, 'Ada');
+  const account = createAccount(virtualUsers, 'Grace');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const basicGroup = getCreatedBasicGroup(chatInteractions.createBasicGroup({
+    title: 'Test Group',
+    creatorAccountId: owner.profile.id,
+    initialMemberIds: [],
+  }));
+  const supergroup = getCreatedSupergroup(chatInteractions.createSupergroup({
+    title: 'Test Supergroup',
+    creatorAccountId: owner.profile.id,
+  }));
+  const channel = getCreatedChannel(chatInteractions.createChannel({
+    title: 'Test Channel',
+    creatorAccountId: owner.profile.id,
+  }));
+
+  assertMemberAdded(chatInteractions.addChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: basicGroup.id,
+    memberId: bot.profile.id,
+  }));
+  assertMemberAdded(chatInteractions.addChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: supergroup.id,
+    memberId: bot.profile.id,
+  }));
+  assertMemberAdded(chatInteractions.addChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: channel.id,
+    memberId: account.profile.id,
+  }));
+
+  assertMembershipStatus(chats.getChatMembership(basicGroup.id, bot.profile.id)?.status, 'member');
+  assertMembershipStatus(chats.getChatMembership(supergroup.id, bot.profile.id)?.status, 'member');
+  assertMembershipStatus(chats.getChatMembership(channel.id, account.profile.id)?.status, 'member');
+});
+
+Deno.test('ChatInteractionService validates member additions before changing chat state', () => {
+  const { virtualUsers, chats, chatInteractions } = new EmulationSession('test-session');
+  const owner = createAccount(virtualUsers, 'Ada');
+  const existingMember = createAccount(virtualUsers, 'Grace');
+  const candidate = createAccount(virtualUsers, 'Linus');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const channel = getCreatedChannel(chatInteractions.createChannel({
+    title: 'Test Channel',
+    creatorAccountId: owner.profile.id,
+  }));
+  assertMemberAdded(chatInteractions.addChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: channel.id,
+    memberId: existingMember.profile.id,
+  }));
+
+  assertMemberAdditionFailure(
+    chatInteractions.addChatMember({
+      actorAccountId: 999,
+      chatId: channel.id,
+      memberId: candidate.profile.id,
+    }),
+    'actor_account_not_found',
+  );
+  assertMemberAdditionFailure(
+    chatInteractions.addChatMember({
+      actorAccountId: owner.profile.id,
+      chatId: -999,
+      memberId: candidate.profile.id,
+    }),
+    'chat_not_found',
+  );
+  assertMemberAdditionFailure(
+    chatInteractions.addChatMember({
+      actorAccountId: existingMember.profile.id,
+      chatId: channel.id,
+      memberId: candidate.profile.id,
+    }),
+    'actor_not_authorized',
+  );
+  assertMemberAdditionFailure(
+    chatInteractions.addChatMember({
+      actorAccountId: owner.profile.id,
+      chatId: channel.id,
+      memberId: 999,
+    }),
+    'member_not_found',
+  );
+  assertMemberAdditionFailure(
+    chatInteractions.addChatMember({
+      actorAccountId: owner.profile.id,
+      chatId: channel.id,
+      memberId: bot.profile.id,
+    }),
+    'bot_not_permitted_in_channel',
+  );
+  assertMemberAdditionFailure(
+    chatInteractions.addChatMember({
+      actorAccountId: owner.profile.id,
+      chatId: channel.id,
+      memberId: existingMember.profile.id,
+    }),
+    'member_already_present',
+  );
+
+  if (
+    chats.getChatMembership(channel.id, candidate.profile.id) !== undefined ||
+    chats.getChatMembership(channel.id, bot.profile.id) !== undefined
+  ) {
+    throw new Error('Expected rejected member additions not to change chat memberships');
+  }
+});
+
 function getCreatedBasicGroup(result: BasicGroupCreationResult): BasicGroup {
   if (!result.created) {
     throw new Error(`Expected group creation to succeed, received ${result.reason}`);
@@ -228,6 +343,21 @@ function assertOwnerOnlyChatCreationFailure(
 ): void {
   if (result.created || result.reason !== expectedReason) {
     throw new Error(`Expected shared-chat creation to fail with ${expectedReason}`);
+  }
+}
+
+function assertMemberAdded(result: AddChatMemberResult): void {
+  if (!result.added) {
+    throw new Error(`Expected member addition to succeed, received ${result.reason}`);
+  }
+}
+
+function assertMemberAdditionFailure(
+  result: AddChatMemberResult,
+  expectedReason: AddChatMemberFailureReason,
+): void {
+  if (result.added || result.reason !== expectedReason) {
+    throw new Error(`Expected member addition to fail with ${expectedReason}`);
   }
 }
 

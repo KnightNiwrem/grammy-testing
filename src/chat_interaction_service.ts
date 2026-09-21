@@ -1,7 +1,9 @@
 import type {
   BasicGroupRegistrationResult,
+  ChatMemberAdditionResult,
   SharedChatRegistrationResult,
 } from './chat_registry.ts';
+import type { ChatMembership } from './chat_membership.ts';
 import type { IdentityReservationResult } from './telegram_identity_registry.ts';
 import type { VirtualAccount } from './virtual_account.ts';
 import type { VirtualBot } from './virtual_bot.ts';
@@ -93,6 +95,27 @@ export type PrivateConversationActivationResult =
     readonly reason: PrivateConversationActivationFailureReason;
   };
 
+export interface AddChatMemberInput {
+  readonly actorAccountId: number;
+  readonly chatId: number;
+  readonly memberId: number;
+}
+
+export type AddChatMemberFailureReason =
+  | 'actor_account_not_found'
+  | 'chat_not_found'
+  | 'actor_not_authorized'
+  | 'member_not_found'
+  | 'bot_not_permitted_in_channel'
+  | 'member_already_present';
+
+export type AddChatMemberResult =
+  | { readonly added: true }
+  | {
+    readonly added: false;
+    readonly reason: AddChatMemberFailureReason;
+  };
+
 interface AccountLookup {
   getById(accountId: number): VirtualAccount | undefined;
 }
@@ -129,7 +152,17 @@ interface OwnerOnlySharedChatStore {
   ): SharedChatRegistrationResult;
 }
 
-type ChatStore = PrivateConversationStore & BasicGroupStore & OwnerOnlySharedChatStore;
+interface ChatMembershipStore {
+  getSharedChat(chatId: number): SharedChat | undefined;
+  getChatMembership(chatId: number, identityId: number): ChatMembership | undefined;
+  addChatMember(chatId: number, memberId: number): ChatMemberAdditionResult;
+}
+
+type ChatStore =
+  & PrivateConversationStore
+  & BasicGroupStore
+  & OwnerOnlySharedChatStore
+  & ChatMembershipStore;
 
 interface ChatInteractionServiceDependencies {
   readonly identities: SharedChatIdentityReservationStore;
@@ -238,6 +271,32 @@ export class ChatInteractionService {
     }
 
     return { created: true, channel };
+  }
+
+  addChatMember(input: AddChatMemberInput): AddChatMemberResult {
+    if (this.#accounts.getById(input.actorAccountId) === undefined) {
+      return { added: false, reason: 'actor_account_not_found' };
+    }
+
+    const chat = this.#chats.getSharedChat(input.chatId);
+    if (chat === undefined) {
+      return { added: false, reason: 'chat_not_found' };
+    }
+    const actorMembership = this.#chats.getChatMembership(input.chatId, input.actorAccountId);
+    if (actorMembership?.status !== 'owner') {
+      return { added: false, reason: 'actor_not_authorized' };
+    }
+
+    const memberIsAccount = this.#accounts.getById(input.memberId) !== undefined;
+    const memberIsBot = this.#bots.getById(input.memberId) !== undefined;
+    if (!memberIsAccount && !memberIsBot) {
+      return { added: false, reason: 'member_not_found' };
+    }
+    if (chat.kind === 'channel' && memberIsBot) {
+      return { added: false, reason: 'bot_not_permitted_in_channel' };
+    }
+
+    return this.#chats.addChatMember(input.chatId, input.memberId);
   }
 
   #validateBasicGroupParticipants(
