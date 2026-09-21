@@ -1,0 +1,137 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "clients/typescript/mod.ts",
+    "src/main.ts"
+  ],
+  "rules": {
+    "boundary-violation": "error"
+  },
+  "boundaries": {
+    "zones": [
+      {
+        "name": "domain",
+        "patterns": [
+          "src/virtual_account.ts",
+          "src/virtual_bot.ts",
+          "src/virtual_chat.ts",
+          "src/chat_membership.ts"
+        ]
+      },
+      {
+        "name": "account-registry",
+        "patterns": [
+          "src/account_registry.ts"
+        ]
+      },
+      {
+        "name": "bot-registry",
+        "patterns": [
+          "src/bot_registry.ts"
+        ]
+      },
+      {
+        "name": "chat-registry",
+        "patterns": [
+          "src/chat_registry.ts"
+        ]
+      },
+      {
+        "name": "identity-registry",
+        "patterns": [
+          "src/telegram_identity_registry.ts"
+        ]
+      },
+      {
+        "name": "services",
+        "patterns": [
+          "src/virtual_user_service.ts",
+          "src/chat_interaction_service.ts"
+        ]
+      },
+      {
+        "name": "composition",
+        "patterns": [
+          "src/session_registry.ts"
+        ]
+      },
+      {
+        "name": "transport",
+        "patterns": [
+          "src/api/**/*.ts",
+          "src/config.ts",
+          "src/server.ts",
+          "src/main.ts"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "from": "domain",
+        "allow": []
+      },
+      {
+        "from": "account-registry",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
+        "from": "bot-registry",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
+        "from": "chat-registry",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
+        "from": "identity-registry",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
+        "from": "services",
+        "allow": [
+          "domain"
+        ],
+        "allowTypeOnly": [
+          "account-registry",
+          "bot-registry",
+          "chat-registry",
+          "identity-registry"
+        ]
+      },
+      {
+        "from": "composition",
+        "allow": [
+          "domain",
+          "account-registry",
+          "bot-registry",
+          "chat-registry",
+          "identity-registry",
+          "services"
+        ]
+      },
+      {
+        "from": "transport",
+        "allow": [
+          "domain",
+          "composition",
+          "transport"
+        ]
+      }
+    ],
+    "coverage": {
+      "requireAllFiles": true,
+      "allowUnmatched": [
+        "tests/**",
+        "clients/**"
+      ]
+    }
+  }
+}
