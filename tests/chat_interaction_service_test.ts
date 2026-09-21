@@ -2,9 +2,13 @@ import { EmulationSession } from '../src/session_registry.ts';
 import type {
   BasicGroupCreationFailureReason,
   BasicGroupCreationResult,
+  ChannelCreationResult,
+  SupergroupCreationResult,
 } from '../src/chat_interaction_service.ts';
 import type { ChatMembership } from '../src/chat_membership.ts';
-import type { BasicGroup } from '../src/virtual_chat.ts';
+import type { ChatRegistry } from '../src/chat_registry.ts';
+import type { TelegramIdentityRegistry } from '../src/telegram_identity_registry.ts';
+import type { BasicGroup, Channel, Supergroup } from '../src/virtual_chat.ts';
 import type { VirtualUserService } from '../src/virtual_user_service.ts';
 
 Deno.test('ChatInteractionService activates a private conversation for known participants', () => {
@@ -128,11 +132,85 @@ Deno.test('ChatInteractionService validates basic-group participants before rese
   }
 });
 
+Deno.test('ChatInteractionService creates owner-only supergroups and channels', () => {
+  const { virtualUsers, identities, chats, chatInteractions } = new EmulationSession(
+    'test-session',
+  );
+  const creator = createAccount(virtualUsers, 'Ada');
+  const nonMember = createAccount(virtualUsers, 'Grace');
+
+  const supergroup = getCreatedSupergroup(chatInteractions.createSupergroup({
+    title: 'Test Supergroup',
+    description: 'Supergroup description',
+    creatorAccountId: creator.profile.id,
+  }));
+  const channel = getCreatedChannel(chatInteractions.createChannel({
+    title: 'Test Channel',
+    creatorAccountId: creator.profile.id,
+  }));
+
+  assertSharedChatIds(supergroup, channel);
+  assertSharedChatDescriptions(supergroup, channel);
+  assertSharedChatIdentityKind(identities, supergroup, 'supergroup');
+  assertSharedChatIdentityKind(identities, channel, 'channel');
+  assertStoredOwnerOnlyChat(
+    chats,
+    supergroup,
+    creator.profile.id,
+    nonMember.profile.id,
+  );
+  assertStoredOwnerOnlyChat(
+    chats,
+    channel,
+    creator.profile.id,
+    nonMember.profile.id,
+  );
+});
+
+Deno.test('ChatInteractionService validates owners before reserving shared-chat IDs', () => {
+  const { virtualUsers, chatInteractions } = new EmulationSession('test-session');
+
+  const missingSupergroupOwner = chatInteractions.createSupergroup({
+    title: 'Missing Owner',
+    creatorAccountId: 999,
+  });
+  assertOwnerOnlyChatCreationFailure(missingSupergroupOwner, 'creator_account_not_found');
+
+  const missingChannelOwner = chatInteractions.createChannel({
+    title: 'Missing Owner',
+    creatorAccountId: 999,
+  });
+  assertOwnerOnlyChatCreationFailure(missingChannelOwner, 'creator_account_not_found');
+
+  const creator = createAccount(virtualUsers, 'Ada');
+  const validChannel = getCreatedChannel(chatInteractions.createChannel({
+    title: 'First Valid Shared Chat',
+    creatorAccountId: creator.profile.id,
+  }));
+  if (validChannel.id !== -1_000_000_000_001) {
+    throw new Error('Expected rejected creations not to consume a shared-chat ID');
+  }
+});
+
 function getCreatedBasicGroup(result: BasicGroupCreationResult): BasicGroup {
   if (!result.created) {
     throw new Error(`Expected group creation to succeed, received ${result.reason}`);
   }
   return result.group;
+}
+
+function getCreatedSupergroup(result: SupergroupCreationResult): Supergroup {
+  if (!result.created) {
+    throw new Error(`Expected supergroup creation to succeed, received ${result.reason}`);
+  }
+  return result.supergroup;
+}
+
+function getCreatedChannel(result: ChannelCreationResult): Channel {
+  if (!result.created) {
+    throw new Error(`Expected channel creation to succeed, received ${result.reason}`);
+  }
+  return result.channel;
 }
 
 function assertBasicGroupCreationFailure(
@@ -141,6 +219,58 @@ function assertBasicGroupCreationFailure(
 ): void {
   if (result.created || result.reason !== expectedReason) {
     throw new Error(`Expected basic-group creation to fail with ${expectedReason}`);
+  }
+}
+
+function assertOwnerOnlyChatCreationFailure(
+  result: SupergroupCreationResult | ChannelCreationResult,
+  expectedReason: 'creator_account_not_found' | 'identity_limit_reached',
+): void {
+  if (result.created || result.reason !== expectedReason) {
+    throw new Error(`Expected shared-chat creation to fail with ${expectedReason}`);
+  }
+}
+
+function assertSharedChatIds(supergroup: Supergroup, channel: Channel): void {
+  if (
+    supergroup.id !== -1_000_000_000_001 ||
+    channel.id !== -1_000_000_000_002
+  ) {
+    throw new Error('Expected supergroups and channels to share their descending ID sequence');
+  }
+}
+
+function assertSharedChatDescriptions(supergroup: Supergroup, channel: Channel): void {
+  if (
+    supergroup.description !== 'Supergroup description' ||
+    channel.description !== undefined
+  ) {
+    throw new Error('Expected shared-chat descriptions to preserve their creation inputs');
+  }
+}
+
+function assertSharedChatIdentityKind(
+  identities: TelegramIdentityRegistry,
+  chat: Supergroup | Channel,
+  expectedKind: 'supergroup' | 'channel',
+): void {
+  if (identities.getById(chat.id)?.kind !== expectedKind) {
+    throw new Error(`Expected the shared-chat identity kind to be ${expectedKind}`);
+  }
+}
+
+function assertStoredOwnerOnlyChat(
+  chats: ChatRegistry,
+  chat: Supergroup | Channel,
+  ownerAccountId: number,
+  nonMemberAccountId: number,
+): void {
+  if (chats.getSharedChat(chat.id) !== chat) {
+    throw new Error('Expected the created shared chat to be stored canonically');
+  }
+  assertMembershipStatus(chats.getChatMembership(chat.id, ownerAccountId)?.status, 'owner');
+  if (chats.getChatMembership(chat.id, nonMemberAccountId) !== undefined) {
+    throw new Error('Expected an owner-only shared chat not to add other accounts at creation');
   }
 }
 

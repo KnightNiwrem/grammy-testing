@@ -1,8 +1,18 @@
-import type { BasicGroupRegistrationResult } from './chat_registry.ts';
+import type {
+  BasicGroupRegistrationResult,
+  SharedChatRegistrationResult,
+} from './chat_registry.ts';
 import type { IdentityReservationResult } from './telegram_identity_registry.ts';
 import type { VirtualAccount } from './virtual_account.ts';
 import type { VirtualBot } from './virtual_bot.ts';
-import type { BasicGroup, PrivateConversation, PrivateConversationKey } from './virtual_chat.ts';
+import type {
+  BasicGroup,
+  Channel,
+  PrivateConversation,
+  PrivateConversationKey,
+  SharedChat,
+  Supergroup,
+} from './virtual_chat.ts';
 
 export interface CreateBasicGroupInput {
   readonly title: string;
@@ -27,6 +37,46 @@ export type BasicGroupCreationResult =
   | {
     readonly created: false;
     readonly reason: BasicGroupCreationFailureReason;
+  };
+
+export interface CreateSupergroupInput {
+  readonly title: string;
+  readonly description?: string;
+  readonly creatorAccountId: number;
+}
+
+export type SupergroupCreationFailureReason =
+  | 'creator_account_not_found'
+  | 'identity_limit_reached';
+
+export type SupergroupCreationResult =
+  | {
+    readonly created: true;
+    readonly supergroup: Supergroup;
+  }
+  | {
+    readonly created: false;
+    readonly reason: SupergroupCreationFailureReason;
+  };
+
+export interface CreateChannelInput {
+  readonly title: string;
+  readonly description?: string;
+  readonly creatorAccountId: number;
+}
+
+export type ChannelCreationFailureReason =
+  | 'creator_account_not_found'
+  | 'identity_limit_reached';
+
+export type ChannelCreationResult =
+  | {
+    readonly created: true;
+    readonly channel: Channel;
+  }
+  | {
+    readonly created: false;
+    readonly reason: ChannelCreationFailureReason;
   };
 
 export type PrivateConversationActivationFailureReason =
@@ -55,8 +105,8 @@ interface PrivateConversationStore {
   getOrCreatePrivateConversation(key: PrivateConversationKey): PrivateConversation;
 }
 
-interface BasicGroupIdentityReservationStore {
-  reserveIdentity(input: { readonly kind: 'basic_group' }): IdentityReservationResult;
+interface SharedChatIdentityReservationStore {
+  reserveIdentity(input: { readonly kind: SharedChat['kind'] }): IdentityReservationResult;
 }
 
 interface BasicGroupStore {
@@ -67,18 +117,32 @@ interface BasicGroupStore {
   ): BasicGroupRegistrationResult;
 }
 
+interface OwnerOnlySharedChatStore {
+  registerSupergroup(
+    supergroup: Supergroup,
+    ownerAccountId: number,
+  ): SharedChatRegistrationResult;
+
+  registerChannel(
+    channel: Channel,
+    ownerAccountId: number,
+  ): SharedChatRegistrationResult;
+}
+
+type ChatStore = PrivateConversationStore & BasicGroupStore & OwnerOnlySharedChatStore;
+
 interface ChatInteractionServiceDependencies {
-  readonly identities: BasicGroupIdentityReservationStore;
+  readonly identities: SharedChatIdentityReservationStore;
   readonly accounts: AccountLookup;
   readonly bots: BotLookup;
-  readonly chats: PrivateConversationStore & BasicGroupStore;
+  readonly chats: ChatStore;
 }
 
 export class ChatInteractionService {
-  readonly #identities: BasicGroupIdentityReservationStore;
+  readonly #identities: SharedChatIdentityReservationStore;
   readonly #accounts: AccountLookup;
   readonly #bots: BotLookup;
-  readonly #chats: PrivateConversationStore & BasicGroupStore;
+  readonly #chats: ChatStore;
 
   constructor({ identities, accounts, bots, chats }: ChatInteractionServiceDependencies) {
     this.#identities = identities;
@@ -109,7 +173,7 @@ export class ChatInteractionService {
       return { created: false, reason: participantValidationFailure };
     }
 
-    const groupId = this.#reserveBasicGroupId();
+    const groupId = this.#reserveSharedChatId('basic_group');
     if (groupId === undefined) {
       return { created: false, reason: 'identity_limit_reached' };
     }
@@ -128,6 +192,52 @@ export class ChatInteractionService {
     }
 
     return { created: true, group };
+  }
+
+  createSupergroup(input: CreateSupergroupInput): SupergroupCreationResult {
+    if (this.#accounts.getById(input.creatorAccountId) === undefined) {
+      return { created: false, reason: 'creator_account_not_found' };
+    }
+
+    const supergroupId = this.#reserveSharedChatId('supergroup');
+    if (supergroupId === undefined) {
+      return { created: false, reason: 'identity_limit_reached' };
+    }
+    const supergroup: Supergroup = {
+      kind: 'supergroup',
+      id: supergroupId,
+      title: input.title,
+      description: input.description,
+    };
+    const registration = this.#chats.registerSupergroup(supergroup, input.creatorAccountId);
+    if (!registration.registered) {
+      throw new Error(`Reserved supergroup could not be registered: ${registration.reason}`);
+    }
+
+    return { created: true, supergroup };
+  }
+
+  createChannel(input: CreateChannelInput): ChannelCreationResult {
+    if (this.#accounts.getById(input.creatorAccountId) === undefined) {
+      return { created: false, reason: 'creator_account_not_found' };
+    }
+
+    const channelId = this.#reserveSharedChatId('channel');
+    if (channelId === undefined) {
+      return { created: false, reason: 'identity_limit_reached' };
+    }
+    const channel: Channel = {
+      kind: 'channel',
+      id: channelId,
+      title: input.title,
+      description: input.description,
+    };
+    const registration = this.#chats.registerChannel(channel, input.creatorAccountId);
+    if (!registration.registered) {
+      throw new Error(`Reserved channel could not be registered: ${registration.reason}`);
+    }
+
+    return { created: true, channel };
   }
 
   #validateBasicGroupParticipants(
@@ -156,18 +266,18 @@ export class ChatInteractionService {
     return undefined;
   }
 
-  #reserveBasicGroupId(): number | undefined {
-    const identityReservation = this.#identities.reserveIdentity({ kind: 'basic_group' });
+  #reserveSharedChatId(kind: SharedChat['kind']): number | undefined {
+    const identityReservation = this.#identities.reserveIdentity({ kind });
     if (!identityReservation.reserved) {
       if (identityReservation.reason !== 'identity_limit_reached') {
         throw new Error(
-          `Basic-group identity reservation failed unexpectedly: ${identityReservation.reason}`,
+          `${kind} identity reservation failed unexpectedly: ${identityReservation.reason}`,
         );
       }
       return undefined;
     }
-    if (identityReservation.identity.kind !== 'basic_group') {
-      throw new Error('Basic-group identity reservation returned a different identity kind');
+    if (identityReservation.identity.kind !== kind) {
+      throw new Error(`${kind} identity reservation returned a different identity kind`);
     }
 
     return identityReservation.identity.id;
