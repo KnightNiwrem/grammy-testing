@@ -24,6 +24,7 @@ export class EmulationSession {
     });
     this.chats = new ChatRegistry();
     this.chatInteractions = new ChatInteractionService({
+      identities: this.identities,
       accounts: this.accounts,
       bots: this.bots,
       chats: this.chats,
