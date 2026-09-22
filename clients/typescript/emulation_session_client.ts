@@ -3,13 +3,20 @@ import {
   createdVirtualAccountSchema,
   createdVirtualBotSchema,
   getMeResponseSchema,
+  messageHistoryResponseSchema,
+  sentMessageResponseSchema,
 } from './schemas.ts';
 import type {
+  AccountMessageHistoryInput,
+  AccountSendMessageInput,
   CreatedVirtualAccount,
   CreatedVirtualBot,
   CreateVirtualAccountInput,
   CreateVirtualBotInput,
   EmulationSession,
+  PrivateTextMessage,
+  VirtualAccountClient,
+  VirtualAccountProfile,
   VirtualBotProfile,
 } from './types.ts';
 import { normalizeUrlRoot, requestEmptyResponse, requestJson } from './utils.ts';
@@ -68,20 +75,25 @@ class HttpEmulationSessionClient implements EmulationSessionClient {
     });
   }
 
-  createAccount(input: CreateVirtualAccountInput): Promise<CreatedVirtualAccount> {
-    return requestJson(this.#fetch, {
+  async createAccount(input: CreateVirtualAccountInput): Promise<CreatedVirtualAccount> {
+    const response = await requestJson(this.#fetch, {
       method: 'POST',
       url: `${this.#sessionUrl}/accounts`,
       expectedStatus: HTTP_STATUS_CREATED,
       responseSchema: createdVirtualAccountSchema,
       body: input,
     });
+    return {
+      account: createVirtualAccountClient(
+        response.account,
+        `${this.#sessionUrl}/accounts/${response.account.id}`,
+        this.#fetch,
+      ),
+    };
   }
 
   async getMe(botToken: string): Promise<VirtualBotProfile> {
-    if (typeof botToken !== 'string' || botToken.length === 0) {
-      throw new TypeError('botToken must be a non-empty string');
-    }
+    validateBotToken(botToken);
 
     const response = await requestJson(this.#fetch, {
       method: 'POST',
@@ -90,5 +102,41 @@ class HttpEmulationSessionClient implements EmulationSessionClient {
       responseSchema: getMeResponseSchema,
     });
     return response.result;
+  }
+}
+
+function createVirtualAccountClient(
+  profile: VirtualAccountProfile,
+  accountUrl: string,
+  fetchImplementation: typeof globalThis.fetch,
+): VirtualAccountClient {
+  return Object.freeze({
+    ...profile,
+    async sendMessage(input: AccountSendMessageInput): Promise<PrivateTextMessage> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'POST',
+        url: `${accountUrl}/messages`,
+        expectedStatus: HTTP_STATUS_CREATED,
+        responseSchema: sentMessageResponseSchema,
+        body: input,
+      });
+      return response.message;
+    },
+    async getMessages(input: AccountMessageHistoryInput): Promise<readonly PrivateTextMessage[]> {
+      const botId = encodeURIComponent(input.chat.botId);
+      const response = await requestJson(fetchImplementation, {
+        method: 'GET',
+        url: `${accountUrl}/conversations/private/${botId}/messages`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: messageHistoryResponseSchema,
+      });
+      return response.messages;
+    },
+  });
+}
+
+function validateBotToken(botToken: string): void {
+  if (typeof botToken !== 'string' || botToken.length === 0) {
+    throw new TypeError('botToken must be a non-empty string');
   }
 }

@@ -130,6 +130,51 @@ paths:
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/AccountId'
+  /sessions/{sessionId}/accounts/{accountId}/messages:
+    description: Messages sent by one virtual account.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      operationId: sendAccountMessage
+      summary: Send a message as a virtual account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendAccountMessageRequest'
+      responses:
+        '201':
+          description: The message was stored and an update was enqueued for the target bot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentMessage'
+        '400':
+          description: The request or message text is invalid.
+        '404':
+          description: The session, sending account, or target bot does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/messages:
+    description: Stored messages in a private conversation between an account and bot.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      operationId: getPrivateMessageHistory
+      summary: Return the private conversation's stored messages
+      responses:
+        '200':
+          description: The participants exist; the message list may be empty.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageHistory'
+        '400':
+          description: An account or bot path identifier is invalid.
+        '404':
+          description: The session, account, or bot does not exist.
   /sessions/{sessionId}/bot-api/bot{token}/getMe:
     description: Telegram Bot API method for retrieving the authenticated virtual bot's profile.
     parameters:
@@ -145,6 +190,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetMeResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/getUpdates:
+    description: Telegram Bot API long-polling method for receiving pending bot updates.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getUpdates
+      summary: Return pending updates for the authenticated virtual bot
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetUpdatesRequest'
+      responses:
+        '200':
+          description: Pending updates, limited and confirmed according to the supplied offset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetUpdatesResponse'
+        '400':
+          description: The getUpdates parameters are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
         '401':
           description: The token does not belong to a virtual bot in the addressed session.
           content:
@@ -287,6 +367,141 @@ components:
       properties:
         account:
           $ref: '#/components/schemas/Account'
+    PrivateMessageTarget:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - botId
+      properties:
+        type:
+          type: string
+          const: private
+        botId:
+          type: integer
+          minimum: 1
+          maximum: 4503599627370495
+    SendAccountMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - to
+        - text
+      properties:
+        to:
+          $ref: '#/components/schemas/PrivateMessageTarget'
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    PrivateChat:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - first_name
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          maximum: 4503599627370495
+        type:
+          type: string
+          const: private
+        first_name:
+          type: string
+        last_name:
+          type: string
+        username:
+          type: string
+    PrivateTextMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - message_id
+        - from
+        - chat
+        - date
+        - text
+      properties:
+        message_id:
+          type: integer
+          minimum: 1
+        from:
+          $ref: '#/components/schemas/Account'
+        chat:
+          $ref: '#/components/schemas/PrivateChat'
+        date:
+          type: integer
+          minimum: 0
+          description: Unix timestamp when the emulator accepted the message.
+        text:
+          type: string
+    SentMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - message
+      properties:
+        message:
+          $ref: '#/components/schemas/PrivateTextMessage'
+    MessageHistory:
+      type: object
+      additionalProperties: false
+      required:
+        - messages
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/PrivateTextMessage'
+    MessageUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - update_id
+        - message
+      properties:
+        update_id:
+          type: integer
+          minimum: 1
+        message:
+          $ref: '#/components/schemas/PrivateTextMessage'
+    GetUpdatesRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        offset:
+          type: integer
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+        timeout:
+          type: integer
+          minimum: 0
+          maximum: 50
+          default: 0
+        allowed_updates:
+          type: array
+          items:
+            type: string
+    GetUpdatesResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageUpdate'
     GetMeResponse:
       type: object
       additionalProperties: false

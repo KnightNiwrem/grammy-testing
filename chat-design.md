@@ -304,18 +304,21 @@ type AccountMessageTarget =
     readonly chatId: number;
   };
 
-interface SendMessageInput {
-  readonly fromAccountId: number;
+interface AccountSendMessageInput {
   readonly to: AccountMessageTarget;
   readonly text: string;
 }
 
-interface PublishMessageInput {
-  readonly fromAccountId: number;
+interface AccountPublishMessageInput {
   readonly channelId: number;
   readonly text: string;
 }
 ```
+
+These are account-bound client operations: `account.sendMessage(input)` and, when channel posts are
+implemented, `account.publishMessage(input)`. The server-side command still identifies the acting
+account explicitly from the account-scoped HTTP route, but callers do not pass a separate account ID
+to an operation already bound to that account.
 
 `sendMessage` creates a private, basic-group, or supergroup message. `publishMessage` validates that
 the account can post in the channel and creates a channel post. Eligible bots receive `message` for

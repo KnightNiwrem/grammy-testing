@@ -15,7 +15,9 @@
           "src/types/virtual_account.ts",
           "src/types/virtual_bot.ts",
           "src/types/virtual_chat.ts",
-          "src/types/chat_membership.ts"
+          "src/types/chat_membership.ts",
+          "src/types/virtual_message.ts",
+          "src/types/bot_api.ts"
         ]
       },
       {
@@ -34,6 +36,18 @@
         "name": "chat-repository",
         "patterns": [
           "src/repositories/chat.ts"
+        ]
+      },
+      {
+        "name": "message-repository",
+        "patterns": [
+          "src/repositories/message.ts"
+        ]
+      },
+      {
+        "name": "bot-update-repository",
+        "patterns": [
+          "src/repositories/bot_update.ts"
         ]
       },
       {
@@ -107,6 +121,18 @@
         ]
       },
       {
+        "from": "message-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
+        "from": "bot-update-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "identity-repository",
         "allow": [
           "domain"
@@ -119,6 +145,8 @@
           "account-repository",
           "bot-repository",
           "chat-repository",
+          "message-repository",
+          "bot-update-repository",
           "identity-repository",
           "domain-services"
         ]
@@ -156,6 +184,8 @@
           "account-repository",
           "bot-repository",
           "chat-repository",
+          "message-repository",
+          "bot-update-repository",
           "identity-repository",
           "session-repository",
           "domain-services",

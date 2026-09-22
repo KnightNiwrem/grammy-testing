@@ -47,11 +47,48 @@ export interface VirtualAccountProfile {
   readonly language_code?: string;
 }
 
-export interface CreatedVirtualAccount {
-  readonly account: VirtualAccountProfile;
+export interface PrivateMessageTarget {
+  readonly type: 'private';
+  readonly botId: number;
 }
 
-export type HttpMethod = 'DELETE' | 'POST';
+export interface AccountSendMessageInput {
+  readonly to: PrivateMessageTarget;
+  readonly text: string;
+}
+
+export interface AccountMessageHistoryInput {
+  readonly chat: PrivateMessageTarget;
+}
+
+export interface PrivateChat {
+  readonly id: number;
+  readonly type: 'private';
+  readonly first_name: string;
+  readonly last_name?: string;
+  readonly username?: string;
+}
+
+export interface PrivateTextMessage {
+  readonly message_id: number;
+  readonly from: VirtualAccountProfile;
+  readonly chat: PrivateChat;
+  readonly date: number;
+  readonly text: string;
+}
+
+export interface VirtualAccountClient extends VirtualAccountProfile {
+  /** Sends a message as this virtual Telegram account. */
+  sendMessage(input: AccountSendMessageInput): Promise<PrivateTextMessage>;
+  /** Returns Telegram-shaped messages stored for a conversation owned by this account. */
+  getMessages(input: AccountMessageHistoryInput): Promise<readonly PrivateTextMessage[]>;
+}
+
+export interface CreatedVirtualAccount {
+  readonly account: VirtualAccountClient;
+}
+
+export type HttpMethod = 'DELETE' | 'GET' | 'POST';
 
 export interface RequestDetails {
   readonly method: HttpMethod;

@@ -2,12 +2,16 @@ import { z } from 'zod';
 
 import { MAX_TELEGRAM_USER_ID } from './constants.ts';
 import type {
-  CreatedVirtualAccount,
   CreatedVirtualBot,
   EmulationSession,
+  PrivateTextMessage,
   VirtualAccountProfile,
   VirtualBotProfile,
 } from './types.ts';
+
+interface CreatedVirtualAccountResponse {
+  readonly account: VirtualAccountProfile;
+}
 
 const telegramUserIdSchema = z.number().int().min(1).max(MAX_TELEGRAM_USER_ID);
 
@@ -47,11 +51,37 @@ export const createdVirtualBotSchema: z.ZodType<CreatedVirtualBot> = z.strictObj
   bot: virtualBotProfileSchema,
 });
 
-export const createdVirtualAccountSchema: z.ZodType<CreatedVirtualAccount> = z.strictObject({
-  account: virtualAccountProfileSchema,
-});
+export const createdVirtualAccountSchema: z.ZodType<CreatedVirtualAccountResponse> = z.strictObject(
+  {
+    account: virtualAccountProfileSchema,
+  },
+);
 
 export const getMeResponseSchema = z.strictObject({
   ok: z.literal(true),
   result: virtualBotProfileSchema,
+});
+
+const privateChatSchema = z.strictObject({
+  id: telegramUserIdSchema,
+  type: z.literal('private'),
+  first_name: z.string(),
+  last_name: z.string().optional(),
+  username: z.string().optional(),
+});
+
+export const privateTextMessageSchema: z.ZodType<PrivateTextMessage> = z.strictObject({
+  message_id: z.number().int().positive(),
+  from: virtualAccountProfileSchema,
+  chat: privateChatSchema,
+  date: z.number().int().nonnegative(),
+  text: z.string(),
+});
+
+export const sentMessageResponseSchema = z.strictObject({
+  message: privateTextMessageSchema,
+});
+
+export const messageHistoryResponseSchema = z.strictObject({
+  messages: z.array(privateTextMessageSchema),
 });

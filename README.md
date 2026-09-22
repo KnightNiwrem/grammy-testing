@@ -4,9 +4,10 @@ An HTTP server for emulating the Telegram Bot API in end-to-end tests. The serve
 the emulated Bot API and an admin API for controlling isolated test sessions.
 
 The standalone server currently supports creating and ending isolated test sessions, adding virtual
-bots and accounts to them, and calling the Bot API `getMe` method for a virtual bot. The session
-creation response identifies its Bot API root. Other routes described in `openapi.yaml` are not
-implemented yet.
+bots and accounts, sending private text messages as an account, inspecting private conversation
+history, and receiving account messages through the Bot API `getUpdates` method. It also implements
+the Bot API `getMe` method. The session creation response identifies its Bot API root. Other routes
+described in `openapi.yaml` are not implemented yet.
 
 ## TypeScript client
 
@@ -25,8 +26,17 @@ try {
   });
   const { account } = await session.createAccount({ first_name: 'Ada' });
 
-  // Configure grammY with token and session.botApiRoot.
-  console.log(token, bot, account, session.botApiRoot);
+  const incomingMessage = await account.sendMessage({
+    to: { type: 'private', botId: bot.id },
+    text: 'Hello!',
+  });
+
+  // Configure grammY with token and session.botApiRoot. Its getUpdates polling
+  // receives the message above. Tests can also inspect the stored history.
+  const history = await account.getMessages({
+    chat: { type: 'private', botId: bot.id },
+  });
+  console.log(token, session.botApiRoot, incomingMessage, history);
 } finally {
   await session.end();
 }

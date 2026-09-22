@@ -1,6 +1,8 @@
 import type { AccountRepository } from '../repositories/account.ts';
 import type { BotRepository } from '../repositories/bot.ts';
 import type { ChatRepository } from '../repositories/chat.ts';
+import type { BotUpdateRepository } from '../repositories/bot_update.ts';
+import type { MessageRepository } from '../repositories/message.ts';
 import type { TelegramIdentityRepository } from '../repositories/telegram_identity.ts';
 import type { ChatInteractionService } from '../services/chat_interaction.ts';
 import type { VirtualUserService } from '../services/virtual_user.ts';
@@ -13,5 +15,7 @@ export interface EmulationSession {
   readonly bots: BotRepository;
   readonly virtualUsers: VirtualUserService;
   readonly chats: ChatRepository;
+  readonly messages: MessageRepository;
+  readonly botUpdates: BotUpdateRepository;
   readonly chatInteractions: ChatInteractionService;
 }

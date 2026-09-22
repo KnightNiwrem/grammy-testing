@@ -7,6 +7,7 @@ import type {
   ChannelCreationResult,
   SupergroupCreationResult,
 } from '../src/services/chat_interaction.ts';
+import { MAX_TEXT_MESSAGE_LENGTH } from '../src/types/virtual_message.ts';
 import type { ChatMembership } from '../src/types/chat_membership.ts';
 import type { ChatRepository } from '../src/repositories/chat.ts';
 import type { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
@@ -304,6 +305,129 @@ Deno.test('ChatInteractionService validates member additions before changing cha
     chats.getChatMembership(channel.id, bot.profile.id) !== undefined
   ) {
     throw new Error('Expected rejected member additions not to change chat memberships');
+  }
+});
+
+Deno.test('ChatInteractionService sends and stores private account messages', async () => {
+  const { virtualUsers, chats, messages, botUpdates, chatInteractions } = createEmulationSession(
+    'test-session',
+  );
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+
+  const firstResult = chatInteractions.sendMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: 'Hello',
+  });
+  if (!firstResult.sent) {
+    throw new Error(`Expected message send to succeed, received ${firstResult.reason}`);
+  }
+  const secondResult = chatInteractions.sendMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: 'Again',
+  });
+  if (!secondResult.sent) {
+    throw new Error(`Expected message send to succeed, received ${secondResult.reason}`);
+  }
+
+  if (
+    chats.getPrivateConversation({ accountId: account.profile.id, botId: bot.profile.id }) ===
+      undefined
+  ) {
+    throw new Error('Expected the first message to activate the private conversation');
+  }
+  const storedMessages = messages.getPrivateConversationMessages({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
+  if (
+    storedMessages.length !== 2 ||
+    storedMessages[0].text !== 'Hello' ||
+    storedMessages[1].text !== 'Again'
+  ) {
+    throw new Error('Expected canonical messages to be retained in conversation history');
+  }
+
+  const history = chatInteractions.getPrivateMessageHistory({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
+  if (
+    !history.found ||
+    history.messages.length !== 2 ||
+    history.messages[0].message_id !== firstResult.message.message_id ||
+    history.messages[0].chat.id !== account.profile.id ||
+    history.messages[0].from.id !== account.profile.id
+  ) {
+    throw new Error('Expected history to project stored messages as private Bot API messages');
+  }
+
+  const updates = await botUpdates.getUpdates(bot.profile.id, {
+    limit: 100,
+    timeoutSeconds: 0,
+  });
+  if (
+    updates.length !== 2 ||
+    updates[0].message !== firstResult.message ||
+    updates[1].message !== secondResult.message
+  ) {
+    throw new Error('Expected each sent message to enqueue one update for the target bot');
+  }
+});
+
+Deno.test('ChatInteractionService validates private messages before changing state', async () => {
+  const { virtualUsers, chats, messages, botUpdates, chatInteractions } = createEmulationSession(
+    'test-session',
+  );
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+
+  const failures = [
+    chatInteractions.sendMessage({
+      fromAccountId: 999,
+      to: { type: 'private', botId: bot.profile.id },
+      text: 'Hello',
+    }),
+    chatInteractions.sendMessage({
+      fromAccountId: account.profile.id,
+      to: { type: 'private', botId: 999 },
+      text: 'Hello',
+    }),
+    chatInteractions.sendMessage({
+      fromAccountId: account.profile.id,
+      to: { type: 'private', botId: bot.profile.id },
+      text: '',
+    }),
+    chatInteractions.sendMessage({
+      fromAccountId: account.profile.id,
+      to: { type: 'private', botId: bot.profile.id },
+      text: 'x'.repeat(MAX_TEXT_MESSAGE_LENGTH + 1),
+    }),
+  ];
+  const expectedReasons = [
+    'account_not_found',
+    'bot_not_found',
+    'message_text_empty',
+    'message_text_too_long',
+  ];
+  failures.forEach((result, index) => {
+    if (result.sent || result.reason !== expectedReasons[index]) {
+      throw new Error(`Expected message send to fail with ${expectedReasons[index]}`);
+    }
+  });
+
+  if (
+    chats.getPrivateConversation({ accountId: account.profile.id, botId: bot.profile.id }) !==
+      undefined ||
+    messages.getPrivateConversationMessages({
+        accountId: account.profile.id,
+        botId: bot.profile.id,
+      }).length !== 0 ||
+    (await botUpdates.getUpdates(bot.profile.id, { limit: 100, timeoutSeconds: 0 })).length !== 0
+  ) {
+    throw new Error('Expected rejected messages not to change conversation state');
   }
 });
 

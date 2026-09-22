@@ -4,6 +4,7 @@ import type {
   SharedChatRegistrationResult,
 } from '../repositories/chat.ts';
 import type { IdentityReservationResult } from '../repositories/telegram_identity.ts';
+import type { BotApiPrivateTextMessage } from '../types/bot_api.ts';
 import type { ChatMembership } from '../types/chat_membership.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
@@ -15,6 +16,7 @@ import type {
   SharedChat,
   Supergroup,
 } from '../types/virtual_chat.ts';
+import { MAX_TEXT_MESSAGE_LENGTH, type PrivateTextMessage } from '../types/virtual_message.ts';
 
 export interface CreateBasicGroupInput {
   readonly title: string;
@@ -116,6 +118,46 @@ export type AddChatMemberResult =
     readonly reason: AddChatMemberFailureReason;
   };
 
+export interface SendMessageInput {
+  readonly fromAccountId: number;
+  readonly to: {
+    readonly type: 'private';
+    readonly botId: number;
+  };
+  readonly text: string;
+}
+
+export type SendMessageFailureReason =
+  | 'account_not_found'
+  | 'bot_not_found'
+  | 'message_text_empty'
+  | 'message_text_too_long';
+
+export type SendMessageResult =
+  | {
+    readonly sent: true;
+    readonly message: BotApiPrivateTextMessage;
+  }
+  | {
+    readonly sent: false;
+    readonly reason: SendMessageFailureReason;
+  };
+
+export interface GetPrivateMessageHistoryInput {
+  readonly accountId: number;
+  readonly botId: number;
+}
+
+export type GetPrivateMessageHistoryResult =
+  | {
+    readonly found: true;
+    readonly messages: readonly BotApiPrivateTextMessage[];
+  }
+  | {
+    readonly found: false;
+    readonly reason: 'account_not_found' | 'bot_not_found';
+  };
+
 interface AccountLookup {
   getById(accountId: number): VirtualAccount | undefined;
 }
@@ -164,11 +206,30 @@ type ChatStore =
   & OwnerOnlySharedChatStore
   & ChatMembershipStore;
 
+interface PrivateMessageStore {
+  addPrivateTextMessage(input: {
+    readonly conversation: PrivateConversationKey;
+    readonly authorAccountId: number;
+    readonly sentAtUnixSeconds: number;
+    readonly text: string;
+  }): PrivateTextMessage;
+  getPrivateConversationMessages(
+    conversation: PrivateConversationKey,
+  ): readonly PrivateTextMessage[];
+}
+
+interface BotUpdateSink {
+  enqueueMessageUpdate(botId: number, message: BotApiPrivateTextMessage): void;
+}
+
 interface ChatInteractionServiceDependencies {
   readonly identities: SharedChatIdentityReservationStore;
   readonly accounts: AccountLookup;
   readonly bots: BotLookup;
   readonly chats: ChatStore;
+  readonly messages: PrivateMessageStore;
+  readonly botUpdates: BotUpdateSink;
+  readonly currentUnixTimeSeconds: () => number;
 }
 
 export class ChatInteractionService {
@@ -176,12 +237,28 @@ export class ChatInteractionService {
   readonly #accounts: AccountLookup;
   readonly #bots: BotLookup;
   readonly #chats: ChatStore;
+  readonly #messages: PrivateMessageStore;
+  readonly #botUpdates: BotUpdateSink;
+  readonly #currentUnixTimeSeconds: () => number;
 
-  constructor({ identities, accounts, bots, chats }: ChatInteractionServiceDependencies) {
+  constructor(
+    {
+      identities,
+      accounts,
+      bots,
+      chats,
+      messages,
+      botUpdates,
+      currentUnixTimeSeconds,
+    }: ChatInteractionServiceDependencies,
+  ) {
     this.#identities = identities;
     this.#accounts = accounts;
     this.#bots = bots;
     this.#chats = chats;
+    this.#messages = messages;
+    this.#botUpdates = botUpdates;
+    this.#currentUnixTimeSeconds = currentUnixTimeSeconds;
   }
 
   activatePrivateConversation(
@@ -297,6 +374,75 @@ export class ChatInteractionService {
     }
 
     return this.#chats.addChatMember(input.chatId, input.memberId);
+  }
+
+  sendMessage(input: SendMessageInput): SendMessageResult {
+    const account = this.#accounts.getById(input.fromAccountId);
+    if (account === undefined) {
+      return { sent: false, reason: 'account_not_found' };
+    }
+    const bot = this.#bots.getById(input.to.botId);
+    if (bot === undefined) {
+      return { sent: false, reason: 'bot_not_found' };
+    }
+    if (input.text.length === 0) {
+      return { sent: false, reason: 'message_text_empty' };
+    }
+    if (input.text.length > MAX_TEXT_MESSAGE_LENGTH) {
+      return { sent: false, reason: 'message_text_too_long' };
+    }
+
+    const conversation = this.#chats.getOrCreatePrivateConversation({
+      accountId: account.profile.id,
+      botId: bot.profile.id,
+    });
+    const storedMessage = this.#messages.addPrivateTextMessage({
+      conversation,
+      authorAccountId: account.profile.id,
+      sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
+      text: input.text,
+    });
+    const projectedMessage = this.#projectPrivateTextMessage(storedMessage, account);
+    this.#botUpdates.enqueueMessageUpdate(bot.profile.id, projectedMessage);
+
+    return { sent: true, message: projectedMessage };
+  }
+
+  getPrivateMessageHistory(
+    input: GetPrivateMessageHistoryInput,
+  ): GetPrivateMessageHistoryResult {
+    const account = this.#accounts.getById(input.accountId);
+    if (account === undefined) {
+      return { found: false, reason: 'account_not_found' };
+    }
+    if (this.#bots.getById(input.botId) === undefined) {
+      return { found: false, reason: 'bot_not_found' };
+    }
+
+    const messages = this.#messages.getPrivateConversationMessages(input).map((message) =>
+      this.#projectPrivateTextMessage(message, account)
+    );
+    return { found: true, messages };
+  }
+
+  #projectPrivateTextMessage(
+    message: PrivateTextMessage,
+    account: VirtualAccount,
+  ): BotApiPrivateTextMessage {
+    const { id, first_name, last_name, username } = account.profile;
+    return {
+      message_id: message.messageId,
+      from: account.profile,
+      chat: {
+        id,
+        type: 'private',
+        first_name,
+        ...(last_name === undefined ? {} : { last_name }),
+        ...(username === undefined ? {} : { username }),
+      },
+      date: message.sentAtUnixSeconds,
+      text: message.text,
+    };
   }
 
   #validateBasicGroupParticipants(

@@ -8,11 +8,17 @@ export {
   type TelegramEmulationClientOptions,
 } from './telegram_emulation_client.ts';
 export type {
+  AccountMessageHistoryInput,
+  AccountSendMessageInput,
   CreatedVirtualAccount,
   CreatedVirtualBot,
   CreateVirtualAccountInput,
   CreateVirtualBotInput,
   EmulationSession,
+  PrivateChat,
+  PrivateMessageTarget,
+  PrivateTextMessage,
+  VirtualAccountClient,
   VirtualAccountProfile,
   VirtualBotProfile,
 } from './types.ts';
