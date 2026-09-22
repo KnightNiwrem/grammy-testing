@@ -1,4 +1,4 @@
-import type { ChatMembership } from './chat_membership.ts';
+import type { ChatMembership } from '../chat_membership.ts';
 import type {
   BasicGroup,
   Channel,
@@ -6,7 +6,7 @@ import type {
   PrivateConversationKey,
   SharedChat,
   Supergroup,
-} from './virtual_chat.ts';
+} from '../virtual_chat.ts';
 
 export type SharedChatRegistrationFailureReason = 'chat_id_taken';
 
@@ -39,7 +39,7 @@ export type ChatMemberAdditionResult =
     readonly reason: ChatMemberAdditionFailureReason;
   };
 
-export class ChatRegistry {
+export class ChatRepository {
   readonly #privateConversationsByAccountId = new Map<number, Map<number, PrivateConversation>>();
   readonly #sharedChatsById = new Map<number, SharedChat>();
   readonly #sharedChatMembershipsByChatId = new Map<number, Map<number, ChatMembership>>();

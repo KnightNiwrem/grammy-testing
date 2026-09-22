@@ -65,8 +65,8 @@ authenticated bot would therefore be ambiguous in a session containing multiple 
 
 Accounts, bots, supergroups, and channels share one case-insensitive public username namespace
 within an emulation session. Basic groups do not have public usernames. The session identity
-registry owns username reservation and resolution alongside the distinct numeric ID sequences, so a
-username cannot be assigned to two different identity kinds. This follows Telegram's generic
+repository owns username reservation and resolution alongside the distinct numeric ID sequences, so
+a username cannot be assigned to two different identity kinds. This follows Telegram's generic
 [`contacts.resolveUsername`](https://core.telegram.org/method/contacts.resolveUsername) lookup and
 its support for assigning usernames to
 [`channels` and supergroups](https://core.telegram.org/method/channels.checkUsername).

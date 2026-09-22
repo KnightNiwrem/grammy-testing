@@ -1,6 +1,6 @@
-import type { VirtualAccount } from './virtual_account.ts';
+import type { VirtualAccount } from '../virtual_account.ts';
 
-export class AccountRegistry {
+export class AccountRepository {
   readonly #accountsById = new Map<number, VirtualAccount>();
 
   add(account: VirtualAccount): boolean {

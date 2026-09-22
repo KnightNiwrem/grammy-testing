@@ -1,11 +1,11 @@
 import { createEmulationApi } from '../../src/api/mod.ts';
-import { SessionRegistry } from '../../src/session_registry.ts';
+import { SessionRepository } from '../../src/repositories/session.ts';
 import { EmulationClientError, TelegramEmulationClient } from './mod.ts';
 
 Deno.test('TypeScript client manages all currently implemented session resources', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({
-    sessions: new SessionRegistry(),
+    sessions: new SessionRepository(),
     publicOrigin,
   });
   const client = new TelegramEmulationClient(publicOrigin, {
@@ -49,7 +49,7 @@ Deno.test('TypeScript client manages all currently implemented session resources
 Deno.test('TypeScript client reports HTTP failures with request details', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({
-    sessions: new SessionRegistry(),
+    sessions: new SessionRepository(),
     publicOrigin,
   });
   const client = new TelegramEmulationClient(publicOrigin, {

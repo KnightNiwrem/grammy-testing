@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 
-import type { SessionRegistry } from '../session_registry.ts';
+import type { SessionRepository } from '../repositories/session.ts';
 import { createSessionRoutes } from './sessions/mod.ts';
 
 export interface EmulationApiDependencies {
-  readonly sessions: SessionRegistry;
+  readonly sessions: SessionRepository;
   readonly publicOrigin: string;
 }
 

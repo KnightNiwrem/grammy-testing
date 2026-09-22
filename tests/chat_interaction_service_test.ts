@@ -1,4 +1,4 @@
-import { EmulationSession } from '../src/session_registry.ts';
+import { EmulationSession } from '../src/repositories/session.ts';
 import type {
   AddChatMemberFailureReason,
   AddChatMemberResult,
@@ -6,12 +6,12 @@ import type {
   BasicGroupCreationResult,
   ChannelCreationResult,
   SupergroupCreationResult,
-} from '../src/chat_interaction_service.ts';
+} from '../src/services/chat_interaction.ts';
 import type { ChatMembership } from '../src/chat_membership.ts';
-import type { ChatRegistry } from '../src/chat_registry.ts';
-import type { TelegramIdentityRegistry } from '../src/telegram_identity_registry.ts';
+import type { ChatRepository } from '../src/repositories/chat.ts';
+import type { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import type { BasicGroup, Channel, Supergroup } from '../src/virtual_chat.ts';
-import type { VirtualUserService } from '../src/virtual_user_service.ts';
+import type { VirtualUserService } from '../src/services/virtual_user.ts';
 
 Deno.test('ChatInteractionService activates a private conversation for known participants', () => {
   const { virtualUsers, chats, chatInteractions } = new EmulationSession('test-session');
@@ -380,7 +380,7 @@ function assertSharedChatDescriptions(supergroup: Supergroup, channel: Channel):
 }
 
 function assertSharedChatIdentityKind(
-  identities: TelegramIdentityRegistry,
+  identities: TelegramIdentityRepository,
   chat: Supergroup | Channel,
   expectedKind: 'supergroup' | 'channel',
 ): void {
@@ -390,7 +390,7 @@ function assertSharedChatIdentityKind(
 }
 
 function assertStoredOwnerOnlyChat(
-  chats: ChatRegistry,
+  chats: ChatRepository,
   chat: Supergroup | Channel,
   ownerAccountId: number,
   nonMemberAccountId: number,

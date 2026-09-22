@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 
-import type { SessionRegistry } from '../../session_registry.ts';
+import type { SessionRepository } from '../../repositories/session.ts';
 import { createAccountRoutes } from './accounts/mod.ts';
 import { createBotApiRoutes } from './bot_api/mod.ts';
 import { createBotRoutes } from './bots/mod.ts';
@@ -15,7 +15,7 @@ const BOT_COLLECTION_PATH = `${SESSION_PATH}/bots` as const;
 const BOT_API_PATH = `${SESSION_PATH}/bot-api` as const;
 
 interface SessionRouteDependencies {
-  readonly sessions: SessionRegistry;
+  readonly sessions: SessionRepository;
   readonly publicOrigin: string;
 }
 

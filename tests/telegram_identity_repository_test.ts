@@ -1,11 +1,11 @@
 import {
   type IdentityReservationInput,
   type TelegramIdentity,
-  TelegramIdentityRegistry,
-} from '../src/telegram_identity_registry.ts';
+  TelegramIdentityRepository,
+} from '../src/repositories/telegram_identity.ts';
 
-Deno.test('TelegramIdentityRegistry shares sequential IDs across username reservations', () => {
-  const identities = new TelegramIdentityRegistry();
+Deno.test('TelegramIdentityRepository shares sequential IDs across username reservations', () => {
+  const identities = new TelegramIdentityRepository();
 
   const botIdentity = reserveIdentity(identities, { kind: 'bot', username: 'TestBot' });
 
@@ -23,8 +23,8 @@ Deno.test('TelegramIdentityRegistry shares sequential IDs across username reserv
   }
 });
 
-Deno.test('TelegramIdentityRegistry resolves identities by ID and normalized username', () => {
-  const identities = new TelegramIdentityRegistry();
+Deno.test('TelegramIdentityRepository resolves identities by ID and normalized username', () => {
+  const identities = new TelegramIdentityRepository();
   const botIdentity = reserveIdentity(identities, { kind: 'bot', username: 'TestBot' });
 
   if (identities.getById(botIdentity.id) !== botIdentity) {
@@ -38,8 +38,8 @@ Deno.test('TelegramIdentityRegistry resolves identities by ID and normalized use
   }
 });
 
-Deno.test('TelegramIdentityRegistry reserves usernames globally across identity kinds', () => {
-  const identities = new TelegramIdentityRegistry();
+Deno.test('TelegramIdentityRepository reserves usernames globally across identity kinds', () => {
+  const identities = new TelegramIdentityRepository();
 
   reserveIdentity(identities, {
     kind: 'account',
@@ -63,8 +63,8 @@ Deno.test('TelegramIdentityRegistry reserves usernames globally across identity 
   }
 });
 
-Deno.test('TelegramIdentityRegistry allocates shared-chat IDs from Telegram ranges', () => {
-  const identities = new TelegramIdentityRegistry();
+Deno.test('TelegramIdentityRepository allocates shared-chat IDs from Telegram ranges', () => {
+  const identities = new TelegramIdentityRepository();
 
   const firstGroup = reserveIdentity(identities, { kind: 'basic_group' });
   const secondGroup = reserveIdentity(identities, { kind: 'basic_group' });
@@ -82,7 +82,7 @@ Deno.test('TelegramIdentityRegistry allocates shared-chat IDs from Telegram rang
 });
 
 function reserveIdentity(
-  identities: TelegramIdentityRegistry,
+  identities: TelegramIdentityRepository,
   input: IdentityReservationInput,
 ): TelegramIdentity {
   const result = identities.reserveIdentity(input);

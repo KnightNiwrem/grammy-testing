@@ -19,40 +19,39 @@
         ]
       },
       {
-        "name": "account-registry",
+        "name": "account-repository",
         "patterns": [
-          "src/account_registry.ts"
+          "src/repositories/account.ts"
         ]
       },
       {
-        "name": "bot-registry",
+        "name": "bot-repository",
         "patterns": [
-          "src/bot_registry.ts"
+          "src/repositories/bot.ts"
         ]
       },
       {
-        "name": "chat-registry",
+        "name": "chat-repository",
         "patterns": [
-          "src/chat_registry.ts"
+          "src/repositories/chat.ts"
         ]
       },
       {
-        "name": "identity-registry",
+        "name": "identity-repository",
         "patterns": [
-          "src/telegram_identity_registry.ts"
+          "src/repositories/telegram_identity.ts"
         ]
       },
       {
         "name": "services",
         "patterns": [
-          "src/virtual_user_service.ts",
-          "src/chat_interaction_service.ts"
+          "src/services/**/*.ts"
         ]
       },
       {
         "name": "composition",
         "patterns": [
-          "src/session_registry.ts"
+          "src/repositories/session.ts"
         ]
       },
       {
@@ -71,25 +70,25 @@
         "allow": []
       },
       {
-        "from": "account-registry",
+        "from": "account-repository",
         "allow": [
           "domain"
         ]
       },
       {
-        "from": "bot-registry",
+        "from": "bot-repository",
         "allow": [
           "domain"
         ]
       },
       {
-        "from": "chat-registry",
+        "from": "chat-repository",
         "allow": [
           "domain"
         ]
       },
       {
-        "from": "identity-registry",
+        "from": "identity-repository",
         "allow": [
           "domain"
         ]
@@ -100,20 +99,20 @@
           "domain"
         ],
         "allowTypeOnly": [
-          "account-registry",
-          "bot-registry",
-          "chat-registry",
-          "identity-registry"
+          "account-repository",
+          "bot-repository",
+          "chat-repository",
+          "identity-repository"
         ]
       },
       {
         "from": "composition",
         "allow": [
           "domain",
-          "account-registry",
-          "bot-registry",
-          "chat-registry",
-          "identity-registry",
+          "account-repository",
+          "bot-repository",
+          "chat-repository",
+          "identity-repository",
           "services"
         ]
       },

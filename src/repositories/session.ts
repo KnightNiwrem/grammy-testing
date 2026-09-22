@@ -1,28 +1,28 @@
-import { AccountRegistry } from './account_registry.ts';
-import { BotRegistry } from './bot_registry.ts';
-import { ChatInteractionService } from './chat_interaction_service.ts';
-import { ChatRegistry } from './chat_registry.ts';
-import { TelegramIdentityRegistry } from './telegram_identity_registry.ts';
-import { VirtualUserService } from './virtual_user_service.ts';
+import { ChatInteractionService } from '../services/chat_interaction.ts';
+import { VirtualUserService } from '../services/virtual_user.ts';
+import { AccountRepository } from './account.ts';
+import { BotRepository } from './bot.ts';
+import { ChatRepository } from './chat.ts';
+import { TelegramIdentityRepository } from './telegram_identity.ts';
 
 export class EmulationSession {
-  readonly identities: TelegramIdentityRegistry;
-  readonly accounts: AccountRegistry;
-  readonly bots: BotRegistry;
+  readonly identities: TelegramIdentityRepository;
+  readonly accounts: AccountRepository;
+  readonly bots: BotRepository;
   readonly virtualUsers: VirtualUserService;
-  readonly chats: ChatRegistry;
+  readonly chats: ChatRepository;
   readonly chatInteractions: ChatInteractionService;
 
   constructor(readonly id: string) {
-    this.identities = new TelegramIdentityRegistry();
-    this.accounts = new AccountRegistry();
-    this.bots = new BotRegistry();
+    this.identities = new TelegramIdentityRepository();
+    this.accounts = new AccountRepository();
+    this.bots = new BotRepository();
     this.virtualUsers = new VirtualUserService({
       identities: this.identities,
       accounts: this.accounts,
       bots: this.bots,
     });
-    this.chats = new ChatRegistry();
+    this.chats = new ChatRepository();
     this.chatInteractions = new ChatInteractionService({
       identities: this.identities,
       accounts: this.accounts,
@@ -34,7 +34,7 @@ export class EmulationSession {
 
 const MAX_SESSION_ID_GENERATION_ATTEMPTS = 10;
 
-export class SessionRegistry {
+export class SessionRepository {
   readonly #sessions = new Map<string, EmulationSession>();
 
   create(): EmulationSession {

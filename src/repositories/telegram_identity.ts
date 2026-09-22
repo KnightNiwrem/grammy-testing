@@ -65,7 +65,7 @@ export type IdentityReservationResult =
     readonly reason: IdentityReservationFailureReason;
   };
 
-export class TelegramIdentityRegistry {
+export class TelegramIdentityRepository {
   readonly #identitiesById = new Map<number, TelegramIdentity>();
   readonly #identitiesByNormalizedUsername = new Map<string, TelegramIdentity>();
   #nextUserId = 1;
@@ -95,8 +95,8 @@ export class TelegramIdentityRegistry {
     return { reserved: true, identity };
   }
 
-  getById(id: number): TelegramIdentity | undefined {
-    return this.#identitiesById.get(id);
+  getById(identityId: number): TelegramIdentity | undefined {
+    return this.#identitiesById.get(identityId);
   }
 
   getByUsername(username: string): TelegramIdentity | undefined {

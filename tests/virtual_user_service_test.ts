@@ -1,7 +1,7 @@
-import { AccountRegistry } from '../src/account_registry.ts';
-import { BotRegistry } from '../src/bot_registry.ts';
-import { TelegramIdentityRegistry } from '../src/telegram_identity_registry.ts';
-import { VirtualUserService } from '../src/virtual_user_service.ts';
+import { AccountRepository } from '../src/repositories/account.ts';
+import { BotRepository } from '../src/repositories/bot.ts';
+import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
+import { VirtualUserService } from '../src/services/virtual_user.ts';
 
 Deno.test('VirtualUserService creates accounts and bots in their shared user ID sequence', () => {
   const { accounts, bots, virtualUsers } = createVirtualUserState();
@@ -22,7 +22,7 @@ Deno.test('VirtualUserService creates accounts and bots in their shared user ID 
     bots.getById(botResult.bot.profile.id) !== botResult.bot ||
     bots.getByToken(botResult.bot.token) !== botResult.bot
   ) {
-    throw new Error('Expected created users to be stored in their respective registries');
+    throw new Error('Expected created users to be stored in their respective repositories');
   }
 });
 
@@ -83,13 +83,13 @@ Deno.test('VirtualUserService reports global username conflicts without storing 
 });
 
 function createVirtualUserState(): {
-  accounts: AccountRegistry;
-  bots: BotRegistry;
+  accounts: AccountRepository;
+  bots: BotRepository;
   virtualUsers: VirtualUserService;
 } {
-  const identities = new TelegramIdentityRegistry();
-  const accounts = new AccountRegistry();
-  const bots = new BotRegistry();
+  const identities = new TelegramIdentityRepository();
+  const accounts = new AccountRepository();
+  const bots = new BotRepository();
   return {
     accounts,
     bots,

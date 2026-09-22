@@ -3,11 +3,11 @@ import {
   type BasicGroupRegistrationResult,
   type ChatMemberAdditionFailureReason,
   type ChatMemberAdditionResult,
-  ChatRegistry,
-} from '../src/chat_registry.ts';
+  ChatRepository,
+} from '../src/repositories/chat.ts';
 
-Deno.test('ChatRegistry stores one private conversation per account and bot pair', () => {
-  const chats = new ChatRegistry();
+Deno.test('ChatRepository stores one private conversation per account and bot pair', () => {
+  const chats = new ChatRepository();
   const conversationKey = { accountId: 1, botId: 2 };
 
   const firstConversation = chats.getOrCreatePrivateConversation(conversationKey);
@@ -25,8 +25,8 @@ Deno.test('ChatRegistry stores one private conversation per account and bot pair
   }
 });
 
-Deno.test('ChatRegistry disambiguates private conversations for different bots', () => {
-  const chats = new ChatRegistry();
+Deno.test('ChatRepository disambiguates private conversations for different bots', () => {
+  const chats = new ChatRepository();
 
   const firstConversation = chats.getOrCreatePrivateConversation({
     accountId: 1,
@@ -44,8 +44,8 @@ Deno.test('ChatRegistry disambiguates private conversations for different bots',
   }
 });
 
-Deno.test('ChatRegistry atomically registers a basic group and its initial memberships', () => {
-  const chats = new ChatRegistry();
+Deno.test('ChatRepository atomically registers a basic group and its initial memberships', () => {
+  const chats = new ChatRepository();
   const group = { kind: 'basic_group', id: -1, title: 'Test Group' } as const;
 
   const result = chats.registerBasicGroup(group, 1, [2]);
@@ -63,8 +63,8 @@ Deno.test('ChatRegistry atomically registers a basic group and its initial membe
   }
 });
 
-Deno.test('ChatRegistry rejects non-unique basic-group members without storing the chat', () => {
-  const chats = new ChatRegistry();
+Deno.test('ChatRepository rejects non-unique basic-group members without storing the chat', () => {
+  const chats = new ChatRepository();
   const group = { kind: 'basic_group', id: -1, title: 'Test Group' } as const;
 
   const ownerRepeatedAsMember = chats.registerBasicGroup(group, 1, [1]);
@@ -78,8 +78,8 @@ Deno.test('ChatRegistry rejects non-unique basic-group members without storing t
   }
 });
 
-Deno.test('ChatRegistry registers a supergroup with its required owner', () => {
-  const chats = new ChatRegistry();
+Deno.test('ChatRepository registers a supergroup with its required owner', () => {
+  const chats = new ChatRepository();
   const supergroup = { kind: 'supergroup', id: -1_000_000_000_001, title: 'Test' } as const;
 
   const result = chats.registerSupergroup(supergroup, 1);
@@ -94,8 +94,8 @@ Deno.test('ChatRegistry registers a supergroup with its required owner', () => {
   }
 });
 
-Deno.test('ChatRegistry registers a channel with its required owner', () => {
-  const chats = new ChatRegistry();
+Deno.test('ChatRepository registers a channel with its required owner', () => {
+  const chats = new ChatRepository();
   const channel = { kind: 'channel', id: -1_000_000_000_001, title: 'Test' } as const;
 
   const result = chats.registerChannel(channel, 1);
@@ -119,8 +119,8 @@ function assertRegistrationFailure(
   }
 }
 
-Deno.test('ChatRegistry preserves an existing shared chat when its ID is registered again', () => {
-  const chats = new ChatRegistry();
+Deno.test('ChatRepository preserves an existing shared chat when its ID is registered again', () => {
+  const chats = new ChatRepository();
   const originalGroup = { kind: 'basic_group', id: -1, title: 'Original' } as const;
   const replacementGroup = { kind: 'basic_group', id: -1, title: 'Replacement' } as const;
 
@@ -142,8 +142,8 @@ Deno.test('ChatRegistry preserves an existing shared chat when its ID is registe
   }
 });
 
-Deno.test('ChatRegistry adds a member to an existing shared chat', () => {
-  const chats = new ChatRegistry();
+Deno.test('ChatRepository adds a member to an existing shared chat', () => {
+  const chats = new ChatRepository();
   const group = { kind: 'basic_group', id: -1, title: 'Test Group' } as const;
   const registration = chats.registerBasicGroup(group, 1, []);
   if (!registration.registered) {
@@ -159,8 +159,8 @@ Deno.test('ChatRegistry adds a member to an existing shared chat', () => {
   }
 });
 
-Deno.test('ChatRegistry rejects member addition without changing existing state', () => {
-  const chats = new ChatRegistry();
+Deno.test('ChatRepository rejects member addition without changing existing state', () => {
+  const chats = new ChatRepository();
   const group = { kind: 'basic_group', id: -1, title: 'Test Group' } as const;
   const registration = chats.registerBasicGroup(group, 1, [2]);
   if (!registration.registered) {
@@ -185,7 +185,7 @@ function assertMemberAdditionFailure(
 }
 
 function assertMembershipsPreservedAfterRejectedAdditions(
-  chats: ChatRegistry,
+  chats: ChatRepository,
   chatId: number,
 ): void {
   if (

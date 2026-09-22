@@ -1,8 +1,8 @@
-import { AccountRegistry } from '../src/account_registry.ts';
+import { AccountRepository } from '../src/repositories/account.ts';
 import type { VirtualAccount } from '../src/virtual_account.ts';
 
-Deno.test('AccountRegistry adds and retrieves an account without overwriting its ID', () => {
-  const accounts = new AccountRegistry();
+Deno.test('AccountRepository adds and retrieves an account without overwriting its ID', () => {
+  const accounts = new AccountRepository();
   const account: VirtualAccount = {
     profile: {
       id: 1,

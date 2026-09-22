@@ -1,10 +1,10 @@
 import { createEmulationApi } from '../src/api/mod.ts';
-import { SessionRegistry } from '../src/session_registry.ts';
+import { SessionRepository } from '../src/repositories/session.ts';
 
 Deno.test('POST /sessions creates a session and returns its API locations', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({
-    sessions: new SessionRegistry(),
+    sessions: new SessionRepository(),
     publicOrigin,
   });
 
@@ -29,7 +29,7 @@ Deno.test('POST /sessions creates a session and returns its API locations', asyn
 
 Deno.test('DELETE /sessions/:sessionId ends an active session', async () => {
   const api = createEmulationApi({
-    sessions: new SessionRegistry(),
+    sessions: new SessionRepository(),
     publicOrigin: 'http://emulator.example:9000',
   });
   const createResponse = await api.request('/sessions', { method: 'POST' });
@@ -46,7 +46,7 @@ Deno.test('DELETE /sessions/:sessionId ends an active session', async () => {
 
 Deno.test('POST /sessions/:sessionId/bots creates a virtual bot', async () => {
   const api = createEmulationApi({
-    sessions: new SessionRegistry(),
+    sessions: new SessionRepository(),
     publicOrigin: 'http://emulator.example:9000',
   });
   const createSessionResponse = await api.request('/sessions', { method: 'POST' });
@@ -87,7 +87,7 @@ Deno.test('POST /sessions/:sessionId/bots creates a virtual bot', async () => {
 
 Deno.test('POST /sessions/:sessionId/accounts creates an account in the shared ID namespace', async () => {
   const api = createEmulationApi({
-    sessions: new SessionRegistry(),
+    sessions: new SessionRepository(),
     publicOrigin: 'http://emulator.example:9000',
   });
   const createSessionResponse = await api.request('/sessions', { method: 'POST' });
@@ -136,7 +136,7 @@ Deno.test('POST /sessions/:sessionId/accounts creates an account in the shared I
 
 Deno.test('POST /sessions/:sessionId/bot-api/bot:token/getMe returns the bot profile', async () => {
   const api = createEmulationApi({
-    sessions: new SessionRegistry(),
+    sessions: new SessionRepository(),
     publicOrigin: 'http://emulator.example:9000',
   });
   const createSessionResponse = await api.request('/sessions', { method: 'POST' });

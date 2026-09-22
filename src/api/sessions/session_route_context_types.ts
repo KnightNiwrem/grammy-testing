@@ -1,4 +1,4 @@
-import type { EmulationSession } from '../../session_registry.ts';
+import type { EmulationSession } from '../../repositories/session.ts';
 
 interface SessionRouteVariables {
   readonly emulationSession: EmulationSession;
