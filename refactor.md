@@ -9,10 +9,10 @@ that consistency breaks down, produced with support from Fallow (`dead-code`, `d
 
 ### 1. `EmulationSession` names two different shapes
 
-`src/emulation_session.ts:9`, `clients/typescript/types.ts:2` — server-side it's the aggregate of
-`AccountRepository`/`BotRepository`; client-side it's the wire DTO `{ id, botApiRoot }`. Both names
-are locally sensible, but anyone reading across the boundary (which the client tests do) meets one
-word with two meanings. Renaming the client DTO to something like `EmulationSessionInfo` /
+`src/types/emulation_session.ts:9`, `clients/typescript/types.ts:2` — server-side it's the aggregate
+of `AccountRepository`/`BotRepository`; client-side it's the wire DTO `{ id, botApiRoot }`. Both
+names are locally sensible, but anyone reading across the boundary (which the client tests do) meets
+one word with two meanings. Renaming the client DTO to something like `EmulationSessionInfo` /
 `CreatedEmulationSession` would keep the wire role explicit.
 
 ### 2. Asymmetric result field names: `CreatedVirtualBot.bot` vs `CreatedVirtualAccount.account`

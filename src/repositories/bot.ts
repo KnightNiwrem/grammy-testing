@@ -1,4 +1,4 @@
-import type { VirtualBot } from '../virtual_bot.ts';
+import type { VirtualBot } from '../types/virtual_bot.ts';
 
 export class BotRepository {
   readonly #botsById = new Map<number, VirtualBot>();

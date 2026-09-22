@@ -1,4 +1,4 @@
-import type { ChatMembership } from '../chat_membership.ts';
+import type { ChatMembership } from '../types/chat_membership.ts';
 import type {
   BasicGroup,
   Channel,
@@ -6,7 +6,7 @@ import type {
   PrivateConversationKey,
   SharedChat,
   Supergroup,
-} from '../virtual_chat.ts';
+} from '../types/virtual_chat.ts';
 
 export type SharedChatRegistrationFailureReason = 'chat_id_taken';
 

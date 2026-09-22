@@ -1,5 +1,5 @@
 import { AccountRepository } from '../src/repositories/account.ts';
-import type { VirtualAccount } from '../src/virtual_account.ts';
+import type { VirtualAccount } from '../src/types/virtual_account.ts';
 
 Deno.test('AccountRepository adds and retrieves an account without overwriting its ID', () => {
   const accounts = new AccountRepository();

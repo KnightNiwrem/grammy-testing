@@ -7,10 +7,10 @@ import type {
   ChannelCreationResult,
   SupergroupCreationResult,
 } from '../src/services/chat_interaction.ts';
-import type { ChatMembership } from '../src/chat_membership.ts';
+import type { ChatMembership } from '../src/types/chat_membership.ts';
 import type { ChatRepository } from '../src/repositories/chat.ts';
 import type { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
-import type { BasicGroup, Channel, Supergroup } from '../src/virtual_chat.ts';
+import type { BasicGroup, Channel, Supergroup } from '../src/types/virtual_chat.ts';
 import type { VirtualUserService } from '../src/services/virtual_user.ts';
 
 Deno.test('ChatInteractionService activates a private conversation for known participants', () => {

@@ -3,8 +3,8 @@ import type {
   IdentityReservationInput,
   IdentityReservationResult,
 } from '../repositories/telegram_identity.ts';
-import type { VirtualAccount, VirtualAccountProfile } from '../virtual_account.ts';
-import type { VirtualBot, VirtualBotProfile } from '../virtual_bot.ts';
+import type { VirtualAccount, VirtualAccountProfile } from '../types/virtual_account.ts';
+import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 
 export type CreateVirtualAccountInput =
   & Pick<VirtualAccountProfile, 'first_name'>

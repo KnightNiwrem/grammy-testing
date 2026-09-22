@@ -12,10 +12,10 @@
       {
         "name": "domain",
         "patterns": [
-          "src/virtual_account.ts",
-          "src/virtual_bot.ts",
-          "src/virtual_chat.ts",
-          "src/chat_membership.ts"
+          "src/types/virtual_account.ts",
+          "src/types/virtual_bot.ts",
+          "src/types/virtual_chat.ts",
+          "src/types/chat_membership.ts"
         ]
       },
       {
@@ -45,7 +45,7 @@
       {
         "name": "session",
         "patterns": [
-          "src/emulation_session.ts"
+          "src/types/emulation_session.ts"
         ]
       },
       {

@@ -4,9 +4,9 @@ import type {
   SharedChatRegistrationResult,
 } from '../repositories/chat.ts';
 import type { IdentityReservationResult } from '../repositories/telegram_identity.ts';
-import type { ChatMembership } from '../chat_membership.ts';
-import type { VirtualAccount } from '../virtual_account.ts';
-import type { VirtualBot } from '../virtual_bot.ts';
+import type { ChatMembership } from '../types/chat_membership.ts';
+import type { VirtualAccount } from '../types/virtual_account.ts';
+import type { VirtualBot } from '../types/virtual_bot.ts';
 import type {
   BasicGroup,
   Channel,
@@ -14,7 +14,7 @@ import type {
   PrivateConversationKey,
   SharedChat,
   Supergroup,
-} from '../virtual_chat.ts';
+} from '../types/virtual_chat.ts';
 
 export interface CreateBasicGroupInput {
   readonly title: string;

@@ -1,5 +1,5 @@
 import { BotRepository } from '../src/repositories/bot.ts';
-import type { VirtualBot } from '../src/virtual_bot.ts';
+import type { VirtualBot } from '../src/types/virtual_bot.ts';
 
 Deno.test('BotRepository adds and retrieves a virtual bot without overwriting keys', () => {
   const bots = new BotRepository();

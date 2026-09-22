@@ -1,4 +1,4 @@
-import type { EmulationSession } from '../emulation_session.ts';
+import type { EmulationSession } from '../types/emulation_session.ts';
 
 const MAX_SESSION_ID_GENERATION_ATTEMPTS = 10;
 

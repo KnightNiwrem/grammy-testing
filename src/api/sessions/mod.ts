@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 
-import type { EmulationSession } from '../../emulation_session.ts';
+import type { EmulationSession } from '../../types/emulation_session.ts';
 import { createAccountRoutes } from './accounts/mod.ts';
 import { createBotApiRoutes } from './bot_api/mod.ts';
 import { createBotRoutes } from './bots/mod.ts';

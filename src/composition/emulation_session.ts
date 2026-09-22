@@ -1,4 +1,4 @@
-import type { EmulationSession } from '../emulation_session.ts';
+import type { EmulationSession } from '../types/emulation_session.ts';
 import { AccountRepository } from '../repositories/account.ts';
 import { BotRepository } from '../repositories/bot.ts';
 import { ChatRepository } from '../repositories/chat.ts';
