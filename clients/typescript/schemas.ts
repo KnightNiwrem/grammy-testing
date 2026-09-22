@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { MAX_TELEGRAM_USER_ID } from './constants.ts';
+import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from './constants.ts';
 import type {
   CreatedVirtualBot,
   EmulationSession,
@@ -13,7 +13,9 @@ interface CreatedVirtualAccountResponse {
   readonly account: VirtualAccountProfile;
 }
 
-const telegramUserIdSchema = z.number().int().min(1).max(MAX_TELEGRAM_USER_ID);
+const telegramUserIdSchema = z.number().int()
+  .min(MIN_TELEGRAM_USER_ID)
+  .max(MAX_TELEGRAM_USER_ID);
 
 export const virtualBotProfileSchema: z.ZodType<VirtualBotProfile> = z.strictObject({
   id: telegramUserIdSchema,

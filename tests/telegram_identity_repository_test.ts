@@ -3,6 +3,13 @@ import {
   type TelegramIdentity,
   TelegramIdentityRepository,
 } from '../src/repositories/telegram_identity.ts';
+import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from '../src/types/telegram_identity.ts';
+
+Deno.test('Telegram user IDs use the official MTProto user range', () => {
+  if (MIN_TELEGRAM_USER_ID !== 1 || MAX_TELEGRAM_USER_ID !== 1_099_511_627_775) {
+    throw new Error('Expected the Telegram user ID range to match the Bot API contract');
+  }
+});
 
 Deno.test('TelegramIdentityRepository shares sequential IDs across username reservations', () => {
   const identities = new TelegramIdentityRepository();

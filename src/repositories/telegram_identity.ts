@@ -1,4 +1,5 @@
-const MAX_TELEGRAM_USER_ID = 4_503_599_627_370_495;
+import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from '../types/telegram_identity.ts';
+
 const LOWEST_BASIC_GROUP_ID = -999_999_999_999;
 const HIGHEST_BASIC_GROUP_ID = -1;
 const LOWEST_SUPERGROUP_OR_CHANNEL_ID = -1_997_852_516_352;
@@ -68,7 +69,7 @@ export type IdentityReservationResult =
 export class TelegramIdentityRepository {
   readonly #identitiesById = new Map<number, TelegramIdentity>();
   readonly #identitiesByNormalizedUsername = new Map<string, TelegramIdentity>();
-  #nextUserId = 1;
+  #nextUserId = MIN_TELEGRAM_USER_ID;
   #nextBasicGroupId = HIGHEST_BASIC_GROUP_ID;
   #nextSupergroupOrChannelId = HIGHEST_SUPERGROUP_OR_CHANNEL_ID;
 

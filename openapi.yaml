@@ -242,6 +242,10 @@ paths:
       - $ref: '#/components/parameters/BotApiMethod'
 components:
   schemas:
+    TelegramUserId:
+      type: integer
+      minimum: 1
+      maximum: 1099511627775
     Bot:
       type: object
       additionalProperties: false
@@ -261,9 +265,7 @@ components:
         - supports_join_request_queries
       properties:
         id:
-          type: integer
-          minimum: 1
-          maximum: 4503599627370495
+          $ref: '#/components/schemas/TelegramUserId'
           description: Server-assigned Telegram user identifier for the bot.
         is_bot:
           type: boolean
@@ -326,9 +328,7 @@ components:
         - first_name
       properties:
         id:
-          type: integer
-          minimum: 1
-          maximum: 4503599627370495
+          $ref: '#/components/schemas/TelegramUserId'
           description: Server-assigned Telegram user identifier for the account.
         is_bot:
           type: boolean
@@ -378,9 +378,7 @@ components:
           type: string
           const: private
         botId:
-          type: integer
-          minimum: 1
-          maximum: 4503599627370495
+          $ref: '#/components/schemas/TelegramUserId'
     SendAccountMessageRequest:
       type: object
       additionalProperties: false
@@ -403,9 +401,7 @@ components:
         - first_name
       properties:
         id:
-          type: integer
-          minimum: 1
-          maximum: 4503599627370495
+          $ref: '#/components/schemas/TelegramUserId'
         type:
           type: string
           const: private
@@ -565,18 +561,14 @@ components:
       required: true
       description: Server-assigned identifier of a virtual bot.
       schema:
-        type: integer
-        minimum: 1
-        maximum: 4503599627370495
+        $ref: '#/components/schemas/TelegramUserId'
     AccountId:
       name: accountId
       in: path
       required: true
       description: Server-assigned Telegram user identifier for a virtual account.
       schema:
-        type: integer
-        minimum: 1
-        maximum: 4503599627370495
+        $ref: '#/components/schemas/TelegramUserId'
     BotApiMethod:
       name: method
       in: path

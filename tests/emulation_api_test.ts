@@ -2,6 +2,7 @@ import { Bot } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/bot
 
 import { createEmulationApi } from '../src/api/mod.ts';
 import { createSessionLifecycleService } from '../src/composition/session_lifecycle.ts';
+import { MAX_TELEGRAM_USER_ID } from '../src/types/telegram_identity.ts';
 
 Deno.test('POST /sessions creates a session and returns its API locations', async () => {
   const publicOrigin = 'http://emulator.example:9000';
@@ -328,8 +329,44 @@ Deno.test('private message routes validate participants and request bodies', asy
       body: JSON.stringify({ to: { type: 'private', botId: 999 }, text: '' }),
     },
   );
+  const highestValidAccountIdResponse = await api.request(
+    `${sessionPath}/accounts/${MAX_TELEGRAM_USER_ID}/messages`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: { type: 'private', botId: MAX_TELEGRAM_USER_ID },
+        text: 'Hello',
+      }),
+    },
+  );
+  const excessiveAccountIdResponse = await api.request(
+    `${sessionPath}/accounts/${MAX_TELEGRAM_USER_ID + 1}/messages`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: { type: 'private', botId: 999 }, text: 'Hello' }),
+    },
+  );
+  const excessiveBotIdResponse = await api.request(
+    `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: { type: 'private', botId: MAX_TELEGRAM_USER_ID + 1 },
+        text: 'Hello',
+      }),
+    },
+  );
 
-  if (missingBotResponse.status !== 404 || emptyTextResponse.status !== 400) {
+  if (
+    missingBotResponse.status !== 404 ||
+    emptyTextResponse.status !== 400 ||
+    highestValidAccountIdResponse.status !== 404 ||
+    excessiveAccountIdResponse.status !== 400 ||
+    excessiveBotIdResponse.status !== 400
+  ) {
     throw new Error('Expected message routes to distinguish missing participants from bad input');
   }
 });

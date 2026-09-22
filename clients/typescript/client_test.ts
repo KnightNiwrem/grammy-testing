@@ -1,6 +1,28 @@
 import { createEmulationApi } from '../../src/api/mod.ts';
 import { createSessionLifecycleService } from '../../src/composition/session_lifecycle.ts';
+import { MAX_TELEGRAM_USER_ID } from './constants.ts';
 import { EmulationClientError, TelegramEmulationClient } from './mod.ts';
+import { virtualAccountProfileSchema } from './schemas.ts';
+
+Deno.test('TypeScript client validates the official Telegram user ID range', () => {
+  const accountProfile = {
+    id: MAX_TELEGRAM_USER_ID,
+    is_bot: false as const,
+    first_name: 'Ada',
+  };
+
+  if (!virtualAccountProfileSchema.safeParse(accountProfile).success) {
+    throw new Error('Expected the maximum Telegram user ID to be valid');
+  }
+  if (
+    virtualAccountProfileSchema.safeParse({
+      ...accountProfile,
+      id: MAX_TELEGRAM_USER_ID + 1,
+    }).success
+  ) {
+    throw new Error('Expected IDs above the Telegram user range to be invalid');
+  }
+});
 
 Deno.test('TypeScript client manages all currently implemented session resources', async () => {
   const publicOrigin = 'http://emulator.example:9000';

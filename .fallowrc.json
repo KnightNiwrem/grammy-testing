@@ -17,7 +17,8 @@
           "src/types/virtual_chat.ts",
           "src/types/chat_membership.ts",
           "src/types/virtual_message.ts",
-          "src/types/bot_api.ts"
+          "src/types/bot_api.ts",
+          "src/types/telegram_identity.ts"
         ]
       },
       {

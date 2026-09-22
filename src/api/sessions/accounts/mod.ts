@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 import { z } from 'zod';
 
+import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from '../../../types/telegram_identity.ts';
 import { MAX_TEXT_MESSAGE_LENGTH } from '../../../types/virtual_message.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 
@@ -11,7 +12,9 @@ const ACCOUNT_MESSAGE_COLLECTION_PATH = `/:${ACCOUNT_ID_PARAMETER}/messages` as 
 const PRIVATE_MESSAGE_HISTORY_PATH =
   `/:${ACCOUNT_ID_PARAMETER}/conversations/private/:${BOT_ID_PARAMETER}/messages` as const;
 
-const telegramUserIdSchema = z.number().int().min(1).max(4_503_599_627_370_495);
+const telegramUserIdSchema = z.number().int()
+  .min(MIN_TELEGRAM_USER_ID)
+  .max(MAX_TELEGRAM_USER_ID);
 const telegramUserIdPathParameterSchema = z.coerce.number().pipe(telegramUserIdSchema);
 
 const createAccountRequestSchema = z.strictObject({
