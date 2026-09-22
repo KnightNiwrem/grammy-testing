@@ -1,4 +1,4 @@
-import { EmulationSession } from '../src/repositories/session.ts';
+import { createEmulationSession } from '../src/composition/emulation_session.ts';
 import type {
   AddChatMemberFailureReason,
   AddChatMemberResult,
@@ -14,7 +14,7 @@ import type { BasicGroup, Channel, Supergroup } from '../src/virtual_chat.ts';
 import type { VirtualUserService } from '../src/services/virtual_user.ts';
 
 Deno.test('ChatInteractionService activates a private conversation for known participants', () => {
-  const { virtualUsers, chats, chatInteractions } = new EmulationSession('test-session');
+  const { virtualUsers, chats, chatInteractions } = createEmulationSession('test-session');
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'First Bot', 'first_bot');
 
@@ -36,7 +36,7 @@ Deno.test('ChatInteractionService activates a private conversation for known par
 });
 
 Deno.test('ChatInteractionService rejects unknown private conversation participants', () => {
-  const { virtualUsers, chats, chatInteractions } = new EmulationSession('test-session');
+  const { virtualUsers, chats, chatInteractions } = createEmulationSession('test-session');
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'First Bot', 'first_bot');
 
@@ -64,7 +64,7 @@ Deno.test('ChatInteractionService rejects unknown private conversation participa
 });
 
 Deno.test('ChatInteractionService creates a basic group with its initial participants', () => {
-  const { virtualUsers, identities, chats, chatInteractions } = new EmulationSession(
+  const { virtualUsers, identities, chats, chatInteractions } = createEmulationSession(
     'test-session',
   );
   const creator = createAccount(virtualUsers, 'Ada');
@@ -92,7 +92,7 @@ Deno.test('ChatInteractionService creates a basic group with its initial partici
 });
 
 Deno.test('ChatInteractionService validates basic-group participants before reserving an ID', () => {
-  const { virtualUsers, chatInteractions } = new EmulationSession('test-session');
+  const { virtualUsers, chatInteractions } = createEmulationSession('test-session');
   const creator = createAccount(virtualUsers, 'Ada');
   const member = createAccount(virtualUsers, 'Grace');
 
@@ -135,7 +135,7 @@ Deno.test('ChatInteractionService validates basic-group participants before rese
 });
 
 Deno.test('ChatInteractionService creates owner-only supergroups and channels', () => {
-  const { virtualUsers, identities, chats, chatInteractions } = new EmulationSession(
+  const { virtualUsers, identities, chats, chatInteractions } = createEmulationSession(
     'test-session',
   );
   const creator = createAccount(virtualUsers, 'Ada');
@@ -170,7 +170,7 @@ Deno.test('ChatInteractionService creates owner-only supergroups and channels', 
 });
 
 Deno.test('ChatInteractionService validates owners before reserving shared-chat IDs', () => {
-  const { virtualUsers, chatInteractions } = new EmulationSession('test-session');
+  const { virtualUsers, chatInteractions } = createEmulationSession('test-session');
 
   const missingSupergroupOwner = chatInteractions.createSupergroup({
     title: 'Missing Owner',
@@ -195,7 +195,7 @@ Deno.test('ChatInteractionService validates owners before reserving shared-chat 
 });
 
 Deno.test('ChatInteractionService adds permitted members to shared chats', () => {
-  const { virtualUsers, chats, chatInteractions } = new EmulationSession('test-session');
+  const { virtualUsers, chats, chatInteractions } = createEmulationSession('test-session');
   const owner = createAccount(virtualUsers, 'Ada');
   const account = createAccount(virtualUsers, 'Grace');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
@@ -235,7 +235,7 @@ Deno.test('ChatInteractionService adds permitted members to shared chats', () =>
 });
 
 Deno.test('ChatInteractionService validates member additions before changing chat state', () => {
-  const { virtualUsers, chats, chatInteractions } = new EmulationSession('test-session');
+  const { virtualUsers, chats, chatInteractions } = createEmulationSession('test-session');
   const owner = createAccount(virtualUsers, 'Ada');
   const existingMember = createAccount(virtualUsers, 'Grace');
   const candidate = createAccount(virtualUsers, 'Linus');

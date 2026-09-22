@@ -1,7 +1,7 @@
 import { parseServerConfiguration } from './config.ts';
+import { createSessionLifecycleService } from './composition/session_lifecycle.ts';
 import { createEmulationApi } from './api/mod.ts';
 import { TelegramEmulationServer } from './server.ts';
-import { SessionRepository } from './repositories/session.ts';
 
 if (import.meta.main) {
   const configuration = parseServerConfiguration({
@@ -10,7 +10,7 @@ if (import.meta.main) {
   });
 
   const api = createEmulationApi({
-    sessions: new SessionRepository(),
+    sessionLifecycle: createSessionLifecycleService(),
     publicOrigin: configuration.publicOrigin,
   });
   const server = new TelegramEmulationServer({ port: configuration.port }).start(api.fetch);

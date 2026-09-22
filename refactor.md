@@ -9,7 +9,7 @@ that consistency breaks down, produced with support from Fallow (`dead-code`, `d
 
 ### 1. `EmulationSession` names two different shapes
 
-`src/repositories/session.ts:8`, `clients/typescript/types.ts:2` — server-side it's the aggregate of
+`src/emulation_session.ts:9`, `clients/typescript/types.ts:2` — server-side it's the aggregate of
 `AccountRepository`/`BotRepository`; client-side it's the wire DTO `{ id, botApiRoot }`. Both names
 are locally sensible, but anyone reading across the boundary (which the client tests do) meets one
 word with two meanings. Renaming the client DTO to something like `EmulationSessionInfo` /
@@ -39,8 +39,9 @@ shadowing pattern in `tests/server_test.ts:4`. A name like `httpServer` would di
 
 ## Placement and boundaries
 
-The layering is otherwise clean: `main` → `config`/`api` → `sessions` routes → repositories →
-virtual entities, with no upward imports. Three spots worth attention:
+The layering is otherwise clean: `main` composes the transport, lifecycle services, and
+repositories; repositories and domain services then depend on virtual entities. Two spots remain
+worth attention:
 
 ### 5. `config.ts` imports `DEFAULT_PORT` from `server.ts`
 
@@ -50,15 +51,7 @@ the zod schema in `config.ts:9` and the `RangeError` check in `server.ts:18`. Mo
 (and the port-range knowledge) into `config.ts`, or a small shared constants module, would give one
 owner.
 
-### 6. `repositories/session.ts` holds two concepts
-
-`src/repositories/session.ts` — `EmulationSession` (the per-session aggregate root wiring the
-repositories together) and `SessionRepository` (the collection of sessions). The file name only
-advertises the second. It's small enough that this is not urgent, but `emulation_session.ts` +
-`repositories/session.ts` would make the boundary match the names — especially since
-`EmulationSession` is imported by name from three route files and `session_route_variables.ts`.
-
-### 7. Failure-reason → HTTP-status mapping is duplicated
+### 6. Failure-reason → HTTP-status mapping is duplicated
 
 `src/api/sessions/accounts/mod.ts:32`, `src/api/sessions/bots/mod.ts:30` —
 `result.reason === 'username_taken' ? 409 : 507` is shared knowledge (the HTTP contract for
@@ -66,7 +59,7 @@ advertises the second. It's small enough that this is not urgent, but `emulation
 12-line JSON-parse-and-validate preamble. If a third reason is ever added, both sites must change in
 lockstep — a small shared helper in `src/api/sessions/` would own that mapping once.
 
-### 8. Client `utils.ts` and `constants.ts` are grab-bags
+### 7. Client `utils.ts` and `constants.ts` are grab-bags
 
 `clients/typescript/utils.ts`, `constants.ts` — `utils.ts` mixes URL validation (`normalizeUrlRoot`)
 with the whole HTTP request pipeline; `constants.ts` mixes HTTP status codes with a Telegram domain

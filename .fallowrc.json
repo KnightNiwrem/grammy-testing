@@ -43,15 +43,35 @@
         ]
       },
       {
-        "name": "services",
+        "name": "session",
         "patterns": [
-          "src/services/**/*.ts"
+          "src/emulation_session.ts"
+        ]
+      },
+      {
+        "name": "session-repository",
+        "patterns": [
+          "src/repositories/session.ts"
+        ]
+      },
+      {
+        "name": "domain-services",
+        "patterns": [
+          "src/services/chat_interaction.ts",
+          "src/services/virtual_user.ts"
+        ]
+      },
+      {
+        "name": "application-services",
+        "patterns": [
+          "src/services/session_lifecycle.ts"
         ]
       },
       {
         "name": "composition",
         "patterns": [
-          "src/repositories/session.ts"
+          "src/composition/**/*.ts",
+          "src/main.ts"
         ]
       },
       {
@@ -59,8 +79,7 @@
         "patterns": [
           "src/api/**/*.ts",
           "src/config.ts",
-          "src/server.ts",
-          "src/main.ts"
+          "src/server.ts"
         ]
       }
     ],
@@ -94,7 +113,25 @@
         ]
       },
       {
-        "from": "services",
+        "from": "session",
+        "allow": [],
+        "allowTypeOnly": [
+          "account-repository",
+          "bot-repository",
+          "chat-repository",
+          "identity-repository",
+          "domain-services"
+        ]
+      },
+      {
+        "from": "session-repository",
+        "allow": [],
+        "allowTypeOnly": [
+          "session"
+        ]
+      },
+      {
+        "from": "domain-services",
         "allow": [
           "domain"
         ],
@@ -106,6 +143,13 @@
         ]
       },
       {
+        "from": "application-services",
+        "allow": [],
+        "allowTypeOnly": [
+          "session"
+        ]
+      },
+      {
         "from": "composition",
         "allow": [
           "domain",
@@ -113,15 +157,21 @@
           "bot-repository",
           "chat-repository",
           "identity-repository",
-          "services"
+          "session-repository",
+          "domain-services",
+          "application-services",
+          "session",
+          "transport"
         ]
       },
       {
         "from": "transport",
         "allow": [
           "domain",
-          "composition",
           "transport"
+        ],
+        "allowTypeOnly": [
+          "session"
         ]
       }
     ],

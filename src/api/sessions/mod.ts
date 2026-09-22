@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 
-import type { SessionRepository } from '../../repositories/session.ts';
+import type { EmulationSession } from '../../emulation_session.ts';
 import { createAccountRoutes } from './accounts/mod.ts';
 import { createBotApiRoutes } from './bot_api/mod.ts';
 import { createBotRoutes } from './bots/mod.ts';
@@ -14,18 +14,24 @@ const ACCOUNT_COLLECTION_PATH = `${SESSION_PATH}/accounts` as const;
 const BOT_COLLECTION_PATH = `${SESSION_PATH}/bots` as const;
 const BOT_API_PATH = `${SESSION_PATH}/bot-api` as const;
 
+export interface SessionLifecycle {
+  createSession(): EmulationSession;
+  endSession(sessionId: string): boolean;
+  getSessionById(sessionId: string): EmulationSession | undefined;
+}
+
 interface SessionRouteDependencies {
-  readonly sessions: SessionRepository;
+  readonly sessionLifecycle: SessionLifecycle;
   readonly publicOrigin: string;
 }
 
 export function createSessionRoutes(
-  { sessions, publicOrigin }: SessionRouteDependencies,
+  { sessionLifecycle, publicOrigin }: SessionRouteDependencies,
 ): Hono<SessionRouteContextTypes> {
   const sessionRoutes = new Hono<SessionRouteContextTypes>();
 
   sessionRoutes.post('/', (context) => {
-    const session = sessions.create();
+    const session = sessionLifecycle.createSession();
     const sessionPath = `${basePath(context)}/${session.id}`;
 
     return context.json(
@@ -39,12 +45,16 @@ export function createSessionRoutes(
   });
 
   sessionRoutes.delete(SESSION_PATH, (context) => {
-    const sessionWasDeleted = sessions.delete(context.req.param(SESSION_ID_PARAMETER));
+    const sessionWasDeleted = sessionLifecycle.endSession(
+      context.req.param(SESSION_ID_PARAMETER),
+    );
     return context.body(null, sessionWasDeleted ? 204 : 404);
   });
 
   sessionRoutes.use(SESSION_SUBRESOURCE_PATH, async (context, next) => {
-    const session = sessions.get(context.req.param(SESSION_ID_PARAMETER));
+    const session = sessionLifecycle.getSessionById(
+      context.req.param(SESSION_ID_PARAMETER),
+    );
     if (session === undefined) {
       return context.body(null, 404);
     }

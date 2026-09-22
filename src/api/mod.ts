@@ -1,18 +1,19 @@
 import { Hono } from 'hono';
 
-import type { SessionRepository } from '../repositories/session.ts';
-import { createSessionRoutes } from './sessions/mod.ts';
+import { createSessionRoutes, type SessionLifecycle } from './sessions/mod.ts';
 
 export interface EmulationApiDependencies {
-  readonly sessions: SessionRepository;
+  readonly sessionLifecycle: SessionLifecycle;
   readonly publicOrigin: string;
 }
 
 /** Composes the HTTP interface for controlling and interacting with emulation sessions. */
-export function createEmulationApi({ sessions, publicOrigin }: EmulationApiDependencies): Hono {
+export function createEmulationApi(
+  { sessionLifecycle, publicOrigin }: EmulationApiDependencies,
+): Hono {
   const api = new Hono();
 
-  api.route('/sessions', createSessionRoutes({ sessions, publicOrigin }));
+  api.route('/sessions', createSessionRoutes({ sessionLifecycle, publicOrigin }));
   api.notFound((context) => context.body(null, 404));
 
   return api;
