@@ -363,6 +363,11 @@ Bot API objects for updates or append to mailboxes.
 each event, projects it into observer-specific Bot API updates, and appends them to each bot's
 mailbox. This keeps state transitions independent of polling and webhook delivery.
 
+`BotApiService` is the only way the Bot API transport reaches session state. It authenticates bot
+tokens and consumes mailboxes, so invariants spanning bot configuration and delivery mode, such as
+[`getUpdates` and webhooks](https://core.telegram.org/bots/api#setwebhook) being mutually exclusive,
+have a single owner. Repositories are private to session composition.
+
 Only `MessageCreatedEvent` for private text messages exists today; its sole observer is the
 conversation's bot. Further events, such as a chat-member status change, are added together with the
 update projections that consume them.

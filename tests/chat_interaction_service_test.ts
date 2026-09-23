@@ -1,10 +1,11 @@
-import { createEmulationSession } from '../src/composition/emulation_session.ts';
 import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
+import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { ChatRepository } from '../src/repositories/chat.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
+import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import {
   type AddChatMemberFailureReason,
   type AddChatMemberResult,
@@ -23,7 +24,7 @@ import type { BasicGroup, Channel, Supergroup } from '../src/types/virtual_chat.
 import type { VirtualBot } from '../src/types/virtual_bot.ts';
 
 Deno.test('ChatInteractionService activates a private conversation for known participants', () => {
-  const { virtualUsers, chats, chatInteractions } = createEmulationSession('test-session');
+  const { virtualUsers, chats, chatInteractions } = createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'First Bot', 'first_bot');
 
@@ -45,7 +46,7 @@ Deno.test('ChatInteractionService activates a private conversation for known par
 });
 
 Deno.test('ChatInteractionService rejects unknown private conversation participants', () => {
-  const { virtualUsers, chats, chatInteractions } = createEmulationSession('test-session');
+  const { virtualUsers, chats, chatInteractions } = createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'First Bot', 'first_bot');
 
@@ -73,9 +74,7 @@ Deno.test('ChatInteractionService rejects unknown private conversation participa
 });
 
 Deno.test('ChatInteractionService creates a basic group with its initial participants', () => {
-  const { virtualUsers, identities, chats, chatInteractions } = createEmulationSession(
-    'test-session',
-  );
+  const { virtualUsers, identities, chats, chatInteractions } = createChatInteractionFixture();
   const creator = createAccount(virtualUsers, 'Ada');
   const member = createAccount(virtualUsers, 'Grace');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
@@ -101,7 +100,7 @@ Deno.test('ChatInteractionService creates a basic group with its initial partici
 });
 
 Deno.test('ChatInteractionService validates basic-group participants before reserving an ID', () => {
-  const { virtualUsers, chatInteractions } = createEmulationSession('test-session');
+  const { virtualUsers, chatInteractions } = createChatInteractionFixture();
   const creator = createAccount(virtualUsers, 'Ada');
   const member = createAccount(virtualUsers, 'Grace');
 
@@ -144,9 +143,7 @@ Deno.test('ChatInteractionService validates basic-group participants before rese
 });
 
 Deno.test('ChatInteractionService creates owner-only supergroups and channels', () => {
-  const { virtualUsers, identities, chats, chatInteractions } = createEmulationSession(
-    'test-session',
-  );
+  const { virtualUsers, identities, chats, chatInteractions } = createChatInteractionFixture();
   const creator = createAccount(virtualUsers, 'Ada');
   const nonMember = createAccount(virtualUsers, 'Grace');
 
@@ -179,7 +176,7 @@ Deno.test('ChatInteractionService creates owner-only supergroups and channels', 
 });
 
 Deno.test('ChatInteractionService validates owners before reserving shared-chat IDs', () => {
-  const { virtualUsers, chatInteractions } = createEmulationSession('test-session');
+  const { virtualUsers, chatInteractions } = createChatInteractionFixture();
 
   const missingSupergroupOwner = chatInteractions.createSupergroup({
     title: 'Missing Owner',
@@ -204,7 +201,7 @@ Deno.test('ChatInteractionService validates owners before reserving shared-chat 
 });
 
 Deno.test('ChatInteractionService adds permitted members to shared chats', () => {
-  const { virtualUsers, chats, chatInteractions } = createEmulationSession('test-session');
+  const { virtualUsers, chats, chatInteractions } = createChatInteractionFixture();
   const owner = createAccount(virtualUsers, 'Ada');
   const account = createAccount(virtualUsers, 'Grace');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
@@ -244,7 +241,7 @@ Deno.test('ChatInteractionService adds permitted members to shared chats', () =>
 });
 
 Deno.test('ChatInteractionService validates member additions before changing chat state', () => {
-  const { virtualUsers, chats, chatInteractions } = createEmulationSession('test-session');
+  const { virtualUsers, chats, chatInteractions } = createChatInteractionFixture();
   const owner = createAccount(virtualUsers, 'Ada');
   const existingMember = createAccount(virtualUsers, 'Grace');
   const candidate = createAccount(virtualUsers, 'Linus');
@@ -317,9 +314,8 @@ Deno.test('ChatInteractionService validates member additions before changing cha
 });
 
 Deno.test('ChatInteractionService sends and stores private account messages', async () => {
-  const { virtualUsers, chats, messages, botUpdates, chatInteractions } = createEmulationSession(
-    'test-session',
-  );
+  const { virtualUsers, chats, messages, botUpdates, chatInteractions } =
+    createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
 
@@ -386,7 +382,7 @@ Deno.test('ChatInteractionService sends and stores private account messages', as
 });
 
 Deno.test('ChatInteractionService numbers private messages in each bot message box', async () => {
-  const { virtualUsers, botUpdates, chatInteractions } = createEmulationSession('test-session');
+  const { virtualUsers, botUpdates, chatInteractions } = createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const firstBot = createBot(virtualUsers, 'First Bot', 'first_bot');
   const secondBot = createBot(virtualUsers, 'Second Bot', 'second_bot');
@@ -422,7 +418,7 @@ Deno.test('ChatInteractionService numbers private messages in each bot message b
 });
 
 Deno.test('ChatInteractionService continues a bot message box across private chats', () => {
-  const { virtualUsers, chatInteractions } = createEmulationSession('test-session');
+  const { virtualUsers, chatInteractions } = createChatInteractionFixture();
   const firstAccount = createAccount(virtualUsers, 'Ada');
   const secondAccount = createAccount(virtualUsers, 'Grace');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
@@ -438,7 +434,7 @@ Deno.test('ChatInteractionService continues a bot message box across private cha
 
 Deno.test('ChatInteractionService adds private messages to the sending account message box', () => {
   const { virtualUsers, messages, userMessageBoxes, chatInteractions } =
-    createChatInteractionServiceWithRecordedEvents();
+    createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const firstBot = createBot(virtualUsers, 'First Bot', 'first_bot');
   const secondBot = createBot(virtualUsers, 'Second Bot', 'second_bot');
@@ -466,7 +462,7 @@ Deno.test('ChatInteractionService adds private messages to the sending account m
 
 Deno.test('ChatInteractionService publishes a created event for each sent message', () => {
   const { virtualUsers, messages, publishedEvents, chatInteractions } =
-    createChatInteractionServiceWithRecordedEvents();
+    createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
 
@@ -494,9 +490,8 @@ Deno.test('ChatInteractionService publishes a created event for each sent messag
 });
 
 Deno.test('ChatInteractionService validates private messages before changing state', async () => {
-  const { virtualUsers, chats, messages, botUpdates, chatInteractions } = createEmulationSession(
-    'test-session',
-  );
+  const { virtualUsers, chats, messages, botUpdates, chatInteractions } =
+    createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
 
@@ -653,25 +648,46 @@ function assertMembershipStatus(
   }
 }
 
-function createChatInteractionServiceWithRecordedEvents() {
+function createChatInteractionFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
+  const chats = new ChatRepository();
   const messages = new MessageRepository();
   const userMessageBoxes = new UserMessageBoxRepository();
+  const botUpdates = new BotUpdateRepository();
+  const botUpdateDelivery = new BotUpdateDeliveryService({
+    accounts,
+    userMessageBoxes,
+    botUpdates,
+  });
   const publishedEvents: ChatDomainEvent[] = [];
   const chatInteractions = new ChatInteractionService({
     identities,
     accounts,
     bots,
-    chats: new ChatRepository(),
+    chats,
     messages,
     userMessageBoxes,
-    events: { publish: (event) => publishedEvents.push(event) },
+    events: {
+      publish: (event) => {
+        publishedEvents.push(event);
+        botUpdateDelivery.publish(event);
+      },
+    },
     currentUnixTimeSeconds: () => 1_700_000_000,
   });
-  return { virtualUsers, messages, userMessageBoxes, publishedEvents, chatInteractions };
+  return {
+    identities,
+    virtualUsers,
+    chats,
+    messages,
+    userMessageBoxes,
+    botUpdates,
+    publishedEvents,
+    chatInteractions,
+  };
 }
 
 function haveSameBotApiView(

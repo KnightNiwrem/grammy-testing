@@ -175,6 +175,36 @@ Deno.test('POST /sessions/:sessionId/bot-api/bot:token/getMe returns the bot pro
   }
 });
 
+Deno.test('Bot API rejects unknown tokens before resolving methods or parameters', async () => {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
+  const sessionPath = createSessionResponse.headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const botApiPath = `${sessionPath}/bot-api/bot123:unknown`;
+
+  const responses = [
+    await api.request(`${botApiPath}/getMe`, { method: 'POST' }),
+    await api.request(`${botApiPath}/getUpdates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{not json',
+    }),
+    await api.request(`${botApiPath}/unsupportedMethod`, { method: 'POST' }),
+  ];
+
+  for (const response of responses) {
+    const body: unknown = await response.json();
+    if (response.status !== 401 || !isUnauthorizedResponse(body)) {
+      throw new Error(`Expected an unknown token to be unauthorized, received ${response.status}`);
+    }
+  }
+});
+
 Deno.test('private account messages are stored and delivered through getUpdates', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({
@@ -406,6 +436,19 @@ function isGetMeResponse(value: unknown): value is {
 
   const { ok, result } = value as Record<string, unknown>;
   return ok === true && isUserProfile(result) && typeof result.username === 'string';
+}
+
+function isUnauthorizedResponse(value: unknown): value is {
+  ok: false;
+  error_code: 401;
+  description: 'Unauthorized';
+} {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const { ok, error_code, description } = value as Record<string, unknown>;
+  return ok === false && error_code === 401 && description === 'Unauthorized';
 }
 
 function isSentMessageResponse(value: unknown): value is {

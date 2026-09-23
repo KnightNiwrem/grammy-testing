@@ -96,6 +96,12 @@
         ]
       },
       {
+        "name": "bot-api-service",
+        "patterns": [
+          "src/services/bot_api.ts"
+        ]
+      },
+      {
         "name": "application-services",
         "patterns": [
           "src/services/session_lifecycle.ts"
@@ -168,13 +174,8 @@
         "from": "session",
         "allow": [],
         "allowTypeOnly": [
-          "account-repository",
-          "bot-repository",
-          "chat-repository",
-          "message-repository",
-          "bot-update-repository",
-          "identity-repository",
-          "domain-services"
+          "domain-services",
+          "bot-api-service"
         ]
       },
       {
@@ -211,6 +212,12 @@
         ]
       },
       {
+        "from": "bot-api-service",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "application-services",
         "allow": [],
         "allowTypeOnly": [
@@ -232,6 +239,7 @@
           "bot-api-projection",
           "domain-services",
           "update-delivery",
+          "bot-api-service",
           "application-services",
           "session",
           "transport"
