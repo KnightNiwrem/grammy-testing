@@ -324,55 +324,14 @@ Deno.test('private account messages are stored and delivered through getUpdates'
 });
 
 Deno.test('getUpdates allowed_updates filters only updates created afterward', async () => {
-  const api = createEmulationApi({
-    sessionLifecycle: createSessionLifecycleService(),
-    publicOrigin: 'http://emulator.example:9000',
-  });
-  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
-  const sessionPath = createSessionResponse.headers.get('Location');
-  if (sessionPath === null) {
-    throw new Error('Expected the created session to have a Location');
-  }
-  const createBotResponse = await api.request(`${sessionPath}/bots`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
-  });
-  const createdBot: unknown = await createBotResponse.json();
-  if (!isCreatedBotResponse(createdBot)) {
-    throw new Error('Expected a created bot response');
-  }
-  const createAccountResponse = await api.request(`${sessionPath}/accounts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: 'Ada' }),
-  });
-  const createdAccount: unknown = await createAccountResponse.json();
-  if (!isCreatedAccountResponse(createdAccount)) {
-    throw new Error('Expected a created account response');
-  }
-  const sendText = async (text: string) => {
-    const response = await api.request(
-      `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: { type: 'private', botId: createdBot.bot.id }, text }),
-      },
-    );
-    if (response.status !== 201) {
-      throw new Error(`Expected "${text}" to be accepted, received ${response.status}`);
-    }
-  };
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
   const getUpdatedTexts = async (parameters: Record<string, unknown>) => {
-    const response = await api.request(
-      `${sessionPath}/bot-api/bot${createdBot.token}/getUpdates`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(parameters),
-      },
-    );
+    const response = await api.request(`${botApiPath}/getUpdates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parameters),
+    });
     const body: unknown = await response.json();
     if (response.status !== 200 || !isGetUpdatesResponse(body)) {
       throw new Error(`Expected a successful getUpdates response, received ${response.status}`);
@@ -414,35 +373,9 @@ Deno.test('getUpdates allowed_updates filters only updates created afterward', a
 });
 
 Deno.test('getUpdates answers a displaced long poll with a Telegram conflict', async () => {
-  const api = createEmulationApi({
-    sessionLifecycle: createSessionLifecycleService(),
-    publicOrigin: 'http://emulator.example:9000',
-  });
-  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
-  const sessionPath = createSessionResponse.headers.get('Location');
-  if (sessionPath === null) {
-    throw new Error('Expected the created session to have a Location');
-  }
-  const createBotResponse = await api.request(`${sessionPath}/bots`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
-  });
-  const createdBot: unknown = await createBotResponse.json();
-  if (!isCreatedBotResponse(createdBot)) {
-    throw new Error('Expected a created bot response');
-  }
-  const createAccountResponse = await api.request(`${sessionPath}/accounts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: 'Ada' }),
-  });
-  const createdAccount: unknown = await createAccountResponse.json();
-  if (!isCreatedAccountResponse(createdAccount)) {
-    throw new Error('Expected a created account response');
-  }
+  const { api, botApiPath, sendText } = await createPrivateConversationFixture();
   const holdLongPoll = () =>
-    api.request(`${sessionPath}/bot-api/bot${createdBot.token}/getUpdates`, {
+    api.request(`${botApiPath}/getUpdates`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ timeout: 50 }),
@@ -462,17 +395,7 @@ Deno.test('getUpdates answers a displaced long poll with a Telegram conflict', a
     );
   }
 
-  const sendResponse = await api.request(
-    `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: { type: 'private', botId: createdBot.bot.id }, text: 'Hello' }),
-    },
-  );
-  if (sendResponse.status !== 201) {
-    throw new Error(`Expected the account message to be accepted, received ${sendResponse.status}`);
-  }
+  await sendText('Hello');
   const replacementPoll = await pendingPolls[1 - displacedPoll.pollIndex];
   const replacementBody: unknown = await replacementPoll.response.json();
   if (
@@ -481,6 +404,115 @@ Deno.test('getUpdates answers a displaced long poll with a Telegram conflict', a
     replacementBody.result.map((update) => update.message.text).join() !== 'Hello'
   ) {
     throw new Error('Expected the replacement long poll to receive the account message');
+  }
+});
+
+Deno.test('Bot API resolves method names case-insensitively over GET and POST', async () => {
+  const { api, botApiPath, createdBot } = await createPrivateConversationFixture();
+
+  const responses = [
+    await api.request(`${botApiPath}/getMe`),
+    await api.request(`${botApiPath}/GETME`, { method: 'POST' }),
+    await api.request(`${botApiPath}/getme`),
+  ];
+
+  for (const response of responses) {
+    const body: unknown = await response.json();
+    if (
+      response.status !== 200 || !isGetMeResponse(body) ||
+      JSON.stringify(body.result) !== JSON.stringify(createdBot.bot)
+    ) {
+      throw new Error(`Expected ${response.url} to return the bot profile`);
+    }
+  }
+});
+
+Deno.test('getUpdates applies parameters from every supported request encoding', async () => {
+  const { api, botApiPath, sendText } = await createPrivateConversationFixture();
+  const multipartBody = (parameters: Record<string, string>) => {
+    const formData = new FormData();
+    for (const [name, value] of Object.entries(parameters)) {
+      formData.set(name, value);
+    }
+    return formData;
+  };
+  const requestsByEncoding: Record<string, (offset: number) => Response | Promise<Response>> = {
+    'query string without a body': (offset) =>
+      api.request(`${botApiPath}/getUpdates?offset=${offset}&allowed_updates=["message"]`, {
+        method: 'POST',
+      }),
+    'GET query string': (offset) =>
+      api.request(`${botApiPath}/getUpdates?offset=${offset}&allowed_updates=["message"]`),
+    'URL-encoded form': (offset) =>
+      api.request(`${botApiPath}/getUpdates`, {
+        method: 'POST',
+        body: new URLSearchParams({ offset: `${offset}`, allowed_updates: '["message"]' }),
+      }),
+    'multipart form': (offset) =>
+      api.request(`${botApiPath}/getUpdates`, {
+        method: 'POST',
+        body: multipartBody({ offset: `${offset}`, allowed_updates: '["message"]' }),
+      }),
+    'JSON with textual values': (offset) =>
+      api.request(`${botApiPath}/getUpdates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offset: `${offset}`, allowed_updates: '["message"]' }),
+      }),
+  };
+
+  await sendText('first');
+  let expectedUpdateId = 1;
+  for (const [encoding, requestUpdates] of Object.entries(requestsByEncoding)) {
+    expectedUpdateId += 1;
+    await sendText(`received through ${encoding}`);
+
+    // The offset confirms the update still pending from the previous iteration.
+    const response = await requestUpdates(expectedUpdateId);
+    const body: unknown = await response.json();
+    if (
+      response.status !== 200 || !isGetUpdatesResponse(body) ||
+      JSON.stringify(body.result.map((update) => update.update_id)) !==
+        JSON.stringify([expectedUpdateId])
+    ) {
+      throw new Error(`Expected the ${encoding} offset to confirm earlier updates`);
+    }
+  }
+
+  const remainingResponse = await api.request(`${botApiPath}/getUpdates`, { method: 'POST' });
+  const remainingBody: unknown = await remainingResponse.json();
+  if (
+    !isGetUpdatesResponse(remainingBody) ||
+    JSON.stringify(remainingBody.result.map((update) => update.update_id)) !==
+      JSON.stringify([expectedUpdateId])
+  ) {
+    throw new Error('Expected only the last update to remain unconfirmed');
+  }
+});
+
+Deno.test('getUpdates rejects malformed parameters with a Bot API error', async () => {
+  const { api, botApiPath } = await createPrivateConversationFixture();
+
+  const responses = [
+    await api.request(`${botApiPath}/getUpdates?offset=two`),
+    await api.request(`${botApiPath}/getUpdates?allowed_updates=message`),
+    await api.request(`${botApiPath}/getUpdates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: '{"offset":2}',
+    }),
+    await api.request(`${botApiPath}/getUpdates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '[2]',
+    }),
+  ];
+
+  for (const response of responses) {
+    const body: unknown = await response.json();
+    if (response.status !== 400 || !isBadRequestResponse(body)) {
+      throw new Error(`Expected a Bot API bad request, received ${response.status}`);
+    }
   }
 });
 
@@ -633,6 +665,60 @@ Deno.test('private message routes validate participants and request bodies', asy
   }
 });
 
+/** Creates a session holding a bot and an account that can message it. */
+async function createPrivateConversationFixture() {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
+  const sessionPath = createSessionResponse.headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const createBotResponse = await api.request(`${sessionPath}/bots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
+  });
+  const createdBot: unknown = await createBotResponse.json();
+  if (!isCreatedBotResponse(createdBot)) {
+    throw new Error('Expected a created bot response');
+  }
+  const createAccountResponse = await api.request(`${sessionPath}/accounts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Ada' }),
+  });
+  const createdAccount: unknown = await createAccountResponse.json();
+  if (!isCreatedAccountResponse(createdAccount)) {
+    throw new Error('Expected a created account response');
+  }
+
+  const sendText = async (text: string) => {
+    const response = await api.request(
+      `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: { type: 'private', botId: createdBot.bot.id }, text }),
+      },
+    );
+    if (response.status !== 201) {
+      throw new Error(`Expected "${text}" to be accepted, received ${response.status}`);
+    }
+  };
+
+  return {
+    api,
+    sessionPath,
+    botApiPath: `${sessionPath}/bot-api/bot${createdBot.token}`,
+    createdBot,
+    createdAccount,
+    sendText,
+  };
+}
+
 function isSessionResponse(value: unknown): value is { id: string; botApiRoot: string } {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -668,6 +754,20 @@ function isGetMeResponse(value: unknown): value is {
 
   const { ok, result } = value as Record<string, unknown>;
   return ok === true && isUserProfile(result) && typeof result.username === 'string';
+}
+
+function isBadRequestResponse(value: unknown): value is {
+  ok: false;
+  error_code: 400;
+  description: string;
+} {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const { ok, error_code, description } = value as Record<string, unknown>;
+  return ok === false && error_code === 400 && typeof description === 'string' &&
+    description.startsWith('Bad Request: ');
 }
 
 function isUnauthorizedResponse(value: unknown): value is {

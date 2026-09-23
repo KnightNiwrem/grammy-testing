@@ -6,6 +6,16 @@ info:
     HTTP interface for isolated Telegram Bot API test sessions. Objects marked with
     `x-implementation-status: unimplemented` describe agreed API surface that is not available
     from the server yet. Marked path items without operations record routing topology only.
+
+
+    Bot API paths follow Telegram's request conventions, so each listed POST operation also
+    accepts GET, and method names match case-insensitively. Parameters can be supplied in the
+    query string or in an `application/json`, `application/x-www-form-urlencoded`, or
+    `multipart/form-data` body; a query-string parameter takes precedence over a body parameter
+    of the same name. Any parameter value can be sent as text, with array parameters such as
+    `allowed_updates` as JSON text. Telegram tolerates unknown parameters, malformed values, and
+    bodies it cannot decode; the emulator rejects them with a `400` Bot API error so that tests
+    surface the mistake.
 servers:
   - url: http://{domain}:{port}
     variables:
@@ -192,6 +202,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetMeResponse'
+        '400':
+          description: The request body cannot be decoded, or getMe received a parameter.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
         '401':
           description: The token does not belong to a virtual bot in the addressed session.
           content:
@@ -214,6 +230,18 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/GetUpdatesRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GetUpdatesRequest'
+            encoding:
+              allowed_updates:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GetUpdatesRequest'
+            encoding:
+              allowed_updates:
+                contentType: application/json
       responses:
         '200':
           description: Pending updates, limited and confirmed according to the supplied offset.
@@ -222,7 +250,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetUpdatesResponse'
         '400':
-          description: The getUpdates parameters are invalid.
+          description: The request body cannot be decoded, or the getUpdates parameters are invalid.
           content:
             application/json:
               schema:

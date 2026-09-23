@@ -10,8 +10,10 @@ history, and receiving account messages through the Bot API `getUpdates` method,
 ends the earlier request with a `409 Conflict`, so tests notice when two bot instances poll at once.
 Like a Telegram client, the emulator marks bot commands such as `/start` in account-sent text with
 `bot_command` entities, so framework command handlers match them; other entity types are not
-detected yet. It also implements the Bot API `getMe` method. The session creation response
-identifies its Bot API root. Other routes described in `openapi.yaml` are not implemented yet.
+detected yet. It also implements the Bot API `getMe` method. Bot API requests follow Telegram's
+conventions: GET or POST, case-insensitive method names, and parameters in the query string or a
+JSON, URL-encoded, or multipart body. The session creation response identifies its Bot API root.
+Other routes described in `openapi.yaml` are not implemented yet.
 
 ## TypeScript client
 

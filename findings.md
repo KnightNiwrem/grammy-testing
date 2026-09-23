@@ -49,64 +49,17 @@ emulator-specific reasons rather than for reasons that would hold against Telegr
 
 The existing separation of canonical messages, observer-specific message numbering,
 private-conversation identity, domain events, and Bot API update projection is worth retaining. The
-highest-priority remaining work concerns Bot API request decoding and error responses.
+highest-priority remaining work concerns Bot API error responses.
 
 ### Prioritized findings
 
 Priorities describe impact on testing fidelity and future implementation work, not security
 severity.
 
-| ID  | Priority                    | Finding                                          | Main consequence                                                  | Evidence                               |
-| --- | --------------------------- | ------------------------------------------------ | ----------------------------------------------------------------- | -------------------------------------- |
-| F05 | Medium                      | Bot API request decoding differs from Telegram   | Valid requests fail, or supplied parameters are silently ignored. | Reported code/documentation comparison |
-| F06 | Medium                      | Some Bot API failures return an empty body       | Error handling exercises the wrong failure category.              | Reported code/documentation comparison |
-| F07 | Lower for short-lived tests | Update retention and idle-ID behavior are absent | Recovery and long-duration scenarios are unrealistic.             | Reported code/documentation comparison |
-
-## F05 — Bot API request decoding is not wire-compatible
-
-**Priority:** Medium\
-**Primary location:** [`src/api/sessions/bot_api/mod.ts`][bot-api-routes].\
-**Evidence:** Reported code/documentation comparison.
-
-### Context and observed behavior
-
-The implementation registers exact-case POST routes and parses the polling request body as JSON.
-Query-string and form-encoded parameters are not consumed.
-
-Telegram supports GET and POST, case-insensitive method names, and parameters supplied through query
-strings, JSON, URL-encoded forms, or multipart forms. See [Making requests][telegram-requests].
-
-| Request                                         | Current behavior reported in the review        |
-| ----------------------------------------------- | ---------------------------------------------- |
-| `GET …/getMe`                                   | No matching method route.                      |
-| `POST …/GETME`                                  | No matching method route.                      |
-| `POST …/getUpdates?offset=2` with an empty body | Uses default parameters and ignores `offset`.  |
-| Form-encoded `getUpdates` body                  | Attempts JSON parsing and rejects the request. |
-
-### Testing consequence
-
-Valid clients can be rejected. More subtly, a request can succeed while executing different
-semantics: an ignored offset can leave updates unacknowledged or return updates the caller intended
-to skip.
-
-### Recommendation
-
-Introduce a shared Bot API request-decoding boundary, separate from administrative API JSON
-validation. Normalize method names and decode supported parameter representations before
-method-specific processing.
-
-Back parameter coercion, conflicting parameter sources, and boundary-value handling with reference
-fixtures rather than assuming that a strict schema's behavior matches Telegram.
-
-The administrative endpoints do not need to accept every Telegram encoding; this compatibility
-obligation belongs to the Bot API-facing surface.
-
-### Proposed regression tests
-
-For each supported Bot API method, exercise the relevant equivalent request encodings and
-method-name casing. Include a query-string `offset` with no body and assert actual queue
-acknowledgement, not merely an HTTP success response. Verify malformed input through the structured
-error path.
+| ID  | Priority                    | Finding                                          | Main consequence                                      | Evidence                               |
+| --- | --------------------------- | ------------------------------------------------ | ----------------------------------------------------- | -------------------------------------- |
+| F06 | Medium                      | Some Bot API failures return an empty body       | Error handling exercises the wrong failure category.  | Reported code/documentation comparison |
+| F07 | Lower for short-lived tests | Update retention and idle-ID behavior are absent | Recovery and long-duration scenarios are unrealistic. | Reported code/documentation comparison |
 
 ## F06 — Some Bot API failures have an empty body
 
@@ -358,7 +311,6 @@ controls and add the following targeted cases.
 
 | Scenario                                        | Required assertion                                                                               | Related finding |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------- |
-| Equivalent supported request encodings          | Parameters retain their meaning, including acknowledgement effects.                              | F05             |
 | Bot API errors                                  | The client receives the expected structured API error, not an empty-body parsing failure.        | F06             |
 | Time advanced beyond retention                  | Expired updates cannot be recovered.                                                             | F07             |
 | Long-idle update sequence                       | Cursor handling does not assume uninterrupted numbering.                                         | F07             |
@@ -384,20 +336,20 @@ not just a binary implemented/unimplemented status.
 
 | Work unit | Scope                                                                     | Completion criterion                                                                |
 | --------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| 1         | Add the shared Bot API decoding and error boundary.                       | Supported encodings and client-visible failures conform to reference fixtures.      |
+| 1         | Add the Bot API error boundary.                                           | Client-visible failures conform to reference fixtures.                              |
 | 2         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.     |
 | 3         | Add controlled retention and idle-sequence behavior.                      | Time-dependent recovery scenarios are deterministic and realistic.                  |
 | 4         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests. |
 
 Keep the queue fixes independently reviewable. Avoid bundling broad architectural refactors with
-narrowly reproducible behavior corrections. Where the shared decoding and error boundary permits it,
-keep those changes independently testable as well.
+narrowly reproducible behavior corrections. Where the error boundary permits it, keep those changes
+independently testable as well.
 
 ## Bottom line
 
 The repository's architecture is a sensible foundation for the supported scenario. The greatest
 immediate fidelity risk comes from behaviors that appear implemented but silently differ from
-Telegram, such as request parameters that are silently ignored.
+Telegram, such as unmatched methods that fail without a Bot API error.
 
 Correct those behaviors, then prove a real command-to-reply lifecycle. Preserve observer-aware
 identifiers and the event/projection boundary, and make new permissions, visibility modes, and
