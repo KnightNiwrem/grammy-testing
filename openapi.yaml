@@ -233,6 +233,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BotApiErrorResponse'
+        '409':
+          description: >-
+            Another getUpdates request for the same bot began waiting for updates while this one
+            was waiting, and replaced it. A bot has at most one waiting request; requests answered
+            immediately do not replace it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
   /sessions/{sessionId}/bot-api/bot{token}/{method}:

@@ -413,6 +413,77 @@ Deno.test('getUpdates allowed_updates filters only updates created afterward', a
   }
 });
 
+Deno.test('getUpdates answers a displaced long poll with a Telegram conflict', async () => {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
+  const sessionPath = createSessionResponse.headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const createBotResponse = await api.request(`${sessionPath}/bots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
+  });
+  const createdBot: unknown = await createBotResponse.json();
+  if (!isCreatedBotResponse(createdBot)) {
+    throw new Error('Expected a created bot response');
+  }
+  const createAccountResponse = await api.request(`${sessionPath}/accounts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Ada' }),
+  });
+  const createdAccount: unknown = await createAccountResponse.json();
+  if (!isCreatedAccountResponse(createdAccount)) {
+    throw new Error('Expected a created account response');
+  }
+  const holdLongPoll = () =>
+    api.request(`${sessionPath}/bot-api/bot${createdBot.token}/getUpdates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timeout: 50 }),
+    });
+
+  // Whichever request is held second displaces the other, so the first to finish is the conflict.
+  const pendingPolls = [holdLongPoll(), holdLongPoll()].map((pendingResponse, pollIndex) =>
+    Promise.resolve(pendingResponse).then((response) => ({ pollIndex, response }))
+  );
+  const displacedPoll = await Promise.race(pendingPolls);
+  const displacedBody: unknown = await displacedPoll.response.json();
+  if (
+    displacedPoll.response.status !== 409 || !isTerminatedByOtherLongPollResponse(displacedBody)
+  ) {
+    throw new Error(
+      `Expected a displaced long poll conflict, received ${displacedPoll.response.status}`,
+    );
+  }
+
+  const sendResponse = await api.request(
+    `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: { type: 'private', botId: createdBot.bot.id }, text: 'Hello' }),
+    },
+  );
+  if (sendResponse.status !== 201) {
+    throw new Error(`Expected the account message to be accepted, received ${sendResponse.status}`);
+  }
+  const replacementPoll = await pendingPolls[1 - displacedPoll.pollIndex];
+  const replacementBody: unknown = await replacementPoll.response.json();
+  if (
+    replacementPoll.response.status !== 200 ||
+    !isGetUpdatesResponse(replacementBody) ||
+    replacementBody.result.map((update) => update.message.text).join() !== 'Hello'
+  ) {
+    throw new Error('Expected the replacement long poll to receive the account message');
+  }
+});
+
 Deno.test('grammY command handlers match account-sent bot commands', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({
@@ -610,6 +681,23 @@ function isUnauthorizedResponse(value: unknown): value is {
 
   const { ok, error_code, description } = value as Record<string, unknown>;
   return ok === false && error_code === 401 && description === 'Unauthorized';
+}
+
+const TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION =
+  'Conflict: terminated by other getUpdates request; make sure that only one bot instance is running';
+
+function isTerminatedByOtherLongPollResponse(value: unknown): value is {
+  ok: false;
+  error_code: 409;
+  description: typeof TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION;
+} {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const { ok, error_code, description } = value as Record<string, unknown>;
+  return ok === false && error_code === 409 &&
+    description === TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION;
 }
 
 function isSentMessageResponse(value: unknown): value is {

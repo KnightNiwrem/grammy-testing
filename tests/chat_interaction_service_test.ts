@@ -314,7 +314,7 @@ Deno.test('ChatInteractionService validates member additions before changing cha
   }
 });
 
-Deno.test('ChatInteractionService sends and stores private account messages', async () => {
+Deno.test('ChatInteractionService sends and stores private account messages', () => {
   const { virtualUsers, chats, messages, botUpdates, chatInteractions } =
     createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');
@@ -369,10 +369,7 @@ Deno.test('ChatInteractionService sends and stores private account messages', as
     throw new Error('Expected history to project stored messages as private Bot API messages');
   }
 
-  const updates = await botUpdates.getUpdates(bot.profile.id, {
-    limit: 100,
-    timeoutSeconds: 0,
-  });
+  const updates = botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 });
   if (
     updates.length !== 2 ||
     !haveSameBotApiView(updates[0].message, firstResult.message) ||
@@ -432,7 +429,7 @@ Deno.test('ChatInteractionService marks bot commands in private account messages
   }
 });
 
-Deno.test('ChatInteractionService numbers private messages in each bot message box', async () => {
+Deno.test('ChatInteractionService numbers private messages in each bot message box', () => {
   const { virtualUsers, botUpdates, chatInteractions } = createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const firstBot = createBot(virtualUsers, 'First Bot', 'first_bot');
@@ -449,10 +446,7 @@ Deno.test('ChatInteractionService numbers private messages in each bot message b
   ) {
     throw new Error('Expected each bot to number messages from its own message box');
   }
-  const secondBotUpdates = await botUpdates.getUpdates(secondBot.profile.id, {
-    limit: 100,
-    timeoutSeconds: 0,
-  });
+  const secondBotUpdates = botUpdates.readPendingUpdates(secondBot.profile.id, { limit: 100 });
   if (secondBotUpdates.length !== 1 || secondBotUpdates[0].message.message_id !== 1) {
     throw new Error("Expected the bot's update to carry its own message ID");
   }
@@ -540,7 +534,7 @@ Deno.test('ChatInteractionService publishes a created event for each sent messag
   }
 });
 
-Deno.test('ChatInteractionService validates private messages before changing state', async () => {
+Deno.test('ChatInteractionService validates private messages before changing state', () => {
   const { virtualUsers, chats, messages, botUpdates, chatInteractions } =
     createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');
@@ -587,7 +581,7 @@ Deno.test('ChatInteractionService validates private messages before changing sta
         accountId: account.profile.id,
         botId: bot.profile.id,
       }).length !== 0 ||
-    (await botUpdates.getUpdates(bot.profile.id, { limit: 100, timeoutSeconds: 0 })).length !== 0
+    botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 }).length !== 0
   ) {
     throw new Error('Expected rejected messages not to change conversation state');
   }

@@ -11,6 +11,10 @@ const BOT_API_METHOD_PATH = `${BOT_TOKEN_PATH}/*` as const;
 const GET_ME_PATH = `${BOT_TOKEN_PATH}/getMe` as const;
 const GET_UPDATES_PATH = `${BOT_TOKEN_PATH}/getUpdates` as const;
 
+/** Telegram's wording, from `abort_long_poll` in the official Bot API server. */
+const TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION =
+  'Conflict: terminated by other getUpdates request; make sure that only one bot instance is running';
+
 const getUpdatesRequestSchema = z.strictObject({
   offset: z.number().int().optional(),
   limit: z.number().int().min(1).max(100).default(100),
@@ -71,7 +75,7 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
       return badRequest(context, 'Bad Request: invalid getUpdates parameters');
     }
 
-    const updates = await context.get('emulationSession').botApi.getUpdates(
+    const result = await context.get('emulationSession').botApi.getUpdates(
       context.get('authenticatedBot'),
       {
         offset: parsedRequest.data.offset,
@@ -81,7 +85,19 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
         signal: context.req.raw.signal,
       },
     );
-    return context.json({ ok: true as const, result: updates });
+    if (!result.retrieved) {
+      // Telegram delays a conflict by 3 seconds when another occurred within the previous 3
+      // seconds; the emulator answers immediately to keep tests fast.
+      return context.json(
+        {
+          ok: false as const,
+          error_code: 409,
+          description: TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION,
+        },
+        409,
+      );
+    }
+    return context.json({ ok: true as const, result: result.updates });
   });
 
   return botApiRoutes;

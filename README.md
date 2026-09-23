@@ -6,11 +6,12 @@ the emulated Bot API and an admin API for controlling isolated test sessions.
 The standalone server currently supports creating and ending isolated test sessions, adding virtual
 bots and accounts, sending private text messages as an account, inspecting private conversation
 history, and receiving account messages through the Bot API `getUpdates` method, which honors its
-`allowed_updates` subscription. Like a Telegram client, the emulator marks bot commands such as
-`/start` in account-sent text with `bot_command` entities, so framework command handlers match them;
-other entity types are not detected yet. It also implements the Bot API `getMe` method. The session
-creation response identifies its Bot API root. Other routes described in `openapi.yaml` are not
-implemented yet.
+`allowed_updates` subscription. As on Telegram, a bot has at most one waiting long poll: a newer one
+ends the earlier request with a `409 Conflict`, so tests notice when two bot instances poll at once.
+Like a Telegram client, the emulator marks bot commands such as `/start` in account-sent text with
+`bot_command` entities, so framework command handlers match them; other entity types are not
+detected yet. It also implements the Bot API `getMe` method. The session creation response
+identifies its Bot API root. Other routes described in `openapi.yaml` are not implemented yet.
 
 ## TypeScript client
 

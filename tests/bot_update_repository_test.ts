@@ -1,7 +1,7 @@
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import type { BotApiPrivateTextMessage } from '../src/types/bot_api.ts';
 
-Deno.test('BotUpdateRepository sequences and confirms each bot mailbox independently', async () => {
+Deno.test('BotUpdateRepository sequences and confirms each bot mailbox independently', () => {
   const botUpdates = new BotUpdateRepository();
   const message = createMessage('first');
 
@@ -9,18 +9,12 @@ Deno.test('BotUpdateRepository sequences and confirms each bot mailbox independe
   botUpdates.enqueueMessageUpdate(10, createMessage('second'));
   botUpdates.enqueueMessageUpdate(20, message);
 
-  const limitedUpdates = await botUpdates.getUpdates(10, {
-    limit: 1,
-    timeoutSeconds: 0,
-  });
+  const limitedUpdates = botUpdates.readPendingUpdates(10, { limit: 1 });
   if (limitedUpdates.length !== 1 || limitedUpdates[0].update_id !== 1) {
-    throw new Error('Expected getUpdates to honor its limit without confirming updates');
+    throw new Error('Expected a read to honor its limit without confirming updates');
   }
 
-  const repeatedUpdates = await botUpdates.getUpdates(10, {
-    limit: 100,
-    timeoutSeconds: 0,
-  });
+  const repeatedUpdates = botUpdates.readPendingUpdates(10, { limit: 100 });
   if (
     repeatedUpdates.length !== 2 ||
     repeatedUpdates[0].update_id !== 1 ||
@@ -29,92 +23,67 @@ Deno.test('BotUpdateRepository sequences and confirms each bot mailbox independe
     throw new Error('Expected unconfirmed updates to remain pending');
   }
 
-  const afterConfirmation = await botUpdates.getUpdates(10, {
-    offset: 2,
+  const afterConfirmation = botUpdates.readPendingUpdates(10, {
+    firstUnconfirmedUpdateId: 2,
     limit: 100,
-    timeoutSeconds: 0,
   });
   if (afterConfirmation.length !== 1 || afterConfirmation[0].update_id !== 2) {
-    throw new Error('Expected offset to confirm only earlier updates');
+    throw new Error('Expected a read to confirm only earlier updates');
   }
 
-  const otherBotUpdates = await botUpdates.getUpdates(20, {
-    limit: 100,
-    timeoutSeconds: 0,
-  });
+  const otherBotUpdates = botUpdates.readPendingUpdates(20, { limit: 100 });
   if (otherBotUpdates.length !== 1 || otherBotUpdates[0].update_id !== 1) {
     throw new Error('Expected each bot to own an independent update sequence');
   }
 });
 
-Deno.test('BotUpdateRepository wakes long polling when an update arrives', async () => {
+Deno.test('BotUpdateRepository wakes a waiter when an update arrives for its bot', async () => {
   const botUpdates = new BotUpdateRepository();
-  const pendingUpdates = botUpdates.getUpdates(10, {
-    limit: 100,
-    timeoutSeconds: 1,
-  });
+  const pendingWait = botUpdates.waitForUpdate(10, { timeoutSeconds: 1 });
 
   queueMicrotask(() => botUpdates.enqueueMessageUpdate(10, createMessage('arrived')));
 
-  const updates = await pendingUpdates;
+  await pendingWait;
+  const updates = botUpdates.readPendingUpdates(10, { limit: 100 });
   if (updates.length !== 1 || updates[0].message.text !== 'arrived') {
-    throw new Error('Expected an enqueued update to complete the pending long poll');
+    throw new Error('Expected an enqueued update to end the wait');
   }
 });
 
-Deno.test('BotUpdateRepository forgets only the updates preceding a negative offset tail', async () => {
+Deno.test('BotUpdateRepository ends a wait when its signal aborts', async () => {
   const botUpdates = new BotUpdateRepository();
+  const abortController = new AbortController();
+  const pendingWait = botUpdates.waitForUpdate(10, {
+    timeoutSeconds: 50,
+    signal: abortController.signal,
+  });
+
+  abortController.abort();
+  await pendingWait;
+  await botUpdates.waitForUpdate(10, { timeoutSeconds: 50, signal: abortController.signal });
+});
+
+Deno.test('BotUpdateRepository resolves a negative offset against the queue tail', () => {
+  const botUpdates = new BotUpdateRepository();
+  if (botUpdates.resolveFirstUnconfirmedUpdateId(10, -1) !== 1) {
+    throw new Error('Expected a negative offset on an empty queue to keep future updates');
+  }
   botUpdates.enqueueMessageUpdate(10, createMessage('first'));
   botUpdates.enqueueMessageUpdate(10, createMessage('second'));
   botUpdates.enqueueMessageUpdate(10, createMessage('third'));
 
-  const tailUpdates = await botUpdates.getUpdates(10, {
-    offset: -2,
-    limit: 100,
-    timeoutSeconds: 0,
-  });
-  if (
-    tailUpdates.length !== 2 ||
-    tailUpdates[0].update_id !== 2 ||
-    tailUpdates[1].update_id !== 3
-  ) {
+  const firstUnconfirmedUpdateId = botUpdates.resolveFirstUnconfirmedUpdateId(10, -2);
+  const tailUpdates = botUpdates.readPendingUpdates(10, { firstUnconfirmedUpdateId, limit: 100 });
+  if (tailUpdates.map((update) => update.update_id).join() !== '2,3') {
     throw new Error('Expected a negative offset to return the requested queue tail');
   }
 
-  const remainingUpdates = await botUpdates.getUpdates(10, {
-    limit: 100,
-    timeoutSeconds: 0,
-  });
-  if (remainingUpdates.length !== 2 || remainingUpdates[0].update_id !== 2) {
+  const remainingUpdates = botUpdates.readPendingUpdates(10, { limit: 100 });
+  if (remainingUpdates.map((update) => update.update_id).join() !== '2,3') {
     throw new Error('Expected a negative offset to forget updates before the tail');
   }
-});
-
-Deno.test('BotUpdateRepository keeps updates that arrive during a negative offset long poll', async () => {
-  const botUpdates = new BotUpdateRepository();
-  const pendingUpdates = botUpdates.getUpdates(10, {
-    offset: -1,
-    limit: 100,
-    timeoutSeconds: 1,
-  });
-
-  queueMicrotask(() => {
-    botUpdates.enqueueMessageUpdate(10, createMessage('first'));
-    botUpdates.enqueueMessageUpdate(10, createMessage('second'));
-    botUpdates.enqueueMessageUpdate(10, createMessage('third'));
-  });
-
-  const updates = await pendingUpdates;
-  if (updates.map((update) => update.update_id).join() !== '1,2,3') {
-    throw new Error('Expected the long poll to return every update that arrived while waiting');
-  }
-
-  const remainingUpdates = await botUpdates.getUpdates(10, {
-    limit: 100,
-    timeoutSeconds: 0,
-  });
-  if (remainingUpdates.map((update) => update.update_id).join() !== '1,2,3') {
-    throw new Error('Expected updates that arrived while waiting to remain pending');
+  if (botUpdates.resolveFirstUnconfirmedUpdateId(10, -5) !== 2) {
+    throw new Error('Expected a negative offset beyond the queue length to keep every update');
   }
 });
 

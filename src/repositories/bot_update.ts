@@ -1,8 +1,12 @@
 import type { BotApiPrivateTextMessage, BotApiUpdate } from '../types/bot_api.ts';
 
-export interface GetBotUpdatesInput {
-  readonly offset?: number;
+interface ReadPendingUpdatesInput {
+  /** Updates with a lower ID are confirmed and forgotten; `undefined` confirms none. */
+  readonly firstUnconfirmedUpdateId?: number;
   readonly limit: number;
+}
+
+interface WaitForUpdateInput {
   readonly timeoutSeconds: number;
   readonly signal?: AbortSignal;
 }
@@ -28,53 +32,27 @@ export class BotUpdateRepository {
     return update;
   }
 
-  async getUpdates(botId: number, input: GetBotUpdatesInput): Promise<readonly BotApiUpdate[]> {
-    const mailbox = this.#getOrCreateMailbox(botId);
-    // Telegram resolves a negative offset once, when the request arrives, so updates enqueued while
-    // this request waits are not cut from the tail again.
-    const firstUnconfirmedUpdateId = this.#resolveFirstUnconfirmedUpdateId(mailbox, input.offset);
-
-    let updates = this.#selectUpdates(mailbox, firstUnconfirmedUpdateId, input.limit);
-    if (updates.length > 0 || input.timeoutSeconds === 0 || input.signal?.aborted === true) {
-      return updates;
-    }
-
-    await this.#waitForUpdate(botId, input.timeoutSeconds, input.signal);
-    updates = this.#selectUpdates(mailbox, firstUnconfirmedUpdateId, input.limit);
-    return updates;
-  }
-
-  #getOrCreateMailbox(botId: number): BotUpdateMailbox {
-    const existingMailbox = this.#mailboxesByBotId.get(botId);
-    if (existingMailbox !== undefined) {
-      return existingMailbox;
-    }
-
-    const mailbox: BotUpdateMailbox = { nextUpdateId: 1, updates: [] };
-    this.#mailboxesByBotId.set(botId, mailbox);
-    return mailbox;
-  }
-
-  /** Converts a Bot API offset, which may count back from the queue tail, into an update ID. */
-  #resolveFirstUnconfirmedUpdateId(
-    mailbox: BotUpdateMailbox,
-    offset: number | undefined,
-  ): number | undefined {
+  /**
+   * Converts a Bot API offset, which may count back from the queue tail, into the ID of the first
+   * update to keep. The result depends on the current queue, so resolve it once per request.
+   */
+  resolveFirstUnconfirmedUpdateId(botId: number, offset: number | undefined): number | undefined {
     if (offset === undefined || offset >= 0) {
       return offset;
     }
 
+    const mailbox = this.#getOrCreateMailbox(botId);
     const retainedUpdateCount = Math.min(-offset, mailbox.updates.length);
     const firstRetainedUpdate = mailbox.updates[mailbox.updates.length - retainedUpdateCount];
     return firstRetainedUpdate?.update_id ?? mailbox.nextUpdateId;
   }
 
   /** Confirms updates preceding `firstUnconfirmedUpdateId`, then reads pending updates. */
-  #selectUpdates(
-    mailbox: BotUpdateMailbox,
-    firstUnconfirmedUpdateId: number | undefined,
-    limit: number,
-  ): BotApiUpdate[] {
+  readPendingUpdates(
+    botId: number,
+    { firstUnconfirmedUpdateId, limit }: ReadPendingUpdatesInput,
+  ): readonly BotApiUpdate[] {
+    const mailbox = this.#getOrCreateMailbox(botId);
     if (firstUnconfirmedUpdateId !== undefined) {
       const firstUnconfirmedUpdateIndex = mailbox.updates.findIndex((update) =>
         update.update_id >= firstUnconfirmedUpdateId
@@ -89,8 +67,14 @@ export class BotUpdateRepository {
     return mailbox.updates.slice(0, limit);
   }
 
-  #waitForUpdate(botId: number, timeoutSeconds: number, signal?: AbortSignal): Promise<void> {
+  /** Resolves when an update is enqueued for the bot, the timeout elapses, or `signal` aborts. */
+  waitForUpdate(botId: number, { timeoutSeconds, signal }: WaitForUpdateInput): Promise<void> {
     return new Promise((resolve) => {
+      if (signal?.aborted === true) {
+        resolve();
+        return;
+      }
+
       const waiters = this.#waitersByBotId.get(botId) ?? new Set<() => void>();
 
       const finish = () => {
@@ -108,6 +92,17 @@ export class BotUpdateRepository {
       const timeoutId = setTimeout(finish, timeoutSeconds * 1_000);
       signal?.addEventListener('abort', finish, { once: true });
     });
+  }
+
+  #getOrCreateMailbox(botId: number): BotUpdateMailbox {
+    const existingMailbox = this.#mailboxesByBotId.get(botId);
+    if (existingMailbox !== undefined) {
+      return existingMailbox;
+    }
+
+    const mailbox: BotUpdateMailbox = { nextUpdateId: 1, updates: [] };
+    this.#mailboxesByBotId.set(botId, mailbox);
+    return mailbox;
   }
 
   #notifyWaiters(botId: number): void {

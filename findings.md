@@ -22,24 +22,17 @@ MTProto or TDLib compatibility.
 
 ### Evidence and limitations
 
-The original review compared code with Telegram documentation and official implementation source. It
-also executed isolated characterization probes against a byte-for-byte copy of
-`src/repositories/bot_update.ts`. The supplied probe archive records queue mismatches and one
-positive control.
+The original review compared code with Telegram documentation and official implementation source.
 
-The original review did **not** run the full Deno suite, run live differential tests against
-Telegram, or execute a full HTTP integration test as part of those isolated probes. No additional
-test execution or repository revalidation was performed while preparing this document.
-Recommendations and proposed regression tests below are not claims that fixes have already been
-implemented.
+The original review did **not** run the full Deno suite or run live differential tests against
+Telegram. No additional test execution or repository revalidation was performed while preparing this
+document. Recommendations and proposed regression tests below are not claims that fixes have already
+been implemented.
 
 Evidence is distinguished as follows:
 
 - **Reported code/documentation comparison:** a mismatch identified in the preceding review, without
   an additional local reproduction recorded here.
-- **Locally characterized:** the current queue behavior was reproduced by the supplied isolated
-  probes; the expected Telegram behavior comes from documentation or official source, not a live
-  comparison.
 - **Coverage limitation or extension risk:** a missing workflow or a design assumption to address
   before extending the emulator, rather than a claim that every unsupported feature is currently
   defective.
@@ -56,61 +49,18 @@ emulator-specific reasons rather than for reasons that would hold against Telegr
 
 The existing separation of canonical messages, observer-specific message numbering,
 private-conversation identity, domain events, and Bot API update projection is worth retaining. The
-highest-priority work concerns polling semantics.
+highest-priority remaining work concerns Bot API request decoding and error responses.
 
 ### Prioritized findings
 
 Priorities describe impact on testing fidelity and future implementation work, not security
 severity.
 
-| ID  | Priority                    | Finding                                             | Main consequence                                                  | Evidence                                          |
-| --- | --------------------------- | --------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------- |
-| F04 | High                        | Multiple pending long polls for one bot all succeed | Duplicate-poller deployment and lifecycle bugs are hidden.        | Locally characterized; official source comparison |
-| F05 | Medium                      | Bot API request decoding differs from Telegram      | Valid requests fail, or supplied parameters are silently ignored. | Reported code/documentation comparison            |
-| F06 | Medium                      | Some Bot API failures return an empty body          | Error handling exercises the wrong failure category.              | Reported code/documentation comparison            |
-| F07 | Lower for short-lived tests | Update retention and idle-ID behavior are absent    | Recovery and long-duration scenarios are unrealistic.             | Reported code/documentation comparison            |
-
-## F04 — Competing long polls do not produce Telegram's conflict behavior
-
-**Priority:** High\
-**Primary location:** [`src/repositories/bot_update.ts`][queue], especially `#waitersByBotId`.\
-**Evidence:** Locally characterized; comparison with official Bot API source.
-
-### Context and observed behavior
-
-The repository holds a set of waiters for each bot and wakes all of them when an update arrives. The
-isolated probe created two simultaneous pending polls for the same bot; both succeeded with the same
-`update_id`, and neither was displaced.
-
-### Expected Telegram behavior
-
-The official Bot API server maintains a pending long-poll query. When another request becomes the
-pending long poll, the earlier request is terminated with a **409 conflict** identifying the
-competing `getUpdates` request. See `abort_long_poll` and the polling functions in the
-[pinned official implementation][telegram-source].
-
-The finding concerns **two competing held long polls**. It should not be broadened into a claim that
-every pair of overlapping short requests must conflict.
-
-### Testing consequence
-
-Duplicate bot instances, overlapping polling loops, and incorrect restart behavior appear to work
-instead of exercising the production conflict path.
-
-### Recommendation
-
-Represent ownership of the pending Bot API long poll explicitly, per bot. Replacing the owner must
-finish the displaced request with a structured conflict result, not wake it as a successful poll.
-
-The [`BotApiService`][bot-api-service] boundary already coordinates polling-related invariants and
-is a reasonable place for this behavior. Keep the queue repository focused rather than making it a
-general HTTP transport layer.
-
-### Proposed regression tests
-
-Hold one long poll, start a second for the same bot, and verify that the first takes the conflict
-path while the replacement remains functional. Verify that different bots do not conflict. Cover
-cancellation and cleanup so that an abandoned request does not retain ownership.
+| ID  | Priority                    | Finding                                          | Main consequence                                                  | Evidence                               |
+| --- | --------------------------- | ------------------------------------------------ | ----------------------------------------------------------------- | -------------------------------------- |
+| F05 | Medium                      | Bot API request decoding differs from Telegram   | Valid requests fail, or supplied parameters are silently ignored. | Reported code/documentation comparison |
+| F06 | Medium                      | Some Bot API failures return an empty body       | Error handling exercises the wrong failure category.              | Reported code/documentation comparison |
+| F07 | Lower for short-lived tests | Update retention and idle-ID behavior are absent | Recovery and long-duration scenarios are unrealistic.             | Reported code/documentation comparison |
 
 ## F05 — Bot API request decoding is not wire-compatible
 
@@ -408,7 +358,6 @@ controls and add the following targeted cases.
 
 | Scenario                                        | Required assertion                                                                               | Related finding |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------- |
-| Two held polls for one bot                      | The displaced request takes the structured conflict path.                                        | F04             |
 | Equivalent supported request encodings          | Parameters retain their meaning, including acknowledgement effects.                              | F05             |
 | Bot API errors                                  | The client receives the expected structured API error, not an empty-body parsing failure.        | F06             |
 | Time advanced beyond retention                  | Expired updates cannot be recovered.                                                             | F07             |
@@ -433,60 +382,24 @@ not just a binary implemented/unimplemented status.
 
 ## Suggested implementation order
 
-| Work unit | Scope                                                                     | Completion criterion                                                                 |
-| --------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| 1         | Implement competing-long-poll ownership and conflicts.                    | Same-bot held polls follow the reference conflict behavior; cleanup remains correct. |
-| 2         | Add the shared Bot API decoding and error boundary.                       | Supported encodings and client-visible failures conform to reference fixtures.       |
-| 3         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.      |
-| 4         | Add controlled retention and idle-sequence behavior.                      | Time-dependent recovery scenarios are deterministic and realistic.                   |
-| 5         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests.  |
+| Work unit | Scope                                                                     | Completion criterion                                                                |
+| --------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 1         | Add the shared Bot API decoding and error boundary.                       | Supported encodings and client-visible failures conform to reference fixtures.      |
+| 2         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.     |
+| 3         | Add controlled retention and idle-sequence behavior.                      | Time-dependent recovery scenarios are deterministic and realistic.                  |
+| 4         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests. |
 
 Keep the queue fixes independently reviewable. Avoid bundling broad architectural refactors with
 narrowly reproducible behavior corrections. Where the shared decoding and error boundary permits it,
 keep those changes independently testable as well.
 
-## Reproduction artifacts
-
-The separately supplied [`telegram-fidelity-queue-probes.zip`](telegram-fidelity-queue-probes.zip)
-contains:
-
-```text
-telegram-fidelity-review/
-  README.md
-  bot_update.ts
-  queue_probes.mjs
-  queue_probe_results.json
-```
-
-The archive identifies the copied repository file as Git blob
-`d6c979b917a9f7177534349714002eea138665af` at the reviewed commit. Its captured results are:
-
-| Probe                                        | Recorded observation                                                         |
-| -------------------------------------------- | ---------------------------------------------------------------------------- |
-| Two simultaneous long polls for the same bot | Both succeed with the same `update_id=1`; neither conflicts.                 |
-| Basic replay and acknowledgement             | No-offset replay retains pending updates; `offset=2` confirms only update 1. |
-
-The archive documents Node 22.16 as the runtime used for the original probes. From the extracted
-`telegram-fidelity-review` directory, its recorded command is:
-
-```sh
-node --experimental-strip-types queue_probes.mjs
-```
-
-These are **characterization probes, not passing Telegram-conformance tests**: their assertions
-deliberately establish the observed emulator behavior. Convert the demonstrated mismatches into
-regression tests with the expected Telegram behavior when implementing fixes.
-
-The archive is a separate download, not embedded in this Markdown file. Its relative link works when
-both files are saved in the same directory.
-
 ## Bottom line
 
 The repository's architecture is a sensible foundation for the supported scenario. The greatest
 immediate fidelity risk comes from behaviors that appear implemented but silently differ from
-Telegram, such as competing long polls that both succeed.
+Telegram, such as request parameters that are silently ignored.
 
-Correct that behavior, then prove a real command-to-reply lifecycle. Preserve observer-aware
+Correct those behaviors, then prove a real command-to-reply lifecycle. Preserve observer-aware
 identifiers and the event/projection boundary, and make new permissions, visibility modes, and
 user-action side effects explicit rather than allowing today's narrow assumptions to become
 permanent global rules.
@@ -498,7 +411,6 @@ permanent global rules.
 [projection]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/projections/bot_api_message.ts
 [queue]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/repositories/bot_update.ts
 [bot-api-routes]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/api/sessions/bot_api/mod.ts
-[bot-api-service]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/services/bot_api.ts
 [api-root]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/api/mod.ts
 [telegram-source]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp
 [telegram-requests]: https://core.telegram.org/bots/api#making-requests

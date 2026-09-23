@@ -15,14 +15,24 @@ export interface GetUpdatesRequest {
   readonly signal?: AbortSignal;
 }
 
-type PendingUpdatesRequest = Omit<GetUpdatesRequest, 'allowedUpdates'>;
+export type GetUpdatesResult =
+  | { readonly retrieved: true; readonly updates: readonly BotApiUpdate[] }
+  | { readonly retrieved: false; readonly reason: 'terminated_by_other_long_poll' };
 
 interface BotCredentialLookup {
   getByToken(token: string): VirtualBot | undefined;
 }
 
 interface BotUpdateMailboxPolling {
-  getUpdates(botId: number, input: PendingUpdatesRequest): Promise<readonly BotApiUpdate[]>;
+  resolveFirstUnconfirmedUpdateId(botId: number, offset: number | undefined): number | undefined;
+  readPendingUpdates(
+    botId: number,
+    input: { readonly firstUnconfirmedUpdateId?: number; readonly limit: number },
+  ): readonly BotApiUpdate[];
+  waitForUpdate(
+    botId: number,
+    input: { readonly timeoutSeconds: number; readonly signal?: AbortSignal },
+  ): Promise<void>;
 }
 
 interface BotUpdateSubscriptionStore {
@@ -47,6 +57,8 @@ export class BotApiService {
   readonly #bots: BotCredentialLookup;
   readonly #botUpdates: BotUpdateMailboxPolling;
   readonly #updateSubscriptions: BotUpdateSubscriptionStore;
+  /** Aborting a bot's controller terminates the long poll it holds. */
+  readonly #heldLongPollsByBotId = new Map<number, AbortController>();
 
   constructor({ bots, botUpdates, updateSubscriptions }: BotApiServiceDependencies) {
     this.#bots = bots;
@@ -62,18 +74,63 @@ export class BotApiService {
   /**
    * Changes the bot's subscription before reading its mailbox, as Telegram does. The new
    * subscription applies only to updates created afterward; pending updates are still returned.
+   *
+   * A request that finds no updates and has a timeout is held until an update arrives. Like
+   * Telegram, a bot has at most one held request: holding a new one terminates the previous one.
+   * Requests answered immediately never terminate a held one.
    */
-  getUpdates(
+  async getUpdates(
     authenticatedBot: VirtualBotProfile,
-    { allowedUpdates, ...pendingUpdatesRequest }: GetUpdatesRequest,
-  ): Promise<readonly BotApiUpdate[]> {
+    { offset, limit, timeoutSeconds, allowedUpdates, signal }: GetUpdatesRequest,
+  ): Promise<GetUpdatesResult> {
+    const botId = authenticatedBot.id;
     if (allowedUpdates !== undefined) {
       this.#updateSubscriptions.setAllowedUpdateTypes(
-        authenticatedBot.id,
+        botId,
         resolveAllowedUpdateTypes(allowedUpdates),
       );
     }
-    return this.#botUpdates.getUpdates(authenticatedBot.id, pendingUpdatesRequest);
+
+    // Telegram resolves a negative offset once, when the request arrives, so updates enqueued while
+    // this request waits are not cut from the tail again.
+    const firstUnconfirmedUpdateId = this.#botUpdates.resolveFirstUnconfirmedUpdateId(
+      botId,
+      offset,
+    );
+    const updates = this.#botUpdates.readPendingUpdates(botId, { firstUnconfirmedUpdateId, limit });
+    if (updates.length > 0 || timeoutSeconds === 0 || signal?.aborted === true) {
+      return { retrieved: true, updates };
+    }
+
+    const heldLongPoll = this.#holdLongPoll(botId);
+    try {
+      await this.#botUpdates.waitForUpdate(botId, {
+        timeoutSeconds,
+        signal: signal === undefined
+          ? heldLongPoll.signal
+          : AbortSignal.any([signal, heldLongPoll.signal]),
+      });
+    } finally {
+      if (this.#heldLongPollsByBotId.get(botId) === heldLongPoll) {
+        this.#heldLongPollsByBotId.delete(botId);
+      }
+    }
+
+    if (heldLongPoll.signal.aborted) {
+      return { retrieved: false, reason: 'terminated_by_other_long_poll' };
+    }
+    return {
+      retrieved: true,
+      updates: this.#botUpdates.readPendingUpdates(botId, { firstUnconfirmedUpdateId, limit }),
+    };
+  }
+
+  /** Terminates the bot's previously held long poll and makes the returned one current. */
+  #holdLongPoll(botId: number): AbortController {
+    this.#heldLongPollsByBotId.get(botId)?.abort();
+    const heldLongPoll = new AbortController();
+    this.#heldLongPollsByBotId.set(botId, heldLongPoll);
+    return heldLongPoll;
   }
 }
 
