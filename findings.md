@@ -24,7 +24,7 @@ MTProto or TDLib compatibility.
 
 The original review compared code with Telegram documentation and official implementation source. It
 also executed isolated characterization probes against a byte-for-byte copy of
-`src/repositories/bot_update.ts`. The supplied probe archive records two queue mismatches and one
+`src/repositories/bot_update.ts`. The supplied probe archive records queue mismatches and one
 positive control.
 
 The original review did **not** run the full Deno suite, run live differential tests against
@@ -63,75 +63,12 @@ highest-priority work concerns polling semantics.
 Priorities describe impact on testing fidelity and future implementation work, not security
 severity.
 
-| ID  | Priority                    | Finding                                               | Main consequence                                                  | Evidence                                          |
-| --- | --------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------- |
-| F03 | High                        | Negative offsets are reapplied after a long-poll wait | Newly arriving updates can be permanently discarded.              | Locally characterized; official source comparison |
-| F04 | High                        | Multiple pending long polls for one bot all succeed   | Duplicate-poller deployment and lifecycle bugs are hidden.        | Locally characterized; official source comparison |
-| F05 | Medium                      | Bot API request decoding differs from Telegram        | Valid requests fail, or supplied parameters are silently ignored. | Reported code/documentation comparison            |
-| F06 | Medium                      | Some Bot API failures return an empty body            | Error handling exercises the wrong failure category.              | Reported code/documentation comparison            |
-| F07 | Lower for short-lived tests | Update retention and idle-ID behavior are absent      | Recovery and long-duration scenarios are unrealistic.             | Reported code/documentation comparison            |
-
-## F03 — Negative-offset long polling can discard newly arriving updates
-
-**Priority:** High\
-**Primary location:** [`src/repositories/bot_update.ts`][queue], especially `getUpdates` and
-`#selectUpdates`.\
-**Evidence:** Locally characterized; comparison with the official Bot API polling implementation.
-
-### Context and observed behavior
-
-`getUpdates` invokes the destructive selection operation before and after waiting:
-
-```ts
-let updates = this.#selectUpdates(botId, input.offset, input.limit);
-// ...
-await this.#waitForUpdate(...);
-updates = this.#selectUpdates(botId, input.offset, input.limit);
-```
-
-For a negative offset, `#selectUpdates` trims the queue to its last `-offset` entries. The second
-invocation therefore applies the tail cut again, this time to updates that arrived after the request
-started.
-
-### Reproduced scenario
-
-```text
-Queue initially empty.
-Begin getUpdates(offset = -1, limit = 100, timeout = 1).
-Enqueue A, B, and C before the waiting continuation resumes.
-
-Returned: C
-Still pending afterward: C
-A and B have been permanently removed.
-```
-
-The supplied probe results record that only update 3 is returned and retained; updates 1 and 2 are
-removed on wake-up.
-
-### Expected Telegram behavior
-
-In the official implementation, `do_get_updates` applies the negative tail cut initially, normalizes
-the offset to the queue head, and stores the normalized offset for the pending long poll. The
-wake-up path does not repeat the original negative-offset operation. Relevant functions include
-`process_get_updates_query`, `do_get_updates`, and `long_poll_wakeup` in the
-[pinned official `Client.cpp`][telegram-source].
-
-### Testing consequence
-
-Burst-delivery tests can fail unpredictably because the emulator loses updates. The risk grows when
-one future action can generate multiple updates.
-
-### Recommendation
-
-Separate request admission—acknowledgement and negative-offset normalization—from waiting and
-reading. Resolve the negative offset once, then retain a normalized cursor for that request.
-
-### Proposed regression tests
-
-Include an initially empty queue, a negative-offset long poll, and multiple enqueues before the
-waiting continuation executes. Assert both the returned updates and subsequent queue contents. Keep
-a separate test of tail selection against an already-populated queue; that test alone does not
-expose this bug.
+| ID  | Priority                    | Finding                                             | Main consequence                                                  | Evidence                                          |
+| --- | --------------------------- | --------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------- |
+| F04 | High                        | Multiple pending long polls for one bot all succeed | Duplicate-poller deployment and lifecycle bugs are hidden.        | Locally characterized; official source comparison |
+| F05 | Medium                      | Bot API request decoding differs from Telegram      | Valid requests fail, or supplied parameters are silently ignored. | Reported code/documentation comparison            |
+| F06 | Medium                      | Some Bot API failures return an empty body          | Error handling exercises the wrong failure category.              | Reported code/documentation comparison            |
+| F07 | Lower for short-lived tests | Update retention and idle-ID behavior are absent    | Recovery and long-duration scenarios are unrealistic.             | Reported code/documentation comparison            |
 
 ## F04 — Competing long polls do not produce Telegram's conflict behavior
 
@@ -469,18 +406,17 @@ The existing tests described in the original review cover ordinary replay, ackno
 sequencing, waking a long poll, and a plain private message through grammY's API client. Keep those
 controls and add the following targeted cases.
 
-| Scenario                                             | Required assertion                                                                               | Related finding |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------- |
-| Empty-queue negative-offset poll followed by a burst | The wake-up path does not repeat the tail cut or lose the new burst.                             | F03             |
-| Two held polls for one bot                           | The displaced request takes the structured conflict path.                                        | F04             |
-| Equivalent supported request encodings               | Parameters retain their meaning, including acknowledgement effects.                              | F05             |
-| Bot API errors                                       | The client receives the expected structured API error, not an empty-body parsing failure.        | F06             |
-| Time advanced beyond retention                       | Expired updates cannot be recovered.                                                             | F07             |
-| Long-idle update sequence                            | Cursor handling does not assume uninterrupted numbering.                                         | F07             |
-| Real startup, command, reply, stop, and restart      | Framework lifecycle works without test-only replacements.                                        | C01             |
-| Interleaved conversations and observers              | Canonical IDs, observer message IDs, and update IDs remain distinct.                             | A01, R01        |
-| Group permissions and visibility                     | Membership, action permission, privacy visibility, and subscription are evaluated independently. | R02, R03        |
-| Fixture seeding versus simulated actions             | Each follows its explicitly documented side-effect contract.                                     | R05             |
+| Scenario                                        | Required assertion                                                                               | Related finding |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------- |
+| Two held polls for one bot                      | The displaced request takes the structured conflict path.                                        | F04             |
+| Equivalent supported request encodings          | Parameters retain their meaning, including acknowledgement effects.                              | F05             |
+| Bot API errors                                  | The client receives the expected structured API error, not an empty-body parsing failure.        | F06             |
+| Time advanced beyond retention                  | Expired updates cannot be recovered.                                                             | F07             |
+| Long-idle update sequence                       | Cursor handling does not assume uninterrupted numbering.                                         | F07             |
+| Real startup, command, reply, stop, and restart | Framework lifecycle works without test-only replacements.                                        | C01             |
+| Interleaved conversations and observers         | Canonical IDs, observer message IDs, and update IDs remain distinct.                             | A01, R01        |
+| Group permissions and visibility                | Membership, action permission, privacy visibility, and subscription are evaluated independently. | R02, R03        |
+| Fixture seeding versus simulated actions        | Each follows its explicitly documented side-effect contract.                                     | R05             |
 
 ### Keep evidence beside the tests
 
@@ -499,12 +435,11 @@ not just a binary implemented/unimplemented status.
 
 | Work unit | Scope                                                                     | Completion criterion                                                                 |
 | --------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| 1         | Correct negative-offset normalization.                                    | Burst regression passes without losing updates.                                      |
-| 2         | Implement competing-long-poll ownership and conflicts.                    | Same-bot held polls follow the reference conflict behavior; cleanup remains correct. |
-| 3         | Add the shared Bot API decoding and error boundary.                       | Supported encodings and client-visible failures conform to reference fixtures.       |
-| 4         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.      |
-| 5         | Add controlled retention and idle-sequence behavior.                      | Time-dependent recovery scenarios are deterministic and realistic.                   |
-| 6         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests.  |
+| 1         | Implement competing-long-poll ownership and conflicts.                    | Same-bot held polls follow the reference conflict behavior; cleanup remains correct. |
+| 2         | Add the shared Bot API decoding and error boundary.                       | Supported encodings and client-visible failures conform to reference fixtures.       |
+| 3         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.      |
+| 4         | Add controlled retention and idle-sequence behavior.                      | Time-dependent recovery scenarios are deterministic and realistic.                   |
+| 5         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests.  |
 
 Keep the queue fixes independently reviewable. Avoid bundling broad architectural refactors with
 narrowly reproducible behavior corrections. Where the shared decoding and error boundary permits it,
@@ -526,11 +461,10 @@ telegram-fidelity-review/
 The archive identifies the copied repository file as Git blob
 `d6c979b917a9f7177534349714002eea138665af` at the reviewed commit. Its captured results are:
 
-| Probe                                                                  | Recorded observation                                                            |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Two simultaneous long polls for the same bot                           | Both succeed with the same `update_id=1`; neither conflicts.                    |
-| Basic replay and acknowledgement                                       | No-offset replay retains pending updates; `offset=2` confirms only update 1.    |
-| Negative-offset long poll followed by a synchronous three-update burst | Only update 3 is returned and retained; updates 1 and 2 are removed on wake-up. |
+| Probe                                        | Recorded observation                                                         |
+| -------------------------------------------- | ---------------------------------------------------------------------------- |
+| Two simultaneous long polls for the same bot | Both succeed with the same `update_id=1`; neither conflicts.                 |
+| Basic replay and acknowledgement             | No-offset replay retains pending updates; `offset=2` confirms only update 1. |
 
 The archive documents Node 22.16 as the runtime used for the original probes. From the extracted
 `telegram-fidelity-review` directory, its recorded command is:
@@ -550,9 +484,9 @@ both files are saved in the same directory.
 
 The repository's architecture is a sensible foundation for the supported scenario. The greatest
 immediate fidelity risk comes from behaviors that appear implemented but silently differ from
-Telegram: competing polls that both succeed and destructive offset handling on wake-up.
+Telegram, such as competing long polls that both succeed.
 
-Correct those semantics, then prove a real command-to-reply lifecycle. Preserve observer-aware
+Correct that behavior, then prove a real command-to-reply lifecycle. Preserve observer-aware
 identifiers and the event/projection boundary, and make new permissions, visibility modes, and
 user-action side effects explicit rather than allowing today's narrow assumptions to become
 permanent global rules.

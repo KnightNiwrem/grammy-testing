@@ -62,6 +62,62 @@ Deno.test('BotUpdateRepository wakes long polling when an update arrives', async
   }
 });
 
+Deno.test('BotUpdateRepository forgets only the updates preceding a negative offset tail', async () => {
+  const botUpdates = new BotUpdateRepository();
+  botUpdates.enqueueMessageUpdate(10, createMessage('first'));
+  botUpdates.enqueueMessageUpdate(10, createMessage('second'));
+  botUpdates.enqueueMessageUpdate(10, createMessage('third'));
+
+  const tailUpdates = await botUpdates.getUpdates(10, {
+    offset: -2,
+    limit: 100,
+    timeoutSeconds: 0,
+  });
+  if (
+    tailUpdates.length !== 2 ||
+    tailUpdates[0].update_id !== 2 ||
+    tailUpdates[1].update_id !== 3
+  ) {
+    throw new Error('Expected a negative offset to return the requested queue tail');
+  }
+
+  const remainingUpdates = await botUpdates.getUpdates(10, {
+    limit: 100,
+    timeoutSeconds: 0,
+  });
+  if (remainingUpdates.length !== 2 || remainingUpdates[0].update_id !== 2) {
+    throw new Error('Expected a negative offset to forget updates before the tail');
+  }
+});
+
+Deno.test('BotUpdateRepository keeps updates that arrive during a negative offset long poll', async () => {
+  const botUpdates = new BotUpdateRepository();
+  const pendingUpdates = botUpdates.getUpdates(10, {
+    offset: -1,
+    limit: 100,
+    timeoutSeconds: 1,
+  });
+
+  queueMicrotask(() => {
+    botUpdates.enqueueMessageUpdate(10, createMessage('first'));
+    botUpdates.enqueueMessageUpdate(10, createMessage('second'));
+    botUpdates.enqueueMessageUpdate(10, createMessage('third'));
+  });
+
+  const updates = await pendingUpdates;
+  if (updates.map((update) => update.update_id).join() !== '1,2,3') {
+    throw new Error('Expected the long poll to return every update that arrived while waiting');
+  }
+
+  const remainingUpdates = await botUpdates.getUpdates(10, {
+    limit: 100,
+    timeoutSeconds: 0,
+  });
+  if (remainingUpdates.map((update) => update.update_id).join() !== '1,2,3') {
+    throw new Error('Expected updates that arrived while waiting to remain pending');
+  }
+});
+
 function createMessage(text: string): BotApiPrivateTextMessage {
   return {
     message_id: 1,

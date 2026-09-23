@@ -29,13 +29,18 @@ export class BotUpdateRepository {
   }
 
   async getUpdates(botId: number, input: GetBotUpdatesInput): Promise<readonly BotApiUpdate[]> {
-    let updates = this.#selectUpdates(botId, input.offset, input.limit);
+    const mailbox = this.#getOrCreateMailbox(botId);
+    // Telegram resolves a negative offset once, when the request arrives, so updates enqueued while
+    // this request waits are not cut from the tail again.
+    const firstUnconfirmedUpdateId = this.#resolveFirstUnconfirmedUpdateId(mailbox, input.offset);
+
+    let updates = this.#selectUpdates(mailbox, firstUnconfirmedUpdateId, input.limit);
     if (updates.length > 0 || input.timeoutSeconds === 0 || input.signal?.aborted === true) {
       return updates;
     }
 
     await this.#waitForUpdate(botId, input.timeoutSeconds, input.signal);
-    updates = this.#selectUpdates(botId, input.offset, input.limit);
+    updates = this.#selectUpdates(mailbox, firstUnconfirmedUpdateId, input.limit);
     return updates;
   }
 
@@ -50,15 +55,29 @@ export class BotUpdateRepository {
     return mailbox;
   }
 
-  #selectUpdates(botId: number, offset: number | undefined, limit: number): BotApiUpdate[] {
-    const mailbox = this.#getOrCreateMailbox(botId);
+  /** Converts a Bot API offset, which may count back from the queue tail, into an update ID. */
+  #resolveFirstUnconfirmedUpdateId(
+    mailbox: BotUpdateMailbox,
+    offset: number | undefined,
+  ): number | undefined {
+    if (offset === undefined || offset >= 0) {
+      return offset;
+    }
 
-    if (offset !== undefined && offset < 0) {
-      const retainedUpdateCount = Math.min(-offset, mailbox.updates.length);
-      mailbox.updates.splice(0, mailbox.updates.length - retainedUpdateCount);
-    } else if (offset !== undefined) {
+    const retainedUpdateCount = Math.min(-offset, mailbox.updates.length);
+    const firstRetainedUpdate = mailbox.updates[mailbox.updates.length - retainedUpdateCount];
+    return firstRetainedUpdate?.update_id ?? mailbox.nextUpdateId;
+  }
+
+  /** Confirms updates preceding `firstUnconfirmedUpdateId`, then reads pending updates. */
+  #selectUpdates(
+    mailbox: BotUpdateMailbox,
+    firstUnconfirmedUpdateId: number | undefined,
+    limit: number,
+  ): BotApiUpdate[] {
+    if (firstUnconfirmedUpdateId !== undefined) {
       const firstUnconfirmedUpdateIndex = mailbox.updates.findIndex((update) =>
-        update.update_id >= offset
+        update.update_id >= firstUnconfirmedUpdateId
       );
       if (firstUnconfirmedUpdateIndex === -1) {
         mailbox.updates.splice(0);
