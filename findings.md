@@ -66,24 +66,3 @@ such as a Bot API authentication and update-delivery service. Route handlers sho
 invoke that interface, and translate its result to the Bot API response envelope.
 
 Reference: [Telegram webhook delivery rules](https://core.telegram.org/bots/api#setwebhook)
-
-## P2 — Use Telegram's user-ID range for users, bots, and private chats
-
-Location: `src/repositories/telegram_identity.ts:1`
-
-The identity allocator, request validation, TypeScript client schemas, and OpenAPI contract use
-`4_503_599_627_370_495` (`2^52 - 1`) as the maximum Telegram user ID. Telegram documents the actual
-user ID range as `1` through `0xffffffffff` (`1_099_511_627_775`). The 52-significant-bit statement
-describes safe numeric representation of Bot API identifiers in general; it is not the upper bound
-of the user-ID sequence.
-
-This currently publishes an invalid contract for account, bot, and private-chat IDs and allows the
-allocator to define identities outside Telegram's user range. Define the official bound once in a
-shared contract source and use it consistently in the allocator, server validation, generated or
-handwritten client validation, and OpenAPI schema.
-
-The existing supported shared-chat ranges are correct: basic groups use `-999999999999` through
-`-1`, and supergroups/channels use `-1997852516352` through `-1000000000001`. They do not require a
-separate finding.
-
-Reference: [Telegram Bot API dialog IDs](https://core.telegram.org/api/bots/ids)
