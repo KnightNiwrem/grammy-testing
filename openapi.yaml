@@ -424,6 +424,9 @@ components:
         message_id:
           type: integer
           minimum: 1
+          description: >-
+            Message ID in the recipient bot's message sequence, which spans all of that bot's
+            private chats. Other observers can number the same message differently.
         from:
           $ref: '#/components/schemas/Account'
         chat:

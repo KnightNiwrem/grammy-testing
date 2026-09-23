@@ -16,7 +16,11 @@ import type {
   SharedChat,
   Supergroup,
 } from '../types/virtual_chat.ts';
-import { MAX_TEXT_MESSAGE_LENGTH, type PrivateTextMessage } from '../types/virtual_message.ts';
+import {
+  type CanonicalMessageId,
+  MAX_TEXT_MESSAGE_LENGTH,
+  type PrivateTextMessage,
+} from '../types/virtual_message.ts';
 
 export interface CreateBasicGroupInput {
   readonly title: string;
@@ -218,6 +222,11 @@ interface PrivateMessageStore {
   ): readonly PrivateTextMessage[];
 }
 
+interface UserMessageBoxStore {
+  assignMessageId(ownerId: number, canonicalMessageId: CanonicalMessageId): number;
+  getMessageId(ownerId: number, canonicalMessageId: CanonicalMessageId): number | undefined;
+}
+
 interface BotUpdateSink {
   enqueueMessageUpdate(botId: number, message: BotApiPrivateTextMessage): void;
 }
@@ -228,6 +237,7 @@ interface ChatInteractionServiceDependencies {
   readonly bots: BotLookup;
   readonly chats: ChatStore;
   readonly messages: PrivateMessageStore;
+  readonly userMessageBoxes: UserMessageBoxStore;
   readonly botUpdates: BotUpdateSink;
   readonly currentUnixTimeSeconds: () => number;
 }
@@ -238,6 +248,7 @@ export class ChatInteractionService {
   readonly #bots: BotLookup;
   readonly #chats: ChatStore;
   readonly #messages: PrivateMessageStore;
+  readonly #userMessageBoxes: UserMessageBoxStore;
   readonly #botUpdates: BotUpdateSink;
   readonly #currentUnixTimeSeconds: () => number;
 
@@ -248,6 +259,7 @@ export class ChatInteractionService {
       bots,
       chats,
       messages,
+      userMessageBoxes,
       botUpdates,
       currentUnixTimeSeconds,
     }: ChatInteractionServiceDependencies,
@@ -257,6 +269,7 @@ export class ChatInteractionService {
     this.#bots = bots;
     this.#chats = chats;
     this.#messages = messages;
+    this.#userMessageBoxes = userMessageBoxes;
     this.#botUpdates = botUpdates;
     this.#currentUnixTimeSeconds = currentUnixTimeSeconds;
   }
@@ -402,7 +415,15 @@ export class ChatInteractionService {
       sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
       text: input.text,
     });
-    const projectedMessage = this.#projectPrivateTextMessage(storedMessage, account);
+    // Telegram numbers a private message in each participant's message box. Only the bot's
+    // numbering is projected today; the account's keeps the stored model faithful to Telegram.
+    this.#userMessageBoxes.assignMessageId(account.profile.id, storedMessage.id);
+    this.#userMessageBoxes.assignMessageId(bot.profile.id, storedMessage.id);
+    const projectedMessage = this.#projectPrivateTextMessageForBot(
+      storedMessage,
+      account,
+      bot.profile.id,
+    );
     this.#botUpdates.enqueueMessageUpdate(bot.profile.id, projectedMessage);
 
     return { sent: true, message: projectedMessage };
@@ -420,18 +441,23 @@ export class ChatInteractionService {
     }
 
     const messages = this.#messages.getPrivateConversationMessages(input).map((message) =>
-      this.#projectPrivateTextMessage(message, account)
+      this.#projectPrivateTextMessageForBot(message, account, input.botId)
     );
     return { found: true, messages };
   }
 
-  #projectPrivateTextMessage(
+  #projectPrivateTextMessageForBot(
     message: PrivateTextMessage,
     account: VirtualAccount,
+    observingBotId: number,
   ): BotApiPrivateTextMessage {
+    const messageId = this.#userMessageBoxes.getMessageId(observingBotId, message.id);
+    if (messageId === undefined) {
+      throw new Error(`Private message ${message.id} was not delivered to bot ${observingBotId}`);
+    }
     const { id, first_name, last_name, username } = account.profile;
     return {
-      message_id: message.messageId,
+      message_id: messageId,
       from: account.profile,
       chat: {
         id,

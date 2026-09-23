@@ -8,18 +8,17 @@ export interface AddPrivateTextMessageInput {
   readonly text: string;
 }
 
-/** Stores canonical messages and owns the session's message identifier sequence. */
+/** Stores canonical messages under opaque identities, independent of Telegram message IDs. */
 export class MessageRepository {
   readonly #privateMessagesByAccountId = new Map<
     number,
     Map<number, PrivateTextMessage[]>
   >();
-  #nextMessageId = 1;
 
   addPrivateTextMessage(input: AddPrivateTextMessageInput): PrivateTextMessage {
     const message: PrivateTextMessage = {
       kind: 'private_text',
-      messageId: this.#nextMessageId++,
+      id: crypto.randomUUID(),
       conversation: { ...input.conversation },
       authorAccountId: input.authorAccountId,
       sentAtUnixSeconds: input.sentAtUnixSeconds,

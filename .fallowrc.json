@@ -46,6 +46,12 @@
         ]
       },
       {
+        "name": "user-message-box-repository",
+        "patterns": [
+          "src/repositories/user_message_box.ts"
+        ]
+      },
+      {
         "name": "bot-update-repository",
         "patterns": [
           "src/repositories/bot_update.ts"
@@ -128,6 +134,12 @@
         ]
       },
       {
+        "from": "user-message-box-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "bot-update-repository",
         "allow": [
           "domain"
@@ -186,6 +198,7 @@
           "bot-repository",
           "chat-repository",
           "message-repository",
+          "user-message-box-repository",
           "bot-update-repository",
           "identity-repository",
           "session-repository",

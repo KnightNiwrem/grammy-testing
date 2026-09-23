@@ -1,28 +1,5 @@
 # Architecture review findings
 
-## P1 — Separate canonical message identity from Bot API `message_id`
-
-Location: `src/repositories/message.ts:17-23`
-
-`MessageRepository` allocates one session-global number and stores it as the canonical message ID;
-`ChatInteractionService` then exposes that number unchanged in every Bot API projection. Telegram's
-identifier model cannot be represented by one canonical sequence: private chats and basic groups use
-the observing user's common message-ID sequence, while each supergroup or channel owns a shared
-sequence. A private or basic-group message may consequently have different IDs for different
-observers.
-
-This becomes a structural blocker when the emulator adds shared-chat delivery, bot-authored
-messages, replies, edits, deletes, or service messages. Those operations must resolve an
-observer-visible ID in the correct sequence, not reuse a session-global property of the canonical
-message.
-
-Keep an opaque internal identity on the canonical message and allocate Telegram `message_id` values
-for the relevant observer or shared-chat sequence during projection. This is consistent with the
-unsettled projection strategy documented in `chat-design.md:333-341`.
-
-Reference:
-[Telegram message-ID sequences](https://core.telegram.org/api/updates#message-id-sequences)
-
 ## P1 — Produce domain events before projecting Bot API updates
 
 Location: `src/services/chat_interaction.ts:405-406`

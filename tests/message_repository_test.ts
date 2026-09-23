@@ -25,11 +25,9 @@ Deno.test('MessageRepository stores ordered private conversation history', () =>
   });
 
   if (
-    firstMessage.messageId !== 1 ||
-    unrelatedMessage.messageId !== 2 ||
-    secondMessage.messageId !== 3
+    new Set([firstMessage.id, unrelatedMessage.id, secondMessage.id]).size !== 3
   ) {
-    throw new Error('Expected messages to use the session message identifier sequence');
+    throw new Error('Expected each canonical message to have a distinct identity');
   }
   const history = messages.getPrivateConversationMessages(firstConversation);
   if (history.length !== 2 || history[0] !== firstMessage || history[1] !== secondMessage) {

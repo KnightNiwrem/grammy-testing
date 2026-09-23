@@ -330,10 +330,23 @@ event data. A projector constructs the Bot API `Message` visible to each bot. Se
 as basic-group creation, are stored messages and consume message identifiers. Membership changes
 without service messages do not.
 
-Telegram's underlying identifier sequences differ: private chats and basic groups use a user's
-message-box sequence, while each supergroup/channel has its own sequence. The emulator's exact
-message-ID allocator and per-bot projection strategy are not settled. Implementations must not
-assume that every newly created chat starts at message ID `1`.
+A canonical message is identified by an opaque, emulator-internal ID. That ID is never exposed as a
+Telegram `message_id`, because Telegram numbers the same message differently depending on the chat
+kind and observer:
+
+- Every account and bot owns a common message box. A private-chat or basic-group message takes the
+  next ID in the box of each participant it is delivered to, so its `message_id` can differ between
+  observers. A private message is numbered in both the account's and the bot's box.
+- Each supergroup and channel owns one sequence shared by all of its observers.
+
+Projection resolves the observing bot's `message_id` from the stored assignment; it never derives
+one from the canonical ID. Because a box spans all of its owner's chats, implementations must not
+assume that every newly created chat starts at message ID `1`. Observation BG-1 is consistent with
+this model: the first message of a newly created basic group reached the bot as
+`message_id: 883182`.
+
+Private-chat numbering is implemented. Basic-group and supergroup/channel numbering will follow the
+rules above when those chats carry messages.
 
 See Telegram's
 [message ID sequence documentation](https://core.telegram.org/api/updates#message-id-sequences),
@@ -384,8 +397,9 @@ await session.waitForMessage({
 });
 ```
 
-The cursor prevents an assertion from matching an older message. The final observer API must also
-handle the message-ID projection strategy selected for private chats and basic groups.
+The cursor prevents an assertion from matching an older message. Because private-chat and
+basic-group message IDs are observer-specific, the observer API must state whose message box its
+cursor refers to.
 
 ## Behavior still requiring confirmation
 
@@ -397,7 +411,8 @@ contract:
 - removing administrator status from bots and accounts in each shared chat type;
 - adding, removing, restricting, and banning ordinary members;
 - update visibility for other administrator bots subscribed to `chat_member`;
-- the precise message-ID allocation and projection strategy for private chats and basic groups.
+- whether basic-group messages hidden from a privacy-mode bot consume an ID in that bot's message
+  box.
 
 These gaps do not change the settled chat shapes or valid membership transitions above.
 
