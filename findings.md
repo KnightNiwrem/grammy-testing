@@ -48,54 +48,7 @@ substantially widening endpoint coverage.** The principal risk is that tests pas
 emulator-specific reasons rather than for reasons that would hold against Telegram.
 
 The existing separation of canonical messages, observer-specific message numbering,
-private-conversation identity, domain events, and Bot API update projection is worth retaining. The
-remaining finding concerns update retention and long-idle update IDs.
-
-### Prioritized findings
-
-Priorities describe impact on testing fidelity and future implementation work, not security
-severity.
-
-| ID  | Priority                    | Finding                                          | Main consequence                                      | Evidence                               |
-| --- | --------------------------- | ------------------------------------------------ | ----------------------------------------------------- | -------------------------------------- |
-| F07 | Lower for short-lived tests | Update retention and idle-ID behavior are absent | Recovery and long-duration scenarios are unrealistic. | Reported code/documentation comparison |
-
-## F07 — Update retention and long-idle ID behavior are absent
-
-**Priority:** Lower for short-lived tests; important for recovery and time-dependent scenarios.\
-**Primary location:** [`src/repositories/bot_update.ts`][queue].\
-**Evidence:** Reported code/documentation comparison.
-
-### Context and observed behavior
-
-Mailbox entries have no expiry metadata or clock dependency. Update IDs start at one and increment
-indefinitely.
-
-Telegram retains pending updates for no longer than 24 hours. Its `Update` documentation also
-specifies a randomly chosen next update ID after at least a week without new updates. See
-[Getting updates][telegram-getting-updates] and [Update][telegram-update].
-
-**Starting at one is not itself a fidelity violation.** Determinism is useful; the missing behavior
-concerns expiry and assumptions about sequences across long idle periods.
-
-### Testing consequence
-
-Outage-recovery tests can assume that every missed update remains recoverable forever. Cursor logic
-can also accidentally rely on uninterrupted numbering across long idle periods.
-
-### Recommendation
-
-Inject time into the queue and add controlled expiry and idle-sequence behavior. Use seeded
-randomness or explicit test controls where appropriate so that tests remain reproducible.
-
-The interaction service already accepts `currentUnixTimeSeconds`; extend that approach rather than
-introducing unrelated real-time dependencies.
-
-### Proposed regression tests
-
-Advance a controlled clock beyond the documented retention maximum and verify that expired updates
-cannot be recovered. Exercise long-idle ID changes without depending on a particular random value.
-Preserve normal short-session replay and acknowledgement tests as controls.
+private-conversation identity, domain events, and Bot API update projection is worth retaining.
 
 ## C01 — The current integration coverage is not a complete bot lifecycle
 
@@ -268,8 +221,6 @@ controls and add the following targeted cases.
 
 | Scenario                                        | Required assertion                                                                               | Related finding |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------- |
-| Time advanced beyond retention                  | Expired updates cannot be recovered.                                                             | F07             |
-| Long-idle update sequence                       | Cursor handling does not assume uninterrupted numbering.                                         | F07             |
 | Real startup, command, reply, stop, and restart | Framework lifecycle works without test-only replacements.                                        | C01             |
 | Interleaved conversations and observers         | Canonical IDs, observer message IDs, and update IDs remain distinct.                             | A01, R01        |
 | Group permissions and visibility                | Membership, action permission, privacy visibility, and subscription are evaluated independently. | R02, R03        |
@@ -293,10 +244,9 @@ not just a binary implemented/unimplemented status.
 | Work unit | Scope                                                                     | Completion criterion                                                                |
 | --------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | 1         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.     |
-| 2         | Add controlled retention and idle-sequence behavior.                      | Time-dependent recovery scenarios are deterministic and realistic.                  |
-| 3         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests. |
+| 2         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests. |
 
-Keep the queue fixes independently reviewable. Avoid bundling broad architectural refactors with
+Keep behavior fixes independently reviewable. Avoid bundling broad architectural refactors with
 narrowly reproducible behavior corrections.
 
 ## Bottom line
@@ -315,11 +265,8 @@ permanent global rules.
 [repository]: https://github.com/KnightNiwrem/grammy-testing
 [snapshot]: https://github.com/KnightNiwrem/grammy-testing/tree/274da0e2b8db667a84fa76df7fbf28042aab8e12
 [projection]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/projections/bot_api_message.ts
-[queue]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/repositories/bot_update.ts
 [bot-api-routes]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/api/sessions/bot_api/mod.ts
 [telegram-source]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp
-[telegram-getting-updates]: https://core.telegram.org/bots/api#getting-updates
-[telegram-update]: https://core.telegram.org/bots/api#update
 [telegram-message]: https://core.telegram.org/bots/api#message
 [telegram-message-ids]: https://core.telegram.org/api/ids#message-ids
 [telegram-edit-admin]: https://core.telegram.org/method/channels.editAdmin
