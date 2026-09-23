@@ -1,4 +1,5 @@
 import { Bot } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/bot.ts';
+import { GrammyError } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/core/error.ts';
 
 import { createEmulationApi } from '../src/api/mod.ts';
 import { createSessionLifecycleService } from '../src/composition/session_lifecycle.ts';
@@ -516,6 +517,79 @@ Deno.test('getUpdates rejects malformed parameters with a Bot API error', async 
   }
 });
 
+Deno.test("Bot API answers unknown methods with Telegram's not-found error", async () => {
+  const { api, botApiPath } = await createPrivateConversationFixture();
+
+  const responses = [
+    await api.request(`${botApiPath}/unknownMethod`, { method: 'POST' }),
+    await api.request(`${botApiPath}/getMe/extra`),
+    await api.request(`${botApiPath}/`),
+    // The method is resolved before the body is decoded.
+    await api.request(`${botApiPath}/unknownMethod`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{not json',
+    }),
+  ];
+
+  for (const response of responses) {
+    const body: unknown = await response.json();
+    if (
+      response.status !== 404 || !isNotFoundResponse(body, 'Not Found: method not found')
+    ) {
+      throw new Error(
+        `Expected ${response.url} to be a method not found, received ${response.status}`,
+      );
+    }
+  }
+});
+
+Deno.test('Bot API answers paths without a method before checking the token', async () => {
+  const { api, sessionPath, botApiPath } = await createPrivateConversationFixture();
+  const botApiRootPath = `${sessionPath}/bot-api`;
+
+  const responses = [
+    await api.request(botApiPath),
+    await api.request(`${botApiRootPath}/bot123:unknown`),
+    await api.request(`${botApiRootPath}/getMe`),
+    await api.request(botApiRootPath),
+  ];
+
+  for (const response of responses) {
+    const body: unknown = await response.json();
+    if (response.status !== 404 || !isNotFoundResponse(body, 'Not Found')) {
+      throw new Error(`Expected ${response.url} to be not found, received ${response.status}`);
+    }
+  }
+});
+
+Deno.test('grammY reports an unimplemented method as a Telegram API error', async () => {
+  const { api, sessionPath, createdBot } = await createPrivateConversationFixture();
+  const publicOrigin = 'http://emulator.example:9000';
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `${publicOrigin}${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+
+  let callError: unknown;
+  try {
+    await grammyBot.api.raw.logOut();
+  } catch (error) {
+    callError = error;
+  }
+
+  if (
+    !(callError instanceof GrammyError) || callError.error_code !== 404 ||
+    callError.description !== 'Not Found: method not found'
+  ) {
+    throw new Error(
+      `Expected a grammY API error for an unimplemented method, received ${callError}`,
+    );
+  }
+});
+
 Deno.test('grammY command handlers match account-sent bot commands', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({
@@ -781,6 +855,18 @@ function isUnauthorizedResponse(value: unknown): value is {
 
   const { ok, error_code, description } = value as Record<string, unknown>;
   return ok === false && error_code === 401 && description === 'Unauthorized';
+}
+
+function isNotFoundResponse<Description extends string>(
+  value: unknown,
+  expectedDescription: Description,
+): value is { ok: false; error_code: 404; description: Description } {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const { ok, error_code, description } = value as Record<string, unknown>;
+  return ok === false && error_code === 404 && description === expectedDescription;
 }
 
 const TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION =

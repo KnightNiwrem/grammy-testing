@@ -49,7 +49,7 @@ emulator-specific reasons rather than for reasons that would hold against Telegr
 
 The existing separation of canonical messages, observer-specific message numbering,
 private-conversation identity, domain events, and Bot API update projection is worth retaining. The
-highest-priority remaining work concerns Bot API error responses.
+remaining finding concerns update retention and long-idle update IDs.
 
 ### Prioritized findings
 
@@ -58,50 +58,7 @@ severity.
 
 | ID  | Priority                    | Finding                                          | Main consequence                                      | Evidence                               |
 | --- | --------------------------- | ------------------------------------------------ | ----------------------------------------------------- | -------------------------------------- |
-| F06 | Medium                      | Some Bot API failures return an empty body       | Error handling exercises the wrong failure category.  | Reported code/documentation comparison |
 | F07 | Lower for short-lived tests | Update retention and idle-ID behavior are absent | Recovery and long-duration scenarios are unrealistic. | Reported code/documentation comparison |
-
-## F06 — Some Bot API failures have an empty body
-
-**Priority:** Medium\
-**Primary locations:** [`src/api/mod.ts`][api-root] and [Bot API routes][bot-api-routes].\
-**Evidence:** Reported code/documentation comparison.
-
-### Context and observed behavior
-
-The application-level fallback is:
-
-```ts
-api.notFound((context) => context.body(null, 404));
-```
-
-An authenticated request reaching an unmatched Bot API method therefore receives an empty body.
-Authentication and some validation failures already use a Bot API-shaped JSON response, so the
-behavior is inconsistent within the same surface.
-
-Telegram's error contract is JSON containing `ok: false`, `error_code`, and a description. See
-[Making requests][telegram-requests].
-
-### Testing consequence
-
-Clients may encounter JSON-decoding or transport-style failures instead of a normal Telegram API
-error. Error handling that branches on a Telegram error code is not exercised.
-
-### Recommendation
-
-Establish a Bot API-specific error boundary and keep administrative lifecycle failures separate.
-Distinguish genuine Telegram-level invalid requests, valid Telegram methods not implemented by the
-emulator, and internal emulator failures.
-
-Match documented Telegram failures to reference status/body fixtures. For unsupported functionality,
-fail clearly and expose an emulator diagnostic rather than returning fabricated success. Make the
-compatibility limitation visible without confusing it with a successfully emulated Telegram outcome.
-
-### Proposed regression tests
-
-Exercise unmatched methods, invalid parameters, authentication failures, and declared unsupported
-methods. Assert HTTP status, response content, and the client-visible error category. An assertion
-that only checks for a non-success status is insufficient.
 
 ## F07 — Update retention and long-idle ID behavior are absent
 
@@ -311,7 +268,6 @@ controls and add the following targeted cases.
 
 | Scenario                                        | Required assertion                                                                               | Related finding |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------- |
-| Bot API errors                                  | The client receives the expected structured API error, not an empty-body parsing failure.        | F06             |
 | Time advanced beyond retention                  | Expired updates cannot be recovered.                                                             | F07             |
 | Long-idle update sequence                       | Cursor handling does not assume uninterrupted numbering.                                         | F07             |
 | Real startup, command, reply, stop, and restart | Framework lifecycle works without test-only replacements.                                        | C01             |
@@ -336,20 +292,18 @@ not just a binary implemented/unimplemented status.
 
 | Work unit | Scope                                                                     | Completion criterion                                                                |
 | --------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| 1         | Add the Bot API error boundary.                                           | Client-visible failures conform to reference fixtures.                              |
-| 2         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.     |
-| 3         | Add controlled retention and idle-sequence behavior.                      | Time-dependent recovery scenarios are deterministic and realistic.                  |
-| 4         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests. |
+| 1         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.     |
+| 2         | Add controlled retention and idle-sequence behavior.                      | Time-dependent recovery scenarios are deterministic and realistic.                  |
+| 3         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests. |
 
 Keep the queue fixes independently reviewable. Avoid bundling broad architectural refactors with
-narrowly reproducible behavior corrections. Where the error boundary permits it, keep those changes
-independently testable as well.
+narrowly reproducible behavior corrections.
 
 ## Bottom line
 
 The repository's architecture is a sensible foundation for the supported scenario. The greatest
 immediate fidelity risk comes from behaviors that appear implemented but silently differ from
-Telegram, such as unmatched methods that fail without a Bot API error.
+Telegram.
 
 Correct those behaviors, then prove a real command-to-reply lifecycle. Preserve observer-aware
 identifiers and the event/projection boundary, and make new permissions, visibility modes, and
@@ -363,9 +317,7 @@ permanent global rules.
 [projection]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/projections/bot_api_message.ts
 [queue]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/repositories/bot_update.ts
 [bot-api-routes]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/api/sessions/bot_api/mod.ts
-[api-root]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/api/mod.ts
 [telegram-source]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp
-[telegram-requests]: https://core.telegram.org/bots/api#making-requests
 [telegram-getting-updates]: https://core.telegram.org/bots/api#getting-updates
 [telegram-update]: https://core.telegram.org/bots/api#update
 [telegram-message]: https://core.telegram.org/bots/api#message

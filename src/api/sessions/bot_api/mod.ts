@@ -1,4 +1,5 @@
 import { type Context, Hono } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 
 import type { VirtualBotProfile } from '../../../types/virtual_bot.ts';
@@ -15,7 +16,8 @@ const BOT_TOKEN_PATH_PREFIX = 'bot';
 const BOT_TOKEN_PATH = `/:${BOT_TOKEN_PATH_PARAMETER}{${BOT_TOKEN_PATH_PREFIX}[^/]+}` as const;
 const BOT_API_SUBRESOURCE_PATH = `${BOT_TOKEN_PATH}/*` as const;
 const BOT_API_METHOD_NAME_PARAMETER = 'methodName';
-const BOT_API_METHOD_PATH = `${BOT_TOKEN_PATH}/:${BOT_API_METHOD_NAME_PARAMETER}` as const;
+/** Everything after the token is the method name, as in the official Bot API server. */
+const BOT_API_METHOD_PATH = `${BOT_TOKEN_PATH}/:${BOT_API_METHOD_NAME_PARAMETER}{.*}` as const;
 
 /** Telegram's wording, from `abort_long_poll` in the official Bot API server. */
 const TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION =
@@ -57,20 +59,16 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
 export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
   const botApiRoutes = new Hono<BotApiRouteContextTypes>();
 
+  // Telegram rejects a path without a method segment before it checks the token.
+  botApiRoutes.all(BOT_TOKEN_PATH, (context) => botApiError(context, 404, 'Not Found'));
+
   // Telegram rejects an invalid token before it resolves the method or validates parameters.
   botApiRoutes.use(BOT_API_SUBRESOURCE_PATH, async (context, next) => {
     const botTokenPathSegment = context.req.param(BOT_TOKEN_PATH_PARAMETER);
     const token = botTokenPathSegment.slice(BOT_TOKEN_PATH_PREFIX.length);
     const authenticatedBot = context.get('emulationSession').botApi.authenticate(token);
     if (authenticatedBot === undefined) {
-      return context.json(
-        {
-          ok: false as const,
-          error_code: 401,
-          description: 'Unauthorized',
-        },
-        401,
-      );
+      return botApiError(context, 401, 'Unauthorized');
     }
 
     context.set('authenticatedBot', authenticatedBot);
@@ -83,22 +81,25 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
       context.req.param(BOT_API_METHOD_NAME_PARAMETER).toLowerCase(),
     );
     if (methodHandler === undefined) {
-      return context.notFound();
+      return botApiError(context, 404, 'Not Found: method not found');
     }
 
     const parametersDecoding = await decodeBotApiRequestParameters(context.req.raw);
     if (!parametersDecoding.decoded) {
-      return badRequest(context, parametersDecoding.description);
+      return botApiError(context, 400, parametersDecoding.description);
     }
     return methodHandler(context, parametersDecoding.parameters);
   });
+
+  // Telegram answers every other path in its Bot API namespace with a Bot API error.
+  botApiRoutes.all('*', (context) => botApiError(context, 404, 'Not Found'));
 
   return botApiRoutes;
 }
 
 function handleGetMe(context: BotApiRouteContext, parameters: BotApiRequestParameters): Response {
   if (!getMeParametersSchema.safeParse(parameters).success) {
-    return badRequest(context, 'Bad Request: invalid getMe parameters');
+    return botApiError(context, 400, 'Bad Request: invalid getMe parameters');
   }
   return context.json({ ok: true as const, result: context.get('authenticatedBot') });
 }
@@ -109,7 +110,7 @@ async function handleGetUpdates(
 ): Promise<Response> {
   const parsedParameters = getUpdatesParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return badRequest(context, 'Bad Request: invalid getUpdates parameters');
+    return botApiError(context, 400, 'Bad Request: invalid getUpdates parameters');
   }
 
   const result = await context.get('emulationSession').botApi.getUpdates(
@@ -125,25 +126,16 @@ async function handleGetUpdates(
   if (!result.retrieved) {
     // Telegram delays a conflict by 3 seconds when another occurred within the previous 3
     // seconds; the emulator answers immediately to keep tests fast.
-    return context.json(
-      {
-        ok: false as const,
-        error_code: 409,
-        description: TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION,
-      },
-      409,
-    );
+    return botApiError(context, 409, TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION);
   }
   return context.json({ ok: true as const, result: result.updates });
 }
 
-function badRequest(context: BotApiRouteContext, description: string) {
-  return context.json(
-    {
-      ok: false as const,
-      error_code: 400,
-      description,
-    },
-    400,
-  );
+/** Telegram's error body, whose `error_code` repeats the HTTP status. */
+function botApiError(
+  context: Context,
+  errorCode: ContentfulStatusCode,
+  description: string,
+): Response {
+  return context.json({ ok: false as const, error_code: errorCode, description }, errorCode);
 }

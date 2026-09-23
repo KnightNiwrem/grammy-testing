@@ -12,8 +12,10 @@ Like a Telegram client, the emulator marks bot commands such as `/start` in acco
 `bot_command` entities, so framework command handlers match them; other entity types are not
 detected yet. It also implements the Bot API `getMe` method. Bot API requests follow Telegram's
 conventions: GET or POST, case-insensitive method names, and parameters in the query string or a
-JSON, URL-encoded, or multipart body. The session creation response identifies its Bot API root.
-Other routes described in `openapi.yaml` are not implemented yet.
+JSON, URL-encoded, or multipart body. Bot API failures, including calls to methods the emulator does
+not implement, return Telegram-shaped JSON errors that clients report as API errors. The session
+creation response identifies its Bot API root. Other routes described in `openapi.yaml` are not
+implemented yet.
 
 ## TypeScript client
 

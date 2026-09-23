@@ -16,6 +16,12 @@ info:
     `allowed_updates` as JSON text. Telegram tolerates unknown parameters, malformed values, and
     bodies it cannot decode; the emulator rejects them with a `400` Bot API error so that tests
     surface the mistake.
+
+
+    As on Telegram, a method the emulator does not implement is answered, after the token is
+    authenticated, with a `404` Bot API error described as `Not Found: method not found`. A path
+    under a session's Bot API root that does not name both a bot token and a method is answered
+    with a `404` Bot API error described as `Not Found`, before any token is checked.
 servers:
   - url: http://{domain}:{port}
     variables:
