@@ -323,6 +323,96 @@ Deno.test('private account messages are stored and delivered through getUpdates'
   }
 });
 
+Deno.test('getUpdates allowed_updates filters only updates created afterward', async () => {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
+  const sessionPath = createSessionResponse.headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const createBotResponse = await api.request(`${sessionPath}/bots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
+  });
+  const createdBot: unknown = await createBotResponse.json();
+  if (!isCreatedBotResponse(createdBot)) {
+    throw new Error('Expected a created bot response');
+  }
+  const createAccountResponse = await api.request(`${sessionPath}/accounts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Ada' }),
+  });
+  const createdAccount: unknown = await createAccountResponse.json();
+  if (!isCreatedAccountResponse(createdAccount)) {
+    throw new Error('Expected a created account response');
+  }
+  const sendText = async (text: string) => {
+    const response = await api.request(
+      `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: { type: 'private', botId: createdBot.bot.id }, text }),
+      },
+    );
+    if (response.status !== 201) {
+      throw new Error(`Expected "${text}" to be accepted, received ${response.status}`);
+    }
+  };
+  const getUpdatedTexts = async (parameters: Record<string, unknown>) => {
+    const response = await api.request(
+      `${sessionPath}/bot-api/bot${createdBot.token}/getUpdates`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parameters),
+      },
+    );
+    const body: unknown = await response.json();
+    if (response.status !== 200 || !isGetUpdatesResponse(body)) {
+      throw new Error(`Expected a successful getUpdates response, received ${response.status}`);
+    }
+    return body.result.map((update) => update.message.text);
+  };
+
+  await sendText('queued before unsubscribing');
+  const updatesQueuedBeforeChange = await getUpdatedTexts({ allowed_updates: ['callback_query'] });
+  if (
+    JSON.stringify(updatesQueuedBeforeChange) !== JSON.stringify(['queued before unsubscribing'])
+  ) {
+    throw new Error('Expected a subscription change not to remove an already queued update');
+  }
+
+  await sendText('sent while unsubscribed');
+  if ((await getUpdatedTexts({ offset: 2 })).length !== 0) {
+    throw new Error('Expected an omitted allowed_updates to keep excluding message updates');
+  }
+  const historyResponse = await api.request(
+    `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/messages`,
+  );
+  const historyBody: unknown = await historyResponse.json();
+  if (
+    !isMessageHistoryResponse(historyBody) ||
+    historyBody.messages.at(-1)?.text !== 'sent while unsubscribed'
+  ) {
+    throw new Error('Expected an undelivered message to remain in conversation history');
+  }
+
+  await getUpdatedTexts({ allowed_updates: [] });
+  await sendText('sent after restoring the default');
+  const updatesAfterRestore = await getUpdatedTexts({});
+  if (
+    JSON.stringify(updatesAfterRestore) !== JSON.stringify(['sent after restoring the default'])
+  ) {
+    throw new Error('Expected an empty allowed_updates to restore message updates');
+  }
+});
+
 Deno.test('grammY command handlers match account-sent bot commands', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({

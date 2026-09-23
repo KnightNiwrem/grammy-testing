@@ -3,6 +3,7 @@ import { AccountRepository } from '../repositories/account.ts';
 import { BotRepository } from '../repositories/bot.ts';
 import { ChatRepository } from '../repositories/chat.ts';
 import { BotUpdateRepository } from '../repositories/bot_update.ts';
+import { BotUpdateSubscriptionRepository } from '../repositories/bot_update_subscription.ts';
 import { MessageRepository } from '../repositories/message.ts';
 import { TelegramIdentityRepository } from '../repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../repositories/user_message_box.ts';
@@ -20,10 +21,12 @@ export function createEmulationSession(id: string): EmulationSession {
   const messages = new MessageRepository();
   const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
+  const updateSubscriptions = new BotUpdateSubscriptionRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
     accounts,
     userMessageBoxes,
     botUpdates,
+    updateSubscriptions,
   });
   const chatInteractions = new ChatInteractionService({
     identities,
@@ -36,7 +39,7 @@ export function createEmulationSession(id: string): EmulationSession {
     currentUnixTimeSeconds: () => Math.floor(Date.now() / 1_000),
   });
 
-  const botApi = new BotApiService({ bots, botUpdates });
+  const botApi = new BotApiService({ bots, botUpdates, updateSubscriptions });
 
   return { id, virtualUsers, chatInteractions, botApi };
 }

@@ -56,7 +56,7 @@ emulator-specific reasons rather than for reasons that would hold against Telegr
 
 The existing separation of canonical messages, observer-specific message numbering,
 private-conversation identity, domain events, and Bot API update projection is worth retaining. The
-highest-priority work concerns polling semantics and update subscriptions.
+highest-priority work concerns polling semantics.
 
 ### Prioritized findings
 
@@ -65,73 +65,11 @@ severity.
 
 | ID  | Priority                    | Finding                                               | Main consequence                                                  | Evidence                                          |
 | --- | --------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------- |
-| F02 | High                        | `allowed_updates` is accepted but ignored             | Incorrect subscriptions can pass tests.                           | Reported code/documentation comparison            |
 | F03 | High                        | Negative offsets are reapplied after a long-poll wait | Newly arriving updates can be permanently discarded.              | Locally characterized; official source comparison |
 | F04 | High                        | Multiple pending long polls for one bot all succeed   | Duplicate-poller deployment and lifecycle bugs are hidden.        | Locally characterized; official source comparison |
 | F05 | Medium                      | Bot API request decoding differs from Telegram        | Valid requests fail, or supplied parameters are silently ignored. | Reported code/documentation comparison            |
 | F06 | Medium                      | Some Bot API failures return an empty body            | Error handling exercises the wrong failure category.              | Reported code/documentation comparison            |
 | F07 | Lower for short-lived tests | Update retention and idle-ID behavior are absent      | Recovery and long-duration scenarios are unrealistic.             | Reported code/documentation comparison            |
-
-## F02 — `allowed_updates` is silently ignored
-
-**Priority:** High\
-**Primary locations:** [`src/api/sessions/bot_api/mod.ts`][bot-api-routes],
-[`src/services/bot_api.ts`][bot-api-service], and the `BotUpdateDeliveryService` delivery path.\
-**Evidence:** Reported code/documentation comparison.
-
-### Context and observed behavior
-
-The route validates `allowed_updates`, but the request forwarded to the service contains only:
-
-```ts
-{
-  offset,
-  limit,
-  timeoutSeconds,
-  signal,
-}
-```
-
-The service request type has no subscription field, and private-message delivery unconditionally
-enqueues the update. This is accepted-but-ineffective behavior, not an explicit
-unsupported-parameter failure.
-
-### Expected Telegram behavior
-
-Telegram's subscription persists across calls: omission retains the previous setting. An empty array
-selects the default set, excluding `chat_member`, `message_reaction`, and `message_reaction_count`.
-A subscription change does not retroactively affect updates created before that call. See
-[`getUpdates`][telegram-getupdates].
-
-### Minimal scenario
-
-1. Poll with `allowed_updates: ["callback_query"]`.
-2. After that call, send a new private text message to the bot.
-3. Poll again without `allowed_updates`.
-
-The current implementation delivers the new message despite the retained subscription excluding
-`message`.
-
-### Testing consequence
-
-A test can validate a handler even though the bot's production subscription prevents the
-corresponding update from reaching it.
-
-### Recommendation
-
-Store the subscription per bot and apply it when deciding whether to enqueue a newly generated Bot
-API update. Keep the underlying message and conversation history independent of that delivery
-decision.
-
-Do **not** filter the entire pending queue on each `getUpdates` call. That would create another
-mismatch by retroactively hiding previously queued updates.
-
-### Proposed regression tests
-
-Verify subscription persistence when the next call omits `allowed_updates`; exclusion of messages
-created after a subscription change; preservation of messages already queued before the change; and
-restoration of default behavior with `[]`. Ensure a message excluded from Bot API delivery still
-exists in canonical history.
 
 ## F03 — Negative-offset long polling can discard newly arriving updates
 
@@ -423,8 +361,8 @@ identifier must not become interchangeable with a Bot API `message_id`.
 `BotUpdateDeliveryService` separates stored chat events from Bot API update production. Preserve
 that boundary for recipient selection, projection, subscription checks, and delivery.
 
-The subscription fix should build on this separation. Polling should not determine whether the
-underlying message exists, and excluding an update should not erase conversation history.
+Update subscriptions are checked here when an update is created. Polling does not determine whether
+the underlying message exists, and excluding an update does not erase conversation history.
 
 ## Extension risks to resolve before generalizing the implementation
 
@@ -533,8 +471,6 @@ controls and add the following targeted cases.
 
 | Scenario                                             | Required assertion                                                                               | Related finding |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------- |
-| Subscription changed before a message                | Newly excluded update is not queued.                                                             | F02             |
-| Subscription changed after a message                 | Previously queued update is not retroactively removed.                                           | F02             |
 | Empty-queue negative-offset poll followed by a burst | The wake-up path does not repeat the tail cut or lose the new burst.                             | F03             |
 | Two held polls for one bot                           | The displaced request takes the structured conflict path.                                        | F04             |
 | Equivalent supported request encodings               | Parameters retain their meaning, including acknowledgement effects.                              | F05             |
@@ -565,11 +501,10 @@ not just a binary implemented/unimplemented status.
 | --------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | 1         | Correct negative-offset normalization.                                    | Burst regression passes without losing updates.                                      |
 | 2         | Implement competing-long-poll ownership and conflicts.                    | Same-bot held polls follow the reference conflict behavior; cleanup remains correct. |
-| 3         | Persist and apply `allowed_updates`.                                      | Enqueue-time filtering and non-retroactive behavior are covered.                     |
-| 4         | Add the shared Bot API decoding and error boundary.                       | Supported encodings and client-visible failures conform to reference fixtures.       |
-| 5         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.      |
-| 6         | Add controlled retention and idle-sequence behavior.                      | Time-dependent recovery scenarios are deterministic and realistic.                   |
-| 7         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests.  |
+| 3         | Add the shared Bot API decoding and error boundary.                       | Supported encodings and client-visible failures conform to reference fixtures.       |
+| 4         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.      |
+| 5         | Add controlled retention and idle-sequence behavior.                      | Time-dependent recovery scenarios are deterministic and realistic.                   |
+| 6         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests.  |
 
 Keep the queue fixes independently reviewable. Avoid bundling broad architectural refactors with
 narrowly reproducible behavior corrections. Where the shared decoding and error boundary permits it,
@@ -615,8 +550,7 @@ both files are saved in the same directory.
 
 The repository's architecture is a sensible foundation for the supported scenario. The greatest
 immediate fidelity risk comes from behaviors that appear implemented but silently differ from
-Telegram: ignored subscriptions, competing polls that both succeed, and destructive offset handling
-on wake-up.
+Telegram: competing polls that both succeed and destructive offset handling on wake-up.
 
 Correct those semantics, then prove a real command-to-reply lifecycle. Preserve observer-aware
 identifiers and the event/projection boundary, and make new permissions, visibility modes, and
@@ -635,7 +569,6 @@ permanent global rules.
 [telegram-source]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp
 [telegram-requests]: https://core.telegram.org/bots/api#making-requests
 [telegram-getting-updates]: https://core.telegram.org/bots/api#getting-updates
-[telegram-getupdates]: https://core.telegram.org/bots/api#getupdates
 [telegram-update]: https://core.telegram.org/bots/api#update
 [telegram-message]: https://core.telegram.org/bots/api#message
 [telegram-message-ids]: https://core.telegram.org/api/ids#message-ids

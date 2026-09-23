@@ -1,6 +1,7 @@
 import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
+import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { ChatRepository } from '../src/repositories/chat.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
@@ -711,6 +712,7 @@ function createChatInteractionFixture() {
     accounts,
     userMessageBoxes,
     botUpdates,
+    updateSubscriptions: new BotUpdateSubscriptionRepository(),
   });
   const publishedEvents: ChatDomainEvent[] = [];
   const chatInteractions = new ChatInteractionService({

@@ -1,10 +1,15 @@
 import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
+import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import { BotApiService } from '../src/services/bot_api.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
-import type { BotApiPrivateTextMessage } from '../src/types/bot_api.ts';
+import {
+  type BotApiPrivateTextMessage,
+  type BotApiUpdateType,
+  DEFAULT_ALLOWED_UPDATE_TYPES,
+} from '../src/types/bot_api.ts';
 
 Deno.test('BotApiService authenticates a bot by its token', () => {
   const { virtualUsers, botApi } = createBotApiFixture();
@@ -36,6 +41,68 @@ Deno.test('BotApiService polls only the authenticated bot mailbox', async () => 
   }
 });
 
+Deno.test('BotApiService keeps a bot update subscription until a request replaces it', async () => {
+  const { virtualUsers, updateSubscriptions, botApi } = createBotApiFixture();
+  const subscribedBot = createBot(virtualUsers, 'subscribed_bot');
+  const otherBot = createBot(virtualUsers, 'other_bot');
+
+  await botApi.getUpdates(subscribedBot.profile, {
+    limit: 100,
+    timeoutSeconds: 0,
+    allowedUpdates: ['callback_query'],
+  });
+  await botApi.getUpdates(subscribedBot.profile, { limit: 100, timeoutSeconds: 0 });
+
+  assertAllowedUpdateTypes(
+    updateSubscriptions.getAllowedUpdateTypes(subscribedBot.profile.id),
+    ['callback_query'],
+  );
+  assertAllowedUpdateTypes(
+    updateSubscriptions.getAllowedUpdateTypes(otherBot.profile.id),
+    [...DEFAULT_ALLOWED_UPDATE_TYPES],
+  );
+});
+
+Deno.test('BotApiService resolves allowed update names as Telegram does', async () => {
+  const { virtualUsers, updateSubscriptions, botApi } = createBotApiFixture();
+  const bot = createBot(virtualUsers, 'test_bot');
+  const cases: { allowedUpdates: string[]; expected: readonly BotApiUpdateType[] }[] = [
+    { allowedUpdates: ['MESSAGE', 'not_an_update_type'], expected: ['message'] },
+    { allowedUpdates: ['chat_member'], expected: ['chat_member'] },
+    { allowedUpdates: ['not_an_update_type'], expected: [...DEFAULT_ALLOWED_UPDATE_TYPES] },
+    { allowedUpdates: ['message'], expected: ['message'] },
+    { allowedUpdates: [], expected: [...DEFAULT_ALLOWED_UPDATE_TYPES] },
+  ];
+
+  for (const { allowedUpdates, expected } of cases) {
+    await botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 0, allowedUpdates });
+    assertAllowedUpdateTypes(updateSubscriptions.getAllowedUpdateTypes(bot.profile.id), expected);
+  }
+  const optInUpdateTypes: BotApiUpdateType[] = [
+    'chat_member',
+    'message_reaction',
+    'message_reaction_count',
+  ];
+  for (const optInUpdateType of optInUpdateTypes) {
+    if (DEFAULT_ALLOWED_UPDATE_TYPES.has(optInUpdateType)) {
+      throw new Error(`Expected the default subscription to exclude ${optInUpdateType}`);
+    }
+  }
+});
+
+function assertAllowedUpdateTypes(
+  actual: ReadonlySet<BotApiUpdateType>,
+  expected: readonly BotApiUpdateType[],
+): void {
+  if (actual.size !== expected.length || !expected.every((updateType) => actual.has(updateType))) {
+    throw new Error(
+      `Expected allowed update types ${JSON.stringify(expected)}, received ${
+        JSON.stringify([...actual])
+      }`,
+    );
+  }
+}
+
 function createBotApiFixture() {
   const identities = new TelegramIdentityRepository();
   const bots = new BotRepository();
@@ -45,8 +112,9 @@ function createBotApiFixture() {
     bots,
   });
   const botUpdates = new BotUpdateRepository();
-  const botApi = new BotApiService({ bots, botUpdates });
-  return { virtualUsers, botUpdates, botApi };
+  const updateSubscriptions = new BotUpdateSubscriptionRepository();
+  const botApi = new BotApiService({ bots, botUpdates, updateSubscriptions });
+  return { virtualUsers, botUpdates, updateSubscriptions, botApi };
 }
 
 function createBot(virtualUsers: VirtualUserService, username: string) {

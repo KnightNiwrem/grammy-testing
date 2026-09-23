@@ -15,6 +15,8 @@ const getUpdatesRequestSchema = z.strictObject({
   offset: z.number().int().optional(),
   limit: z.number().int().min(1).max(100).default(100),
   timeout: z.number().int().min(0).max(50).default(0),
+  // Telegram ignores a malformed value and keeps the current subscription; rejecting it instead
+  // surfaces the bot's mistake in tests.
   allowed_updates: z.array(z.string()).optional(),
 });
 
@@ -75,6 +77,7 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
         offset: parsedRequest.data.offset,
         limit: parsedRequest.data.limit,
         timeoutSeconds: parsedRequest.data.timeout,
+        allowedUpdates: parsedRequest.data.allowed_updates,
         signal: context.req.raw.signal,
       },
     );

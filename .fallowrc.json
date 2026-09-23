@@ -59,6 +59,12 @@
         ]
       },
       {
+        "name": "bot-update-subscription-repository",
+        "patterns": [
+          "src/repositories/bot_update_subscription.ts"
+        ]
+      },
+      {
         "name": "identity-repository",
         "patterns": [
           "src/repositories/telegram_identity.ts"
@@ -171,6 +177,12 @@
         ]
       },
       {
+        "from": "bot-update-subscription-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "identity-repository",
         "allow": [
           "domain"
@@ -247,6 +259,7 @@
           "message-repository",
           "user-message-box-repository",
           "bot-update-repository",
+          "bot-update-subscription-repository",
           "identity-repository",
           "session-repository",
           "bot-api-projection",

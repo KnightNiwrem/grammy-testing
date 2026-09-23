@@ -1,6 +1,7 @@
 import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
+import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
@@ -50,6 +51,35 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
   }
 });
 
+Deno.test('BotUpdateDeliveryService skips updates excluded by the bot subscription', async () => {
+  const {
+    virtualUsers,
+    messages,
+    userMessageBoxes,
+    botUpdates,
+    updateSubscriptions,
+    botUpdateDelivery,
+  } = createDeliveryFixture();
+  const account = createAccount(virtualUsers);
+  const bot = createBot(virtualUsers, 'test_bot');
+  updateSubscriptions.setAllowedUpdateTypes(bot.profile.id, new Set(['callback_query']));
+  const message = messages.addPrivateTextMessage({
+    conversation: { accountId: account.profile.id, botId: bot.profile.id },
+    authorAccountId: account.profile.id,
+    sentAtUnixSeconds: 1_700_000_000,
+    text: 'Hello',
+    entities: [],
+  });
+  userMessageBoxes.assignMessageId(bot.profile.id, message.id);
+
+  botUpdateDelivery.publish({ type: 'message_created', message });
+
+  const updates = await botUpdates.getUpdates(bot.profile.id, { limit: 100, timeoutSeconds: 0 });
+  if (updates.length !== 0) {
+    throw new Error('Expected a message update not to reach a bot that excluded message updates');
+  }
+});
+
 Deno.test('BotUpdateDeliveryService rejects a message missing from the bot message box', () => {
   const { virtualUsers, messages, botUpdateDelivery } = createDeliveryFixture();
   const account = createAccount(virtualUsers);
@@ -81,12 +111,21 @@ function createDeliveryFixture() {
   const messages = new MessageRepository();
   const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
+  const updateSubscriptions = new BotUpdateSubscriptionRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
     accounts,
     userMessageBoxes,
     botUpdates,
+    updateSubscriptions,
   });
-  return { virtualUsers, messages, userMessageBoxes, botUpdates, botUpdateDelivery };
+  return {
+    virtualUsers,
+    messages,
+    userMessageBoxes,
+    botUpdates,
+    updateSubscriptions,
+    botUpdateDelivery,
+  };
 }
 
 function createAccount(virtualUsers: VirtualUserService) {

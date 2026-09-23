@@ -146,7 +146,9 @@ paths:
               $ref: '#/components/schemas/SendAccountMessageRequest'
       responses:
         '201':
-          description: The message was stored and an update was enqueued for the target bot.
+          description: >-
+            The message was stored and, unless the target bot's allowed_updates subscription
+            excludes message updates, an update was enqueued for the target bot.
           content:
             application/json:
               schema:
@@ -511,6 +513,12 @@ components:
           maximum: 50
           default: 0
         allowed_updates:
+          description: >-
+            Update types the bot subscribes to, matched case-insensitively. The subscription
+            persists until a later request supplies this parameter and applies only to updates
+            created afterward. Unrecognized names are ignored; a list with no recognized name
+            selects Telegram's default, which excludes chat_member, message_reaction, and
+            message_reaction_count.
           type: array
           items:
             type: string
