@@ -1,7 +1,6 @@
 import { createEmulationSession } from '../src/composition/emulation_session.ts';
 import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
-import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { ChatRepository } from '../src/repositories/chat.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
@@ -17,6 +16,7 @@ import {
 } from '../src/services/chat_interaction.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { BotApiPrivateTextMessage } from '../src/types/bot_api.ts';
+import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
 import { MAX_TEXT_MESSAGE_LENGTH } from '../src/types/virtual_message.ts';
 import type { ChatMembership } from '../src/types/chat_membership.ts';
 import type { BasicGroup, Channel, Supergroup } from '../src/types/virtual_chat.ts';
@@ -378,8 +378,8 @@ Deno.test('ChatInteractionService sends and stores private account messages', as
   });
   if (
     updates.length !== 2 ||
-    updates[0].message !== firstResult.message ||
-    updates[1].message !== secondResult.message
+    !haveSameBotApiView(updates[0].message, firstResult.message) ||
+    !haveSameBotApiView(updates[1].message, secondResult.message)
   ) {
     throw new Error('Expected each sent message to enqueue one update for the target bot');
   }
@@ -437,22 +437,8 @@ Deno.test('ChatInteractionService continues a bot message box across private cha
 });
 
 Deno.test('ChatInteractionService adds private messages to the sending account message box', () => {
-  const identities = new TelegramIdentityRepository();
-  const accounts = new AccountRepository();
-  const bots = new BotRepository();
-  const virtualUsers = new VirtualUserService({ identities, accounts, bots });
-  const messages = new MessageRepository();
-  const userMessageBoxes = new UserMessageBoxRepository();
-  const chatInteractions = new ChatInteractionService({
-    identities,
-    accounts,
-    bots,
-    chats: new ChatRepository(),
-    messages,
-    userMessageBoxes,
-    botUpdates: new BotUpdateRepository(),
-    currentUnixTimeSeconds: () => 1_700_000_000,
-  });
+  const { virtualUsers, messages, userMessageBoxes, chatInteractions } =
+    createChatInteractionServiceWithRecordedEvents();
   const account = createAccount(virtualUsers, 'Ada');
   const firstBot = createBot(virtualUsers, 'First Bot', 'first_bot');
   const secondBot = createBot(virtualUsers, 'Second Bot', 'second_bot');
@@ -475,6 +461,35 @@ Deno.test('ChatInteractionService adds private messages to the sending account m
     userMessageBoxes.getMessageId(secondBot.profile.id, secondBotMessage.id) !== 1
   ) {
     throw new Error("Expected the account's message box to number messages across its chats");
+  }
+});
+
+Deno.test('ChatInteractionService publishes a created event for each sent message', () => {
+  const { virtualUsers, messages, publishedEvents, chatInteractions } =
+    createChatInteractionServiceWithRecordedEvents();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+
+  const rejectedResult = chatInteractions.sendMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: '',
+  });
+  if (rejectedResult.sent) {
+    throw new Error('Expected an empty message to be rejected');
+  }
+  sendPrivateText(chatInteractions, account.profile.id, bot);
+
+  const [storedMessage] = messages.getPrivateConversationMessages({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
+  if (
+    publishedEvents.length !== 1 ||
+    publishedEvents[0].type !== 'message_created' ||
+    publishedEvents[0].message !== storedMessage
+  ) {
+    throw new Error('Expected only the accepted message to publish a message_created event');
   }
 });
 
@@ -636,6 +651,38 @@ function assertMembershipStatus(
   if (actualStatus !== expectedStatus) {
     throw new Error(`Expected ${expectedStatus} membership, received ${actualStatus}`);
   }
+}
+
+function createChatInteractionServiceWithRecordedEvents() {
+  const identities = new TelegramIdentityRepository();
+  const accounts = new AccountRepository();
+  const bots = new BotRepository();
+  const virtualUsers = new VirtualUserService({ identities, accounts, bots });
+  const messages = new MessageRepository();
+  const userMessageBoxes = new UserMessageBoxRepository();
+  const publishedEvents: ChatDomainEvent[] = [];
+  const chatInteractions = new ChatInteractionService({
+    identities,
+    accounts,
+    bots,
+    chats: new ChatRepository(),
+    messages,
+    userMessageBoxes,
+    events: { publish: (event) => publishedEvents.push(event) },
+    currentUnixTimeSeconds: () => 1_700_000_000,
+  });
+  return { virtualUsers, messages, userMessageBoxes, publishedEvents, chatInteractions };
+}
+
+function haveSameBotApiView(
+  actual: BotApiPrivateTextMessage,
+  expected: BotApiPrivateTextMessage,
+): boolean {
+  return actual.message_id === expected.message_id &&
+    actual.chat.id === expected.chat.id &&
+    actual.from.id === expected.from.id &&
+    actual.date === expected.date &&
+    actual.text === expected.text;
 }
 
 function sendPrivateText(

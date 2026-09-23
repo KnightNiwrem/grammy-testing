@@ -1,3 +1,4 @@
+import { projectPrivateTextMessage } from '../projections/bot_api_message.ts';
 import type {
   BasicGroupRegistrationResult,
   ChatMemberAdditionResult,
@@ -5,6 +6,7 @@ import type {
 } from '../repositories/chat.ts';
 import type { IdentityReservationResult } from '../repositories/telegram_identity.ts';
 import type { BotApiPrivateTextMessage } from '../types/bot_api.ts';
+import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { ChatMembership } from '../types/chat_membership.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
@@ -227,8 +229,8 @@ interface UserMessageBoxStore {
   getMessageId(ownerId: number, canonicalMessageId: CanonicalMessageId): number | undefined;
 }
 
-interface BotUpdateSink {
-  enqueueMessageUpdate(botId: number, message: BotApiPrivateTextMessage): void;
+interface ChatDomainEventSink {
+  publish(event: ChatDomainEvent): void;
 }
 
 interface ChatInteractionServiceDependencies {
@@ -238,7 +240,7 @@ interface ChatInteractionServiceDependencies {
   readonly chats: ChatStore;
   readonly messages: PrivateMessageStore;
   readonly userMessageBoxes: UserMessageBoxStore;
-  readonly botUpdates: BotUpdateSink;
+  readonly events: ChatDomainEventSink;
   readonly currentUnixTimeSeconds: () => number;
 }
 
@@ -249,7 +251,7 @@ export class ChatInteractionService {
   readonly #chats: ChatStore;
   readonly #messages: PrivateMessageStore;
   readonly #userMessageBoxes: UserMessageBoxStore;
-  readonly #botUpdates: BotUpdateSink;
+  readonly #events: ChatDomainEventSink;
   readonly #currentUnixTimeSeconds: () => number;
 
   constructor(
@@ -260,7 +262,7 @@ export class ChatInteractionService {
       chats,
       messages,
       userMessageBoxes,
-      botUpdates,
+      events,
       currentUnixTimeSeconds,
     }: ChatInteractionServiceDependencies,
   ) {
@@ -270,7 +272,7 @@ export class ChatInteractionService {
     this.#chats = chats;
     this.#messages = messages;
     this.#userMessageBoxes = userMessageBoxes;
-    this.#botUpdates = botUpdates;
+    this.#events = events;
     this.#currentUnixTimeSeconds = currentUnixTimeSeconds;
   }
 
@@ -419,14 +421,12 @@ export class ChatInteractionService {
     // numbering is projected today; the account's keeps the stored model faithful to Telegram.
     this.#userMessageBoxes.assignMessageId(account.profile.id, storedMessage.id);
     this.#userMessageBoxes.assignMessageId(bot.profile.id, storedMessage.id);
-    const projectedMessage = this.#projectPrivateTextMessageForBot(
-      storedMessage,
-      account,
-      bot.profile.id,
-    );
-    this.#botUpdates.enqueueMessageUpdate(bot.profile.id, projectedMessage);
+    this.#events.publish({ type: 'message_created', message: storedMessage });
 
-    return { sent: true, message: projectedMessage };
+    return {
+      sent: true,
+      message: this.#projectPrivateTextMessageForBot(storedMessage, account, bot.profile.id),
+    };
   }
 
   getPrivateMessageHistory(
@@ -451,24 +451,11 @@ export class ChatInteractionService {
     account: VirtualAccount,
     observingBotId: number,
   ): BotApiPrivateTextMessage {
-    const messageId = this.#userMessageBoxes.getMessageId(observingBotId, message.id);
-    if (messageId === undefined) {
+    const observerMessageId = this.#userMessageBoxes.getMessageId(observingBotId, message.id);
+    if (observerMessageId === undefined) {
       throw new Error(`Private message ${message.id} was not delivered to bot ${observingBotId}`);
     }
-    const { id, first_name, last_name, username } = account.profile;
-    return {
-      message_id: messageId,
-      from: account.profile,
-      chat: {
-        id,
-        type: 'private',
-        first_name,
-        ...(last_name === undefined ? {} : { last_name }),
-        ...(username === undefined ? {} : { username }),
-      },
-      date: message.sentAtUnixSeconds,
-      text: message.text,
-    };
+    return projectPrivateTextMessage({ message, author: account.profile, observerMessageId });
   }
 
   #validateBasicGroupParticipants(

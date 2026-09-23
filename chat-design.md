@@ -355,16 +355,17 @@ supergroup/channel message IDs are shared by their observers.
 
 ## Update generation
 
-Chat commands first change canonical state and produce ordered domain events, for example:
+Chat commands first change canonical state, including message-box numbering, and then publish
+ordered domain events (`ChatDomainEvent` in `src/types/chat_domain_event.ts`). Commands never build
+Bot API objects for updates or append to mailboxes.
 
-```ts
-type ChatDomainEvent =
-  | ChatMemberStatusChangedEvent
-  | MessageCreatedEvent;
-```
+`BotUpdateDeliveryService` is the delivery layer. It determines which bots are eligible to observe
+each event, projects it into observer-specific Bot API updates, and appends them to each bot's
+mailbox. This keeps state transitions independent of polling and webhook delivery.
 
-The delivery layer determines which bots are eligible to observe each event and projects it into Bot
-API updates. This keeps state transitions independent of polling and webhook delivery.
+Only `MessageCreatedEvent` for private text messages exists today; its sole observer is the
+conversation's bot. Further events, such as a chat-member status change, are added together with the
+update projections that consume them.
 
 Delivery must eventually account for:
 

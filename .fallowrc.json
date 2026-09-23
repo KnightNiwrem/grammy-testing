@@ -17,6 +17,7 @@
           "src/types/virtual_chat.ts",
           "src/types/chat_membership.ts",
           "src/types/virtual_message.ts",
+          "src/types/chat_domain_event.ts",
           "src/types/bot_api.ts",
           "src/types/telegram_identity.ts"
         ]
@@ -76,10 +77,22 @@
         ]
       },
       {
+        "name": "bot-api-projection",
+        "patterns": [
+          "src/projections/**/*.ts"
+        ]
+      },
+      {
         "name": "domain-services",
         "patterns": [
           "src/services/chat_interaction.ts",
           "src/services/virtual_user.ts"
+        ]
+      },
+      {
+        "name": "update-delivery",
+        "patterns": [
+          "src/services/bot_update_delivery.ts"
         ]
       },
       {
@@ -172,15 +185,29 @@
         ]
       },
       {
-        "from": "domain-services",
+        "from": "bot-api-projection",
         "allow": [
           "domain"
+        ]
+      },
+      {
+        "from": "domain-services",
+        "allow": [
+          "domain",
+          "bot-api-projection"
         ],
         "allowTypeOnly": [
           "account-repository",
           "bot-repository",
           "chat-repository",
           "identity-repository"
+        ]
+      },
+      {
+        "from": "update-delivery",
+        "allow": [
+          "domain",
+          "bot-api-projection"
         ]
       },
       {
@@ -202,7 +229,9 @@
           "bot-update-repository",
           "identity-repository",
           "session-repository",
+          "bot-api-projection",
           "domain-services",
+          "update-delivery",
           "application-services",
           "session",
           "transport"

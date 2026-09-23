@@ -6,6 +6,7 @@ import { BotUpdateRepository } from '../repositories/bot_update.ts';
 import { MessageRepository } from '../repositories/message.ts';
 import { TelegramIdentityRepository } from '../repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../repositories/user_message_box.ts';
+import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
 import { ChatInteractionService } from '../services/chat_interaction.ts';
 import { VirtualUserService } from '../services/virtual_user.ts';
 
@@ -18,6 +19,11 @@ export function createEmulationSession(id: string): EmulationSession {
   const messages = new MessageRepository();
   const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
+  const botUpdateDelivery = new BotUpdateDeliveryService({
+    accounts,
+    userMessageBoxes,
+    botUpdates,
+  });
   const chatInteractions = new ChatInteractionService({
     identities,
     accounts,
@@ -25,7 +31,7 @@ export function createEmulationSession(id: string): EmulationSession {
     chats,
     messages,
     userMessageBoxes,
-    botUpdates,
+    events: botUpdateDelivery,
     currentUnixTimeSeconds: () => Math.floor(Date.now() / 1_000),
   });
 
