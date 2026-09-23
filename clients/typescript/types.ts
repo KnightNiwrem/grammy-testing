@@ -69,12 +69,20 @@ export interface PrivateChat {
   readonly username?: string;
 }
 
+/** Offsets and lengths count UTF-16 code units. */
+export interface MessageEntity {
+  readonly type: 'bot_command';
+  readonly offset: number;
+  readonly length: number;
+}
+
 export interface PrivateTextMessage {
   readonly message_id: number;
   readonly from: VirtualAccountProfile;
   readonly chat: PrivateChat;
   readonly date: number;
   readonly text: string;
+  readonly entities?: readonly MessageEntity[];
 }
 
 export interface VirtualAccountClient extends VirtualAccountProfile {

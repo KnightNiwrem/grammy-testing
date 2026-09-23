@@ -26,5 +26,8 @@ export function projectPrivateTextMessage(
     },
     date: message.sentAtUnixSeconds,
     text: message.text,
+    ...(message.entities.length === 0 ? {} : {
+      entities: message.entities.map(({ type, offset, length }) => ({ type, offset, length })),
+    }),
   };
 }

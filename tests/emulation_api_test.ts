@@ -323,6 +323,77 @@ Deno.test('private account messages are stored and delivered through getUpdates'
   }
 });
 
+Deno.test('grammY command handlers match account-sent bot commands', async () => {
+  const publicOrigin = 'http://emulator.example:9000';
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin,
+  });
+  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
+  const sessionPath = createSessionResponse.headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const createBotResponse = await api.request(`${sessionPath}/bots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
+  });
+  const createdBot: unknown = await createBotResponse.json();
+  if (!isCreatedBotResponse(createdBot)) {
+    throw new Error('Expected a created bot response');
+  }
+  const createAccountResponse = await api.request(`${sessionPath}/accounts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: 'Ada' }),
+  });
+  const createdAccount: unknown = await createAccountResponse.json();
+  if (!isCreatedAccountResponse(createdAccount)) {
+    throw new Error('Expected a created account response');
+  }
+
+  for (const text of ['/start', '/start@test_bot payload', 'hello /start']) {
+    const sendResponse = await api.request(
+      `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: { type: 'private', botId: createdBot.bot.id }, text }),
+      },
+    );
+    if (sendResponse.status !== 201) {
+      throw new Error(
+        `Expected the account message to be accepted, received ${sendResponse.status}`,
+      );
+    }
+  }
+
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `${publicOrigin}${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const startCommandPayloads: string[] = [];
+  grammyBot.command('start', (context) => {
+    startCommandPayloads.push(context.match);
+  });
+  await grammyBot.init();
+  for (const update of await grammyBot.api.getUpdates()) {
+    await grammyBot.handleUpdate(update);
+  }
+
+  // A command that does not start the message is marked, but grammY only handles leading commands.
+  if (JSON.stringify(startCommandPayloads) !== JSON.stringify(['', 'payload'])) {
+    throw new Error(
+      `Expected the start handler to run for leading commands, received ${
+        JSON.stringify(startCommandPayloads)
+      }`,
+    );
+  }
+});
+
 Deno.test('private message routes validate participants and request bodies', async () => {
   const api = createEmulationApi({
     sessionLifecycle: createSessionLifecycleService(),

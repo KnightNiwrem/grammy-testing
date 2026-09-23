@@ -5,6 +5,7 @@ import type {
   SharedChatRegistrationResult,
 } from '../repositories/chat.ts';
 import type { IdentityReservationResult } from '../repositories/telegram_identity.ts';
+import { findBotCommandEntities } from '../text_entities/bot_command.ts';
 import type { BotApiPrivateTextMessage } from '../types/bot_api.ts';
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { ChatMembership } from '../types/chat_membership.ts';
@@ -22,6 +23,7 @@ import {
   type CanonicalMessageId,
   MAX_TEXT_MESSAGE_LENGTH,
   type PrivateTextMessage,
+  type TextEntity,
 } from '../types/virtual_message.ts';
 
 export interface CreateBasicGroupInput {
@@ -218,6 +220,7 @@ interface PrivateMessageStore {
     readonly authorAccountId: number;
     readonly sentAtUnixSeconds: number;
     readonly text: string;
+    readonly entities: readonly TextEntity[];
   }): PrivateTextMessage;
   getPrivateConversationMessages(
     conversation: PrivateConversationKey,
@@ -416,6 +419,9 @@ export class ChatInteractionService {
       authorAccountId: account.profile.id,
       sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
       text: input.text,
+      // Telegram clients mark bot commands in text sent to chats with bots, which every private
+      // conversation here is. Other entity types are not detected.
+      entities: findBotCommandEntities(input.text),
     });
     // Telegram numbers a private message in each participant's message box. Only the bot's
     // numbering is projected today; the account's keeps the stored model faithful to Telegram.

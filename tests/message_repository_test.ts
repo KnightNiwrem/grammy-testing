@@ -10,18 +10,21 @@ Deno.test('MessageRepository stores ordered private conversation history', () =>
     authorAccountId: 1,
     sentAtUnixSeconds: 1_700_000_000,
     text: 'first',
+    entities: [],
   });
   const unrelatedMessage = messages.addPrivateTextMessage({
     conversation: secondConversation,
     authorAccountId: 1,
     sentAtUnixSeconds: 1_700_000_001,
     text: 'unrelated',
+    entities: [],
   });
   const secondMessage = messages.addPrivateTextMessage({
     conversation: firstConversation,
     authorAccountId: 1,
     sentAtUnixSeconds: 1_700_000_002,
     text: 'second',
+    entities: [],
   });
 
   if (

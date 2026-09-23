@@ -83,6 +83,12 @@
         ]
       },
       {
+        "name": "text-entity-detection",
+        "patterns": [
+          "src/text_entities/**/*.ts"
+        ]
+      },
+      {
         "name": "domain-services",
         "patterns": [
           "src/services/chat_interaction.ts",
@@ -192,10 +198,17 @@
         ]
       },
       {
+        "from": "text-entity-detection",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "domain-services",
         "allow": [
           "domain",
-          "bot-api-projection"
+          "bot-api-projection",
+          "text-entity-detection"
         ],
         "allowTypeOnly": [
           "account-repository",

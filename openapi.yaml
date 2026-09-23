@@ -437,6 +437,33 @@ components:
           description: Unix timestamp when the emulator accepted the message.
         text:
           type: string
+        entities:
+          type: array
+          minItems: 1
+          description: >-
+            Entities marked in the text, omitted when there are none. Like a Telegram client, the
+            emulator marks bot commands in account-sent text; other entity types are not detected.
+          items:
+            $ref: '#/components/schemas/MessageEntity'
+    MessageEntity:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - offset
+        - length
+      properties:
+        type:
+          type: string
+          const: bot_command
+        offset:
+          type: integer
+          minimum: 0
+          description: Offset in UTF-16 code units to the start of the entity.
+        length:
+          type: integer
+          minimum: 1
+          description: Length of the entity in UTF-16 code units.
     SentMessage:
       type: object
       additionalProperties: false

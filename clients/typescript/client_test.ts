@@ -76,11 +76,26 @@ Deno.test('TypeScript client manages all currently implemented session resources
   ) {
     throw new Error('Expected the account-bound client to send a private message');
   }
+  const sentCommand = await createdAccount.account.sendMessage({
+    to: { type: 'private', botId: createdBot.bot.id },
+    text: '/start',
+  });
+  if (
+    sentMessage.entities !== undefined ||
+    JSON.stringify(sentCommand.entities) !==
+      JSON.stringify([{ type: 'bot_command', offset: 0, length: 6 }])
+  ) {
+    throw new Error('Expected the client to return bot command entities only where present');
+  }
 
   const history = await createdAccount.account.getMessages({
     chat: { type: 'private', botId: createdBot.bot.id },
   });
-  if (history.length !== 1 || history[0].message_id !== sentMessage.message_id) {
+  if (
+    history.length !== 2 ||
+    history[0].message_id !== sentMessage.message_id ||
+    history[1].message_id !== sentCommand.message_id
+  ) {
     throw new Error('Expected the account-bound client to retrieve conversation history');
   }
 

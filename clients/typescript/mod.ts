@@ -15,6 +15,7 @@ export type {
   CreateVirtualAccountInput,
   CreateVirtualBotInput,
   EmulationSession,
+  MessageEntity,
   PrivateChat,
   PrivateMessageTarget,
   PrivateTextMessage,

@@ -381,6 +381,56 @@ Deno.test('ChatInteractionService sends and stores private account messages', as
   }
 });
 
+Deno.test('ChatInteractionService marks bot commands in private account messages', () => {
+  const { virtualUsers, messages, chatInteractions } = createChatInteractionFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+
+  const commandResult = chatInteractions.sendMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: '/start payload',
+  });
+  const plainResult = chatInteractions.sendMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: 'Hello',
+  });
+  if (!commandResult.sent || !plainResult.sent) {
+    throw new Error('Expected both message sends to succeed');
+  }
+
+  const expectedCommandEntities = [{ type: 'bot_command', offset: 0, length: 6 }];
+  const storedMessages = messages.getPrivateConversationMessages({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
+  if (
+    JSON.stringify(storedMessages[0].entities) !== JSON.stringify(expectedCommandEntities) ||
+    storedMessages[1].entities.length !== 0
+  ) {
+    throw new Error('Expected canonical messages to store the detected bot command entities');
+  }
+
+  const history = chatInteractions.getPrivateMessageHistory({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
+  if (!history.found) {
+    throw new Error('Expected the private conversation history to be found');
+  }
+  for (const projectedCommand of [commandResult.message, history.messages[0]]) {
+    if (JSON.stringify(projectedCommand.entities) !== JSON.stringify(expectedCommandEntities)) {
+      throw new Error('Expected the projected command message to carry its entities');
+    }
+  }
+  for (const projectedPlainText of [plainResult.message, history.messages[1]]) {
+    if ('entities' in projectedPlainText) {
+      throw new Error('Expected a message without entities to omit the entities field');
+    }
+  }
+});
+
 Deno.test('ChatInteractionService numbers private messages in each bot message box', async () => {
   const { virtualUsers, botUpdates, chatInteractions } = createChatInteractionFixture();
   const account = createAccount(virtualUsers, 'Ada');

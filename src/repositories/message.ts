@@ -1,11 +1,12 @@
 import type { PrivateConversationKey } from '../types/virtual_chat.ts';
-import type { PrivateTextMessage } from '../types/virtual_message.ts';
+import type { PrivateTextMessage, TextEntity } from '../types/virtual_message.ts';
 
 export interface AddPrivateTextMessageInput {
   readonly conversation: PrivateConversationKey;
   readonly authorAccountId: number;
   readonly sentAtUnixSeconds: number;
   readonly text: string;
+  readonly entities: readonly TextEntity[];
 }
 
 /** Stores canonical messages under opaque identities, independent of Telegram message IDs. */
@@ -23,6 +24,7 @@ export class MessageRepository {
       authorAccountId: input.authorAccountId,
       sentAtUnixSeconds: input.sentAtUnixSeconds,
       text: input.text,
+      entities: input.entities.map((entity) => ({ ...entity })),
     };
 
     const messagesByBotId = this.#privateMessagesByAccountId.get(input.conversation.accountId) ??

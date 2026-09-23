@@ -72,12 +72,19 @@ const privateChatSchema = z.strictObject({
   username: z.string().optional(),
 });
 
+const messageEntitySchema = z.strictObject({
+  type: z.literal('bot_command'),
+  offset: z.number().int().nonnegative(),
+  length: z.number().int().positive(),
+});
+
 export const privateTextMessageSchema: z.ZodType<PrivateTextMessage> = z.strictObject({
   message_id: z.number().int().positive(),
   from: virtualAccountProfileSchema,
   chat: privateChatSchema,
   date: z.number().int().nonnegative(),
   text: z.string(),
+  entities: z.array(messageEntitySchema).min(1).optional(),
 });
 
 export const sentMessageResponseSchema = z.strictObject({

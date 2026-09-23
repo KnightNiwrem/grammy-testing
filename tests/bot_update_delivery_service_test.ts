@@ -17,7 +17,8 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
     conversation: { accountId: account.profile.id, botId: targetBot.profile.id },
     authorAccountId: account.profile.id,
     sentAtUnixSeconds: 1_700_000_000,
-    text: 'Hello',
+    text: '/start',
+    entities: [{ type: 'bot_command', offset: 0, length: 6 }],
   });
   userMessageBoxes.assignMessageId(targetBot.profile.id, 'unrelated-message');
   userMessageBoxes.assignMessageId(targetBot.profile.id, message.id);
@@ -34,7 +35,9 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
     targetBotUpdates[0].message.chat.id !== account.profile.id ||
     targetBotUpdates[0].message.from.id !== account.profile.id ||
     targetBotUpdates[0].message.date !== 1_700_000_000 ||
-    targetBotUpdates[0].message.text !== 'Hello'
+    targetBotUpdates[0].message.text !== '/start' ||
+    JSON.stringify(targetBotUpdates[0].message.entities) !==
+      JSON.stringify([{ type: 'bot_command', offset: 0, length: 6 }])
   ) {
     throw new Error("Expected one update projected with the bot's own message ID");
   }
@@ -56,6 +59,7 @@ Deno.test('BotUpdateDeliveryService rejects a message missing from the bot messa
     authorAccountId: account.profile.id,
     sentAtUnixSeconds: 1_700_000_000,
     text: 'Hello',
+    entities: [],
   });
 
   let deliveryError: unknown;
