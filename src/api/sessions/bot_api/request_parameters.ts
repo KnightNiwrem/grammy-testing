@@ -15,6 +15,9 @@ const URL_ENCODED_FORM_MEDIA_TYPE = 'application/x-www-form-urlencoded';
 const MULTIPART_FORM_MEDIA_TYPE = 'multipart/form-data';
 
 const DECIMAL_INTEGER_PATTERN = /^-?\d+$/;
+/** Spellings that Telegram's `to_bool` reads as true, compared after trimming and lowercasing. */
+const TRUE_BOOLEAN_TEXTS = ['true', 'yes', '1'] as const;
+const FALSE_BOOLEAN_TEXTS = ['false', 'no', '0'] as const;
 
 /**
  * Collects parameters from the query string and the body, as the official Bot API server's
@@ -118,6 +121,17 @@ function decodeJsonObjectParameterEntries(body: string): BodyParameterEntriesDec
  */
 export function integerParameter<Output>(integerSchema: z.ZodType<Output, number>) {
   return z.string().regex(DECIMAL_INTEGER_PATTERN).transform(Number).pipe(integerSchema);
+}
+
+/**
+ * A parameter holding a boolean, spelled as Telegram accepts it in any letter case. Telegram reads
+ * every other text as false; rejecting it instead surfaces the bot's mistake in tests.
+ */
+export function booleanParameter() {
+  return z.string()
+    .transform((text) => text.trim().toLowerCase())
+    .pipe(z.enum([...TRUE_BOOLEAN_TEXTS, ...FALSE_BOOLEAN_TEXTS]))
+    .transform((text) => (TRUE_BOOLEAN_TEXTS as readonly string[]).includes(text));
 }
 
 /** A parameter holding JSON text, such as an array serialized by a form-encoded request. */

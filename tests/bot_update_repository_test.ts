@@ -115,6 +115,23 @@ Deno.test('BotUpdateRepository ignores an offset too far beyond the next update 
   }
 });
 
+Deno.test('BotUpdateRepository discards pending updates without restarting the sequence', () => {
+  const botUpdates = new BotUpdateRepository();
+  botUpdates.enqueueMessageUpdate(10, createMessage('first'));
+  botUpdates.enqueueMessageUpdate(20, createMessage('other bot'));
+
+  botUpdates.discardPendingUpdates(10);
+  botUpdates.enqueueMessageUpdate(10, createMessage('second'));
+
+  const updates = botUpdates.readPendingUpdates(10, { limit: 100 });
+  if (updates.map((update) => update.update_id).join() !== '2') {
+    throw new Error('Expected only the later update to remain, continuing the ID sequence');
+  }
+  if (botUpdates.readPendingUpdates(20, { limit: 100 }).length !== 1) {
+    throw new Error("Expected discarding one bot's updates to leave other bots untouched");
+  }
+});
+
 function createMessage(text: string): BotApiPrivateTextMessage {
   return {
     message_id: 1,

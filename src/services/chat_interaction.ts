@@ -1,4 +1,4 @@
-import { projectPrivateTextMessage } from '../projections/bot_api_message.ts';
+import { projectPrivateTextMessageForBot } from '../projections/bot_api_message.ts';
 import type {
   BasicGroupRegistrationResult,
   ChatMemberAdditionResult,
@@ -16,6 +16,7 @@ import type {
   Channel,
   PrivateConversation,
   PrivateConversationKey,
+  PrivateConversationRole,
   SharedChat,
   Supergroup,
 } from '../types/virtual_chat.ts';
@@ -151,6 +152,32 @@ export type SendMessageResult =
     readonly reason: SendMessageFailureReason;
   };
 
+export interface SendBotMessageInput {
+  readonly fromBotId: number;
+  readonly to: {
+    readonly type: 'private';
+    readonly accountId: number;
+  };
+  readonly text: string;
+}
+
+export type SendBotMessageFailureReason =
+  | 'bot_not_found'
+  | 'message_text_empty'
+  | 'account_not_found'
+  | 'conversation_not_started'
+  | 'message_text_too_long';
+
+export type SendBotMessageResult =
+  | {
+    readonly sent: true;
+    readonly message: BotApiPrivateTextMessage;
+  }
+  | {
+    readonly sent: false;
+    readonly reason: SendBotMessageFailureReason;
+  };
+
 export interface GetPrivateMessageHistoryInput {
   readonly accountId: number;
   readonly botId: number;
@@ -176,6 +203,7 @@ interface BotLookup {
 
 interface PrivateConversationStore {
   getOrCreatePrivateConversation(key: PrivateConversationKey): PrivateConversation;
+  getPrivateConversation(key: PrivateConversationKey): PrivateConversation | undefined;
 }
 
 interface SharedChatIdentityReservationStore {
@@ -217,7 +245,7 @@ type ChatStore =
 interface PrivateMessageStore {
   addPrivateTextMessage(input: {
     readonly conversation: PrivateConversationKey;
-    readonly authorAccountId: number;
+    readonly authorRole: PrivateConversationRole;
     readonly sentAtUnixSeconds: number;
     readonly text: string;
     readonly entities: readonly TextEntity[];
@@ -410,28 +438,54 @@ export class ChatInteractionService {
       return { sent: false, reason: 'message_text_too_long' };
     }
 
-    const conversation = this.#chats.getOrCreatePrivateConversation({
+    this.#chats.getOrCreatePrivateConversation({
       accountId: account.profile.id,
       botId: bot.profile.id,
     });
-    const storedMessage = this.#messages.addPrivateTextMessage({
-      conversation,
-      authorAccountId: account.profile.id,
-      sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
-      text: input.text,
-      // Telegram clients mark bot commands in text sent to chats with bots, which every private
-      // conversation here is. Other entity types are not detected.
-      entities: findBotCommandEntities(input.text),
+    return {
+      sent: true,
+      message: this.#storePrivateTextMessage({
+        account,
+        bot,
+        authorRole: 'account',
+        text: input.text,
+      }),
+    };
+  }
+
+  /**
+   * Sends text from a bot to an account. As on Telegram, a bot cannot initiate a private
+   * conversation, so the account must have started one with the bot.
+   *
+   * Checks follow Telegram's order: the text is checked for emptiness before the recipient is
+   * resolved, and for length afterward.
+   */
+  sendBotMessage(input: SendBotMessageInput): SendBotMessageResult {
+    const bot = this.#bots.getById(input.fromBotId);
+    if (bot === undefined) {
+      return { sent: false, reason: 'bot_not_found' };
+    }
+    if (input.text.length === 0) {
+      return { sent: false, reason: 'message_text_empty' };
+    }
+    const account = this.#accounts.getById(input.to.accountId);
+    if (account === undefined) {
+      return { sent: false, reason: 'account_not_found' };
+    }
+    const conversation = this.#chats.getPrivateConversation({
+      accountId: account.profile.id,
+      botId: bot.profile.id,
     });
-    // Telegram numbers a private message in each participant's message box. Only the bot's
-    // numbering is projected today; the account's keeps the stored model faithful to Telegram.
-    this.#userMessageBoxes.assignMessageId(account.profile.id, storedMessage.id);
-    this.#userMessageBoxes.assignMessageId(bot.profile.id, storedMessage.id);
-    this.#events.publish({ type: 'message_created', message: storedMessage });
+    if (conversation === undefined) {
+      return { sent: false, reason: 'conversation_not_started' };
+    }
+    if (input.text.length > MAX_TEXT_MESSAGE_LENGTH) {
+      return { sent: false, reason: 'message_text_too_long' };
+    }
 
     return {
       sent: true,
-      message: this.#projectPrivateTextMessageForBot(storedMessage, account, bot.profile.id),
+      message: this.#storePrivateTextMessage({ account, bot, authorRole: 'bot', text: input.text }),
     };
   }
 
@@ -442,26 +496,62 @@ export class ChatInteractionService {
     if (account === undefined) {
       return { found: false, reason: 'account_not_found' };
     }
-    if (this.#bots.getById(input.botId) === undefined) {
+    const bot = this.#bots.getById(input.botId);
+    if (bot === undefined) {
       return { found: false, reason: 'bot_not_found' };
     }
 
     const messages = this.#messages.getPrivateConversationMessages(input).map((message) =>
-      this.#projectPrivateTextMessageForBot(message, account, input.botId)
+      this.#projectPrivateTextMessageForBot(message, account, bot)
     );
     return { found: true, messages };
+  }
+
+  /**
+   * Stores validated text written by one participant of an existing private conversation, numbers
+   * it in both participants' message boxes, and publishes its creation.
+   */
+  #storePrivateTextMessage(
+    { account, bot, authorRole, text }: {
+      readonly account: VirtualAccount;
+      readonly bot: VirtualBot;
+      readonly authorRole: PrivateConversationRole;
+      readonly text: string;
+    },
+  ): BotApiPrivateTextMessage {
+    const storedMessage = this.#messages.addPrivateTextMessage({
+      conversation: { accountId: account.profile.id, botId: bot.profile.id },
+      authorRole,
+      sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
+      text,
+      // Telegram marks bot commands in text sent in private chats with bots, which every private
+      // conversation here is, whichever participant writes it. Other entity types are not detected.
+      entities: findBotCommandEntities(text),
+    });
+    // Telegram numbers a private message in each participant's message box. Only the bot's
+    // numbering is projected today; the account's keeps the stored model faithful to Telegram.
+    this.#userMessageBoxes.assignMessageId(account.profile.id, storedMessage.id);
+    this.#userMessageBoxes.assignMessageId(bot.profile.id, storedMessage.id);
+    this.#events.publish({ type: 'message_created', message: storedMessage });
+
+    return this.#projectPrivateTextMessageForBot(storedMessage, account, bot);
   }
 
   #projectPrivateTextMessageForBot(
     message: PrivateTextMessage,
     account: VirtualAccount,
-    observingBotId: number,
+    bot: VirtualBot,
   ): BotApiPrivateTextMessage {
-    const observerMessageId = this.#userMessageBoxes.getMessageId(observingBotId, message.id);
+    const observerMessageId = this.#userMessageBoxes.getMessageId(bot.profile.id, message.id);
     if (observerMessageId === undefined) {
-      throw new Error(`Private message ${message.id} was not delivered to bot ${observingBotId}`);
+      throw new Error(`Private message ${message.id} was not delivered to bot ${bot.profile.id}`);
     }
-    return projectPrivateTextMessage({ message, author: account.profile, observerMessageId });
+    return projectPrivateTextMessageForBot({
+      message,
+      account: account.profile,
+      bot: bot.profile,
+      observerMessageId,
+    });
   }
 
   #validateBasicGroupParticipants(

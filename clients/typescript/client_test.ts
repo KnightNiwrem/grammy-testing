@@ -88,15 +88,30 @@ Deno.test('TypeScript client manages all currently implemented session resources
     throw new Error('Expected the client to return bot command entities only where present');
   }
 
+  const replyResponse = await api.request(
+    `/sessions/${session.id}/bot-api/bot${createdBot.token}/sendMessage`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: createdAccount.account.id, text: 'Hello from the bot' }),
+    },
+  );
+  if (replyResponse.status !== 200) {
+    throw new Error(`Expected the bot reply to be accepted, received ${replyResponse.status}`);
+  }
+
   const history = await createdAccount.account.getMessages({
     chat: { type: 'private', botId: createdBot.bot.id },
   });
   if (
-    history.length !== 2 ||
+    history.length !== 3 ||
     history[0].message_id !== sentMessage.message_id ||
-    history[1].message_id !== sentCommand.message_id
+    history[1].message_id !== sentCommand.message_id ||
+    history[2].from.id !== createdBot.bot.id ||
+    !history[2].from.is_bot ||
+    history[2].text !== 'Hello from the bot'
   ) {
-    throw new Error('Expected the account-bound client to retrieve conversation history');
+    throw new Error("Expected the account-bound client to retrieve both participants' messages");
   }
 
   await session.end();

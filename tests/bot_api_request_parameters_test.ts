@@ -1,9 +1,32 @@
 import {
+  booleanParameter,
   type BotApiRequestParametersDecoding,
   decodeBotApiRequestParameters,
 } from '../src/api/sessions/bot_api/request_parameters.ts';
 
 const METHOD_URL = 'http://emulator.example/bot123:token/getUpdates';
+
+Deno.test("booleanParameter reads Telegram's boolean spellings and rejects other text", () => {
+  const cases: [string, boolean][] = [
+    ['true', true],
+    [' YES ', true],
+    ['1', true],
+    ['False', false],
+    ['no', false],
+    ['0', false],
+  ];
+  for (const [text, expected] of cases) {
+    const parsed = booleanParameter().safeParse(text);
+    if (!parsed.success || parsed.data !== expected) {
+      throw new Error(`Expected ${JSON.stringify(text)} to be read as ${expected}`);
+    }
+  }
+  for (const text of ['', 'maybe', '2']) {
+    if (booleanParameter().safeParse(text).success) {
+      throw new Error(`Expected ${JSON.stringify(text)} to be rejected`);
+    }
+  }
+});
 
 Deno.test('decodeBotApiRequestParameters reads the query string without a body', async () => {
   const decoding = await decodeBotApiRequestParameters(

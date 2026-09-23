@@ -80,6 +80,11 @@ export class BotUpdateRepository {
     return mailbox.updates.slice(0, limit);
   }
 
+  /** Forgets every pending update; later updates continue the bot's update ID sequence. */
+  discardPendingUpdates(botId: number): void {
+    this.#getOrCreateMailbox(botId).updates.splice(0);
+  }
+
   /** Resolves when an update is enqueued for the bot, the timeout elapses, or `signal` aborts. */
   waitForUpdate(botId: number, { timeoutSeconds, signal }: WaitForUpdateInput): Promise<void> {
     return new Promise((resolve) => {

@@ -24,6 +24,7 @@ export function createEmulationSession(id: string): EmulationSession {
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
     accounts,
+    bots,
     userMessageBoxes,
     botUpdates,
     updateSubscriptions,
@@ -39,7 +40,12 @@ export function createEmulationSession(id: string): EmulationSession {
     currentUnixTimeSeconds: () => Math.floor(Date.now() / 1_000),
   });
 
-  const botApi = new BotApiService({ bots, botUpdates, updateSubscriptions });
+  const botApi = new BotApiService({
+    bots,
+    botUpdates,
+    updateSubscriptions,
+    botMessages: chatInteractions,
+  });
 
   return { id, virtualUsers, chatInteractions, botApi };
 }

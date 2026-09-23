@@ -2,8 +2,17 @@ import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
+import { ChatRepository } from '../src/repositories/chat.ts';
+import { MessageRepository } from '../src/repositories/message.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
-import { BotApiService, type GetUpdatesResult } from '../src/services/bot_api.ts';
+import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
+import {
+  BotApiService,
+  type GetUpdatesResult,
+  type SendMessageResult,
+} from '../src/services/bot_api.ts';
+import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
+import { ChatInteractionService } from '../src/services/chat_interaction.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import {
   type BotApiPrivateTextMessage,
@@ -11,6 +20,7 @@ import {
   type BotApiUpdateType,
   DEFAULT_ALLOWED_UPDATE_TYPES,
 } from '../src/types/bot_api.ts';
+import { MAX_TEXT_MESSAGE_LENGTH } from '../src/types/virtual_message.ts';
 
 Deno.test('BotApiService authenticates a bot by its token', () => {
   const { virtualUsers, botApi } = createBotApiFixture();
@@ -194,6 +204,103 @@ Deno.test('BotApiService ends a cancelled long poll without terminating it', asy
   }
 });
 
+Deno.test('BotApiService deleteWebhook discards pending updates only when asked', async () => {
+  const { virtualUsers, botUpdates, botApi } = createBotApiFixture();
+  const bot = createBot(virtualUsers, 'test_bot');
+  botUpdates.enqueueMessageUpdate(bot.profile.id, createPrivateTextMessage(1));
+
+  botApi.deleteWebhook(bot.profile, { dropPendingUpdates: false });
+  if (botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 }).length !== 1) {
+    throw new Error('Expected deleteWebhook to keep pending updates by default');
+  }
+
+  botApi.deleteWebhook(bot.profile, { dropPendingUpdates: true });
+  botUpdates.enqueueMessageUpdate(bot.profile.id, createPrivateTextMessage(2));
+  const updates = expectRetrievedUpdates(
+    await botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 0 }),
+  );
+  if (updates.map((update) => update.update_id).join() !== '2') {
+    throw new Error('Expected dropped updates to be discarded without restarting update IDs');
+  }
+});
+
+Deno.test('BotApiService sends a message to an account that has written to the bot', () => {
+  const { virtualUsers, botUpdates, chatInteractions, botApi } = createBotApiFixture();
+  const bot = createBot(virtualUsers, 'test_bot');
+  const account = createAccount(virtualUsers);
+  chatInteractions.sendMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: '/start',
+  });
+
+  const reply = expectSentMessage(
+    botApi.sendMessage(bot.profile, { chatId: account.profile.id, text: 'Welcome!' }),
+  );
+  if (
+    reply.message_id !== 2 ||
+    reply.chat.id !== account.profile.id ||
+    reply.from.id !== bot.profile.id ||
+    !reply.from.is_bot ||
+    reply.text !== 'Welcome!'
+  ) {
+    throw new Error(
+      "Expected the reply to be projected in the bot's private chat with the account",
+    );
+  }
+  const pendingUpdates = botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 });
+  if (pendingUpdates.length !== 1 || pendingUpdates[0].message.text !== '/start') {
+    throw new Error('Expected the bot not to receive an update for its own message');
+  }
+});
+
+Deno.test('BotApiService reports unreachable chats as not found', () => {
+  const { virtualUsers, chatInteractions, botApi } = createBotApiFixture();
+  const bot = createBot(virtualUsers, 'test_bot');
+  const otherBot = createBot(virtualUsers, 'other_bot');
+  const account = createAccount(virtualUsers);
+  const cases: { chatId: number; text: string; expectedReason: string }[] = [
+    { chatId: 999, text: '', expectedReason: 'message_text_empty' },
+    { chatId: 999, text: 'Hello', expectedReason: 'chat_not_found' },
+    { chatId: account.profile.id, text: 'Hello', expectedReason: 'chat_not_found' },
+    { chatId: otherBot.profile.id, text: 'Hello', expectedReason: 'chat_not_found' },
+    { chatId: -1, text: 'Hello', expectedReason: 'chat_not_found' },
+  ];
+  for (const { chatId, text, expectedReason } of cases) {
+    assertSendMessageFailure(botApi.sendMessage(bot.profile, { chatId, text }), expectedReason);
+  }
+
+  chatInteractions.sendMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: 'Hello',
+  });
+  assertSendMessageFailure(
+    botApi.sendMessage(bot.profile, {
+      chatId: account.profile.id,
+      text: 'x'.repeat(MAX_TEXT_MESSAGE_LENGTH + 1),
+    }),
+    'message_text_too_long',
+  );
+});
+
+function expectSentMessage(result: SendMessageResult): BotApiPrivateTextMessage {
+  if (!result.sent) {
+    throw new Error(`Expected sendMessage to succeed, received ${result.reason}`);
+  }
+  return result.message;
+}
+
+function assertSendMessageFailure(result: SendMessageResult, expectedReason: string): void {
+  if (result.sent || result.reason !== expectedReason) {
+    throw new Error(
+      `Expected sendMessage to fail with ${expectedReason}, received ${
+        result.sent ? 'success' : result.reason
+      }`,
+    );
+  }
+}
+
 function expectRetrievedUpdates(result: GetUpdatesResult): readonly BotApiUpdate[] {
   if (!result.retrieved) {
     throw new Error(`Expected getUpdates to retrieve updates, received ${result.reason}`);
@@ -216,16 +323,35 @@ function assertAllowedUpdateTypes(
 
 function createBotApiFixture() {
   const identities = new TelegramIdentityRepository();
+  const accounts = new AccountRepository();
   const bots = new BotRepository();
-  const virtualUsers = new VirtualUserService({
-    identities,
-    accounts: new AccountRepository(),
-    bots,
-  });
+  const virtualUsers = new VirtualUserService({ identities, accounts, bots });
+  const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
-  const botApi = new BotApiService({ bots, botUpdates, updateSubscriptions });
-  return { virtualUsers, botUpdates, updateSubscriptions, botApi };
+  const chatInteractions = new ChatInteractionService({
+    identities,
+    accounts,
+    bots,
+    chats: new ChatRepository(),
+    messages: new MessageRepository(),
+    userMessageBoxes,
+    events: new BotUpdateDeliveryService({
+      accounts,
+      bots,
+      userMessageBoxes,
+      botUpdates,
+      updateSubscriptions,
+    }),
+    currentUnixTimeSeconds: () => 1_700_000_000,
+  });
+  const botApi = new BotApiService({
+    bots,
+    botUpdates,
+    updateSubscriptions,
+    botMessages: chatInteractions,
+  });
+  return { virtualUsers, botUpdates, updateSubscriptions, chatInteractions, botApi };
 }
 
 function createBot(virtualUsers: VirtualUserService, username: string) {
@@ -234,6 +360,14 @@ function createBot(virtualUsers: VirtualUserService, username: string) {
     throw new Error(`Expected bot creation to succeed, received ${result.reason}`);
   }
   return result.bot;
+}
+
+function createAccount(virtualUsers: VirtualUserService) {
+  const result = virtualUsers.createAccount({ first_name: 'Ada' });
+  if (!result.created) {
+    throw new Error(`Expected account creation to succeed, received ${result.reason}`);
+  }
+  return result.account;
 }
 
 function createPrivateTextMessage(messageId: number): BotApiPrivateTextMessage {

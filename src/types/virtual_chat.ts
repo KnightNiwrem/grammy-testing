@@ -3,6 +3,9 @@ export interface PrivateConversationKey {
   readonly botId: number;
 }
 
+/** Which participant of a private conversation, identified relative to its key. */
+export type PrivateConversationRole = 'account' | 'bot';
+
 export interface PrivateConversation extends PrivateConversationKey {
   readonly kind: 'private';
 }

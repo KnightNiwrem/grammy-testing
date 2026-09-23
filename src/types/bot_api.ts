@@ -15,9 +15,20 @@ export interface BotApiMessageEntity {
   readonly length: number;
 }
 
+/** A bot as a message sender, without the capabilities that only `getMe` reports. */
+export interface BotApiBotUser {
+  readonly id: number;
+  readonly is_bot: true;
+  readonly first_name: string;
+  readonly last_name?: string;
+  readonly username: string;
+}
+
+export type BotApiMessageSender = VirtualAccountProfile | BotApiBotUser;
+
 export interface BotApiPrivateTextMessage {
   readonly message_id: number;
-  readonly from: VirtualAccountProfile;
+  readonly from: BotApiMessageSender;
   readonly chat: BotApiPrivateChat;
   readonly date: number;
   readonly text: string;

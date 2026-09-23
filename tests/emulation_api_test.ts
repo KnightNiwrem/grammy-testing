@@ -661,6 +661,196 @@ Deno.test('grammY command handlers match account-sent bot commands', async () =>
   }
 });
 
+Deno.test('deleteWebhook answers as Telegram does for a bot without a webhook', async () => {
+  const { api, botApiPath, sendText } = await createPrivateConversationFixture();
+  const deleteWebhook = async (parameters: Record<string, unknown>) => {
+    const response = await api.request(`${botApiPath}/deleteWebhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parameters),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const getPendingTexts = async () => {
+    const response = await api.request(`${botApiPath}/getUpdates`);
+    const body: unknown = await response.json();
+    if (!isGetUpdatesResponse(body)) {
+      throw new Error('Expected a getUpdates response');
+    }
+    return body.result.map((update) => update.message.text);
+  };
+  const expectedAnswer = { ok: true, result: true, description: 'Webhook is already deleted' };
+
+  await sendText('kept');
+  const keepingAnswer = await deleteWebhook({});
+  if (
+    keepingAnswer.status !== 200 ||
+    JSON.stringify(keepingAnswer.body) !== JSON.stringify(expectedAnswer) ||
+    JSON.stringify(await getPendingTexts()) !== JSON.stringify(['kept'])
+  ) {
+    throw new Error('Expected deleteWebhook to succeed without discarding pending updates');
+  }
+
+  const droppingAnswer = await deleteWebhook({ drop_pending_updates: true });
+  if (
+    droppingAnswer.status !== 200 ||
+    JSON.stringify(droppingAnswer.body) !== JSON.stringify(expectedAnswer) ||
+    (await getPendingTexts()).length !== 0
+  ) {
+    throw new Error('Expected drop_pending_updates to discard pending updates');
+  }
+
+  const malformedAnswer = await deleteWebhook({ drop_pending_updates: 'maybe' });
+  if (malformedAnswer.status !== 400 || !isBadRequestResponse(malformedAnswer.body)) {
+    throw new Error('Expected a malformed drop_pending_updates to be rejected');
+  }
+});
+
+Deno.test('sendMessage replies only in private chats the account has started', async () => {
+  const { api, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const sendMessage = async (parameters: Record<string, unknown>) => {
+    const response = await api.request(`${botApiPath}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parameters),
+    });
+    return { status: response.status, body: (await response.json()) as unknown };
+  };
+  const expectBadRequest = async (
+    parameters: Record<string, unknown>,
+    expectedDescription?: string,
+  ) => {
+    const { status, body } = await sendMessage(parameters);
+    if (
+      status !== 400 || !isBadRequestResponse(body) ||
+      (expectedDescription !== undefined && body.description !== expectedDescription)
+    ) {
+      throw new Error(
+        `Expected ${JSON.stringify(parameters)} to be rejected with ${
+          expectedDescription ?? 'a bad request'
+        }, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  };
+  const accountId = createdAccount.account.id;
+
+  await expectBadRequest({ chat_id: accountId, text: 'Hello' }, 'Bad Request: chat not found');
+  await sendText('Hi');
+
+  const { status, body } = await sendMessage({ chat_id: accountId, text: 'Try /help' });
+  if (
+    status !== 200 ||
+    typeof body !== 'object' || body === null ||
+    !('ok' in body) || body.ok !== true ||
+    !('result' in body) || !isPrivateTextMessage(body.result)
+  ) {
+    throw new Error(`Expected sendMessage to succeed, received ${status}`);
+  }
+  const reply = body.result;
+  if (
+    reply.message_id !== 2 ||
+    reply.chat.id !== accountId ||
+    JSON.stringify(reply.from) !==
+      JSON.stringify({
+        id: createdBot.bot.id,
+        is_bot: true,
+        first_name: 'Test Bot',
+        username: 'test_bot',
+      }) ||
+    reply.text !== 'Try /help'
+  ) {
+    throw new Error("Expected the sent message in the bot's private chat with the account");
+  }
+
+  await expectBadRequest({ text: '' }, 'Bad Request: message text is empty');
+  await expectBadRequest({ text: 'Hello' }, 'Bad Request: chat_id is empty');
+  await expectBadRequest({ chat_id: accountId }, 'Bad Request: message text is empty');
+  await expectBadRequest({ chat_id: 999, text: 'Hello' }, 'Bad Request: chat not found');
+  await expectBadRequest(
+    { chat_id: createdBot.bot.id, text: 'Hello' },
+    'Bad Request: chat not found',
+  );
+  await expectBadRequest(
+    { chat_id: accountId, text: 'x'.repeat(4_097) },
+    'Bad Request: message is too long',
+  );
+  await expectBadRequest({ chat_id: '@ada', text: 'Hello' });
+  await expectBadRequest({ chat_id: accountId, text: 'Hello', parse_mode: 'HTML' });
+
+  const updatesResponse = await api.request(`${botApiPath}/getUpdates`);
+  const updatesBody: unknown = await updatesResponse.json();
+  if (
+    !isGetUpdatesResponse(updatesBody) ||
+    JSON.stringify(updatesBody.result.map((update) => update.message.text)) !==
+      JSON.stringify(['Hi'])
+  ) {
+    throw new Error('Expected the bot to receive no update for its own message');
+  }
+});
+
+Deno.test('a grammY bot starts polling, replies to a command, and resumes after a restart', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const startGrammyBot = () => {
+    const grammyBot = new Bot(createdBot.token, {
+      client: {
+        apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+        fetch: createInProcessFetch(api.fetch),
+      },
+    });
+    const handledCommandTexts: string[] = [];
+    const firstReply = Promise.withResolvers<void>();
+    grammyBot.command('start', async (context) => {
+      handledCommandTexts.push(context.msg.text ?? '');
+      await context.reply(`Hello, ${context.from?.first_name}!`);
+      firstReply.resolve();
+    });
+    const polling = grammyBot.start();
+    const stopAfterFirstReply = async () => {
+      // Polling ends only when stopped, so settling first means startup failed.
+      await Promise.race([firstReply.promise, polling]);
+      await grammyBot.stop();
+      await polling;
+    };
+    return { handledCommandTexts, stopAfterFirstReply };
+  };
+
+  await sendText('/start');
+  const firstRun = startGrammyBot();
+  await firstRun.stopAfterFirstReply();
+
+  const historyPath =
+    `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/messages`;
+  const historyBody: unknown = await (await api.request(historyPath)).json();
+  if (
+    !isMessageHistoryResponse(historyBody) ||
+    JSON.stringify(
+        historyBody.messages.map(({ from, chat, text }) => [from.id, chat.id, text]),
+      ) !==
+      JSON.stringify([
+        [createdAccount.account.id, createdAccount.account.id, '/start'],
+        [createdBot.bot.id, createdAccount.account.id, 'Hello, Ada!'],
+      ])
+  ) {
+    throw new Error('Expected history to hold the command and the bot reply');
+  }
+
+  const secondRun = startGrammyBot();
+  await sendText('/start again');
+  await secondRun.stopAfterFirstReply();
+  if (
+    JSON.stringify(firstRun.handledCommandTexts) !== JSON.stringify(['/start']) ||
+    JSON.stringify(secondRun.handledCommandTexts) !== JSON.stringify(['/start again'])
+  ) {
+    throw new Error(
+      `Expected a restarted bot to handle only new updates, received ${
+        JSON.stringify([firstRun.handledCommandTexts, secondRun.handledCommandTexts])
+      }`,
+    );
+  }
+});
+
 Deno.test('private message routes validate participants and request bodies', async () => {
   const api = createEmulationApi({
     sessionLifecycle: createSessionLifecycleService(),

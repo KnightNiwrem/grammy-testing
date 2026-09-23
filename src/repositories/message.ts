@@ -1,9 +1,9 @@
-import type { PrivateConversationKey } from '../types/virtual_chat.ts';
+import type { PrivateConversationKey, PrivateConversationRole } from '../types/virtual_chat.ts';
 import type { PrivateTextMessage, TextEntity } from '../types/virtual_message.ts';
 
 export interface AddPrivateTextMessageInput {
   readonly conversation: PrivateConversationKey;
-  readonly authorAccountId: number;
+  readonly authorRole: PrivateConversationRole;
   readonly sentAtUnixSeconds: number;
   readonly text: string;
   readonly entities: readonly TextEntity[];
@@ -21,7 +21,7 @@ export class MessageRepository {
       kind: 'private_text',
       id: crypto.randomUUID(),
       conversation: { ...input.conversation },
-      authorAccountId: input.authorAccountId,
+      authorRole: input.authorRole,
       sentAtUnixSeconds: input.sentAtUnixSeconds,
       text: input.text,
       entities: input.entities.map((entity) => ({ ...entity })),

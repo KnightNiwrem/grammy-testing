@@ -50,45 +50,6 @@ emulator-specific reasons rather than for reasons that would hold against Telegr
 The existing separation of canonical messages, observer-specific message numbering,
 private-conversation identity, domain events, and Bot API update projection is worth retaining.
 
-## C01 — The current integration coverage is not a complete bot lifecycle
-
-**Classification:** Declared coverage limitation, not an undisclosed implementation defect.
-
-### Context
-
-The integration test described in the original review constructs a grammY bot and calls
-`grammyBot.api.getUpdates()` directly. It demonstrates useful API-client interoperability, but does
-not start polling through `bot.start()`, execute command middleware, and send a reply.
-
-The original review checked grammY 1.46.0, matching the baseline of the range imported by the test,
-and found that `bot.start()` invokes `deleteWebhook` during setup. The reviewed emulator routes
-implement only `getMe` and `getUpdates`; `deleteWebhook` and outbound `sendMessage` are absent. See
-the [reviewed route implementation][bot-api-routes] and the [grammY project][grammy].
-
-### Consequence
-
-Passing the existing integration test does not yet establish that an ordinary grammY bot can
-complete startup and a command-to-reply interaction against the emulator.
-
-### Recommendation
-
-Make the next complete workflow:
-
-```text
-Create bot and account
-  → start the actual bot
-  → send /start through the account API
-  → execute the actual command handler
-  → send a reply
-  → inspect conversation history
-  → stop and restart
-  → preserve correct update acknowledgement behavior
-```
-
-Implement the relevant startup and outbound behavior rather than bypassing it with test-only
-replacements. Completing this workflow faithfully should take precedence over adding many unrelated
-methods.
-
 ## Architectural foundations to preserve
 
 ### A01 — Canonical messages and observer-specific message numbering
@@ -121,24 +82,21 @@ already reproduced defects in unsupported features.
 
 ### R01 — Separate author, conversation peer, and observer
 
-**Context:** The current private-message projection derives `chat.id` from the author's ID. That is
-appropriate for its current case: an account-to-bot message viewed by the bot.
+**Context:** Private messages are projected only as the conversation's bot sees them. The projection
+takes the chat from the conversation's account and the sender from the message's author, and
+account-facing history exposes that bot view and numbering, as documented in the OpenAPI contract.
+The account's own message numbering is stored but never projected.
 
-**Risk:** It is not a general private-message projection rule. For a bot replying to a human, the
-bot-facing result identifies the bot as author and the human as the private-chat peer. Reusing the
-function by merely changing `author` would confuse those roles. See the [projection][projection] and
-Telegram's [Message specification][telegram-message].
+**Risk:** The bot view is an inspection contract, not an account-native message view. Account-side
+operations that consume message IDs taken from history, such as replying to, editing, or deleting a
+message as the account, would use the wrong observer's identifiers. See Telegram's
+[Message specification][telegram-message].
 
-**Recommendation:** Derive the peer from the conversation and observer independently of the sender.
-Make observation context explicit wherever it controls externally visible IDs.
+**Recommendation:** Add an observer-qualified projection before introducing account-side operations
+that consume message IDs, and resolve every external message ID through its observer's message box.
 
-The original review also found that account-facing history intentionally exposes the recipient bot's
-projection and numbering, as documented in the current OpenAPI contract. This is an inspection
-contract, not automatically an account-native message view. Preserve it explicitly or add an
-observer-qualified view before introducing account-side operations that consume those message IDs.
-
-**Regression focus:** Incoming versus outgoing private messages; the same canonical message viewed
-by each participant; and reply/edit/delete lookup using the correct observer's identifiers.
+**Regression focus:** The same canonical message viewed by each participant, and reply/edit/delete
+lookup using the correct observer's identifiers.
 
 ### R02 — Do not generalize `owner | member` into Telegram permissions
 
@@ -204,14 +162,8 @@ could establish membership without exercising onboarding behavior.
 documentation, or operation mode. Define the side-effect contract before presenting a state mutation
 as an emulated Telegram action.
 
-Before adding ordinary outbound private messaging, also model reachability separately from account
-existence. A bot does not acquire the right to initiate an ordinary private conversation merely
-because the target user exists; see Telegram's [bot introduction][telegram-bots]. Keep special modes
-explicit rather than using them to weaken the ordinary rule.
-
-**Regression focus:** Fixture seeding that intentionally avoids delivery, simulated user actions
-that produce their required side effects, and outbound messaging with and without the relevant
-reachability prerequisites.
+**Regression focus:** Fixture seeding that intentionally avoids delivery, and simulated user actions
+that produce their required side effects.
 
 ## Recommended conformance-test plan
 
@@ -219,12 +171,11 @@ The existing tests described in the original review cover ordinary replay, ackno
 sequencing, waking a long poll, and a plain private message through grammY's API client. Keep those
 controls and add the following targeted cases.
 
-| Scenario                                        | Required assertion                                                                               | Related finding |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------- |
-| Real startup, command, reply, stop, and restart | Framework lifecycle works without test-only replacements.                                        | C01             |
-| Interleaved conversations and observers         | Canonical IDs, observer message IDs, and update IDs remain distinct.                             | A01, R01        |
-| Group permissions and visibility                | Membership, action permission, privacy visibility, and subscription are evaluated independently. | R02, R03        |
-| Fixture seeding versus simulated actions        | Each follows its explicitly documented side-effect contract.                                     | R05             |
+| Scenario                                 | Required assertion                                                                               | Related finding |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------- |
+| Interleaved conversations and observers  | Canonical IDs, observer message IDs, and update IDs remain distinct.                             | A01, R01        |
+| Group permissions and visibility         | Membership, action permission, privacy visibility, and subscription are evaluated independently. | R02, R03        |
+| Fixture seeding versus simulated actions | Each follows its explicitly documented side-effect contract.                                     | R05             |
 
 ### Keep evidence beside the tests
 
@@ -243,8 +194,7 @@ not just a binary implemented/unimplemented status.
 
 | Work unit | Scope                                                                     | Completion criterion                                                                |
 | --------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| 1         | Complete the real command-to-reply lifecycle.                             | Startup, reply, history inspection, shutdown, and restart run without bypasses.     |
-| 2         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests. |
+| 1         | Extend projections, permissions, and action semantics in focused changes. | Each new capability has explicit scope and independently sourced conformance tests. |
 
 Keep behavior fixes independently reviewable. Avoid bundling broad architectural refactors with
 narrowly reproducible behavior corrections.
@@ -255,21 +205,16 @@ The repository's architecture is a sensible foundation for the supported scenari
 immediate fidelity risk comes from behaviors that appear implemented but silently differ from
 Telegram.
 
-Correct those behaviors, then prove a real command-to-reply lifecycle. Preserve observer-aware
-identifiers and the event/projection boundary, and make new permissions, visibility modes, and
-user-action side effects explicit rather than allowing today's narrow assumptions to become
-permanent global rules.
+Correct those behaviors before widening coverage. Preserve observer-aware identifiers and the
+event/projection boundary, and make new permissions, visibility modes, and user-action side effects
+explicit rather than allowing today's narrow assumptions to become permanent global rules.
 
 <!-- Source references: repository links are pinned to the reviewed snapshot; documentation links are live. -->
 
 [repository]: https://github.com/KnightNiwrem/grammy-testing
 [snapshot]: https://github.com/KnightNiwrem/grammy-testing/tree/274da0e2b8db667a84fa76df7fbf28042aab8e12
-[projection]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/projections/bot_api_message.ts
-[bot-api-routes]: https://github.com/KnightNiwrem/grammy-testing/blob/274da0e2b8db667a84fa76df7fbf28042aab8e12/src/api/sessions/bot_api/mod.ts
 [telegram-source]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp
 [telegram-message]: https://core.telegram.org/bots/api#message
 [telegram-message-ids]: https://core.telegram.org/api/ids#message-ids
 [telegram-edit-admin]: https://core.telegram.org/method/channels.editAdmin
 [telegram-features]: https://core.telegram.org/bots/features
-[telegram-bots]: https://core.telegram.org/bots
-[grammy]: https://github.com/grammyjs/grammY

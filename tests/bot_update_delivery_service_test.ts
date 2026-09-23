@@ -16,7 +16,7 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
   const otherBot = createBot(virtualUsers, 'other_bot');
   const message = messages.addPrivateTextMessage({
     conversation: { accountId: account.profile.id, botId: targetBot.profile.id },
-    authorAccountId: account.profile.id,
+    authorRole: 'account',
     sentAtUnixSeconds: 1_700_000_000,
     text: '/start',
     entities: [{ type: 'bot_command', offset: 0, length: 6 }],
@@ -59,7 +59,7 @@ Deno.test('BotUpdateDeliveryService skips updates excluded by the bot subscripti
   updateSubscriptions.setAllowedUpdateTypes(bot.profile.id, new Set(['callback_query']));
   const message = messages.addPrivateTextMessage({
     conversation: { accountId: account.profile.id, botId: bot.profile.id },
-    authorAccountId: account.profile.id,
+    authorRole: 'account',
     sentAtUnixSeconds: 1_700_000_000,
     text: 'Hello',
     entities: [],
@@ -74,13 +74,34 @@ Deno.test('BotUpdateDeliveryService skips updates excluded by the bot subscripti
   }
 });
 
+Deno.test('BotUpdateDeliveryService does not deliver a bot its own message', () => {
+  const { virtualUsers, messages, userMessageBoxes, botUpdates, botUpdateDelivery } =
+    createDeliveryFixture();
+  const account = createAccount(virtualUsers);
+  const bot = createBot(virtualUsers, 'test_bot');
+  const message = messages.addPrivateTextMessage({
+    conversation: { accountId: account.profile.id, botId: bot.profile.id },
+    authorRole: 'bot',
+    sentAtUnixSeconds: 1_700_000_000,
+    text: 'Welcome!',
+    entities: [],
+  });
+  userMessageBoxes.assignMessageId(bot.profile.id, message.id);
+
+  botUpdateDelivery.publish({ type: 'message_created', message });
+
+  if (botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 }).length !== 0) {
+    throw new Error('Expected a bot-authored message not to become an update for its bot');
+  }
+});
+
 Deno.test('BotUpdateDeliveryService rejects a message missing from the bot message box', () => {
   const { virtualUsers, messages, botUpdateDelivery } = createDeliveryFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers, 'test_bot');
   const message = messages.addPrivateTextMessage({
     conversation: { accountId: account.profile.id, botId: bot.profile.id },
-    authorAccountId: account.profile.id,
+    authorRole: 'account',
     sentAtUnixSeconds: 1_700_000_000,
     text: 'Hello',
     entities: [],
@@ -108,6 +129,7 @@ function createDeliveryFixture() {
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
     accounts,
+    bots,
     userMessageBoxes,
     botUpdates,
     updateSubscriptions,

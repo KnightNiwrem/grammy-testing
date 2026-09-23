@@ -1,4 +1,4 @@
-import type { PrivateConversationKey } from './virtual_chat.ts';
+import type { PrivateConversationKey, PrivateConversationRole } from './virtual_chat.ts';
 
 export const MAX_TEXT_MESSAGE_LENGTH = 4_096;
 
@@ -21,12 +21,12 @@ export interface TextEntity {
   readonly length: number;
 }
 
-/** Canonical account-authored text stored in a private conversation. */
+/** Canonical text stored in a private conversation, written by either participant. */
 export interface PrivateTextMessage {
   readonly kind: 'private_text';
   readonly id: CanonicalMessageId;
   readonly conversation: PrivateConversationKey;
-  readonly authorAccountId: number;
+  readonly authorRole: PrivateConversationRole;
   readonly sentAtUnixSeconds: number;
   readonly text: string;
   readonly entities: readonly TextEntity[];

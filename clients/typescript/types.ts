@@ -76,9 +76,22 @@ export interface MessageEntity {
   readonly length: number;
 }
 
+/** A bot as a message sender, without the capabilities that only getMe reports. */
+export interface MessageSenderBot {
+  readonly id: number;
+  readonly is_bot: true;
+  readonly first_name: string;
+  readonly last_name?: string;
+  readonly username: string;
+}
+
+/**
+ * A private-chat message as the conversation's bot sees it: numbered in the bot's message box,
+ * with the account as its chat, whichever participant wrote it.
+ */
 export interface PrivateTextMessage {
   readonly message_id: number;
-  readonly from: VirtualAccountProfile;
+  readonly from: VirtualAccountProfile | MessageSenderBot;
   readonly chat: PrivateChat;
   readonly date: number;
   readonly text: string;
@@ -88,7 +101,7 @@ export interface PrivateTextMessage {
 export interface VirtualAccountClient extends VirtualAccountProfile {
   /** Sends a message as this virtual Telegram account. */
   sendMessage(input: AccountSendMessageInput): Promise<PrivateTextMessage>;
-  /** Returns Telegram-shaped messages stored for a conversation owned by this account. */
+  /** Returns messages written by either participant of a private conversation, oldest first. */
   getMessages(input: AccountMessageHistoryInput): Promise<readonly PrivateTextMessage[]>;
 }
 

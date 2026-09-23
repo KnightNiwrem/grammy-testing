@@ -14,6 +14,7 @@ import {
   type BasicGroupCreationResult,
   type ChannelCreationResult,
   ChatInteractionService,
+  type SendBotMessageFailureReason,
   type SupergroupCreationResult,
 } from '../src/services/chat_interaction.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
@@ -587,6 +588,131 @@ Deno.test('ChatInteractionService validates private messages before changing sta
   }
 });
 
+Deno.test('ChatInteractionService stores a bot reply in the private conversation', () => {
+  const {
+    virtualUsers,
+    messages,
+    userMessageBoxes,
+    botUpdates,
+    publishedEvents,
+    chatInteractions,
+  } = createChatInteractionFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const incomingMessage = sendPrivateText(chatInteractions, account.profile.id, bot);
+
+  const replyResult = chatInteractions.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    text: 'See /help',
+  });
+  if (!replyResult.sent) {
+    throw new Error(`Expected the bot reply to succeed, received ${replyResult.reason}`);
+  }
+
+  const expectedSender = {
+    id: bot.profile.id,
+    is_bot: true,
+    first_name: 'Test Bot',
+    username: 'test_bot',
+  };
+  if (
+    replyResult.message.message_id !== 2 ||
+    replyResult.message.chat.id !== account.profile.id ||
+    JSON.stringify(replyResult.message.from) !== JSON.stringify(expectedSender) ||
+    replyResult.message.date !== 1_700_000_000 ||
+    JSON.stringify(replyResult.message.entities) !==
+      JSON.stringify([{ type: 'bot_command', offset: 4, length: 5 }])
+  ) {
+    throw new Error("Expected the reply in the bot's view, sent by the bot to the account's chat");
+  }
+
+  const [, storedReply] = messages.getPrivateConversationMessages({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
+  if (
+    storedReply?.authorRole !== 'bot' ||
+    userMessageBoxes.getMessageId(account.profile.id, storedReply.id) !== 2 ||
+    userMessageBoxes.getMessageId(bot.profile.id, storedReply.id) !== 2
+  ) {
+    throw new Error("Expected the reply to be numbered in both participants' message boxes");
+  }
+  const history = chatInteractions.getPrivateMessageHistory({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
+  if (
+    !history.found ||
+    history.messages.length !== 2 ||
+    !haveSameBotApiView(history.messages[0], incomingMessage) ||
+    !haveSameBotApiView(history.messages[1], replyResult.message)
+  ) {
+    throw new Error('Expected history to hold the incoming message and then the reply');
+  }
+  if (
+    publishedEvents.length !== 2 ||
+    publishedEvents[1].message !== storedReply ||
+    botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 }).length !== 1
+  ) {
+    throw new Error('Expected the reply to be published without becoming an update for its bot');
+  }
+});
+
+Deno.test('ChatInteractionService validates bot messages in Telegram order before changing state', () => {
+  const { virtualUsers, publishedEvents, chatInteractions } = createChatInteractionFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const strangerAccount = createAccount(virtualUsers, 'Grace');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  chatInteractions.activatePrivateConversation({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
+  const tooLongText = 'x'.repeat(MAX_TEXT_MESSAGE_LENGTH + 1);
+  // Each case also breaks every later rule, so only the earliest check can explain its failure.
+  const cases: {
+    fromBotId: number;
+    accountId: number;
+    text: string;
+    expectedReason: SendBotMessageFailureReason;
+  }[] = [
+    { fromBotId: 999, accountId: 999, text: '', expectedReason: 'bot_not_found' },
+    { fromBotId: bot.profile.id, accountId: 999, text: '', expectedReason: 'message_text_empty' },
+    {
+      fromBotId: bot.profile.id,
+      accountId: 999,
+      text: tooLongText,
+      expectedReason: 'account_not_found',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: strangerAccount.profile.id,
+      text: tooLongText,
+      expectedReason: 'conversation_not_started',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: account.profile.id,
+      text: tooLongText,
+      expectedReason: 'message_text_too_long',
+    },
+  ];
+
+  for (const { fromBotId, accountId, text, expectedReason } of cases) {
+    const result = chatInteractions.sendBotMessage({
+      fromBotId,
+      to: { type: 'private', accountId },
+      text,
+    });
+    if (result.sent || result.reason !== expectedReason) {
+      throw new Error(`Expected the bot message to fail with ${expectedReason}`);
+    }
+  }
+  if (publishedEvents.length !== 0) {
+    throw new Error('Expected rejected bot messages not to store or publish anything');
+  }
+});
+
 function getCreatedBasicGroup(result: BasicGroupCreationResult): BasicGroup {
   if (!result.created) {
     throw new Error(`Expected group creation to succeed, received ${result.reason}`);
@@ -704,6 +830,7 @@ function createChatInteractionFixture() {
   const botUpdates = new BotUpdateRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
     accounts,
+    bots,
     userMessageBoxes,
     botUpdates,
     updateSubscriptions: new BotUpdateSubscriptionRepository(),

@@ -1,5 +1,6 @@
 import {
   BOT_API_UPDATE_TYPES,
+  type BotApiPrivateTextMessage,
   type BotApiUpdate,
   type BotApiUpdateType,
   DEFAULT_ALLOWED_UPDATE_TYPES,
@@ -19,6 +20,25 @@ export type GetUpdatesResult =
   | { readonly retrieved: true; readonly updates: readonly BotApiUpdate[] }
   | { readonly retrieved: false; readonly reason: 'terminated_by_other_long_poll' };
 
+export interface DeleteWebhookRequest {
+  readonly dropPendingUpdates: boolean;
+}
+
+export interface SendMessageRequest {
+  /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
+  readonly chatId: number;
+  readonly text: string;
+}
+
+export type SendMessageFailureReason =
+  | 'message_text_empty'
+  | 'chat_not_found'
+  | 'message_text_too_long';
+
+export type SendMessageResult =
+  | { readonly sent: true; readonly message: BotApiPrivateTextMessage }
+  | { readonly sent: false; readonly reason: SendMessageFailureReason };
+
 interface BotCredentialLookup {
   getByToken(token: string): VirtualBot | undefined;
 }
@@ -33,6 +53,27 @@ interface BotUpdateMailboxPolling {
     botId: number,
     input: { readonly timeoutSeconds: number; readonly signal?: AbortSignal },
   ): Promise<void>;
+  discardPendingUpdates(botId: number): void;
+}
+
+type BotMessageSendingResult =
+  | { readonly sent: true; readonly message: BotApiPrivateTextMessage }
+  | {
+    readonly sent: false;
+    readonly reason:
+      | 'bot_not_found'
+      | 'message_text_empty'
+      | 'account_not_found'
+      | 'conversation_not_started'
+      | 'message_text_too_long';
+  };
+
+interface BotMessageSender {
+  sendBotMessage(input: {
+    readonly fromBotId: number;
+    readonly to: { readonly type: 'private'; readonly accountId: number };
+    readonly text: string;
+  }): BotMessageSendingResult;
 }
 
 interface BotUpdateSubscriptionStore {
@@ -43,6 +84,7 @@ interface BotApiServiceDependencies {
   readonly bots: BotCredentialLookup;
   readonly botUpdates: BotUpdateMailboxPolling;
   readonly updateSubscriptions: BotUpdateSubscriptionStore;
+  readonly botMessages: BotMessageSender;
 }
 
 /**
@@ -57,13 +99,15 @@ export class BotApiService {
   readonly #bots: BotCredentialLookup;
   readonly #botUpdates: BotUpdateMailboxPolling;
   readonly #updateSubscriptions: BotUpdateSubscriptionStore;
+  readonly #botMessages: BotMessageSender;
   /** Aborting a bot's controller terminates the long poll it holds. */
   readonly #heldLongPollsByBotId = new Map<number, AbortController>();
 
-  constructor({ bots, botUpdates, updateSubscriptions }: BotApiServiceDependencies) {
+  constructor({ bots, botUpdates, updateSubscriptions, botMessages }: BotApiServiceDependencies) {
     this.#bots = bots;
     this.#botUpdates = botUpdates;
     this.#updateSubscriptions = updateSubscriptions;
+    this.#botMessages = botMessages;
   }
 
   /** Returns the profile of the bot that owns `token`, or `undefined` if no bot does. */
@@ -123,6 +167,51 @@ export class BotApiService {
       retrieved: true,
       updates: this.#botUpdates.readPendingUpdates(botId, { firstUnconfirmedUpdateId, limit }),
     };
+  }
+
+  /**
+   * Bots here never have a webhook, so, as on Telegram when none is set, this only discards
+   * pending updates when asked to. A held long poll is left running, as Telegram does.
+   */
+  deleteWebhook(
+    authenticatedBot: VirtualBotProfile,
+    { dropPendingUpdates }: DeleteWebhookRequest,
+  ): void {
+    if (dropPendingUpdates) {
+      this.#botUpdates.discardPendingUpdates(authenticatedBot.id);
+    }
+  }
+
+  /** Sends text to a private chat; other chat types are not supported yet. */
+  sendMessage(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, text }: SendMessageRequest,
+  ): SendMessageResult {
+    const result = this.#botMessages.sendBotMessage({
+      fromBotId: authenticatedBot.id,
+      to: { type: 'private', accountId: chatId },
+      text,
+    });
+    if (result.sent) {
+      return result;
+    }
+
+    switch (result.reason) {
+      case 'message_text_empty':
+      case 'message_text_too_long':
+        return { sent: false, reason: result.reason };
+      // A bot can address a user only after the user has written to it. Telegram reports any
+      // other user, like an unknown chat, as not found.
+      case 'account_not_found':
+      case 'conversation_not_started':
+        return { sent: false, reason: 'chat_not_found' };
+      case 'bot_not_found':
+        throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+      default: {
+        const unhandledReason: never = result.reason;
+        throw new Error(`Unhandled bot message failure: ${unhandledReason}`);
+      }
+    }
   }
 
   /** Terminates the bot's previously held long poll and makes the returned one current. */

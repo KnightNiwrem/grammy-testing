@@ -4,6 +4,7 @@ import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from './constants.ts';
 import type {
   CreatedVirtualBot,
   EmulationSession,
+  MessageSenderBot,
   PrivateTextMessage,
   VirtualAccountProfile,
   VirtualBotProfile,
@@ -64,6 +65,14 @@ export const getMeResponseSchema = z.strictObject({
   result: virtualBotProfileSchema,
 });
 
+const messageSenderBotSchema: z.ZodType<MessageSenderBot> = z.strictObject({
+  id: telegramUserIdSchema,
+  is_bot: z.literal(true),
+  first_name: z.string(),
+  last_name: z.string().optional(),
+  username: z.string(),
+});
+
 const privateChatSchema = z.strictObject({
   id: telegramUserIdSchema,
   type: z.literal('private'),
@@ -80,7 +89,7 @@ const messageEntitySchema = z.strictObject({
 
 export const privateTextMessageSchema: z.ZodType<PrivateTextMessage> = z.strictObject({
   message_id: z.number().int().positive(),
-  from: virtualAccountProfileSchema,
+  from: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
   chat: privateChatSchema,
   date: z.number().int().nonnegative(),
   text: z.string(),
