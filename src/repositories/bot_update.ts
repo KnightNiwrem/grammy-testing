@@ -1,7 +1,17 @@
 import type { BotApiPrivateTextMessage, BotApiUpdate } from '../types/bot_api.ts';
 
+/**
+ * How far beyond the ID of the next update an offset can be before Telegram ignores it. From the
+ * "from_id is in the future" check in TDLib's `TQueue::get`, which the official Bot API server
+ * answers by reading from the queue head instead.
+ */
+const MAX_OFFSET_BEYOND_NEXT_UPDATE_ID = 10;
+
 interface ReadPendingUpdatesInput {
-  /** Updates with a lower ID are confirmed and forgotten; `undefined` confirms none. */
+  /**
+   * Updates with a lower ID are confirmed and forgotten; `undefined` confirms none. As on Telegram,
+   * an ID more than 10 beyond the ID the next update will receive also confirms none.
+   */
   readonly firstUnconfirmedUpdateId?: number;
   readonly limit: number;
 }
@@ -53,7 +63,10 @@ export class BotUpdateRepository {
     { firstUnconfirmedUpdateId, limit }: ReadPendingUpdatesInput,
   ): readonly BotApiUpdate[] {
     const mailbox = this.#getOrCreateMailbox(botId);
-    if (firstUnconfirmedUpdateId !== undefined) {
+    if (
+      firstUnconfirmedUpdateId !== undefined &&
+      firstUnconfirmedUpdateId <= mailbox.nextUpdateId + MAX_OFFSET_BEYOND_NEXT_UPDATE_ID
+    ) {
       const firstUnconfirmedUpdateIndex = mailbox.updates.findIndex((update) =>
         update.update_id >= firstUnconfirmedUpdateId
       );

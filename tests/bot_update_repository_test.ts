@@ -87,6 +87,34 @@ Deno.test('BotUpdateRepository resolves a negative offset against the queue tail
   }
 });
 
+Deno.test('BotUpdateRepository ignores an offset too far beyond the next update ID', () => {
+  const botUpdates = new BotUpdateRepository();
+  botUpdates.enqueueMessageUpdate(10, createMessage('first'));
+  botUpdates.enqueueMessageUpdate(10, createMessage('second'));
+
+  // The next update will receive ID 3, so Telegram ignores offsets above 13.
+  const afterIgnoredOffset = botUpdates.readPendingUpdates(10, {
+    firstUnconfirmedUpdateId: 14,
+    limit: 100,
+  });
+  if (afterIgnoredOffset.map((update) => update.update_id).join() !== '1,2') {
+    throw new Error('Expected an offset beyond the tolerance to confirm no updates');
+  }
+
+  const afterFurthestHonoredOffset = botUpdates.readPendingUpdates(10, {
+    firstUnconfirmedUpdateId: 13,
+    limit: 100,
+  });
+  if (afterFurthestHonoredOffset.length !== 0) {
+    throw new Error('Expected an offset within the tolerance to confirm every pending update');
+  }
+  botUpdates.enqueueMessageUpdate(10, createMessage('third'));
+  const nextUpdates = botUpdates.readPendingUpdates(10, { limit: 100 });
+  if (nextUpdates.map((update) => update.update_id).join() !== '3') {
+    throw new Error('Expected an honored future offset not to change the update sequence');
+  }
+});
+
 function createMessage(text: string): BotApiPrivateTextMessage {
   return {
     message_id: 1,

@@ -545,6 +545,11 @@ components:
       properties:
         offset:
           type: integer
+          description: >-
+            Identifier of the first update to return; earlier updates are confirmed and
+            forgotten. A negative offset returns that many updates from the end of the queue and
+            forgets the rest. As on Telegram, an offset more than 10 beyond the identifier the next
+            update will receive is ignored, so a stale offset does not discard pending updates.
         limit:
           type: integer
           minimum: 1
