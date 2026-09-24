@@ -1,15 +1,17 @@
 import type { EmulationSession } from '../types/emulation_session.ts';
 import { AccountRepository } from '../repositories/account.ts';
 import { BotRepository } from '../repositories/bot.ts';
-import { ChatRepository } from '../repositories/chat.ts';
 import { BotUpdateRepository } from '../repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../repositories/bot_update_subscription.ts';
 import { MessageRepository } from '../repositories/message.ts';
+import { PrivateConversationRepository } from '../repositories/private_conversation.ts';
+import { SharedChatRepository } from '../repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../repositories/user_message_box.ts';
 import { BotApiService } from '../services/bot_api.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
-import { ChatInteractionService } from '../services/chat_interaction.ts';
+import { PrivateMessagingService } from '../services/private_messaging.ts';
+import { SharedChatAdministrationService } from '../services/shared_chat_administration.ts';
 import { VirtualUserService } from '../services/virtual_user.ts';
 
 export function createEmulationSession(id: string): EmulationSession {
@@ -17,7 +19,12 @@ export function createEmulationSession(id: string): EmulationSession {
   const accounts = new AccountRepository();
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
-  const chats = new ChatRepository();
+  const sharedChatAdministration = new SharedChatAdministrationService({
+    identities,
+    accounts,
+    bots,
+    sharedChats: new SharedChatRepository(),
+  });
   const messages = new MessageRepository();
   const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
@@ -29,11 +36,10 @@ export function createEmulationSession(id: string): EmulationSession {
     botUpdates,
     updateSubscriptions,
   });
-  const chatInteractions = new ChatInteractionService({
-    identities,
+  const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
-    chats,
+    privateConversations: new PrivateConversationRepository(),
     messages,
     userMessageBoxes,
     events: botUpdateDelivery,
@@ -44,8 +50,15 @@ export function createEmulationSession(id: string): EmulationSession {
     bots,
     botUpdates,
     updateSubscriptions,
-    botMessages: chatInteractions,
+    botMessages: privateMessaging,
   });
 
-  return { id, virtualUsers, chatInteractions, botApi, end: () => botApi.endLongPolling() };
+  return {
+    id,
+    virtualUsers,
+    sharedChatAdministration,
+    privateMessaging,
+    botApi,
+    end: () => botApi.endLongPolling(),
+  };
 }

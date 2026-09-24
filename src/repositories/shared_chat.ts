@@ -1,12 +1,5 @@
 import type { ChatMembership } from '../types/chat_membership.ts';
-import type {
-  BasicGroup,
-  Channel,
-  PrivateConversation,
-  PrivateConversationKey,
-  SharedChat,
-  Supergroup,
-} from '../types/virtual_chat.ts';
+import type { BasicGroup, Channel, SharedChat, Supergroup } from '../types/virtual_chat.ts';
 
 export type SharedChatRegistrationFailureReason = 'chat_id_taken';
 
@@ -39,37 +32,13 @@ export type ChatMemberAdditionResult =
     readonly reason: ChatMemberAdditionFailureReason;
   };
 
-export class ChatRepository {
-  readonly #privateConversationsByAccountId = new Map<number, Map<number, PrivateConversation>>();
+/**
+ * Stores shared chats together with their memberships, so that a registered chat always has its
+ * owner and initial members.
+ */
+export class SharedChatRepository {
   readonly #sharedChatsById = new Map<number, SharedChat>();
   readonly #sharedChatMembershipsByChatId = new Map<number, Map<number, ChatMembership>>();
-
-  getOrCreatePrivateConversation(
-    input: PrivateConversationKey,
-  ): PrivateConversation {
-    const existingConversation = this.getPrivateConversation(input);
-    if (existingConversation !== undefined) {
-      return existingConversation;
-    }
-
-    const conversation: PrivateConversation = {
-      kind: 'private',
-      accountId: input.accountId,
-      botId: input.botId,
-    };
-    const conversationsByBotId = this.#privateConversationsByAccountId.get(input.accountId) ??
-      new Map<number, PrivateConversation>();
-    conversationsByBotId.set(input.botId, conversation);
-    this.#privateConversationsByAccountId.set(input.accountId, conversationsByBotId);
-
-    return conversation;
-  }
-
-  getPrivateConversation(
-    { accountId, botId }: PrivateConversationKey,
-  ): PrivateConversation | undefined {
-    return this.#privateConversationsByAccountId.get(accountId)?.get(botId);
-  }
 
   registerBasicGroup(
     group: BasicGroup,

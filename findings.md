@@ -23,15 +23,14 @@ Exact source links appear in the appendix.
 
 **The architecture has a sound foundation, but several boundaries are broader than their names
 suggest.** The main issue is not a shortage of classes or files. Some components own policies that
-should be independently understandable and changeable—particularly `ChatInteractionService` and the
-boundary between canonical messages and Bot API views.
+should be independently understandable and changeable—particularly the boundary between canonical
+messages and Bot API views.
 
-The highest-value changes are to separate shared-chat administration from private messaging and keep
-Bot API presentation outside the operation that commits canonical message state.
+The highest-value change is to keep Bot API presentation outside the operation that commits
+canonical message state.
 
 | Priority   | Finding and recommendation                                                                       | Nature of the finding                                  |
 | ---------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| **High**   | Separate shared-chat administration from private messaging.                                      | Clear SRP improvement in existing functionality.       |
 | **High**   | Separate canonical messaging operations from Bot API message presentation.                       | Clear architectural boundary improvement.              |
 | **Medium** | Give long-poll coordination an explicit owner and clarify the queue's mutating operations.       | Cohesion and semantic clarity improvement.             |
 | **Lower**  | Improve ownership of application contracts and distinguish fixture setup from simulated actions. | Targeted refinements, not reasons for a large rewrite. |
@@ -82,109 +81,7 @@ smaller classes.
 
 ---
 
-## 2. Finding SRP-02: `ChatInteractionService` combines distinct application responsibilities
-
-**Priority: High**\
-**Classification: Clear SRP improvement in existing functionality**
-
-This is the clearest conventional SRP finding.
-
-### Existing behavior and context
-
-`ChatInteractionService` currently handles:
-
-- Private-conversation activation and account-to-bot and bot-to-account messaging.
-- Basic-group, supergroup, and channel creation, plus membership authorization and addition.
-- History retrieval and Bot API message projection.
-
-Its dependencies cover identity reservation, accounts, bots, chats, canonical messages, observer
-numbering, events, and time.
-
-The problem is not simply that this is a long file; a substantial portion consists of declarations.
-The problem is that different policy families are owned by one component.
-
-| Policy family              | Examples                                                                                   |
-| -------------------------- | ------------------------------------------------------------------------------------------ |
-| Shared-chat administration | Initial participants, ownership, membership authorization, channel restrictions.           |
-| Private messaging          | Whether a conversation exists, whether a bot may send, text constraints, message creation. |
-| Message observation        | Which observer's message ID and profile representation a caller receives.                  |
-
-Changing channel membership rules should not require understanding message numbering or Bot API
-projection. Changing message presentation should not require modifying the service responsible for
-authorizing member additions.
-
-### Recommended split
-
-Initially introduce two application services.
-
-#### `SharedChatAdministrationService`
-
-Owns `createBasicGroup`, `createSupergroup`, `createChannel`, and `addChatMember`.
-
-Its responsibility is:
-
-> Establish and modify shared-chat participation under the emulator's supported rules.
-
-#### `PrivateMessagingService`
-
-Owns account and bot private-message operations, including their different permission rules,
-canonical message creation, observer numbering, and publication of the resulting domain event.
-
-Its responsibility is:
-
-> Perform valid private-message interactions and preserve their canonical effects.
-
-Within this narrower service, explicit names such as `sendAccountText` and `sendBotText` would
-communicate the distinction better than the current asymmetric pair `sendMessage` and
-`sendBotMessage`.
-
-### What not to split yet
-
-Do not initially create separate services for group creation, channel creation, and each membership
-operation. Those methods have enough related policy to justify staying together.
-
-Likewise, account and bot sends can remain together. They have different preconditions, but
-participate in the same private-messaging model and share a meaningful commit operation.
-
-### Evidence from the tests
-
-The common `ChatInteractionService` fixture builds message storage, observer message boxes, update
-storage, and update delivery even for tests concerned with shared-chat creation or membership.
-
-That does not make the tests wrong. It is evidence that the production constructor represents too
-broad a responsibility.
-
-After the split, a shared-chat authorization test should need accounts, bots, identities, and
-shared-chat state—not a message clock or update-delivery subsystem.
-
-### Corresponding repository boundary
-
-`ChatRepository` also combines private conversations with shared chats and shared-chat memberships.
-The private and shared portions use separate maps and have different operations.
-
-Consider splitting it into a private-conversation store and a shared-chat repository alongside the
-application split.
-
-However, **keep shared-chat creation and initial memberships together**. They form a useful
-consistency boundary: a created shared chat should have its intended owner and initial membership
-state. Splitting every map into its own repository would make that invariant harder to maintain.
-
-### Recommended validation
-
-Preserve existing shared-chat authorization, initial-membership, and identity-allocation behavior.
-Ensure that private messaging continues to assign observer IDs and publish events in the same order.
-
-As an architectural acceptance check, the shared-chat test fixture should no longer require
-messaging and update-delivery dependencies.
-
-### Practical outcome
-
-Shared-chat policy can be changed and tested independently of private-message delivery and
-presentation. The result is clearer responsibility, not merely fewer lines per file.
-
----
-
-## 3. Finding SRP-03: canonical messaging still owns Bot API presentation
+## 2. Finding SRP-03: canonical messaging still owns Bot API presentation
 
 **Priority: High**\
 **Classification: Clear architectural boundary improvement**
@@ -309,7 +206,7 @@ assembling domain state.
 
 ---
 
-## 4. Finding SRP-04: polling coordination needs a more explicit owner
+## 3. Finding SRP-04: polling coordination needs a more explicit owner
 
 **Priority: Medium**\
 **Classification: Cohesion and semantic clarity improvement**
@@ -393,12 +290,12 @@ the queue's own consistency guarantees.
 
 ---
 
-## 5. Additional targeted refinements
+## 4. Additional targeted refinements
 
 These recommendations are useful, but they are not equally severe findings and do not justify a
 broad rewrite.
 
-### 5.1 Put contracts with the responsibility that owns them
+### 4.1 Put contracts with the responsibility that owns them
 
 Dependency injection is generally explicit, and several consumers already declare narrow interfaces.
 
@@ -418,7 +315,7 @@ imports create a runtime dependency bug.
 Do not centralize every structurally similar interface. Two small `AccountLookup` interfaces may be
 valid consumer-owned contracts. Identical syntax alone does not establish shared responsibility.
 
-### 5.2 Clarify what “activate private conversation” means
+### 4.2 Clarify what “activate private conversation” means
 
 `activatePrivateConversation()` establishes a conversation without storing a message or publishing a
 message-created event. Its tests exercise that behavior directly.
@@ -437,7 +334,7 @@ observable effects.
 This does not require an entire `ScenarioSetupService` today. A clearly named, separately exposed
 setup capability may be enough.
 
-### 5.3 Keep the SDK independent while maintaining wire-contract alignment
+### 4.3 Keep the SDK independent while maintaining wire-contract alignment
 
 The TypeScript client has its own response types and schemas. Its request utilities own HTTP
 execution, response validation, and client error construction. That is a sensible client boundary.
@@ -453,19 +350,19 @@ service would not.
 
 ---
 
-## 6. Existing boundaries worth preserving
+## 5. Existing boundaries worth preserving
 
 An aggressive “SRP cleanup” could make several parts of this code worse. Preserve the following
 foundations.
 
-### 6.1 The composition root
+### 5.1 The composition root
 
 `createEmulationSession()` constructs repositories and wires services. Having many dependencies
 there is appropriate: **assembling the object graph is its responsibility**.
 
 Keep construction out of the individual services.
 
-### 6.2 Three distinct identity concepts
+### 5.2 Three distinct identity concepts
 
 Canonical message identity, observer-specific Telegram message numbering, and Bot API update
 sequencing are represented separately.
@@ -473,7 +370,7 @@ sequencing are represented separately.
 These are different concepts and should remain different owners. Do not consolidate them into a
 generic message counter or merge canonical storage into the pending update queue.
 
-### 6.3 Event-to-update delivery
+### 5.3 Event-to-update delivery
 
 `BotUpdateDeliveryService` selects whether an event produces an update, applies subscription rules,
 projects it, and enqueues it.
@@ -485,7 +382,7 @@ That is a coherent application responsibility:
 Subscription filtering does not control canonical message existence. Its orchestration is not a
 reason to split it into a service for each step.
 
-### 6.4 Shared identity allocation and username uniqueness
+### 5.4 Shared identity allocation and username uniqueness
 
 `TelegramIdentityRepository` coordinates ID allocation and username reservations across identity
 kinds. Those operations protect a shared namespace invariant.
@@ -494,10 +391,9 @@ Do not split account and bot allocation into unrelated authorities merely becaus
 are different types.
 
 Similarly, `VirtualUserService` handling both account and bot provisioning is defensible at its
-current size and scope. It does not have the same unrelated policy accumulation as
-`ChatInteractionService`.
+current size and scope.
 
-### 6.5 HTTP decoding outside domain operations
+### 5.5 HTTP decoding outside domain operations
 
 The separate Bot API request decoder handles transport encodings and parameter extraction, while
 routes validate method parameters and render responses.
@@ -505,7 +401,7 @@ routes validate method parameters and render responses.
 Retain this boundary. Moving those concerns into message repositories or canonical domain objects
 would be a regression.
 
-### 6.6 The pure message projector
+### 5.6 The pure message projector
 
 Preserve `projectPrivateTextMessageForBot()` as a pure projection function with explicit inputs.
 Move responsibility for assembling those inputs; do not replace the pure function with a stateful
@@ -513,7 +409,7 @@ object unnecessarily.
 
 ---
 
-## 7. Proposed ownership model
+## 6. Proposed ownership model
 
 The target is the following ownership model—not necessarily one class for every row.
 
@@ -537,20 +433,11 @@ The key invariants remain deliberately grouped:
 | Bot-facing projections use the documented observer's numbering and representation | Explicit bot-view assembly plus the pure projector.            |
 | IDs and usernames respect the shared namespace                                    | Shared identity authority.                                     |
 
-## 8. Recommended implementation sequence
+## 7. Recommended implementation sequence
 
 Use separate, reviewable changes rather than one repository-wide redesign.
 
-### PR 1: extract shared-chat administration
-
-Separate shared-chat creation and membership policy from private messaging. Split private versus
-shared chat storage where that improves the boundary.
-
-**Acceptance criteria:** existing authorization, initial-membership, and identity-allocation
-behavior remain intact; shared-chat tests no longer require messaging and update-delivery
-dependencies.
-
-### PR 2: move Bot API view assembly out of canonical message commands
+### PR 1: move Bot API view assembly out of canonical message commands
 
 Return canonical results from private-message operations and apply the documented bot view at the
 appropriate application/query boundary.
@@ -559,7 +446,7 @@ appropriate application/query boundary.
 public bot-view contract; canonical message storage, participant numbering, and event ordering
 remain coordinated.
 
-### PR 3: extract polling coordination and clarify queue operation names
+### PR 2: extract polling coordination and clarify queue operation names
 
 Move the detailed held-poll state machine behind an explicit polling capability while retaining
 cohesive queue behavior.
@@ -570,7 +457,7 @@ independent bots, negative-offset handling, and cancellation-cause distinctions.
 Move contracts and improve naming alongside the relevant extraction rather than performing an
 unrelated repository-wide directory reorganization.
 
-## 9. Validation and limitations
+## 8. Validation and limitations
 
 The original review inspected source through the GitHub connector and made no repository changes.
 
@@ -590,8 +477,8 @@ Consequently:
 rule that every service must be a leaf.**
 
 The canonical-state, observer-numbering, and event-delivery foundations are worth keeping. The
-highest-value work is narrowing shared-chat administration versus private messaging, and ensuring
-that producing a Bot API view is not part of committing canonical domain state.
+highest-value work is ensuring that producing a Bot API view is not part of committing canonical
+domain state.
 
 ---
 
@@ -609,13 +496,12 @@ The following source files are central to the polling findings:
 
 ### Additional inspected components identified by symbol
 
-| Finding or assessment                | Relevant components and tests                                                                                                                                                |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Shared-chat versus private messaging | `ChatInteractionService`, `ChatRepository`, shared-chat creation/membership tests, shared `ChatInteractionService` test fixture.                                             |
-| Canonical state versus presentation  | `PrivateTextMessage`, `ChatInteractionService`, `projectPrivateTextMessageForBot`, `BotUpdateDeliveryService`, observer message numbering, client private-message contracts. |
-| Polling semantics                    | `BotApiService`, `BotUpdateRepository`, polling tests covering offsets, supersession, cancellation, and bot isolation.                                                       |
-| Identity and provisioning            | `TelegramIdentityRepository`, `VirtualUserService`.                                                                                                                          |
-| Adapter and client boundaries        | Bot API request decoder, HTTP routes, TypeScript client response schemas and request utilities.                                                                              |
+| Finding or assessment               | Relevant components and tests                                                                                                                                                |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canonical state versus presentation | `PrivateTextMessage`, `ChatInteractionService`, `projectPrivateTextMessageForBot`, `BotUpdateDeliveryService`, observer message numbering, client private-message contracts. |
+| Polling semantics                   | `BotApiService`, `BotUpdateRepository`, polling tests covering offsets, supersession, cancellation, and bot isolation.                                                       |
+| Identity and provisioning           | `TelegramIdentityRepository`, `VirtualUserService`.                                                                                                                          |
+| Adapter and client boundaries       | Bot API request decoder, HTTP routes, TypeScript client response schemas and request utilities.                                                                              |
 
 ### SRP reference
 

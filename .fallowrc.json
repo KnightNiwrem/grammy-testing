@@ -35,9 +35,15 @@
         ]
       },
       {
-        "name": "chat-repository",
+        "name": "private-conversation-repository",
         "patterns": [
-          "src/repositories/chat.ts"
+          "src/repositories/private_conversation.ts"
+        ]
+      },
+      {
+        "name": "shared-chat-repository",
+        "patterns": [
+          "src/repositories/shared_chat.ts"
         ]
       },
       {
@@ -97,7 +103,8 @@
       {
         "name": "domain-services",
         "patterns": [
-          "src/services/chat_interaction.ts",
+          "src/services/private_messaging.ts",
+          "src/services/shared_chat_administration.ts",
           "src/services/virtual_user.ts"
         ]
       },
@@ -153,7 +160,13 @@
         ]
       },
       {
-        "from": "chat-repository",
+        "from": "private-conversation-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
+        "from": "shared-chat-repository",
         "allow": [
           "domain"
         ]
@@ -225,7 +238,7 @@
         "allowTypeOnly": [
           "account-repository",
           "bot-repository",
-          "chat-repository",
+          "shared-chat-repository",
           "identity-repository"
         ]
       },
@@ -255,7 +268,8 @@
           "domain",
           "account-repository",
           "bot-repository",
-          "chat-repository",
+          "private-conversation-repository",
+          "shared-chat-repository",
           "message-repository",
           "user-message-box-repository",
           "bot-update-repository",

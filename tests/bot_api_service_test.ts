@@ -2,8 +2,8 @@ import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
-import { ChatRepository } from '../src/repositories/chat.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
+import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
 import {
@@ -12,7 +12,7 @@ import {
   type SendMessageResult,
 } from '../src/services/bot_api.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
-import { ChatInteractionService } from '../src/services/chat_interaction.ts';
+import { PrivateMessagingService } from '../src/services/private_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import {
   type BotApiPrivateTextMessage,
@@ -267,10 +267,10 @@ Deno.test('BotApiService deleteWebhook discards pending updates only when asked'
 });
 
 Deno.test('BotApiService sends a message to an account that has written to the bot', () => {
-  const { virtualUsers, botUpdates, chatInteractions, botApi } = createBotApiFixture();
+  const { virtualUsers, botUpdates, privateMessaging, botApi } = createBotApiFixture();
   const bot = createBot(virtualUsers, 'test_bot');
   const account = createAccount(virtualUsers);
-  chatInteractions.sendMessage({
+  privateMessaging.sendAccountMessage({
     fromAccountId: account.profile.id,
     to: { type: 'private', botId: bot.profile.id },
     text: '/start',
@@ -297,7 +297,7 @@ Deno.test('BotApiService sends a message to an account that has written to the b
 });
 
 Deno.test('BotApiService reports unreachable chats as not found', () => {
-  const { virtualUsers, chatInteractions, botApi } = createBotApiFixture();
+  const { virtualUsers, privateMessaging, botApi } = createBotApiFixture();
   const bot = createBot(virtualUsers, 'test_bot');
   const otherBot = createBot(virtualUsers, 'other_bot');
   const account = createAccount(virtualUsers);
@@ -312,7 +312,7 @@ Deno.test('BotApiService reports unreachable chats as not found', () => {
     assertSendMessageFailure(botApi.sendMessage(bot.profile, { chatId, text }), expectedReason);
   }
 
-  chatInteractions.sendMessage({
+  privateMessaging.sendAccountMessage({
     fromAccountId: account.profile.id,
     to: { type: 'private', botId: bot.profile.id },
     text: 'Hello',
@@ -388,11 +388,10 @@ function createBotApiFixture() {
   const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
-  const chatInteractions = new ChatInteractionService({
-    identities,
+  const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
-    chats: new ChatRepository(),
+    privateConversations: new PrivateConversationRepository(),
     messages: new MessageRepository(),
     userMessageBoxes,
     events: new BotUpdateDeliveryService({
@@ -408,9 +407,9 @@ function createBotApiFixture() {
     bots,
     botUpdates,
     updateSubscriptions,
-    botMessages: chatInteractions,
+    botMessages: privateMessaging,
   });
-  return { virtualUsers, botUpdates, updateSubscriptions, chatInteractions, botApi };
+  return { virtualUsers, botUpdates, updateSubscriptions, privateMessaging, botApi };
 }
 
 function createBot(virtualUsers: VirtualUserService, username: string) {

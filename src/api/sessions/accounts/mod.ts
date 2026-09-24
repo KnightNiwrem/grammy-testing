@@ -80,7 +80,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 400);
     }
 
-    const result = context.get('emulationSession').chatInteractions.sendMessage({
+    const result = context.get('emulationSession').privateMessaging.sendAccountMessage({
       fromAccountId: accountId.data,
       ...parsedRequest.data,
     });
@@ -103,7 +103,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 400);
     }
 
-    const result = context.get('emulationSession').chatInteractions.getPrivateMessageHistory({
+    const result = context.get('emulationSession').privateMessaging.getPrivateMessageHistory({
       accountId: accountId.data,
       botId: botId.data,
     });
