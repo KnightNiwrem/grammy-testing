@@ -22,6 +22,14 @@ info:
     authenticated, with a `404` Bot API error described as `Not Found: method not found`. A path
     under a session's Bot API root that does not name both a bot token and a method is answered
     with a `404` Bot API error described as `Not Found`, before any token is checked.
+
+
+    The server is meant to run inside a test environment, such as CI, rather than as a public
+    service, so admin routes require no credentials; each test session isolates its own state. Bot
+    API routes authenticate the bot token in their path, as Telegram does, and answer a token that
+    no bot of the session owns with a `401` Bot API error. OpenAPI security schemes cannot describe
+    a credential in the path, so no operation declares one.
+security: []
 servers:
   - url: http://{domain}:{port}
     variables:

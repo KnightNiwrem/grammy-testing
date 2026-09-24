@@ -126,6 +126,7 @@ try {
 - `deno task fmt` — format files
 - `deno task fmt:check` — check formatting
 - `deno task check` — type-check source and test files
+- `deno task openapi:lint` — lint `openapi.yaml` with Redocly's recommended rules
 
 ## Environment
 
