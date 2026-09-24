@@ -127,6 +127,29 @@ export type EditBotMessageResult<FailureReason extends string> =
     readonly reason: FailureReason;
   };
 
+export interface DeleteMessagesByBotInput {
+  readonly fromBotId: number;
+  readonly chat: BotPrivateChat;
+  /** The messages' IDs in the bot's message box. */
+  readonly botMessageIds: readonly number[];
+}
+
+export type DeleteMessagesByBotFailureReason =
+  | 'bot_not_found'
+  | 'account_not_found'
+  | 'conversation_not_started';
+
+export type DeleteMessagesByBotResult =
+  | {
+    readonly deleted: true;
+    /** How many of the IDs identified a message of the chat, each deleted once. */
+    readonly deletedMessageCount: number;
+  }
+  | {
+    readonly deleted: false;
+    readonly reason: DeleteMessagesByBotFailureReason;
+  };
+
 export interface GetPrivateMessageHistoryInput {
   readonly accountId: number;
   readonly botId: number;
@@ -171,6 +194,7 @@ interface PrivateMessageStore {
     readonly inlineKeyboard: InlineKeyboard | undefined;
     readonly textEditedAtUnixSeconds: number | undefined;
   }): PrivateTextMessage;
+  deletePrivateTextMessage(messageId: CanonicalMessageId): void;
   getPrivateConversationMessages(
     conversation: PrivateConversationKey,
   ): readonly PrivateTextMessage[];
@@ -198,7 +222,8 @@ interface PrivateMessagingServiceDependencies {
 /**
  * Carries out text exchanges between an account and a bot in their private conversation, and
  * commits each accepted message: stored, numbered for both participants, then published. Bots can
- * attach inline keyboards to their messages and edit them afterward.
+ * attach inline keyboards to their messages, edit them afterward, and delete messages of their
+ * chats.
  *
  * Results carry canonical messages; presenting them to an observer, such as through the Bot API,
  * is left to the caller.
@@ -381,6 +406,40 @@ export class PrivateMessagingService {
       inlineKeyboard: input.inlineKeyboard,
       textEditedAtUnixSeconds: message.textEditedAtUnixSeconds,
     });
+  }
+
+  /**
+   * Deletes messages of the bot's private chat for both participants. As on Telegram, a bot can
+   * delete messages either participant wrote, and receives no update for the deletion. IDs that
+   * identify no message of the chat, including messages already deleted, are skipped.
+   *
+   * A deleted message keeps its ID in each message box, because Telegram never reuses message IDs.
+   * The emulator does not age messages, so Telegram's 48-hour deletion limit never applies.
+   */
+  deleteMessagesByBot(input: DeleteMessagesByBotInput): DeleteMessagesByBotResult {
+    if (this.#bots.getById(input.fromBotId) === undefined) {
+      return { deleted: false, reason: 'bot_not_found' };
+    }
+    if (this.#accounts.getById(input.chat.accountId) === undefined) {
+      return { deleted: false, reason: 'account_not_found' };
+    }
+    const conversation: PrivateConversationKey = {
+      accountId: input.chat.accountId,
+      botId: input.fromBotId,
+    };
+    if (this.#privateConversations.getPrivateConversation(conversation) === undefined) {
+      return { deleted: false, reason: 'conversation_not_started' };
+    }
+
+    let deletedMessageCount = 0;
+    for (const botMessageId of input.botMessageIds) {
+      const message = this.getPrivateTextMessageByBotMessageId(conversation, botMessageId);
+      if (message !== undefined) {
+        this.#messages.deletePrivateTextMessage(message.id);
+        deletedMessageCount++;
+      }
+    }
+    return { deleted: true, deletedMessageCount };
   }
 
   /**

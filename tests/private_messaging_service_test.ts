@@ -9,6 +9,7 @@ import { UserMessageBoxRepository } from '../src/repositories/user_message_box.t
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import {
+  type DeleteMessagesByBotFailureReason,
   type EditBotMessageTextFailureReason,
   PrivateMessagingService,
   type SendBotMessageFailureReason,
@@ -699,6 +700,108 @@ Deno.test('PrivateMessagingService validates bot message edits in Telegram order
   }
   if (messages.getPrivateTextMessage(botMessage.id) !== botMessage) {
     throw new Error('Expected rejected edits to leave the message unchanged');
+  }
+});
+
+Deno.test('PrivateMessagingService lets a bot delete messages of its private chat', () => {
+  const { virtualUsers, userMessageBoxes, messages, publishedEvents, privateMessaging } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const otherAccount = createAccount(virtualUsers, 'Grace');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const accountMessage = sendPrivateText(privateMessaging, account.profile.id, bot);
+  const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot, YES_NO_KEYBOARD);
+  const keptMessage = sendBotMessage(privateMessaging, account.profile.id, bot);
+  const otherChatMessage = sendPrivateText(privateMessaging, otherAccount.profile.id, bot);
+  const accountMessageId = expectBotMessageId(userMessageBoxes, bot, accountMessage.id);
+  const botMessageId = expectBotMessageId(userMessageBoxes, bot, botMessage.id);
+  const otherChatMessageId = expectBotMessageId(userMessageBoxes, bot, otherChatMessage.id);
+  const publishedEventCount = publishedEvents.length;
+
+  const deletion = privateMessaging.deleteMessagesByBot({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageIds: [accountMessageId, botMessageId, botMessageId, otherChatMessageId, 999],
+  });
+  if (!deletion.deleted || deletion.deletedMessageCount !== 2) {
+    throw new Error(
+      "Expected both participants' messages to be deleted once and other IDs to be skipped",
+    );
+  }
+  const history = messages.getPrivateConversationMessages({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
+  if (history.length !== 1 || history[0] !== keptMessage) {
+    throw new Error('Expected only the undeleted message to remain in the history');
+  }
+  if (messages.getPrivateTextMessage(otherChatMessage.id) !== otherChatMessage) {
+    throw new Error("Expected a message of the bot's other chat to be kept");
+  }
+  if (publishedEvents.length !== publishedEventCount) {
+    throw new Error('Expected deletions not to publish chat events');
+  }
+
+  const repeatedDeletion = privateMessaging.deleteMessagesByBot({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageIds: [botMessageId],
+  });
+  if (!repeatedDeletion.deleted || repeatedDeletion.deletedMessageCount !== 0) {
+    throw new Error('Expected an already deleted message to be skipped');
+  }
+  const editOfDeletedMessage = privateMessaging.editBotMessageText({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageId,
+    text: 'Done',
+  });
+  if (editOfDeletedMessage.edited || editOfDeletedMessage.reason !== 'message_not_found') {
+    throw new Error('Expected a deleted message not to be found for editing');
+  }
+  const nextMessage = sendPrivateText(privateMessaging, account.profile.id, bot);
+  if (
+    expectBotMessageId(userMessageBoxes, bot, nextMessage.id) !== otherChatMessageId + 1 ||
+    expectBotMessageId(userMessageBoxes, bot, botMessage.id) !== botMessageId
+  ) {
+    throw new Error('Expected deleted messages to keep their IDs, which are never reused');
+  }
+});
+
+Deno.test('PrivateMessagingService validates message deletions before changing state', () => {
+  const { virtualUsers, userMessageBoxes, messages, privateMessaging } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const strangerAccount = createAccount(virtualUsers, 'Grace');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const message = sendPrivateText(privateMessaging, account.profile.id, bot);
+  const botMessageId = expectBotMessageId(userMessageBoxes, bot, message.id);
+  const cases: {
+    fromBotId: number;
+    accountId: number;
+    expectedReason: DeleteMessagesByBotFailureReason;
+  }[] = [
+    { fromBotId: 999, accountId: 999, expectedReason: 'bot_not_found' },
+    { fromBotId: bot.profile.id, accountId: 999, expectedReason: 'account_not_found' },
+    {
+      fromBotId: bot.profile.id,
+      accountId: strangerAccount.profile.id,
+      expectedReason: 'conversation_not_started',
+    },
+  ];
+
+  for (const { fromBotId, accountId, expectedReason } of cases) {
+    const result = privateMessaging.deleteMessagesByBot({
+      fromBotId,
+      chat: { type: 'private', accountId },
+      botMessageIds: [botMessageId],
+    });
+    if (result.deleted || result.reason !== expectedReason) {
+      throw new Error(`Expected the deletion to fail with ${expectedReason}`);
+    }
+  }
+  if (messages.getPrivateTextMessage(message.id) !== message) {
+    throw new Error('Expected rejected deletions to keep the message');
   }
 });
 

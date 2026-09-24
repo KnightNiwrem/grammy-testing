@@ -98,3 +98,38 @@ Deno.test('MessageRepository edits a message in place without changing its ident
     throw new Error('Expected an unknown canonical message ID to find nothing');
   }
 });
+
+Deno.test('MessageRepository deletes a message from the store and its conversation history', () => {
+  const messages = new MessageRepository();
+  const conversation = { accountId: 1, botId: 2 };
+  const addMessage = (text: string) =>
+    messages.addPrivateTextMessage({
+      conversation,
+      authorRole: 'account',
+      sentAtUnixSeconds: 1_700_000_000,
+      text,
+      entities: [],
+    });
+  const firstMessage = addMessage('first');
+  const deletedMessage = addMessage('deleted');
+  const lastMessage = addMessage('last');
+
+  messages.deletePrivateTextMessage(deletedMessage.id);
+  if (messages.getPrivateTextMessage(deletedMessage.id) !== undefined) {
+    throw new Error('Expected the deleted message not to be retrievable');
+  }
+  const history = messages.getPrivateConversationMessages(conversation);
+  if (history.length !== 2 || history[0] !== firstMessage || history[1] !== lastMessage) {
+    throw new Error('Expected history to keep the other messages in order');
+  }
+
+  let secondDeletionError: unknown;
+  try {
+    messages.deletePrivateTextMessage(deletedMessage.id);
+  } catch (error) {
+    secondDeletionError = error;
+  }
+  if (!(secondDeletionError instanceof Error)) {
+    throw new Error('Expected deleting a message that is not stored to throw');
+  }
+});

@@ -26,20 +26,21 @@ export type SendMessageResult =
   | { readonly sent: true; readonly message: BotApiPrivateTextMessage }
   | { readonly sent: false; readonly reason: SendMessageFailureReason };
 
-interface EditMessageTarget {
+/** A message of one of the bot's chats, as Bot API methods address it. */
+interface MessageTarget {
   /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
   readonly chatId: number;
   /** The message's ID in the bot's chat. */
   readonly messageId: number;
 }
 
-export interface EditMessageTextRequest extends EditMessageTarget {
+export interface EditMessageTextRequest extends MessageTarget {
   readonly text: string;
   /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
   readonly inlineKeyboard?: InlineKeyboard;
 }
 
-export interface EditMessageReplyMarkupRequest extends EditMessageTarget {
+export interface EditMessageReplyMarkupRequest extends MessageTarget {
   /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
   readonly inlineKeyboard?: InlineKeyboard;
 }
@@ -59,6 +60,23 @@ export type EditMessageTextFailureReason =
 export type EditMessageResult<FailureReason extends string> =
   | { readonly edited: true; readonly message: BotApiPrivateTextMessage }
   | { readonly edited: false; readonly reason: FailureReason };
+
+export type DeleteMessageRequest = MessageTarget;
+
+export type DeleteMessageResult =
+  | { readonly deleted: true }
+  | { readonly deleted: false; readonly reason: 'chat_not_found' | 'message_not_found' };
+
+export interface DeleteMessagesRequest {
+  /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
+  readonly chatId: number;
+  /** The messages' IDs in the bot's chat. */
+  readonly messageIds: readonly number[];
+}
+
+export type DeleteMessagesResult =
+  | { readonly deleted: true }
+  | { readonly deleted: false; readonly reason: 'chat_not_found' };
 
 export interface AnswerCallbackQueryRequest {
   readonly callbackQueryId: CallbackQueryId;
@@ -137,6 +155,16 @@ interface BotMessaging {
     readonly botMessageId: number;
     readonly inlineKeyboard?: InlineKeyboard;
   }): BotMessageEditingResult<BotMessageEditFailureReason>;
+  deleteMessagesByBot(input: {
+    readonly fromBotId: number;
+    readonly chat: BotPrivateChat;
+    readonly botMessageIds: readonly number[];
+  }):
+    | { readonly deleted: true; readonly deletedMessageCount: number }
+    | {
+      readonly deleted: false;
+      readonly reason: 'bot_not_found' | 'account_not_found' | 'conversation_not_started';
+    };
 }
 
 interface CallbackQueryAnswering {
@@ -298,6 +326,35 @@ export class BotApiService {
     return { edited: false, reason: toEditMessageFailureReason(authenticatedBot, result.reason) };
   }
 
+  /**
+   * Deletes a message of a private chat, which either participant may have written. Unlike
+   * `deleteMessages`, it fails when the ID identifies no message of the chat, as on Telegram.
+   */
+  deleteMessage(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, messageId }: DeleteMessageRequest,
+  ): DeleteMessageResult {
+    const result = this.#deleteChatMessages(authenticatedBot, chatId, [messageId]);
+    if (!result.deleted) {
+      return result;
+    }
+    return result.deletedMessageCount === 0
+      ? { deleted: false, reason: 'message_not_found' }
+      : { deleted: true };
+  }
+
+  /**
+   * Deletes messages of a private chat. As on Telegram, IDs that identify no message of the chat
+   * are skipped.
+   */
+  deleteMessages(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, messageIds }: DeleteMessagesRequest,
+  ): DeleteMessagesResult {
+    const result = this.#deleteChatMessages(authenticatedBot, chatId, messageIds);
+    return result.deleted ? { deleted: true } : result;
+  }
+
   /** Answers a callback query that an account created by pressing one of the bot's buttons. */
   answerCallbackQuery(
     authenticatedBot: VirtualBotProfile,
@@ -311,6 +368,36 @@ export class BotApiService {
       cacheTimeSeconds,
     });
     return result.answered ? { answered: true } : { answered: false, reason: 'query_id_invalid' };
+  }
+
+  #deleteChatMessages(
+    authenticatedBot: VirtualBotProfile,
+    chatId: number,
+    messageIds: readonly number[],
+  ):
+    | { readonly deleted: true; readonly deletedMessageCount: number }
+    | { readonly deleted: false; readonly reason: 'chat_not_found' } {
+    const result = this.#botMessages.deleteMessagesByBot({
+      fromBotId: authenticatedBot.id,
+      chat: { type: 'private', accountId: chatId },
+      botMessageIds: messageIds,
+    });
+    if (result.deleted) {
+      return result;
+    }
+
+    switch (result.reason) {
+      // As for sending, a chat the bot cannot address is not found.
+      case 'account_not_found':
+      case 'conversation_not_started':
+        return { deleted: false, reason: 'chat_not_found' };
+      case 'bot_not_found':
+        throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+      default: {
+        const unhandledReason: never = result.reason;
+        throw new Error(`Unhandled bot message deletion failure: ${unhandledReason}`);
+      }
+    }
   }
 
   #presentEditedMessage(

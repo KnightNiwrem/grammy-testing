@@ -88,6 +88,23 @@ export class MessageRepository {
     return editedMessage;
   }
 
+  /** Removes a stored message from the store and from its conversation's history. */
+  deletePrivateTextMessage(messageId: CanonicalMessageId): void {
+    const storedMessage = this.#privateMessagesById.get(messageId);
+    if (storedMessage === undefined) {
+      throw new Error(`Private message ${messageId} does not exist`);
+    }
+
+    const { accountId, botId } = storedMessage.conversation;
+    const conversationMessageIds = this.#privateMessageIdsByAccountId.get(accountId)?.get(botId);
+    const historyIndex = conversationMessageIds?.indexOf(messageId) ?? -1;
+    if (conversationMessageIds === undefined || historyIndex === -1) {
+      throw new Error(`Private message ${messageId} is stored but not listed`);
+    }
+    conversationMessageIds.splice(historyIndex, 1);
+    this.#privateMessagesById.delete(messageId);
+  }
+
   getPrivateConversationMessages(
     conversation: PrivateConversationKey,
   ): readonly PrivateTextMessage[] {

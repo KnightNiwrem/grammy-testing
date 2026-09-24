@@ -45,6 +45,17 @@ const MESSAGE_NOT_EDITABLE_DESCRIPTION = "Bad Request: message can't be edited";
 const MESSAGE_NOT_MODIFIED_DESCRIPTION =
   'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message';
 
+/** Telegram's descriptions for rejected message deletions. */
+const MESSAGE_TO_DELETE_NOT_FOUND_DESCRIPTION = 'Bad Request: message to delete not found';
+const MESSAGE_IDENTIFIERS_NOT_SPECIFIED_DESCRIPTION =
+  'Bad Request: message identifiers are not specified';
+const TOO_MANY_MESSAGE_IDENTIFIERS_DESCRIPTION =
+  'Bad Request: too many message identifiers specified';
+const INVALID_MESSAGE_IDENTIFIER_DESCRIPTION = 'Bad Request: invalid message identifier specified';
+
+/** Telegram deletes at most 100 messages in one deleteMessages request. */
+const MAX_DELETE_MESSAGES_COUNT = 100;
+
 /** Telegram reads a missing or non-positive `message_id` as 0, which identifies no message. */
 const NO_MESSAGE_ID = 0;
 
@@ -83,6 +94,18 @@ const editMessageReplyMarkupParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   message_id: integerParameter(z.int()).optional(),
   reply_markup: inlineKeyboardMarkupParameter().optional(),
+});
+
+const deleteMessageParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  message_id: integerParameter(z.int()).optional(),
+});
+
+// Telegram also accepts message identifiers written as strings; rejecting them instead surfaces
+// the bot's mistake in tests.
+const deleteMessagesParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  message_ids: jsonParameter(z.array(z.int())).optional(),
 });
 
 // Telegram answers with a URL only for game buttons and bot links, neither of which the emulator
@@ -126,6 +149,8 @@ type BotApiMethodHandler = (
 /** Keyed by lowercase name, because Telegram matches method names case-insensitively. */
 const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHandler>([
   ['answercallbackquery', handleAnswerCallbackQuery],
+  ['deletemessage', handleDeleteMessage],
+  ['deletemessages', handleDeleteMessages],
   ['deletewebhook', handleDeleteWebhook],
   ['editmessagereplymarkup', handleEditMessageReplyMarkup],
   ['editmessagetext', handleEditMessageText],
@@ -360,6 +385,72 @@ function editMessageResponse(context: BotApiRouteContext, result: MessageEditRes
       throw new Error(`Unhandled message edit failure: ${unhandledReason}`);
     }
   }
+}
+
+function handleDeleteMessage(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = deleteMessageParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid deleteMessage parameters');
+  }
+  const { chat_id: chatId, message_id: messageId } = parsedParameters.data;
+  // Telegram looks at the chat before the message.
+  if (chatId === undefined) {
+    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+  }
+
+  const result = context.get('emulationSession').botApi.deleteMessage(
+    context.get('authenticatedBot'),
+    { chatId, messageId: messageIdOrNone(messageId) },
+  );
+  if (result.deleted) {
+    return context.json({ ok: true as const, result: true as const });
+  }
+  switch (result.reason) {
+    case 'chat_not_found':
+      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'message_not_found':
+      return botApiError(context, 400, MESSAGE_TO_DELETE_NOT_FOUND_DESCRIPTION);
+    default: {
+      const unhandledReason: never = result.reason;
+      throw new Error(`Unhandled deleteMessage failure: ${unhandledReason}`);
+    }
+  }
+}
+
+function handleDeleteMessages(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = deleteMessagesParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid deleteMessages parameters');
+  }
+  const { chat_id: chatId, message_ids: messageIds } = parsedParameters.data;
+  // Telegram checks the message identifiers before it looks at the chat.
+  if (messageIds === undefined) {
+    return botApiError(context, 400, MESSAGE_IDENTIFIERS_NOT_SPECIFIED_DESCRIPTION);
+  }
+  if (messageIds.length > MAX_DELETE_MESSAGES_COUNT) {
+    return botApiError(context, 400, TOO_MANY_MESSAGE_IDENTIFIERS_DESCRIPTION);
+  }
+  if (messageIds.some((messageId) => messageId <= 0)) {
+    return botApiError(context, 400, INVALID_MESSAGE_IDENTIFIER_DESCRIPTION);
+  }
+  if (chatId === undefined) {
+    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+  }
+
+  const result = context.get('emulationSession').botApi.deleteMessages(
+    context.get('authenticatedBot'),
+    { chatId, messageIds },
+  );
+  if (!result.deleted) {
+    return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+  }
+  return context.json({ ok: true as const, result: true as const });
 }
 
 function handleAnswerCallbackQuery(

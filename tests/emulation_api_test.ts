@@ -1418,6 +1418,217 @@ Deno.test('a grammY bot answers an inline keyboard press and edits its message',
   }
 });
 
+Deno.test('deleteMessage and deleteMessages follow Telegram checks', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  await sendText('/start');
+  const accountId = createdAccount.account.id;
+  const sendReply = async (text: string) => {
+    const reply = await callBotApi(api, `${botApiPath}/sendMessage`, { chat_id: accountId, text });
+    const messageId = botApiResult(reply.body)?.message_id;
+    if (typeof messageId !== 'number') {
+      throw new Error(`Expected "${text}" to be sent, received ${JSON.stringify(reply.body)}`);
+    }
+    return messageId;
+  };
+  const firstReplyId = await sendReply('First');
+  const secondReplyId = await sendReply('Second');
+  const expectDeletionFailure = async (
+    method: string,
+    parameters: Record<string, unknown>,
+    expectedDescription: string,
+  ) => {
+    const { status, body } = await callBotApi(api, `${botApiPath}/${method}`, parameters);
+    if (status !== 400 || !isBadRequestResponse(body) || body.description !== expectedDescription) {
+      throw new Error(
+        `Expected ${method} ${JSON.stringify(parameters)} to fail with ${expectedDescription}, ` +
+          `received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  };
+  const expectDeletion = async (method: string, parameters: Record<string, unknown>) => {
+    const { status, body } = await callBotApi(api, `${botApiPath}/${method}`, parameters);
+    if (status !== 200 || JSON.stringify(body) !== JSON.stringify({ ok: true, result: true })) {
+      throw new Error(
+        `Expected ${method} ${JSON.stringify(parameters)} to succeed, ` +
+          `received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  };
+  const expectHistoryTexts = async (expectedTexts: readonly string[]) => {
+    const historyBody: unknown = await (await api.request(
+      `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/messages`,
+    )).json();
+    const texts = isMessageHistoryResponse(historyBody)
+      ? historyBody.messages.map((message) => message.text)
+      : [];
+    if (JSON.stringify(texts) !== JSON.stringify(expectedTexts)) {
+      throw new Error(`Expected history ${JSON.stringify(expectedTexts)}, received ${texts}`);
+    }
+  };
+
+  await expectDeletionFailure(
+    'deleteMessage',
+    { message_id: firstReplyId },
+    'Bad Request: chat_id is empty',
+  );
+  await expectDeletionFailure('deleteMessage', { chat_id: 999 }, 'Bad Request: chat not found');
+  await expectDeletionFailure(
+    'deleteMessage',
+    { chat_id: accountId },
+    'Bad Request: message to delete not found',
+  );
+  await expectDeletionFailure(
+    'deleteMessage',
+    { chat_id: accountId, message_id: 999 },
+    'Bad Request: message to delete not found',
+  );
+  await expectDeletionFailure(
+    'deleteMessage',
+    { chat_id: accountId, message_id: 'first' },
+    'Bad Request: invalid deleteMessage parameters',
+  );
+  await expectDeletionFailure(
+    'deleteMessages',
+    { chat_id: 999 },
+    'Bad Request: message identifiers are not specified',
+  );
+  await expectDeletionFailure(
+    'deleteMessages',
+    { chat_id: 999, message_ids: Array.from({ length: 101 }, (_, index) => index + 1) },
+    'Bad Request: too many message identifiers specified',
+  );
+  await expectDeletionFailure(
+    'deleteMessages',
+    { chat_id: 999, message_ids: [firstReplyId, 0] },
+    'Bad Request: invalid message identifier specified',
+  );
+  await expectDeletionFailure(
+    'deleteMessages',
+    { message_ids: [firstReplyId] },
+    'Bad Request: chat_id is empty',
+  );
+  await expectDeletionFailure(
+    'deleteMessages',
+    { chat_id: 999, message_ids: [firstReplyId] },
+    'Bad Request: chat not found',
+  );
+  await expectDeletionFailure(
+    'deleteMessages',
+    { chat_id: accountId, message_ids: ['1'] },
+    'Bad Request: invalid deleteMessages parameters',
+  );
+  await expectHistoryTexts(['/start', 'First', 'Second']);
+
+  // A bot can delete the account's messages in their private chat, not only its own.
+  await expectDeletion('deleteMessage', { chat_id: accountId, message_id: 1 });
+  await expectHistoryTexts(['First', 'Second']);
+  await expectDeletion('deleteMessages', {
+    chat_id: accountId,
+    message_ids: [1, firstReplyId, 999],
+  });
+  await expectHistoryTexts(['Second']);
+  await expectDeletionFailure(
+    'deleteMessage',
+    { chat_id: accountId, message_id: firstReplyId },
+    'Bad Request: message to delete not found',
+  );
+  await expectDeletionFailure(
+    'editMessageText',
+    { chat_id: accountId, message_id: firstReplyId, text: 'Edited' },
+    'Bad Request: message to edit not found',
+  );
+
+  const formEncodedDeletion = await api.request(`${botApiPath}/deleteMessages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      chat_id: String(accountId),
+      message_ids: JSON.stringify([secondReplyId]),
+    }),
+  });
+  if (formEncodedDeletion.status !== 200) {
+    throw new Error(
+      `Expected a form-encoded deleteMessages to succeed, received ${formEncodedDeletion.status}`,
+    );
+  }
+  await expectHistoryTexts([]);
+});
+
+Deno.test('a grammY bot deletes an incoming secret and its menu after a button press', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  const historyPath =
+    `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/messages`;
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const menuSent = Promise.withResolvers<number>();
+  const choiceHandled = Promise.withResolvers<void>();
+  grammyBot.command('password', async (context) => {
+    await context.deleteMessage();
+    const menu = await context.reply('Password stored. Keep it?', {
+      reply_markup: new InlineKeyboard().text('Keep', 'keep').text('Forget', 'forget'),
+    });
+    menuSent.resolve(menu.message_id);
+  });
+  grammyBot.callbackQuery('forget', async (context) => {
+    await context.answerCallbackQuery({ text: 'Forgotten' });
+    await context.deleteMessage();
+    await context.reply('Password forgotten.');
+    choiceHandled.resolve();
+  });
+  const polling = grammyBot.start();
+
+  try {
+    await sendText('/password hunter2');
+    // Polling ends only when stopped, so settling first means startup failed.
+    const menuMessageId = await Promise.race([menuSent.promise, polling.then(() => undefined)]);
+    const pressForget = () =>
+      api.request(`${sessionPath}/accounts/${accountId}/callback-queries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat: { type: 'private', botId: createdBot.bot.id },
+          message_id: menuMessageId,
+          callback_data: 'forget',
+        }),
+      });
+    const pressResponse = await pressForget();
+    if (pressResponse.status !== 201) {
+      throw new Error(`Expected the button press to be accepted, received ${pressResponse.status}`);
+    }
+    await expectSettlementWithin(
+      choiceHandled.promise,
+      5_000,
+      'Expected the bot to handle the button press',
+    );
+
+    const historyBody: unknown = await (await api.request(historyPath)).json();
+    const texts = isMessageHistoryResponse(historyBody)
+      ? historyBody.messages.map((message) => message.text)
+      : undefined;
+    if (JSON.stringify(texts) !== JSON.stringify(['Password forgotten.'])) {
+      throw new Error(
+        `Expected only the final reply to remain, received ${JSON.stringify(historyBody)}`,
+      );
+    }
+    const pressOnDeletedMenu = await pressForget();
+    if (pressOnDeletedMenu.status !== 404) {
+      throw new Error(
+        `Expected a press on the deleted menu to find no message, received ${pressOnDeletedMenu.status}`,
+      );
+    }
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+});
+
 Deno.test('private message routes validate participants and request bodies', async () => {
   const api = createEmulationApi({
     sessionLifecycle: createSessionLifecycleService(),

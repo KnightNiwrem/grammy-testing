@@ -189,6 +189,73 @@ Deno.test('BotApiService edits its messages and reports unreachable chats as not
   }
 });
 
+Deno.test('BotApiService deletes messages and fails only deleteMessage for missing ones', () => {
+  const { virtualUsers, privateMessaging, botApi } = createBotApiFixture();
+  const bot = createBot(virtualUsers, 'test_bot');
+  const strangerAccount = createAccount(virtualUsers);
+  const account = createAccount(virtualUsers);
+  privateMessaging.sendAccountMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: '/start',
+  });
+  const firstReply = expectSentMessage(
+    botApi.sendMessage(bot.profile, { chatId: account.profile.id, text: 'First' }),
+  );
+  const secondReply = expectSentMessage(
+    botApi.sendMessage(bot.profile, { chatId: account.profile.id, text: 'Second' }),
+  );
+  const expectHistoryTexts = (expectedTexts: readonly string[]) => {
+    const history = privateMessaging.getPrivateMessageHistory({
+      accountId: account.profile.id,
+      botId: bot.profile.id,
+    });
+    const texts = history.found ? history.messages.map((message) => message.text) : [];
+    if (JSON.stringify(texts) !== JSON.stringify(expectedTexts)) {
+      throw new Error(`Expected history ${expectedTexts.join(', ')}, received ${texts.join(', ')}`);
+    }
+  };
+
+  const singleDeletion = botApi.deleteMessage(bot.profile, {
+    chatId: account.profile.id,
+    messageId: firstReply.message_id,
+  });
+  if (!singleDeletion.deleted) {
+    throw new Error(`Expected deleteMessage to succeed, received ${singleDeletion.reason}`);
+  }
+  expectHistoryTexts(['/start', 'Second']);
+  const repeatedDeletion = botApi.deleteMessage(bot.profile, {
+    chatId: account.profile.id,
+    messageId: firstReply.message_id,
+  });
+  if (repeatedDeletion.deleted || repeatedDeletion.reason !== 'message_not_found') {
+    throw new Error('Expected deleteMessage of a deleted message to report it as not found');
+  }
+
+  const batchDeletion = botApi.deleteMessages(bot.profile, {
+    chatId: account.profile.id,
+    messageIds: [firstReply.message_id, secondReply.message_id, 999],
+  });
+  if (!batchDeletion.deleted) {
+    throw new Error('Expected deleteMessages to skip the IDs that identify no message');
+  }
+  expectHistoryTexts(['/start']);
+
+  for (const chatId of [999, strangerAccount.profile.id]) {
+    const unreachableDeletion = botApi.deleteMessage(bot.profile, { chatId, messageId: 1 });
+    const unreachableBatchDeletion = botApi.deleteMessages(bot.profile, {
+      chatId,
+      messageIds: [1],
+    });
+    if (
+      unreachableDeletion.deleted || unreachableDeletion.reason !== 'chat_not_found' ||
+      unreachableBatchDeletion.deleted || unreachableBatchDeletion.reason !== 'chat_not_found'
+    ) {
+      throw new Error(`Expected deletions in chat ${chatId} to report the chat as not found`);
+    }
+  }
+});
+
 Deno.test('BotApiService answers callback queries once, as the bot that received them', () => {
   const { virtualUsers, privateMessaging, callbackQueries, botApi } = createBotApiFixture();
   const bot = createBot(virtualUsers, 'test_bot');
