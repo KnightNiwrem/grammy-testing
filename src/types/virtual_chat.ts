@@ -8,6 +8,11 @@ export type PrivateConversationRole = 'account' | 'bot';
 
 export interface PrivateConversation extends PrivateConversationKey {
   readonly kind: 'private';
+  /**
+   * Telegram's `chat_instance`: an opaque signed 64-bit decimal that identifies the chat in
+   * callback queries from its messages.
+   */
+  readonly chatInstance: string;
 }
 
 interface SharedChatBase {

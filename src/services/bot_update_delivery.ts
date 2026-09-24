@@ -1,13 +1,23 @@
-import type { BotApiPrivateTextMessage, BotApiUpdateType } from '../types/bot_api.ts';
-import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
+import type {
+  BotApiCallbackQuery,
+  BotApiPrivateTextMessage,
+  BotApiUpdateType,
+} from '../types/bot_api.ts';
+import type { CallbackQuery } from '../types/callback_query.ts';
+import type { CallbackQueryCreatedEvent, ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { PrivateTextMessage } from '../types/virtual_message.ts';
 
 interface BotMessageViews {
   viewPrivateTextMessageForBot(message: PrivateTextMessage): BotApiPrivateTextMessage;
+  viewCallbackQueryForBot(
+    callbackQuery: CallbackQuery,
+    message: PrivateTextMessage,
+  ): BotApiCallbackQuery;
 }
 
 interface BotUpdateMailboxes {
   enqueueMessageUpdate(botId: number, message: BotApiPrivateTextMessage): void;
+  enqueueCallbackQueryUpdate(botId: number, callbackQuery: BotApiCallbackQuery): void;
 }
 
 interface BotUpdateSubscriptionLookup {
@@ -46,9 +56,12 @@ export class BotUpdateDeliveryService {
       case 'message_created':
         this.#deliverPrivateTextMessage(event.message);
         return;
+      case 'callback_query_created':
+        this.#deliverCallbackQuery(event);
+        return;
       default: {
-        const unhandledEventType: never = event.type;
-        throw new Error(`Unhandled chat domain event: ${unhandledEventType}`);
+        const unhandledEvent: never = event;
+        throw new Error(`Unhandled chat domain event: ${JSON.stringify(unhandledEvent)}`);
       }
     }
   }
@@ -66,6 +79,19 @@ export class BotUpdateDeliveryService {
     this.#botUpdates.enqueueMessageUpdate(
       observingBotId,
       this.#botMessageViews.viewPrivateTextMessageForBot(message),
+    );
+  }
+
+  /** A callback query is observed only by the bot whose message carries the pressed button. */
+  #deliverCallbackQuery({ callbackQuery, message }: CallbackQueryCreatedEvent): void {
+    const observingBotId = callbackQuery.conversation.botId;
+    if (!this.#isSubscribed(observingBotId, 'callback_query')) {
+      return;
+    }
+
+    this.#botUpdates.enqueueCallbackQueryUpdate(
+      observingBotId,
+      this.#botMessageViews.viewCallbackQueryForBot(callbackQuery, message),
     );
   }
 

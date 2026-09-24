@@ -114,6 +114,53 @@ Deno.test('TypeScript client manages all currently implemented session resources
     throw new Error("Expected the account-bound client to retrieve both participants' messages");
   }
 
+  const botApiPath = `/sessions/${session.id}/bot-api/bot${createdBot.token}`;
+  const menuResponse = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: createdAccount.account.id,
+      text: 'Continue?',
+      reply_markup: { inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] },
+    }),
+  });
+  if (menuResponse.status !== 200) {
+    throw new Error(`Expected the bot menu to be accepted, received ${menuResponse.status}`);
+  }
+  const [, , , menu] = await createdAccount.account.getMessages({
+    chat: { type: 'private', botId: createdBot.bot.id },
+  });
+  if (
+    JSON.stringify(menu?.reply_markup) !==
+      JSON.stringify({ inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] })
+  ) {
+    throw new Error('Expected the client to return the inline keyboard of a bot message');
+  }
+
+  const callbackQuery = await createdAccount.account.pressCallbackButton({
+    chat: { type: 'private', botId: createdBot.bot.id },
+    message_id: menu.message_id,
+    callback_data: 'yes',
+  });
+  if (callbackQuery.callback_data !== 'yes' || callbackQuery.answer !== null) {
+    throw new Error('Expected the client to return the unanswered callback query');
+  }
+  const answerResponse = await api.request(`${botApiPath}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: callbackQuery.id, text: 'Saved' }),
+  });
+  if (answerResponse.status !== 200) {
+    throw new Error(`Expected the answer to be accepted, received ${answerResponse.status}`);
+  }
+  const answeredCallbackQuery = await createdAccount.account.getCallbackQuery(callbackQuery.id);
+  if (
+    JSON.stringify(answeredCallbackQuery.answer) !==
+      JSON.stringify({ text: 'Saved', show_alert: false, cache_time: 0 })
+  ) {
+    throw new Error("Expected the client to return the bot's answer");
+  }
+
   await session.end();
 });
 

@@ -61,6 +61,14 @@ export interface AccountMessageHistoryInput {
   readonly chat: PrivateMessageTarget;
 }
 
+export interface PressCallbackButtonInput {
+  readonly chat: PrivateMessageTarget;
+  /** The ID of the message carrying the button, as message history shows it. */
+  readonly message_id: number;
+  /** The callback data of the button to press. */
+  readonly callback_data: string;
+}
+
 export interface PrivateChat {
   readonly id: number;
   readonly type: 'private';
@@ -85,6 +93,22 @@ export interface MessageSenderBot {
   readonly username: string;
 }
 
+export interface CallbackInlineKeyboardButton {
+  readonly text: string;
+  readonly callback_data: string;
+}
+
+export interface UrlInlineKeyboardButton {
+  readonly text: string;
+  readonly url: string;
+}
+
+export type InlineKeyboardButton = CallbackInlineKeyboardButton | UrlInlineKeyboardButton;
+
+export interface InlineKeyboardMarkup {
+  readonly inline_keyboard: readonly (readonly InlineKeyboardButton[])[];
+}
+
 /**
  * A private-chat message as the conversation's bot sees it: numbered in the bot's message box,
  * with the account as its chat, whichever participant wrote it.
@@ -94,8 +118,26 @@ export interface PrivateTextMessage {
   readonly from: VirtualAccountProfile | MessageSenderBot;
   readonly chat: PrivateChat;
   readonly date: number;
+  /** Present once the bot has edited the message's text. */
+  readonly edit_date?: number;
   readonly text: string;
   readonly entities?: readonly MessageEntity[];
+  /** The inline keyboard a bot attached to its message. */
+  readonly reply_markup?: InlineKeyboardMarkup;
+}
+
+export interface CallbackQueryAnswer {
+  /** Omitted when the answer shows no notification. */
+  readonly text?: string;
+  readonly show_alert: boolean;
+  readonly cache_time: number;
+}
+
+/** A callback button press by an account, with the bot's answer once it has answered. */
+export interface CallbackQuery {
+  readonly id: string;
+  readonly callback_data: string;
+  readonly answer: CallbackQueryAnswer | null;
 }
 
 export interface VirtualAccountClient extends VirtualAccountProfile {
@@ -103,6 +145,13 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
   sendMessage(input: AccountSendMessageInput): Promise<PrivateTextMessage>;
   /** Returns messages written by either participant of a private conversation, oldest first. */
   getMessages(input: AccountMessageHistoryInput): Promise<readonly PrivateTextMessage[]>;
+  /**
+   * Presses a callback button on a bot's message, which sends the bot a callback query. The bot
+   * answers asynchronously; read the answer with `getCallbackQuery`.
+   */
+  pressCallbackButton(input: PressCallbackButtonInput): Promise<CallbackQuery>;
+  /** Returns a callback query this account created, with the bot's answer once given. */
+  getCallbackQuery(callbackQueryId: string): Promise<CallbackQuery>;
 }
 
 export interface CreatedVirtualAccount {

@@ -9,17 +9,20 @@ history, and receiving account messages through the Bot API `getUpdates` method,
 `allowed_updates` subscription. As on Telegram, a bot has at most one waiting long poll: a newer one
 ends the earlier request with a `409 Conflict`, so tests notice when two bot instances poll at once.
 Ending a session answers its bots' waiting long polls at once, without updates. Bots reply with the
-Bot API `sendMessage` method, which sends plain text to an account that has written to the bot;
-formatting and keyboards are not supported yet. Replies appear in conversation history, and, as on
-Telegram, the bot receives no update for them. With `deleteWebhook` and `getMe` also implemented, a
-grammY bot can run with `bot.start()` and stop with `bot.stop()`. As Telegram does in private chats
-with bots, the emulator marks bot commands such as `/start` with `bot_command` entities, so
-framework command handlers match them; other entity types are not detected yet. Bot API requests
-follow Telegram's conventions: GET or POST, case-insensitive method names, and parameters in the
-query string or a JSON, URL-encoded, or multipart body. Bot API failures, including calls to methods
-the emulator does not implement, return Telegram-shaped JSON errors that clients report as API
-errors. The session creation response identifies its Bot API root. Other routes described in
-`openapi.yaml` are not implemented yet.
+Bot API `sendMessage` method, which sends plain text to an account that has written to the bot,
+optionally with an inline keyboard of callback and URL buttons; formatting and reply keyboards are
+not supported yet. Replies appear in conversation history, and, as on Telegram, the bot receives no
+update for them. An account can press a callback button, which sends the bot a `callback_query`
+update; the bot answers with `answerCallbackQuery`, and the test reads the answer from the pressed
+callback query. Bots edit their messages with `editMessageText` and `editMessageReplyMarkup`. With
+`deleteWebhook` and `getMe` also implemented, a grammY bot can run with `bot.start()` and stop with
+`bot.stop()`. As Telegram does in private chats with bots, the emulator marks bot commands such as
+`/start` with `bot_command` entities, so framework command handlers match them; other entity types
+are not detected yet. Bot API requests follow Telegram's conventions: GET or POST, case-insensitive
+method names, and parameters in the query string or a JSON, URL-encoded, or multipart body. Bot API
+failures, including calls to methods the emulator does not implement, return Telegram-shaped JSON
+errors that clients report as API errors. The session creation response identifies its Bot API root.
+Other routes described in `openapi.yaml` are not implemented yet.
 
 ## TypeScript client
 
@@ -48,6 +51,18 @@ try {
   const history = await account.getMessages({
     chat: { type: 'private', botId: bot.id },
   });
+
+  // Press a callback button on the bot's latest reply, then read the bot's answer.
+  const menu = history.at(-1);
+  if (menu?.reply_markup !== undefined) {
+    const callbackQuery = await account.pressCallbackButton({
+      chat: { type: 'private', botId: bot.id },
+      message_id: menu.message_id,
+      callback_data: 'yes',
+    });
+    const { answer } = await account.getCallbackQuery(callbackQuery.id);
+    console.log(answer?.text);
+  }
   console.log(token, session.botApiRoot, incomingMessage, history);
 } finally {
   await session.end();

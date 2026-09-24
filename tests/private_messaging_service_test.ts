@@ -9,11 +9,14 @@ import { UserMessageBoxRepository } from '../src/repositories/user_message_box.t
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import {
+  type EditBotMessageTextFailureReason,
   PrivateMessagingService,
   type SendBotMessageFailureReason,
 } from '../src/services/private_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
+import type { BotApiPrivateTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
+import type { InlineKeyboard } from '../src/types/inline_keyboard.ts';
 import { MAX_TEXT_MESSAGE_LENGTH, type PrivateTextMessage } from '../src/types/virtual_message.ts';
 import type { VirtualBot } from '../src/types/virtual_bot.ts';
 
@@ -137,8 +140,8 @@ Deno.test('PrivateMessagingService sends and stores private account messages', (
   const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
   if (
     updates.length !== 2 ||
-    updates[0].message.text !== 'Hello' ||
-    updates[1].message.text !== 'Again'
+    messageFromUpdate(updates[0])?.text !== 'Hello' ||
+    messageFromUpdate(updates[1])?.text !== 'Again'
   ) {
     throw new Error('Expected each sent message to enqueue one update for the target bot');
   }
@@ -199,7 +202,7 @@ Deno.test('PrivateMessagingService numbers private messages in each bot message 
   const secondBotUpdates = botUpdates.confirmAndReadPendingUpdates(secondBot.profile.id, {
     limit: 100,
   });
-  if (secondBotUpdates.length !== 1 || secondBotUpdates[0].message.message_id !== 1) {
+  if (secondBotUpdates.length !== 1 || messageFromUpdate(secondBotUpdates[0])?.message_id !== 1) {
     throw new Error("Expected the bot's update to carry its own message ID");
   }
 });
@@ -455,6 +458,311 @@ Deno.test('PrivateMessagingService validates bot messages in Telegram order befo
   }
 });
 
+Deno.test('PrivateMessagingService stores the inline keyboard of a bot message', () => {
+  const { virtualUsers, messages, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  // 32 two-byte characters fill the 64-byte callback data limit exactly.
+  const inlineKeyboard: InlineKeyboard = [
+    [{ kind: 'callback', text: 'Full', callbackData: 'é'.repeat(32) }],
+    [{ kind: 'url', text: 'Docs', url: 'https://grammy.dev' }],
+  ];
+
+  const result = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    text: 'Choose',
+    inlineKeyboard,
+  });
+  if (!result.sent) {
+    throw new Error(`Expected the bot message to be sent, received ${result.reason}`);
+  }
+  if (
+    JSON.stringify(result.message.inlineKeyboard) !== JSON.stringify(inlineKeyboard) ||
+    messages.getPrivateTextMessage(result.message.id) !== result.message
+  ) {
+    throw new Error('Expected the stored bot message to carry its inline keyboard');
+  }
+});
+
+Deno.test('PrivateMessagingService rejects callback data beyond 64 UTF-8 bytes', () => {
+  const { virtualUsers, publishedEvents, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+
+  const result = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    text: 'Choose',
+    inlineKeyboard: [[{ kind: 'callback', text: 'Too long', callbackData: 'é'.repeat(33) }]],
+  });
+  if (result.sent || result.reason !== 'callback_data_invalid') {
+    throw new Error('Expected 66 bytes of callback data to be rejected');
+  }
+  if (publishedEvents.length !== 1) {
+    throw new Error('Expected the rejected bot message not to be stored or published');
+  }
+});
+
+Deno.test('PrivateMessagingService edits the text and keyboard of a bot message', () => {
+  const { virtualUsers, userMessageBoxes, publishedEvents, privateMessaging, advanceClockSeconds } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot, YES_NO_KEYBOARD);
+  const botMessageId = expectBotMessageId(userMessageBoxes, bot, botMessage.id);
+  advanceClockSeconds(5);
+
+  const textEdit = privateMessaging.editBotMessageText({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageId,
+    text: 'Chosen: /yes',
+  });
+  if (!textEdit.edited) {
+    throw new Error(`Expected the text edit to succeed, received ${textEdit.reason}`);
+  }
+  if (
+    textEdit.message.id !== botMessage.id ||
+    textEdit.message.sentAtUnixSeconds !== 1_700_000_000 ||
+    textEdit.message.textEditedAtUnixSeconds !== 1_700_000_005 ||
+    textEdit.message.text !== 'Chosen: /yes' ||
+    JSON.stringify(textEdit.message.entities) !==
+      JSON.stringify([{ type: 'bot_command', offset: 8, length: 4 }]) ||
+    textEdit.message.inlineKeyboard !== undefined
+  ) {
+    throw new Error('Expected a dated text edit that recomputes entities and drops the keyboard');
+  }
+  advanceClockSeconds(5);
+
+  const keyboardEdit = privateMessaging.editBotMessageInlineKeyboard({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageId,
+    inlineKeyboard: YES_NO_KEYBOARD,
+  });
+  if (!keyboardEdit.edited) {
+    throw new Error(`Expected the keyboard edit to succeed, received ${keyboardEdit.reason}`);
+  }
+  if (
+    keyboardEdit.message.text !== 'Chosen: /yes' ||
+    keyboardEdit.message.textEditedAtUnixSeconds !== 1_700_000_005 ||
+    JSON.stringify(keyboardEdit.message.inlineKeyboard) !== JSON.stringify(YES_NO_KEYBOARD)
+  ) {
+    throw new Error('Expected a keyboard edit to keep the text and its edit date');
+  }
+
+  const sameTextEdit = privateMessaging.editBotMessageText({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageId,
+    text: 'Chosen: /yes',
+  });
+  if (
+    !sameTextEdit.edited ||
+    sameTextEdit.message.textEditedAtUnixSeconds !== 1_700_000_005 ||
+    sameTextEdit.message.inlineKeyboard !== undefined
+  ) {
+    throw new Error('Expected an unchanged text to keep its edit date while the keyboard goes');
+  }
+  if (publishedEvents.length !== 2) {
+    throw new Error('Expected edits not to publish chat events');
+  }
+});
+
+Deno.test('PrivateMessagingService validates bot message edits in Telegram order', () => {
+  const { virtualUsers, userMessageBoxes, messages, privateMessaging } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const strangerAccount = createAccount(virtualUsers, 'Grace');
+  const otherAccount = createAccount(virtualUsers, 'Joan');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const accountMessage = sendPrivateText(privateMessaging, account.profile.id, bot);
+  const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot, YES_NO_KEYBOARD);
+  const otherChatMessage = sendPrivateText(privateMessaging, otherAccount.profile.id, bot);
+  const accountMessageId = expectBotMessageId(userMessageBoxes, bot, accountMessage.id);
+  const botMessageId = expectBotMessageId(userMessageBoxes, bot, botMessage.id);
+  const otherChatMessageId = expectBotMessageId(userMessageBoxes, bot, otherChatMessage.id);
+  const tooLongText = 'x'.repeat(MAX_TEXT_MESSAGE_LENGTH + 1);
+  const invalidKeyboard: InlineKeyboard = [
+    [{ kind: 'callback', text: 'Too long', callbackData: 'x'.repeat(65) }],
+  ];
+  // Each case also breaks every later rule, so only the earliest check can explain its failure.
+  const cases: {
+    fromBotId: number;
+    accountId: number;
+    botMessageId: number;
+    text: string;
+    inlineKeyboard?: InlineKeyboard;
+    expectedReason: EditBotMessageTextFailureReason;
+  }[] = [
+    {
+      fromBotId: 999,
+      accountId: 999,
+      botMessageId: 999,
+      text: '',
+      expectedReason: 'bot_not_found',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: 999,
+      botMessageId: 999,
+      text: '',
+      expectedReason: 'message_text_empty',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: 999,
+      botMessageId: 999,
+      text: tooLongText,
+      expectedReason: 'account_not_found',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: strangerAccount.profile.id,
+      botMessageId,
+      text: tooLongText,
+      expectedReason: 'conversation_not_started',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: account.profile.id,
+      botMessageId: 999,
+      text: tooLongText,
+      expectedReason: 'message_not_found',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: account.profile.id,
+      botMessageId: otherChatMessageId,
+      text: tooLongText,
+      expectedReason: 'message_not_found',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: account.profile.id,
+      botMessageId: accountMessageId,
+      text: tooLongText,
+      expectedReason: 'message_not_editable',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: account.profile.id,
+      botMessageId,
+      text: tooLongText,
+      inlineKeyboard: invalidKeyboard,
+      expectedReason: 'message_text_too_long',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: account.profile.id,
+      botMessageId,
+      text: botMessage.text,
+      inlineKeyboard: invalidKeyboard,
+      expectedReason: 'callback_data_invalid',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: account.profile.id,
+      botMessageId,
+      text: botMessage.text,
+      inlineKeyboard: YES_NO_KEYBOARD,
+      expectedReason: 'message_not_modified',
+    },
+  ];
+
+  for (
+    const { fromBotId, accountId, botMessageId, text, inlineKeyboard, expectedReason } of cases
+  ) {
+    const result = privateMessaging.editBotMessageText({
+      fromBotId,
+      chat: { type: 'private', accountId },
+      botMessageId,
+      text,
+      inlineKeyboard,
+    });
+    if (result.edited || result.reason !== expectedReason) {
+      throw new Error(`Expected the edit to fail with ${expectedReason}`);
+    }
+  }
+  const keyboardEdit = privateMessaging.editBotMessageInlineKeyboard({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageId,
+    inlineKeyboard: YES_NO_KEYBOARD,
+  });
+  if (keyboardEdit.edited || keyboardEdit.reason !== 'message_not_modified') {
+    throw new Error('Expected an identical keyboard edit to be rejected as not modified');
+  }
+  if (messages.getPrivateTextMessage(botMessage.id) !== botMessage) {
+    throw new Error('Expected rejected edits to leave the message unchanged');
+  }
+});
+
+Deno.test('PrivateMessagingService finds messages by bot message ID only in their conversation', () => {
+  const { virtualUsers, userMessageBoxes, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const otherAccount = createAccount(virtualUsers, 'Grace');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const message = sendPrivateText(privateMessaging, account.profile.id, bot);
+  const botMessageId = expectBotMessageId(userMessageBoxes, bot, message.id);
+
+  const conversation = { accountId: account.profile.id, botId: bot.profile.id };
+  if (
+    privateMessaging.getPrivateTextMessageByBotMessageId(conversation, botMessageId) !== message
+  ) {
+    throw new Error("Expected the bot's message ID to find the message in its conversation");
+  }
+  if (
+    privateMessaging.getPrivateTextMessageByBotMessageId(
+        { accountId: otherAccount.profile.id, botId: bot.profile.id },
+        botMessageId,
+      ) !== undefined ||
+    privateMessaging.getPrivateTextMessageByBotMessageId(conversation, botMessageId + 1) !==
+      undefined
+  ) {
+    throw new Error('Expected other conversations and unknown IDs to find nothing');
+  }
+});
+
+const YES_NO_KEYBOARD: InlineKeyboard = [[
+  { kind: 'callback', text: 'Yes', callbackData: 'yes' },
+  { kind: 'callback', text: 'No', callbackData: 'no' },
+]];
+
+function sendBotMessage(
+  privateMessaging: PrivateMessagingService,
+  accountId: number,
+  bot: VirtualBot,
+  inlineKeyboard?: InlineKeyboard,
+): PrivateTextMessage {
+  const result = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId },
+    text: 'Continue?',
+    inlineKeyboard,
+  });
+  if (!result.sent) {
+    throw new Error(`Expected the bot message to be sent, received ${result.reason}`);
+  }
+  return result.message;
+}
+
+function expectBotMessageId(
+  userMessageBoxes: UserMessageBoxRepository,
+  bot: VirtualBot,
+  canonicalMessageId: string,
+): number {
+  const botMessageId = userMessageBoxes.getMessageId(bot.profile.id, canonicalMessageId);
+  if (botMessageId === undefined) {
+    throw new Error(`Expected message ${canonicalMessageId} in the bot's message box`);
+  }
+  return botMessageId;
+}
+
 function createPrivateMessagingFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();
@@ -470,6 +778,7 @@ function createPrivateMessagingFixture() {
     updateSubscriptions: new BotUpdateSubscriptionRepository(),
   });
   const publishedEvents: ChatDomainEvent[] = [];
+  let currentUnixTimeSeconds = 1_700_000_000;
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
@@ -482,8 +791,11 @@ function createPrivateMessagingFixture() {
         botUpdateDelivery.publish(event);
       },
     },
-    currentUnixTimeSeconds: () => 1_700_000_000,
+    currentUnixTimeSeconds: () => currentUnixTimeSeconds,
   });
+  const advanceClockSeconds = (seconds: number) => {
+    currentUnixTimeSeconds += seconds;
+  };
   return {
     virtualUsers,
     privateConversations,
@@ -492,6 +804,7 @@ function createPrivateMessagingFixture() {
     botUpdates,
     publishedEvents,
     privateMessaging,
+    advanceClockSeconds,
   };
 }
 
@@ -525,4 +838,8 @@ function createBot(virtualUsers: VirtualUserService, firstName: string, username
     throw new Error(`Expected bot creation to succeed, received ${result.reason}`);
   }
   return result.bot;
+}
+
+function messageFromUpdate(update: BotApiUpdate | undefined): BotApiPrivateTextMessage | undefined {
+  return update !== undefined && 'message' in update ? update.message : undefined;
 }

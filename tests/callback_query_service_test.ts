@@ -1,0 +1,305 @@
+import { AccountRepository } from '../src/repositories/account.ts';
+import { BotRepository } from '../src/repositories/bot.ts';
+import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
+import { MessageRepository } from '../src/repositories/message.ts';
+import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
+import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
+import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
+import {
+  CallbackQueryService,
+  type PressCallbackButtonFailureReason,
+} from '../src/services/callback_query.ts';
+import { PrivateMessagingService } from '../src/services/private_messaging.ts';
+import { VirtualUserService } from '../src/services/virtual_user.ts';
+import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
+
+Deno.test('CallbackQueryService publishes a callback query for a pressed button', () => {
+  const { publishedEvents, privateConversations, callbackQueries, chat } =
+    createCallbackQueryFixture();
+
+  const result = callbackQueries.pressCallbackButton({
+    fromAccountId: chat.account.profile.id,
+    chat: { type: 'private', botId: chat.bot.profile.id },
+    botMessageId: chat.botMessageId,
+    callbackData: 'no',
+  });
+  if (!result.pressed) {
+    throw new Error(`Expected the button press to succeed, received ${result.reason}`);
+  }
+
+  const conversation = privateConversations.getPrivateConversation({
+    accountId: chat.account.profile.id,
+    botId: chat.bot.profile.id,
+  });
+  const { callbackQuery } = result;
+  if (
+    callbackQuery.callbackData !== 'no' ||
+    callbackQuery.messageId !== chat.botMessage.id ||
+    callbackQuery.chatInstance !== conversation?.chatInstance ||
+    callbackQuery.answer !== undefined
+  ) {
+    throw new Error("Expected an unanswered query for the button in the conversation's chat");
+  }
+  const lastEvent = publishedEvents.at(-1);
+  if (
+    lastEvent?.type !== 'callback_query_created' ||
+    lastEvent.callbackQuery !== callbackQuery ||
+    lastEvent.message !== chat.botMessage
+  ) {
+    throw new Error('Expected the callback query to be published with its message');
+  }
+});
+
+Deno.test('CallbackQueryService validates button presses before changing state', () => {
+  const { virtualUsers, publishedEvents, callbackQueries, chat } = createCallbackQueryFixture();
+  const strangerAccount = createAccount(virtualUsers, 'Grace');
+  const publishedEventCount = publishedEvents.length;
+  const cases: {
+    fromAccountId: number;
+    botId: number;
+    botMessageId: number;
+    callbackData: string;
+    expectedReason: PressCallbackButtonFailureReason;
+  }[] = [
+    {
+      fromAccountId: 999,
+      botId: chat.bot.profile.id,
+      botMessageId: chat.botMessageId,
+      callbackData: 'yes',
+      expectedReason: 'account_not_found',
+    },
+    {
+      fromAccountId: chat.account.profile.id,
+      botId: 999,
+      botMessageId: chat.botMessageId,
+      callbackData: 'yes',
+      expectedReason: 'bot_not_found',
+    },
+    {
+      fromAccountId: strangerAccount.profile.id,
+      botId: chat.bot.profile.id,
+      botMessageId: chat.botMessageId,
+      callbackData: 'yes',
+      expectedReason: 'message_not_found',
+    },
+    {
+      fromAccountId: chat.account.profile.id,
+      botId: chat.bot.profile.id,
+      botMessageId: 999,
+      callbackData: 'yes',
+      expectedReason: 'message_not_found',
+    },
+    {
+      fromAccountId: chat.account.profile.id,
+      botId: chat.bot.profile.id,
+      botMessageId: chat.botMessageId,
+      callbackData: 'maybe',
+      expectedReason: 'callback_button_not_found',
+    },
+    {
+      fromAccountId: chat.account.profile.id,
+      botId: chat.bot.profile.id,
+      botMessageId: chat.accountMessageId,
+      callbackData: 'yes',
+      expectedReason: 'callback_button_not_found',
+    },
+  ];
+
+  for (const { fromAccountId, botId, botMessageId, callbackData, expectedReason } of cases) {
+    const result = callbackQueries.pressCallbackButton({
+      fromAccountId,
+      chat: { type: 'private', botId },
+      botMessageId,
+      callbackData,
+    });
+    if (result.pressed || result.reason !== expectedReason) {
+      throw new Error(`Expected the button press to fail with ${expectedReason}`);
+    }
+  }
+  if (publishedEvents.length !== publishedEventCount) {
+    throw new Error('Expected rejected button presses not to publish anything');
+  }
+});
+
+Deno.test('CallbackQueryService lets only the receiving bot answer, and only once', () => {
+  const { virtualUsers, callbackQueries, chat } = createCallbackQueryFixture();
+  const otherBot = createBot(virtualUsers, 'other_bot');
+  const pressResult = callbackQueries.pressCallbackButton({
+    fromAccountId: chat.account.profile.id,
+    chat: { type: 'private', botId: chat.bot.profile.id },
+    botMessageId: chat.botMessageId,
+    callbackData: 'yes',
+  });
+  if (!pressResult.pressed) {
+    throw new Error(`Expected the button press to succeed, received ${pressResult.reason}`);
+  }
+  const callbackQueryId = pressResult.callbackQuery.id;
+  const answer = (fromBotId: number, text?: string) =>
+    callbackQueries.answerCallbackQuery({
+      fromBotId,
+      callbackQueryId,
+      text,
+      showAlert: true,
+      cacheTimeSeconds: 10,
+    });
+
+  const otherBotAnswer = answer(otherBot.profile.id, 'Stolen');
+  const unknownQueryAnswer = callbackQueries.answerCallbackQuery({
+    fromBotId: chat.bot.profile.id,
+    callbackQueryId: 'unknown',
+    showAlert: false,
+    cacheTimeSeconds: 0,
+  });
+  if (otherBotAnswer.answered || unknownQueryAnswer.answered) {
+    throw new Error("Expected other bots' and unknown queries' answers to be rejected");
+  }
+
+  const firstAnswer = answer(chat.bot.profile.id, 'Saved');
+  if (
+    !firstAnswer.answered ||
+    JSON.stringify(firstAnswer.callbackQuery.answer) !==
+      JSON.stringify({ text: 'Saved', showAlert: true, cacheTimeSeconds: 10 })
+  ) {
+    throw new Error("Expected the receiving bot's answer to be recorded");
+  }
+  if (answer(chat.bot.profile.id, 'Again').answered) {
+    throw new Error('Expected a second answer to be rejected');
+  }
+});
+
+Deno.test('CallbackQueryService records an empty answer text as no notification', () => {
+  const { callbackQueries, chat } = createCallbackQueryFixture();
+  const pressResult = callbackQueries.pressCallbackButton({
+    fromAccountId: chat.account.profile.id,
+    chat: { type: 'private', botId: chat.bot.profile.id },
+    botMessageId: chat.botMessageId,
+    callbackData: 'yes',
+  });
+  if (!pressResult.pressed) {
+    throw new Error(`Expected the button press to succeed, received ${pressResult.reason}`);
+  }
+
+  const result = callbackQueries.answerCallbackQuery({
+    fromBotId: chat.bot.profile.id,
+    callbackQueryId: pressResult.callbackQuery.id,
+    text: '',
+    showAlert: false,
+    cacheTimeSeconds: 0,
+  });
+  if (!result.answered || result.callbackQuery.answer === undefined) {
+    throw new Error('Expected the answer to be recorded');
+  }
+  if ('text' in result.callbackQuery.answer) {
+    throw new Error('Expected empty answer text to be omitted');
+  }
+});
+
+Deno.test('CallbackQueryService shows callback queries only to the account that created them', () => {
+  const { virtualUsers, callbackQueries, chat } = createCallbackQueryFixture();
+  const otherAccount = createAccount(virtualUsers, 'Grace');
+  const pressResult = callbackQueries.pressCallbackButton({
+    fromAccountId: chat.account.profile.id,
+    chat: { type: 'private', botId: chat.bot.profile.id },
+    botMessageId: chat.botMessageId,
+    callbackData: 'yes',
+  });
+  if (!pressResult.pressed) {
+    throw new Error(`Expected the button press to succeed, received ${pressResult.reason}`);
+  }
+  const callbackQueryId = pressResult.callbackQuery.id;
+
+  if (
+    callbackQueries.getAccountCallbackQuery({
+      accountId: chat.account.profile.id,
+      callbackQueryId,
+    }) !== pressResult.callbackQuery
+  ) {
+    throw new Error('Expected the pressing account to find its callback query');
+  }
+  if (
+    callbackQueries.getAccountCallbackQuery({
+      accountId: otherAccount.profile.id,
+      callbackQueryId,
+    }) !== undefined
+  ) {
+    throw new Error("Expected other accounts not to find the account's callback query");
+  }
+});
+
+function createCallbackQueryFixture() {
+  const identities = new TelegramIdentityRepository();
+  const accounts = new AccountRepository();
+  const bots = new BotRepository();
+  const virtualUsers = new VirtualUserService({ identities, accounts, bots });
+  const privateConversations = new PrivateConversationRepository();
+  const userMessageBoxes = new UserMessageBoxRepository();
+  const publishedEvents: ChatDomainEvent[] = [];
+  const events = { publish: (event: ChatDomainEvent) => publishedEvents.push(event) };
+  const privateMessaging = new PrivateMessagingService({
+    accounts,
+    bots,
+    privateConversations,
+    messages: new MessageRepository(),
+    userMessageBoxes,
+    events,
+    currentUnixTimeSeconds: () => 1_700_000_000,
+  });
+  const callbackQueries = new CallbackQueryService({
+    accounts,
+    bots,
+    privateConversations,
+    privateMessages: privateMessaging,
+    callbackQueries: new CallbackQueryRepository(),
+    events,
+  });
+
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'test_bot');
+  const accountMessage = privateMessaging.sendAccountMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: '/start',
+  });
+  const botMessage = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    text: 'Continue?',
+    inlineKeyboard: [[
+      { kind: 'callback', text: 'Yes', callbackData: 'yes' },
+      { kind: 'callback', text: 'No', callbackData: 'no' },
+      { kind: 'url', text: 'Help', url: 'https://grammy.dev' },
+    ]],
+  });
+  if (!accountMessage.sent || !botMessage.sent) {
+    throw new Error('Expected the fixture conversation to be created');
+  }
+  const accountMessageId = userMessageBoxes.getMessageId(bot.profile.id, accountMessage.message.id);
+  const botMessageId = userMessageBoxes.getMessageId(bot.profile.id, botMessage.message.id);
+  if (accountMessageId === undefined || botMessageId === undefined) {
+    throw new Error("Expected the fixture messages in the bot's message box");
+  }
+
+  return {
+    virtualUsers,
+    privateConversations,
+    publishedEvents,
+    callbackQueries,
+    chat: { account, bot, botMessage: botMessage.message, botMessageId, accountMessageId },
+  };
+}
+
+function createAccount(virtualUsers: VirtualUserService, firstName: string) {
+  const result = virtualUsers.createAccount({ first_name: firstName });
+  if (!result.created) {
+    throw new Error(`Expected account creation to succeed, received ${result.reason}`);
+  }
+  return result.account;
+}
+
+function createBot(virtualUsers: VirtualUserService, username: string) {
+  const result = virtualUsers.createBot({ first_name: 'Test Bot', username });
+  if (!result.created) {
+    throw new Error(`Expected bot creation to succeed, received ${result.reason}`);
+  }
+  return result.bot;
+}

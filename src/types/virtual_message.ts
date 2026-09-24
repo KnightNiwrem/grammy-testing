@@ -1,3 +1,4 @@
+import type { InlineKeyboard } from './inline_keyboard.ts';
 import type { PrivateConversationKey, PrivateConversationRole } from './virtual_chat.ts';
 
 export const MAX_TEXT_MESSAGE_LENGTH = 4_096;
@@ -30,4 +31,8 @@ export interface PrivateTextMessage {
   readonly sentAtUnixSeconds: number;
   readonly text: string;
   readonly entities: readonly TextEntity[];
+  /** Omitted when the message has no inline keyboard. Only bots attach inline keyboards. */
+  readonly inlineKeyboard?: InlineKeyboard;
+  /** When the text was last edited; omitted for a message whose text was never edited. */
+  readonly textEditedAtUnixSeconds?: number;
 }

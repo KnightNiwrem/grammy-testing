@@ -96,7 +96,7 @@ Deno.test('BotUpdatePollingService terminates a held long poll when another is h
 
   botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
   const updates = expectRetrievedUpdates(await replacementResult);
-  if (updates.length !== 1 || updates[0].message.message_id !== 1) {
+  if (updates.length !== 1 || messageFromUpdate(updates[0])?.message_id !== 1) {
     throw new Error('Expected the replacement long poll to receive the next update');
   }
 });
@@ -129,10 +129,10 @@ Deno.test('BotUpdatePollingService holds long polls for different bots independe
   botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
   botUpdates.enqueueMessageUpdate(OTHER_BOT_ID, createPrivateTextMessage(2));
 
-  if (expectRetrievedUpdates(await firstResult)[0]?.message.message_id !== 1) {
+  if (messageFromUpdate(expectRetrievedUpdates(await firstResult)[0])?.message_id !== 1) {
     throw new Error("Expected the first bot's long poll to receive its update");
   }
-  if (expectRetrievedUpdates(await secondResult)[0]?.message.message_id !== 2) {
+  if (messageFromUpdate(expectRetrievedUpdates(await secondResult)[0])?.message_id !== 2) {
     throw new Error("Expected the second bot's long poll to receive its update");
   }
 });
@@ -250,4 +250,8 @@ function assertAllowedUpdateTypes(
       }`,
     );
   }
+}
+
+function messageFromUpdate(update: BotApiUpdate | undefined): BotApiPrivateTextMessage | undefined {
+  return update !== undefined && 'message' in update ? update.message : undefined;
 }

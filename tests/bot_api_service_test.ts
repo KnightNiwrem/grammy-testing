@@ -2,6 +2,7 @@ import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
+import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
@@ -13,6 +14,7 @@ import {
   BotUpdatePollingService,
   type GetUpdatesResult,
 } from '../src/services/bot_update_polling.ts';
+import { CallbackQueryService } from '../src/services/callback_query.ts';
 import { PrivateMessagingService } from '../src/services/private_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { BotApiPrivateTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
@@ -45,7 +47,7 @@ Deno.test('BotApiService polls only the authenticated bot mailbox', async () => 
     await botApi.getUpdates(authenticatedBot, { limit: 100, timeoutSeconds: 0 }),
   );
 
-  if (updates.length !== 1 || updates[0].message.message_id !== 2) {
+  if (updates.length !== 1 || messageFromUpdate(updates[0])?.message_id !== 2) {
     throw new Error("Expected getUpdates to return only the authenticated bot's updates");
   }
 });
@@ -95,7 +97,7 @@ Deno.test('BotApiService sends a message to an account that has written to the b
     );
   }
   const pendingUpdates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
-  if (pendingUpdates.length !== 1 || pendingUpdates[0].message.text !== '/start') {
+  if (pendingUpdates.length !== 1 || messageFromUpdate(pendingUpdates[0])?.text !== '/start') {
     throw new Error('Expected the bot not to receive an update for its own message');
   }
 });
@@ -128,6 +130,112 @@ Deno.test('BotApiService reports unreachable chats as not found', () => {
     }),
     'message_text_too_long',
   );
+});
+
+Deno.test('BotApiService edits its messages and reports unreachable chats as not found', () => {
+  const { virtualUsers, privateMessaging, botApi, advanceClockSeconds } = createBotApiFixture();
+  const bot = createBot(virtualUsers, 'test_bot');
+  const strangerAccount = createAccount(virtualUsers);
+  const account = createAccount(virtualUsers);
+  privateMessaging.sendAccountMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: '/start',
+  });
+  const sentMessage = expectSentMessage(
+    botApi.sendMessage(bot.profile, {
+      chatId: account.profile.id,
+      text: 'Continue?',
+      inlineKeyboard: [[{ kind: 'callback', text: 'Yes', callbackData: 'yes' }]],
+    }),
+  );
+  advanceClockSeconds(5);
+
+  const textEdit = botApi.editMessageText(bot.profile, {
+    chatId: account.profile.id,
+    messageId: sentMessage.message_id,
+    text: 'Done',
+  });
+  if (
+    !textEdit.edited ||
+    textEdit.message.message_id !== sentMessage.message_id ||
+    textEdit.message.edit_date !== 1_700_000_005 ||
+    textEdit.message.text !== 'Done' ||
+    'reply_markup' in textEdit.message
+  ) {
+    throw new Error("Expected the edited message in the bot's view, without its keyboard");
+  }
+  const keyboardEdit = botApi.editMessageReplyMarkup(bot.profile, {
+    chatId: account.profile.id,
+    messageId: sentMessage.message_id,
+    inlineKeyboard: [[{ kind: 'url', text: 'Docs', url: 'https://grammy.dev' }]],
+  });
+  if (
+    !keyboardEdit.edited ||
+    JSON.stringify(keyboardEdit.message.reply_markup) !==
+      JSON.stringify({ inline_keyboard: [[{ text: 'Docs', url: 'https://grammy.dev' }]] })
+  ) {
+    throw new Error('Expected the keyboard edit in the bot view');
+  }
+
+  for (const chatId of [999, strangerAccount.profile.id]) {
+    const unreachableEdit = botApi.editMessageReplyMarkup(bot.profile, {
+      chatId,
+      messageId: sentMessage.message_id,
+    });
+    if (unreachableEdit.edited || unreachableEdit.reason !== 'chat_not_found') {
+      throw new Error(`Expected an edit in chat ${chatId} to report the chat as not found`);
+    }
+  }
+});
+
+Deno.test('BotApiService answers callback queries once, as the bot that received them', () => {
+  const { virtualUsers, privateMessaging, callbackQueries, botApi } = createBotApiFixture();
+  const bot = createBot(virtualUsers, 'test_bot');
+  const otherBot = createBot(virtualUsers, 'other_bot');
+  const account = createAccount(virtualUsers);
+  privateMessaging.sendAccountMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: '/start',
+  });
+  const sentMessage = expectSentMessage(
+    botApi.sendMessage(bot.profile, {
+      chatId: account.profile.id,
+      text: 'Continue?',
+      inlineKeyboard: [[{ kind: 'callback', text: 'Yes', callbackData: 'yes' }]],
+    }),
+  );
+  const pressResult = callbackQueries.pressCallbackButton({
+    fromAccountId: account.profile.id,
+    chat: { type: 'private', botId: bot.profile.id },
+    botMessageId: sentMessage.message_id,
+    callbackData: 'yes',
+  });
+  if (!pressResult.pressed) {
+    throw new Error(`Expected the button press to succeed, received ${pressResult.reason}`);
+  }
+  const answer = {
+    callbackQueryId: pressResult.callbackQuery.id,
+    showAlert: false,
+    cacheTimeSeconds: 0,
+  };
+
+  const results = [
+    botApi.answerCallbackQuery(otherBot.profile, answer),
+    botApi.answerCallbackQuery(bot.profile, answer),
+    botApi.answerCallbackQuery(bot.profile, answer),
+  ];
+  if (
+    JSON.stringify(results) !==
+      JSON.stringify([
+        { answered: false, reason: 'query_id_invalid' },
+        { answered: true },
+        { answered: false, reason: 'query_id_invalid' },
+      ])
+  ) {
+    throw new Error(`Expected only the first answer by the receiving bot to succeed`);
+  }
 });
 
 function expectSentMessage(result: SendMessageResult): BotApiPrivateTextMessage {
@@ -163,18 +271,25 @@ function createBotApiFixture() {
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
   const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes });
+  const events = new BotUpdateDeliveryService({ botMessageViews, botUpdates, updateSubscriptions });
+  const privateConversations = new PrivateConversationRepository();
+  let currentUnixTimeSeconds = 1_700_000_000;
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
-    privateConversations: new PrivateConversationRepository(),
+    privateConversations,
     messages: new MessageRepository(),
     userMessageBoxes,
-    events: new BotUpdateDeliveryService({
-      botMessageViews,
-      botUpdates,
-      updateSubscriptions,
-    }),
-    currentUnixTimeSeconds: () => 1_700_000_000,
+    events,
+    currentUnixTimeSeconds: () => currentUnixTimeSeconds,
+  });
+  const callbackQueries = new CallbackQueryService({
+    accounts,
+    bots,
+    privateConversations,
+    privateMessages: privateMessaging,
+    callbackQueries: new CallbackQueryRepository(),
+    events,
   });
   const botApi = new BotApiService({
     bots,
@@ -182,8 +297,19 @@ function createBotApiFixture() {
     pendingUpdates: botUpdates,
     botMessages: privateMessaging,
     botMessageViews,
+    callbackQueries,
   });
-  return { virtualUsers, botUpdates, privateMessaging, botApi };
+  const advanceClockSeconds = (seconds: number) => {
+    currentUnixTimeSeconds += seconds;
+  };
+  return {
+    virtualUsers,
+    botUpdates,
+    privateMessaging,
+    callbackQueries,
+    botApi,
+    advanceClockSeconds,
+  };
 }
 
 function createBot(virtualUsers: VirtualUserService, username: string) {
@@ -211,4 +337,8 @@ function createPrivateTextMessage(messageId: number): BotApiPrivateTextMessage {
     date: 1_700_000_000,
     text: 'Hello',
   };
+}
+
+function messageFromUpdate(update: BotApiUpdate | undefined): BotApiPrivateTextMessage | undefined {
+  return update !== undefined && 'message' in update ? update.message : undefined;
 }

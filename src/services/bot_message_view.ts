@@ -1,5 +1,9 @@
-import { projectPrivateTextMessageForBot } from '../projections/bot_api_message.ts';
-import type { BotApiPrivateTextMessage } from '../types/bot_api.ts';
+import {
+  projectCallbackQueryForBot,
+  projectPrivateTextMessageForBot,
+} from '../projections/bot_api_message.ts';
+import type { BotApiCallbackQuery, BotApiPrivateTextMessage } from '../types/bot_api.ts';
+import type { CallbackQuery } from '../types/callback_query.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { CanonicalMessageId, PrivateTextMessage } from '../types/virtual_message.ts';
@@ -23,7 +27,8 @@ interface BotMessageViewServiceDependencies {
 }
 
 /**
- * Presents committed canonical messages as the Bot API shows them to an observing bot.
+ * Presents committed canonical messages, and callback queries on them, as the Bot API shows them
+ * to an observing bot.
  *
  * It reads the participants' profiles and the observer's message numbering; it never creates
  * messages or decides whether sending one is permitted.
@@ -63,6 +68,27 @@ export class BotMessageViewService {
       account: account.profile,
       bot: bot.profile,
       observerMessageId,
+    });
+  }
+
+  /**
+   * Returns a callback query as the bot that owns the pressed button receives it, carrying the
+   * given state of the button's message.
+   */
+  viewCallbackQueryForBot(
+    callbackQuery: CallbackQuery,
+    message: PrivateTextMessage,
+  ): BotApiCallbackQuery {
+    const { accountId } = callbackQuery.conversation;
+    const account = this.#accounts.getById(accountId);
+    if (account === undefined) {
+      throw new Error(`Account ${accountId} of callback query ${callbackQuery.id} does not exist`);
+    }
+
+    return projectCallbackQueryForBot({
+      callbackQuery,
+      account: account.profile,
+      message: this.viewPrivateTextMessageForBot(message),
     });
   }
 }

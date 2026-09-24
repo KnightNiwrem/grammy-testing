@@ -37,3 +37,25 @@ Deno.test('PrivateConversationRepository disambiguates private conversations for
     throw new Error('Expected both conversations to retain the same account participant');
   }
 });
+
+Deno.test('PrivateConversationRepository gives each conversation a Telegram chat instance', () => {
+  const privateConversations = new PrivateConversationRepository();
+  const firstConversation = privateConversations.getOrCreatePrivateConversation({
+    accountId: 1,
+    botId: 2,
+  });
+  const secondConversation = privateConversations.getOrCreatePrivateConversation({
+    accountId: 1,
+    botId: 3,
+  });
+
+  for (const { chatInstance } of [firstConversation, secondConversation]) {
+    const value = /^-?\d+$/.test(chatInstance) ? BigInt(chatInstance) : undefined;
+    if (value === undefined || value < -(2n ** 63n) || value >= 2n ** 63n) {
+      throw new Error(`Expected a signed 64-bit decimal chat instance, received ${chatInstance}`);
+    }
+  }
+  if (firstConversation.chatInstance === secondConversation.chatInstance) {
+    throw new Error('Expected distinct conversations to have distinct chat instances');
+  }
+});

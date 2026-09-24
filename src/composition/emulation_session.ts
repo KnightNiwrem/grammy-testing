@@ -3,6 +3,7 @@ import { AccountRepository } from '../repositories/account.ts';
 import { BotRepository } from '../repositories/bot.ts';
 import { BotUpdateRepository } from '../repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../repositories/bot_update_subscription.ts';
+import { CallbackQueryRepository } from '../repositories/callback_query.ts';
 import { MessageRepository } from '../repositories/message.ts';
 import { PrivateConversationRepository } from '../repositories/private_conversation.ts';
 import { SharedChatRepository } from '../repositories/shared_chat.ts';
@@ -12,6 +13,7 @@ import { BotApiService } from '../services/bot_api.ts';
 import { BotMessageViewService } from '../services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../services/bot_update_polling.ts';
+import { CallbackQueryService } from '../services/callback_query.ts';
 import { PrivateMessagingService } from '../services/private_messaging.ts';
 import { SharedChatAdministrationService } from '../services/shared_chat_administration.ts';
 import { VirtualUserService } from '../services/virtual_user.ts';
@@ -37,14 +39,23 @@ export function createEmulationSession(id: string): EmulationSession {
     botUpdates,
     updateSubscriptions,
   });
+  const privateConversations = new PrivateConversationRepository();
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
-    privateConversations: new PrivateConversationRepository(),
+    privateConversations,
     messages,
     userMessageBoxes,
     events: botUpdateDelivery,
     currentUnixTimeSeconds: () => Math.floor(Date.now() / 1_000),
+  });
+  const callbackQueries = new CallbackQueryService({
+    accounts,
+    bots,
+    privateConversations,
+    privateMessages: privateMessaging,
+    callbackQueries: new CallbackQueryRepository(),
+    events: botUpdateDelivery,
   });
 
   const botUpdatePolling = new BotUpdatePollingService({ botUpdates, updateSubscriptions });
@@ -54,6 +65,7 @@ export function createEmulationSession(id: string): EmulationSession {
     pendingUpdates: botUpdates,
     botMessages: privateMessaging,
     botMessageViews,
+    callbackQueries,
   });
 
   return {
@@ -61,6 +73,7 @@ export function createEmulationSession(id: string): EmulationSession {
     virtualUsers,
     sharedChatAdministration,
     privateMessaging,
+    callbackQueries,
     botMessageViews,
     botApi,
     end: () => botUpdatePolling.endLongPolling(),

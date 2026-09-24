@@ -26,14 +26,44 @@ export interface BotApiBotUser {
 
 export type BotApiMessageSender = VirtualAccountProfile | BotApiBotUser;
 
+export interface BotApiCallbackInlineKeyboardButton {
+  readonly text: string;
+  readonly callback_data: string;
+}
+
+export interface BotApiUrlInlineKeyboardButton {
+  readonly text: string;
+  readonly url: string;
+}
+
+export type BotApiInlineKeyboardButton =
+  | BotApiCallbackInlineKeyboardButton
+  | BotApiUrlInlineKeyboardButton;
+
+export interface BotApiInlineKeyboardMarkup {
+  readonly inline_keyboard: readonly (readonly BotApiInlineKeyboardButton[])[];
+}
+
 export interface BotApiPrivateTextMessage {
   readonly message_id: number;
   readonly from: BotApiMessageSender;
   readonly chat: BotApiPrivateChat;
   readonly date: number;
+  /** Omitted for a message whose text was never edited. */
+  readonly edit_date?: number;
   readonly text: string;
   /** Omitted when the text has no entities, as Telegram does. */
   readonly entities?: readonly BotApiMessageEntity[];
+  /** Omitted when the message has no inline keyboard. */
+  readonly reply_markup?: BotApiInlineKeyboardMarkup;
+}
+
+export interface BotApiCallbackQuery {
+  readonly id: string;
+  readonly from: VirtualAccountProfile;
+  readonly message: BotApiPrivateTextMessage;
+  readonly chat_instance: string;
+  readonly data: string;
 }
 
 export interface BotApiMessageUpdate {
@@ -41,7 +71,12 @@ export interface BotApiMessageUpdate {
   readonly message: BotApiPrivateTextMessage;
 }
 
-export type BotApiUpdate = BotApiMessageUpdate;
+export interface BotApiCallbackQueryUpdate {
+  readonly update_id: number;
+  readonly callback_query: BotApiCallbackQuery;
+}
+
+export type BotApiUpdate = BotApiMessageUpdate | BotApiCallbackQueryUpdate;
 
 /**
  * Every update type name the official Bot API server recognizes in `allowed_updates`, including

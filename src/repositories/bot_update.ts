@@ -1,4 +1,8 @@
-import type { BotApiPrivateTextMessage, BotApiUpdate } from '../types/bot_api.ts';
+import type {
+  BotApiCallbackQuery,
+  BotApiPrivateTextMessage,
+  BotApiUpdate,
+} from '../types/bot_api.ts';
 
 /**
  * How far beyond the ID of the next update an offset can be before Telegram ignores it. From the
@@ -32,14 +36,14 @@ export class BotUpdateRepository {
   readonly #waitersByBotId = new Map<number, Set<() => void>>();
 
   enqueueMessageUpdate(botId: number, message: BotApiPrivateTextMessage): BotApiUpdate {
-    const mailbox = this.#getOrCreateMailbox(botId);
-    const update: BotApiUpdate = {
-      update_id: mailbox.nextUpdateId++,
-      message,
-    };
-    mailbox.updates.push(update);
-    this.#notifyWaiters(botId);
-    return update;
+    return this.#enqueueUpdate(botId, (update_id) => ({ update_id, message }));
+  }
+
+  enqueueCallbackQueryUpdate(botId: number, callbackQuery: BotApiCallbackQuery): BotApiUpdate {
+    return this.#enqueueUpdate(
+      botId,
+      (update_id) => ({ update_id, callback_query: callbackQuery }),
+    );
   }
 
   /**
@@ -110,6 +114,14 @@ export class BotUpdateRepository {
       const timeoutId = setTimeout(finish, timeoutSeconds * 1_000);
       signal?.addEventListener('abort', finish, { once: true });
     });
+  }
+
+  #enqueueUpdate(botId: number, createUpdate: (updateId: number) => BotApiUpdate): BotApiUpdate {
+    const mailbox = this.#getOrCreateMailbox(botId);
+    const update = createUpdate(mailbox.nextUpdateId++);
+    mailbox.updates.push(update);
+    this.#notifyWaiters(botId);
+    return update;
   }
 
   #getOrCreateMailbox(botId: number): BotUpdateMailbox {

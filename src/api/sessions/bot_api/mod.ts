@@ -2,8 +2,11 @@ import { type Context, Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 
+import { MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH } from '../../../types/callback_query.ts';
+import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { VirtualBotProfile } from '../../../types/virtual_bot.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
+import { inlineKeyboardMarkupParameter } from './reply_markup_parameter.ts';
 import {
   booleanParameter,
   type BotApiRequestParameters,
@@ -32,6 +35,25 @@ const MESSAGE_TEXT_EMPTY_DESCRIPTION = 'Bad Request: message text is empty';
 const CHAT_ID_EMPTY_DESCRIPTION = 'Bad Request: chat_id is empty';
 const CHAT_NOT_FOUND_DESCRIPTION = 'Bad Request: chat not found';
 const MESSAGE_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: message is too long';
+const BUTTON_DATA_INVALID_DESCRIPTION = 'Bad Request: BUTTON_DATA_INVALID';
+
+/** Telegram's descriptions for rejected message edits. */
+const MESSAGE_IDENTIFIER_NOT_SPECIFIED_DESCRIPTION =
+  'Bad Request: message identifier is not specified';
+const MESSAGE_TO_EDIT_NOT_FOUND_DESCRIPTION = 'Bad Request: message to edit not found';
+const MESSAGE_NOT_EDITABLE_DESCRIPTION = "Bad Request: message can't be edited";
+const MESSAGE_NOT_MODIFIED_DESCRIPTION =
+  'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message';
+
+/** Telegram reads a missing or non-positive `message_id` as 0, which identifies no message. */
+const NO_MESSAGE_ID = 0;
+
+/** Telegram's description for an unknown, expired, or already answered callback query. */
+const QUERY_ID_INVALID_DESCRIPTION =
+  'Bad Request: query is too old and response timeout expired or query ID is invalid';
+
+/** Telegram caps how long a client may cache a callback query answer at 30 days. */
+const MAX_CALLBACK_QUERY_ANSWER_CACHE_TIME_SECONDS = 30 * 24 * 60 * 60;
 
 const getMeParametersSchema = z.strictObject({});
 
@@ -45,6 +67,32 @@ const deleteWebhookParametersSchema = z.strictObject({
 const sendMessageParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   text: z.string().default(''),
+  reply_markup: inlineKeyboardMarkupParameter().optional(),
+});
+
+// Editing messages sent through inline mode, which `inline_message_id` identifies, is not
+// supported.
+const editMessageTextParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  message_id: integerParameter(z.int()).optional(),
+  text: z.string().default(''),
+  reply_markup: inlineKeyboardMarkupParameter().optional(),
+});
+
+const editMessageReplyMarkupParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  message_id: integerParameter(z.int()).optional(),
+  reply_markup: inlineKeyboardMarkupParameter().optional(),
+});
+
+// Telegram answers with a URL only for game buttons and bot links, neither of which the emulator
+// supports, so `url` is rejected as unsupported.
+const answerCallbackQueryParametersSchema = z.strictObject({
+  callback_query_id: z.string().default(''),
+  text: z.string().max(MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH).optional(),
+  show_alert: booleanParameter().default(false),
+  cache_time: integerParameter(z.int().min(0).max(MAX_CALLBACK_QUERY_ANSWER_CACHE_TIME_SECONDS))
+    .default(0),
 });
 
 const getUpdatesParametersSchema = z.strictObject({
@@ -67,6 +115,9 @@ interface BotApiRouteContextTypes {
 
 type BotApiRouteContext = Context<BotApiRouteContextTypes>;
 
+/** The outcome of either edit method; editMessageReplyMarkup fails for a subset of the reasons. */
+type MessageEditResult = ReturnType<EmulationSession['botApi']['editMessageText']>;
+
 type BotApiMethodHandler = (
   context: BotApiRouteContext,
   parameters: BotApiRequestParameters,
@@ -74,7 +125,10 @@ type BotApiMethodHandler = (
 
 /** Keyed by lowercase name, because Telegram matches method names case-insensitively. */
 const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHandler>([
+  ['answercallbackquery', handleAnswerCallbackQuery],
   ['deletewebhook', handleDeleteWebhook],
+  ['editmessagereplymarkup', handleEditMessageReplyMarkup],
+  ['editmessagetext', handleEditMessageText],
   ['getme', handleGetMe],
   ['getupdates', handleGetUpdates],
   ['sendmessage', handleSendMessage],
@@ -182,7 +236,7 @@ function handleSendMessage(
   if (!parsedParameters.success) {
     return botApiError(context, 400, 'Bad Request: invalid sendMessage parameters');
   }
-  const { chat_id: chatId, text } = parsedParameters.data;
+  const { chat_id: chatId, text, reply_markup: inlineKeyboard } = parsedParameters.data;
   if (chatId === undefined) {
     // Telegram checks the text before it looks at the chat.
     return botApiError(
@@ -194,7 +248,7 @@ function handleSendMessage(
 
   const result = context.get('emulationSession').botApi.sendMessage(
     context.get('authenticatedBot'),
-    { chatId, text },
+    { chatId, text, inlineKeyboard },
   );
   if (result.sent) {
     return context.json({ ok: true as const, result: result.message });
@@ -206,11 +260,130 @@ function handleSendMessage(
       return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'message_text_too_long':
       return botApiError(context, 400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
+    case 'callback_data_invalid':
+      return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
     default: {
       const unhandledReason: never = result.reason;
       throw new Error(`Unhandled sendMessage failure: ${unhandledReason}`);
     }
   }
+}
+
+function handleEditMessageText(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = editMessageTextParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid editMessageText parameters');
+  }
+  const { chat_id: chatId, message_id: messageId, text, reply_markup: inlineKeyboard } =
+    parsedParameters.data;
+  if (chatId === undefined) {
+    // Telegram checks the text before it looks for the message.
+    return botApiError(
+      context,
+      400,
+      text.length === 0 ? MESSAGE_TEXT_EMPTY_DESCRIPTION : missingChatIdDescription(messageId),
+    );
+  }
+
+  return editMessageResponse(
+    context,
+    context.get('emulationSession').botApi.editMessageText(context.get('authenticatedBot'), {
+      chatId,
+      messageId: messageIdOrNone(messageId),
+      text,
+      inlineKeyboard,
+    }),
+  );
+}
+
+function handleEditMessageReplyMarkup(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = editMessageReplyMarkupParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid editMessageReplyMarkup parameters');
+  }
+  const { chat_id: chatId, message_id: messageId, reply_markup: inlineKeyboard } =
+    parsedParameters.data;
+  if (chatId === undefined) {
+    return botApiError(context, 400, missingChatIdDescription(messageId));
+  }
+
+  return editMessageResponse(
+    context,
+    context.get('emulationSession').botApi.editMessageReplyMarkup(
+      context.get('authenticatedBot'),
+      { chatId, messageId: messageIdOrNone(messageId), inlineKeyboard },
+    ),
+  );
+}
+
+/**
+ * Without `chat_id`, Telegram takes an edit without a positive `message_id` to address an inline
+ * message, whose missing `inline_message_id` it reports as an unspecified message identifier.
+ */
+function missingChatIdDescription(messageId: number | undefined): string {
+  return messageIdOrNone(messageId) === NO_MESSAGE_ID
+    ? MESSAGE_IDENTIFIER_NOT_SPECIFIED_DESCRIPTION
+    : CHAT_ID_EMPTY_DESCRIPTION;
+}
+
+function messageIdOrNone(messageId: number | undefined): number {
+  return messageId === undefined || messageId <= 0 ? NO_MESSAGE_ID : messageId;
+}
+
+function editMessageResponse(context: BotApiRouteContext, result: MessageEditResult): Response {
+  if (result.edited) {
+    return context.json({ ok: true as const, result: result.message });
+  }
+  switch (result.reason) {
+    case 'message_text_empty':
+      return botApiError(context, 400, MESSAGE_TEXT_EMPTY_DESCRIPTION);
+    case 'chat_not_found':
+      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'message_not_found':
+      return botApiError(context, 400, MESSAGE_TO_EDIT_NOT_FOUND_DESCRIPTION);
+    case 'message_not_editable':
+      return botApiError(context, 400, MESSAGE_NOT_EDITABLE_DESCRIPTION);
+    case 'message_text_too_long':
+      return botApiError(context, 400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
+    case 'callback_data_invalid':
+      return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
+    case 'message_not_modified':
+      return botApiError(context, 400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
+    default: {
+      const unhandledReason: never = result.reason;
+      throw new Error(`Unhandled message edit failure: ${unhandledReason}`);
+    }
+  }
+}
+
+function handleAnswerCallbackQuery(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = answerCallbackQueryParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid answerCallbackQuery parameters');
+  }
+
+  const result = context.get('emulationSession').botApi.answerCallbackQuery(
+    context.get('authenticatedBot'),
+    {
+      callbackQueryId: parsedParameters.data.callback_query_id,
+      text: parsedParameters.data.text,
+      showAlert: parsedParameters.data.show_alert,
+      cacheTimeSeconds: parsedParameters.data.cache_time,
+    },
+  );
+  if (!result.answered) {
+    return botApiError(context, 400, QUERY_ID_INVALID_DESCRIPTION);
+  }
+  return context.json({ ok: true as const, result: true as const });
 }
 
 /** Telegram's error body, whose `error_code` repeats the HTTP status. */

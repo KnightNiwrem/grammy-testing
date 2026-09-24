@@ -1,5 +1,6 @@
 import { HTTP_STATUS_CREATED, HTTP_STATUS_NO_CONTENT, HTTP_STATUS_OK } from './constants.ts';
 import {
+  callbackQueryResponseSchema,
   createdVirtualAccountSchema,
   createdVirtualBotSchema,
   getMeResponseSchema,
@@ -9,11 +10,13 @@ import {
 import type {
   AccountMessageHistoryInput,
   AccountSendMessageInput,
+  CallbackQuery,
   CreatedVirtualAccount,
   CreatedVirtualBot,
   CreateVirtualAccountInput,
   CreateVirtualBotInput,
   EmulationSession,
+  PressCallbackButtonInput,
   PrivateTextMessage,
   VirtualAccountClient,
   VirtualAccountProfile,
@@ -131,6 +134,25 @@ function createVirtualAccountClient(
         responseSchema: messageHistoryResponseSchema,
       });
       return response.messages;
+    },
+    async pressCallbackButton(input: PressCallbackButtonInput): Promise<CallbackQuery> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'POST',
+        url: `${accountUrl}/callback-queries`,
+        expectedStatus: HTTP_STATUS_CREATED,
+        responseSchema: callbackQueryResponseSchema,
+        body: input,
+      });
+      return response.callback_query;
+    },
+    async getCallbackQuery(callbackQueryId: string): Promise<CallbackQuery> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'GET',
+        url: `${accountUrl}/callback-queries/${encodeURIComponent(callbackQueryId)}`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: callbackQueryResponseSchema,
+      });
+      return response.callback_query;
     },
   });
 }

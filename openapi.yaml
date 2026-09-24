@@ -198,6 +198,67 @@ paths:
           description: An account or bot path identifier is invalid.
         '404':
           description: The session, account, or bot does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/callback-queries:
+    description: Callback queries an account created by pressing callback buttons.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      operationId: pressCallbackButton
+      summary: Press a callback button on a bot message as a virtual account
+      description: >-
+        Presses the button with the given callback data on a bot message in the account's private
+        chat with the bot. Unless the bot's allowed_updates subscription excludes callback_query
+        updates, the bot receives a callback_query update carrying the message as it is now. The
+        bot answers asynchronously with answerCallbackQuery; read the answer from the created
+        callback query.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PressCallbackButtonRequest'
+      responses:
+        '201':
+          description: The button was pressed and the callback query created.
+          headers:
+            Location:
+              description: Relative URL of the created callback query.
+              required: true
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallbackQueryResponse'
+        '400':
+          description: >-
+            The request is invalid, or the message has no callback button with the given data.
+        '404':
+          description: >-
+            The session, account, or bot does not exist, or the private chat has no message with
+            the given ID.
+  /sessions/{sessionId}/accounts/{accountId}/callback-queries/{callbackQueryId}:
+    description: One callback query created by an account.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/CallbackQueryId'
+    get:
+      operationId: getCallbackQuery
+      summary: Return a callback query with the bot's answer once given
+      responses:
+        '200':
+          description: The callback query, answered or not.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallbackQueryResponse'
+        '400':
+          description: The account path identifier is invalid.
+        '404':
+          description: The session does not exist, or the account created no such callback query.
   /sessions/{sessionId}/bot-api/bot{token}/getMe:
     description: Telegram Bot API method for retrieving the authenticated virtual bot's profile.
     parameters:
@@ -330,9 +391,9 @@ paths:
   /sessions/{sessionId}/bot-api/bot{token}/sendMessage:
     description: >-
       Telegram Bot API method for sending a text message. The emulator supports plain text sent to
-      a private chat with an account that has written to the bot; formatting, reply, and keyboard
-      parameters are not supported yet. As on Telegram, the bot receives no update for its own
-      message.
+      a private chat with an account that has written to the bot, optionally with an inline
+      keyboard of callback and URL buttons; formatting and reply parameters are not supported yet.
+      As on Telegram, the bot receives no update for its own message.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -357,14 +418,179 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SendMessageResponse'
+                $ref: '#/components/schemas/MessageResponse'
         '400':
           description: >-
             The request cannot be decoded or has unsupported parameters, or Telegram would reject
             it: the text is empty (`Bad Request: message text is empty`) or longer than 4096
             characters (`Bad Request: message is too long`), `chat_id` is missing (`Bad Request:
-            chat_id is empty`), or the chat is not a private chat with an account that has written
-            to the bot (`Bad Request: chat not found`).
+            chat_id is empty`), the chat is not a private chat with an account that has written
+            to the bot (`Bad Request: chat not found`), or a button's callback data exceeds 64
+            bytes (`Bad Request: BUTTON_DATA_INVALID`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/editMessageText:
+    description: >-
+      Telegram Bot API method for editing the text of a message the bot sent to a private chat.
+      As on Telegram, the edited message keeps only the inline keyboard given in `reply_markup`,
+      and the bot receives no update for its own edit. The edit date changes only when the text
+      does. Messages sent through inline mode, which `inline_message_id` identifies, are not
+      supported.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: editMessageText
+      summary: Edit the text of a message the authenticated virtual bot sent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditMessageTextRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EditMessageTextRequest'
+            encoding:
+              reply_markup:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EditMessageTextRequest'
+            encoding:
+              reply_markup:
+                contentType: application/json
+      responses:
+        '200':
+          description: The message was edited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it, checking in this order: the text is empty (`Bad Request: message text is empty`);
+            neither `chat_id` nor a positive `message_id` is given (`Bad Request: message
+            identifier is not specified`); `chat_id` is missing (`Bad Request: chat_id is empty`);
+            the chat is not a private chat with an account that has written to the bot (`Bad
+            Request: chat not found`); the chat has no message with that ID (`Bad Request: message
+            to edit not found`); the account wrote the message (`Bad Request: message can't be
+            edited`); the text is longer than 4096 characters (`Bad Request: message is too
+            long`); a button's callback data exceeds 64 bytes (`Bad Request:
+            BUTTON_DATA_INVALID`); or the text and keyboard are unchanged (`Bad Request: message
+            is not modified: specified new message content and reply markup are exactly the same
+            as a current content and reply markup of the message`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/editMessageReplyMarkup:
+    description: >-
+      Telegram Bot API method for replacing the inline keyboard of a message the bot sent to a
+      private chat. Omitting `reply_markup` removes the keyboard. The text and edit date are
+      unchanged, and the bot receives no update for its own edit. Messages sent through inline
+      mode are not supported.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: editMessageReplyMarkup
+      summary: Replace the inline keyboard of a message the authenticated virtual bot sent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditMessageReplyMarkupRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EditMessageReplyMarkupRequest'
+            encoding:
+              reply_markup:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EditMessageReplyMarkupRequest'
+            encoding:
+              reply_markup:
+                contentType: application/json
+      responses:
+        '200':
+          description: The message's keyboard was replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it for the reasons editMessageText gives, apart from those about the text.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/answerCallbackQuery:
+    description: >-
+      Telegram Bot API method for answering a callback query the bot received. The account that
+      pressed the button can read the answer from its callback query. Answer URLs, which Telegram
+      allows only for game buttons and bot links, are not supported.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: answerCallbackQuery
+      summary: Answer a callback query sent to the authenticated virtual bot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerCallbackQueryRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AnswerCallbackQueryRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AnswerCallbackQueryRequest'
+      responses:
+        '200':
+          description: The answer was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnswerCallbackQueryResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or the callback query
+            does not exist, was sent to another bot, or is already answered (`Bad Request: query
+            is too old and response timeout expired or query ID is invalid`).
           content:
             application/json:
               schema:
@@ -583,6 +809,12 @@ components:
           type: integer
           minimum: 0
           description: Unix timestamp when the emulator accepted the message.
+        edit_date:
+          type: integer
+          minimum: 0
+          description: >-
+            Unix timestamp of the last edit of the text, omitted if the text was never edited.
+            Replacing only the inline keyboard does not change it.
         text:
           type: string
         entities:
@@ -594,6 +826,57 @@ components:
             other entity types are not detected.
           items:
             $ref: '#/components/schemas/MessageEntity'
+        reply_markup:
+          $ref: '#/components/schemas/InlineKeyboardMarkup'
+          description: The inline keyboard the bot attached, omitted when there is none.
+    InlineKeyboardMarkup:
+      type: object
+      additionalProperties: false
+      required:
+        - inline_keyboard
+      properties:
+        inline_keyboard:
+          type: array
+          description: >-
+            Rows of buttons. As a request parameter, an empty array attaches no keyboard, as on
+            Telegram; empty rows are rejected.
+          items:
+            type: array
+            minItems: 1
+            items:
+              $ref: '#/components/schemas/InlineKeyboardButton'
+    InlineKeyboardButton:
+      description: >-
+        A button with exactly one action. Telegram also accepts other button types and buttons
+        with several actions, using the first action it recognizes; the emulator rejects them.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - text
+            - callback_data
+          properties:
+            text:
+              type: string
+              minLength: 1
+            callback_data:
+              type: string
+              minLength: 1
+              description: >-
+                Data sent to the bot in a callback query, at most 64 bytes when UTF-8 encoded.
+        - type: object
+          additionalProperties: false
+          required:
+            - text
+            - url
+          properties:
+            text:
+              type: string
+              minLength: 1
+            url:
+              type: string
+              format: uri
+              description: An absolute URL.
     MessageSenderBot:
       type: object
       additionalProperties: false
@@ -664,6 +947,45 @@ components:
           minimum: 1
         message:
           $ref: '#/components/schemas/PrivateTextMessage'
+    CallbackQueryUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - update_id
+        - callback_query
+      properties:
+        update_id:
+          type: integer
+          minimum: 1
+        callback_query:
+          $ref: '#/components/schemas/BotApiCallbackQuery'
+    BotApiCallbackQuery:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - from
+        - message
+        - chat_instance
+        - data
+      properties:
+        id:
+          type: string
+          description: Identifier to pass to answerCallbackQuery.
+        from:
+          $ref: '#/components/schemas/Account'
+          description: The account that pressed the button.
+        message:
+          $ref: '#/components/schemas/PrivateTextMessage'
+          description: The message carrying the button, as it was when the button was pressed.
+        chat_instance:
+          type: string
+          description: >-
+            Opaque signed 64-bit decimal identifying the message's chat, fixed for each private
+            chat.
+        data:
+          type: string
+          description: The pressed button's callback data.
     GetUpdatesRequest:
       type: object
       additionalProperties: false
@@ -743,7 +1065,49 @@ components:
           description: >-
             Plain text, stored as sent. Telegram also removes leading and trailing whitespace; the
             emulator does not yet.
-    SendMessageResponse:
+        reply_markup:
+          $ref: '#/components/schemas/InlineKeyboardMarkup'
+          description: >-
+            Inline keyboard to attach. Reply keyboards, keyboard removal, and forced replies are
+            not supported.
+    EditMessageTextRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+        - message_id
+        - text
+      properties:
+        chat_id:
+          type: integer
+          description: Identifier of the private chat, which is the account's user ID.
+        message_id:
+          type: integer
+          description: Identifier of the message in the bot's chat.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        reply_markup:
+          $ref: '#/components/schemas/InlineKeyboardMarkup'
+          description: Keyboard the edited message shows; omitting it removes the keyboard.
+    EditMessageReplyMarkupRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+        - message_id
+      properties:
+        chat_id:
+          type: integer
+          description: Identifier of the private chat, which is the account's user ID.
+        message_id:
+          type: integer
+          description: Identifier of the message in the bot's chat.
+        reply_markup:
+          $ref: '#/components/schemas/InlineKeyboardMarkup'
+          description: Keyboard the message shows; omitting it removes the keyboard.
+    MessageResponse:
       type: object
       additionalProperties: false
       required:
@@ -755,6 +1119,100 @@ components:
           const: true
         result:
           $ref: '#/components/schemas/PrivateTextMessage'
+    AnswerCallbackQueryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - callback_query_id
+      properties:
+        callback_query_id:
+          type: string
+        text:
+          type: string
+          maxLength: 200
+          description: Notification text; omitted or empty text shows no notification.
+        show_alert:
+          type: boolean
+          default: false
+          description: Shows the text as an alert instead of a transient notification.
+        cache_time:
+          type: integer
+          minimum: 0
+          maximum: 2592000
+          default: 0
+          description: Seconds for which the account's client may reuse the answer.
+    AnswerCallbackQueryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: boolean
+          const: true
+    PressCallbackButtonRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat
+        - message_id
+        - callback_data
+      properties:
+        chat:
+          $ref: '#/components/schemas/PrivateMessageTarget'
+        message_id:
+          type: integer
+          minimum: 1
+          description: >-
+            Identifier of the message carrying the button, as message history shows it, which is
+            its identifier in the bot's chat.
+        callback_data:
+          type: string
+          minLength: 1
+          description: Callback data of the button to press.
+    CallbackQuery:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - callback_data
+        - answer
+      properties:
+        id:
+          type: string
+          description: Identifier the bot receives in its callback_query update.
+        callback_data:
+          type: string
+        answer:
+          description: The bot's answer, or null until the bot answers.
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required:
+                - show_alert
+                - cache_time
+              properties:
+                text:
+                  type: string
+                  description: Notification text, omitted when the answer shows none.
+                show_alert:
+                  type: boolean
+                cache_time:
+                  type: integer
+                  minimum: 0
+    CallbackQueryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - callback_query
+      properties:
+        callback_query:
+          $ref: '#/components/schemas/CallbackQuery'
     GetUpdatesResponse:
       type: object
       additionalProperties: false
@@ -768,7 +1226,9 @@ components:
         result:
           type: array
           items:
-            $ref: '#/components/schemas/MessageUpdate'
+            oneOf:
+              - $ref: '#/components/schemas/MessageUpdate'
+              - $ref: '#/components/schemas/CallbackQueryUpdate'
     GetMeResponse:
       type: object
       additionalProperties: false
@@ -840,6 +1300,13 @@ components:
       description: Server-assigned Telegram user identifier for a virtual account.
       schema:
         $ref: '#/components/schemas/TelegramUserId'
+    CallbackQueryId:
+      name: callbackQueryId
+      in: path
+      required: true
+      description: Identifier of a callback query created by the addressed account.
+      schema:
+        type: string
     BotApiMethod:
       name: method
       in: path

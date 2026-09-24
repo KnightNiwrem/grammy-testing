@@ -1,4 +1,5 @@
 import { Bot } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/bot.ts';
+import { InlineKeyboard } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/convenience/keyboard.ts';
 import { GrammyError } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/core/error.ts';
 
 import { createEmulationApi } from '../src/api/mod.ts';
@@ -884,6 +885,398 @@ Deno.test('a grammY bot starts polling, replies to a command, and resumes after 
   }
 });
 
+Deno.test('sendMessage attaches an inline keyboard from every request encoding', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  await sendText('/start');
+  const accountId = createdAccount.account.id;
+  const inlineKeyboard = [
+    [{ text: 'Yes', callback_data: 'yes' }, { text: 'No', callback_data: 'no' }],
+    [{ text: 'Docs', url: 'https://grammy.dev' }],
+  ];
+
+  const jsonReply = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Continue?',
+    reply_markup: { inline_keyboard: inlineKeyboard },
+  });
+  const formReply = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      chat_id: String(accountId),
+      text: 'Again?',
+      reply_markup: JSON.stringify({ inline_keyboard: inlineKeyboard }),
+    }),
+  });
+  const emptyKeyboardReply = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'No buttons',
+    reply_markup: { inline_keyboard: [] },
+  });
+  const expectedMarkup = JSON.stringify({ inline_keyboard: inlineKeyboard });
+  if (
+    jsonReply.status !== 200 ||
+    JSON.stringify(botApiResult(jsonReply.body)?.reply_markup) !== expectedMarkup ||
+    formReply.status !== 200 ||
+    JSON.stringify(botApiResult(await formReply.json())?.reply_markup) !== expectedMarkup ||
+    emptyKeyboardReply.status !== 200 ||
+    botApiResult(emptyKeyboardReply.body)?.reply_markup !== undefined
+  ) {
+    throw new Error('Expected the keyboard in replies, and no keyboard for an empty one');
+  }
+  const historyBody: unknown = await (await api.request(
+    `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/messages`,
+  )).json();
+  if (
+    !isMessageHistoryResponse(historyBody) ||
+    JSON.stringify((historyBody.messages[1] as Record<string, unknown>).reply_markup) !==
+      expectedMarkup
+  ) {
+    throw new Error('Expected history to show the inline keyboard');
+  }
+
+  const invalidMarkups: unknown[] = [
+    { inline_keyboard: [[{ text: 'Plain' }]] },
+    { inline_keyboard: [[{ text: 'Empty', callback_data: '' }]] },
+    { inline_keyboard: [[{ text: 'Both', callback_data: 'yes', url: 'https://grammy.dev' }]] },
+    { inline_keyboard: [[{ text: 'Relative', url: 'grammy.dev' }]] },
+    { inline_keyboard: [[{ text: 'App', web_app: { url: 'https://grammy.dev' } }]] },
+    { inline_keyboard: [[]] },
+    { keyboard: [[{ text: 'Reply keyboard' }]] },
+    { remove_keyboard: true },
+    'not JSON',
+  ];
+  for (const replyMarkup of invalidMarkups) {
+    const { status, body } = await callBotApi(api, `${botApiPath}/sendMessage`, {
+      chat_id: accountId,
+      text: 'Hello',
+      reply_markup: replyMarkup,
+    });
+    if (
+      status !== 400 || !isBadRequestResponse(body) ||
+      body.description !== 'Bad Request: invalid sendMessage parameters'
+    ) {
+      throw new Error(`Expected ${JSON.stringify(replyMarkup)} to be rejected`);
+    }
+  }
+  const oversizedCallbackData = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Hello',
+    reply_markup: { inline_keyboard: [[{ text: 'Big', callback_data: 'x'.repeat(65) }]] },
+  });
+  if (
+    !isBadRequestResponse(oversizedCallbackData.body) ||
+    oversizedCallbackData.body.description !== 'Bad Request: BUTTON_DATA_INVALID'
+  ) {
+    throw new Error('Expected callback data over 64 bytes to be rejected as Telegram does');
+  }
+});
+
+Deno.test('an account presses a callback button and reads the bot answer', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  await sendText('/start');
+  const accountId = createdAccount.account.id;
+  const reply = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Continue?',
+    reply_markup: { inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] },
+  });
+  const replyMessageId = botApiResult(reply.body)?.message_id;
+  const callbackQueriesPath = `${sessionPath}/accounts/${accountId}/callback-queries`;
+  const pressButton = (body: unknown) =>
+    api.request(callbackQueriesPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  const pressResponse = await pressButton({
+    chat: { type: 'private', botId: createdBot.bot.id },
+    message_id: replyMessageId,
+    callback_data: 'yes',
+  });
+  const pressBody: unknown = await pressResponse.json();
+  if (
+    pressResponse.status !== 201 || !isCallbackQueryResponse(pressBody) ||
+    pressBody.callback_query.callback_data !== 'yes' || pressBody.callback_query.answer !== null ||
+    pressResponse.headers.get('Location') !==
+      `${callbackQueriesPath}/${pressBody.callback_query.id}`
+  ) {
+    throw new Error(`Expected the press to create an unanswered callback query`);
+  }
+  const callbackQueryId = pressBody.callback_query.id;
+
+  const updatesBody: unknown = await (await api.request(`${botApiPath}/getUpdates`)).json();
+  const updates = (updatesBody as { result?: unknown }).result;
+  const callbackQuery = Array.isArray(updates)
+    ? updates.at(-1)?.callback_query as Record<string, unknown> | undefined
+    : undefined;
+  const callbackMessage = callbackQuery?.message as Record<string, unknown> | undefined;
+  if (
+    callbackQuery?.id !== callbackQueryId ||
+    JSON.stringify(callbackQuery.from) !== JSON.stringify(createdAccount.account) ||
+    typeof callbackQuery.chat_instance !== 'string' ||
+    callbackQuery.data !== 'yes' ||
+    callbackMessage?.message_id !== replyMessageId ||
+    callbackMessage?.text !== 'Continue?'
+  ) {
+    throw new Error(`Expected a callback_query update, received ${JSON.stringify(updatesBody)}`);
+  }
+
+  const answerResponse = await callBotApi(api, `${botApiPath}/answerCallbackQuery`, {
+    callback_query_id: callbackQueryId,
+    text: 'Saved',
+    show_alert: true,
+  });
+  if (JSON.stringify(answerResponse.body) !== JSON.stringify({ ok: true, result: true })) {
+    throw new Error(`Expected the answer to be accepted, received ${answerResponse.status}`);
+  }
+  const answeredBody: unknown = await (await api.request(
+    `${callbackQueriesPath}/${callbackQueryId}`,
+  )).json();
+  if (
+    !isCallbackQueryResponse(answeredBody) ||
+    JSON.stringify(answeredBody.callback_query.answer) !==
+      JSON.stringify({ text: 'Saved', show_alert: true, cache_time: 0 })
+  ) {
+    throw new Error(
+      `Expected the account to see the answer, received ${JSON.stringify(answeredBody)}`,
+    );
+  }
+
+  const queryIdInvalid =
+    'Bad Request: query is too old and response timeout expired or query ID is invalid';
+  for (
+    const parameters of [{ callback_query_id: callbackQueryId }, { callback_query_id: '999' }, {}]
+  ) {
+    const { body } = await callBotApi(api, `${botApiPath}/answerCallbackQuery`, parameters);
+    if (!isBadRequestResponse(body) || body.description !== queryIdInvalid) {
+      throw new Error(`Expected ${JSON.stringify(parameters)} to be an invalid query ID`);
+    }
+  }
+  const unsupportedAnswer = await callBotApi(api, `${botApiPath}/answerCallbackQuery`, {
+    callback_query_id: callbackQueryId,
+    url: 'https://grammy.dev',
+  });
+  if (unsupportedAnswer.status !== 400) {
+    throw new Error('Expected an answer URL to be rejected as unsupported');
+  }
+
+  const pressFailures = await Promise.all([
+    pressButton({
+      chat: { type: 'private', botId: 999 },
+      message_id: replyMessageId,
+      callback_data: 'yes',
+    }),
+    pressButton({
+      chat: { type: 'private', botId: createdBot.bot.id },
+      message_id: 999,
+      callback_data: 'yes',
+    }),
+    pressButton({
+      chat: { type: 'private', botId: createdBot.bot.id },
+      message_id: replyMessageId,
+      callback_data: 'no',
+    }),
+    pressButton({
+      chat: { type: 'private', botId: createdBot.bot.id },
+      message_id: replyMessageId,
+    }),
+    api.request(`${sessionPath}/accounts/${createdBot.bot.id}/callback-queries/${callbackQueryId}`),
+    api.request(`${callbackQueriesPath}/999`),
+  ]);
+  if (
+    JSON.stringify(pressFailures.map((response) => response.status)) !==
+      JSON.stringify([404, 404, 400, 400, 404, 404])
+  ) {
+    throw new Error(
+      `Expected missing resources and bad presses to be rejected, received ${
+        pressFailures.map((response) => response.status).join()
+      }`,
+    );
+  }
+});
+
+Deno.test('editMessageText and editMessageReplyMarkup follow Telegram checks', async () => {
+  const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
+  await sendText('/start');
+  const accountId = createdAccount.account.id;
+  const keyboard = { inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] };
+  const reply = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Continue?',
+    reply_markup: keyboard,
+  });
+  const messageId = botApiResult(reply.body)?.message_id;
+  const expectEditFailure = async (
+    method: string,
+    parameters: Record<string, unknown>,
+    expectedDescription: string,
+  ) => {
+    const { status, body } = await callBotApi(api, `${botApiPath}/${method}`, parameters);
+    if (status !== 400 || !isBadRequestResponse(body) || body.description !== expectedDescription) {
+      throw new Error(
+        `Expected ${method} ${JSON.stringify(parameters)} to fail with ${expectedDescription}, ` +
+          `received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  };
+
+  await expectEditFailure('editMessageText', {}, 'Bad Request: message text is empty');
+  await expectEditFailure(
+    'editMessageText',
+    { text: 'Done' },
+    'Bad Request: message identifier is not specified',
+  );
+  await expectEditFailure(
+    'editMessageText',
+    { message_id: messageId, text: 'Done' },
+    'Bad Request: chat_id is empty',
+  );
+  await expectEditFailure(
+    'editMessageText',
+    { chat_id: 999, message_id: messageId, text: 'Done' },
+    'Bad Request: chat not found',
+  );
+  await expectEditFailure(
+    'editMessageText',
+    { chat_id: accountId, text: 'Done' },
+    'Bad Request: message to edit not found',
+  );
+  await expectEditFailure(
+    'editMessageText',
+    { chat_id: accountId, message_id: 1, text: 'Done' },
+    "Bad Request: message can't be edited",
+  );
+  await expectEditFailure(
+    'editMessageText',
+    { chat_id: accountId, message_id: messageId, text: 'Continue?', reply_markup: keyboard },
+    'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message',
+  );
+  await expectEditFailure(
+    'editMessageText',
+    { inline_message_id: 'inline', text: 'Done' },
+    'Bad Request: invalid editMessageText parameters',
+  );
+  await expectEditFailure(
+    'editMessageReplyMarkup',
+    {},
+    'Bad Request: message identifier is not specified',
+  );
+  await expectEditFailure(
+    'editMessageReplyMarkup',
+    { chat_id: accountId, message_id: messageId, reply_markup: keyboard },
+    'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message',
+  );
+
+  const keyboardEdit = await callBotApi(api, `${botApiPath}/editMessageReplyMarkup`, {
+    chat_id: accountId,
+    message_id: messageId,
+  });
+  const keyboardEditResult = botApiResult(keyboardEdit.body);
+  if (
+    keyboardEdit.status !== 200 || keyboardEditResult === undefined ||
+    keyboardEditResult.message_id !== messageId || 'reply_markup' in keyboardEditResult ||
+    'edit_date' in keyboardEditResult
+  ) {
+    throw new Error('Expected editMessageReplyMarkup without markup to remove the keyboard');
+  }
+  const textEdit = await callBotApi(api, `${botApiPath}/editMessageText`, {
+    chat_id: accountId,
+    message_id: messageId,
+    text: 'Done',
+    reply_markup: keyboard,
+  });
+  const textEditResult = botApiResult(textEdit.body);
+  if (
+    textEdit.status !== 200 || textEditResult?.text !== 'Done' ||
+    typeof textEditResult.edit_date !== 'number' ||
+    JSON.stringify(textEditResult.reply_markup) !== JSON.stringify(keyboard)
+  ) {
+    throw new Error('Expected editMessageText to replace the text and keyboard with an edit date');
+  }
+});
+
+Deno.test('a grammY bot answers an inline keyboard press and edits its message', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const menuSent = Promise.withResolvers<number>();
+  const choiceHandled = Promise.withResolvers<void>();
+  grammyBot.command('start', async (context) => {
+    const menu = await context.reply('Continue?', {
+      reply_markup: new InlineKeyboard().text('Yes', 'choice:yes').text('No', 'choice:no'),
+    });
+    menuSent.resolve(menu.message_id);
+  });
+  grammyBot.callbackQuery(/^choice:(.+)$/, async (context) => {
+    await context.answerCallbackQuery({ text: `You chose ${context.match[1]}` });
+    await context.editMessageText(`Chosen: ${context.match[1]}`);
+    choiceHandled.resolve();
+  });
+  const polling = grammyBot.start();
+
+  try {
+    await sendText('/start');
+    // Polling ends only when stopped, so settling first means startup failed.
+    const menuMessageId = await Promise.race([menuSent.promise, polling.then(() => undefined)]);
+    const pressResponse = await api.request(
+      `${sessionPath}/accounts/${accountId}/callback-queries`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat: { type: 'private', botId: createdBot.bot.id },
+          message_id: menuMessageId,
+          callback_data: 'choice:no',
+        }),
+      },
+    );
+    const callbackQueryPath = pressResponse.headers.get('Location');
+    if (pressResponse.status !== 201 || callbackQueryPath === null) {
+      throw new Error(`Expected the button press to be accepted, received ${pressResponse.status}`);
+    }
+    await expectSettlementWithin(
+      choiceHandled.promise,
+      5_000,
+      'Expected the bot to handle the button press',
+    );
+
+    const answeredBody: unknown = await (await api.request(callbackQueryPath)).json();
+    if (
+      !isCallbackQueryResponse(answeredBody) ||
+      answeredBody.callback_query.answer?.text !== 'You chose no'
+    ) {
+      throw new Error(`Expected the bot's answer, received ${JSON.stringify(answeredBody)}`);
+    }
+    const historyBody: unknown = await (await api.request(
+      `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/messages`,
+    )).json();
+    const menuMessage = isMessageHistoryResponse(historyBody)
+      ? historyBody.messages.find((message) => message.message_id === menuMessageId)
+      : undefined;
+    if (
+      menuMessage?.text !== 'Chosen: no' ||
+      (menuMessage as Record<string, unknown>).reply_markup !== undefined
+    ) {
+      throw new Error(
+        `Expected the edited menu without buttons, received ${JSON.stringify(menuMessage)}`,
+      );
+    }
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+});
+
 Deno.test('private message routes validate participants and request bodies', async () => {
   const api = createEmulationApi({
     sessionLifecycle: createSessionLifecycleService(),
@@ -1095,6 +1488,50 @@ function isUnauthorizedResponse(value: unknown): value is {
 
   const { ok, error_code, description } = value as Record<string, unknown>;
   return ok === false && error_code === 401 && description === 'Unauthorized';
+}
+
+/** Calls a Bot API method with JSON parameters and returns the status and decoded body. */
+async function callBotApi(
+  api: ReturnType<typeof createEmulationApi>,
+  methodPath: string,
+  parameters: Record<string, unknown>,
+): Promise<{ status: number; body: unknown }> {
+  const response = await api.request(methodPath, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(parameters),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+/** Returns the message a successful Bot API message method returned, if it did. */
+function botApiResult(body: unknown): Record<string, unknown> | undefined {
+  if (typeof body !== 'object' || body === null) {
+    return undefined;
+  }
+  const { ok, result } = body as Record<string, unknown>;
+  return ok === true && typeof result === 'object' && result !== null
+    ? result as Record<string, unknown>
+    : undefined;
+}
+
+function isCallbackQueryResponse(value: unknown): value is {
+  callback_query: {
+    id: string;
+    callback_data: string;
+    answer: { text?: string; show_alert: boolean; cache_time: number } | null;
+  };
+} {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const callbackQuery = (value as Record<string, unknown>).callback_query;
+  if (typeof callbackQuery !== 'object' || callbackQuery === null) {
+    return false;
+  }
+  const { id, callback_data, answer } = callbackQuery as Record<string, unknown>;
+  return typeof id === 'string' && typeof callback_data === 'string' &&
+    (answer === null || typeof answer === 'object');
 }
 
 function isNotFoundResponse<Description extends string>(

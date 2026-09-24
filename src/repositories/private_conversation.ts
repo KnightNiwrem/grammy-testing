@@ -15,6 +15,7 @@ export class PrivateConversationRepository {
       kind: 'private',
       accountId: input.accountId,
       botId: input.botId,
+      chatInstance: createChatInstance(),
     };
     const conversationsByBotId = this.#privateConversationsByAccountId.get(input.accountId) ??
       new Map<number, PrivateConversation>();
@@ -29,4 +30,9 @@ export class PrivateConversationRepository {
   ): PrivateConversation | undefined {
     return this.#privateConversationsByAccountId.get(accountId)?.get(botId);
   }
+}
+
+/** Telegram's chat instances look like random signed 64-bit integers. */
+function createChatInstance(): string {
+  return crypto.getRandomValues(new BigInt64Array(1))[0].toString();
 }

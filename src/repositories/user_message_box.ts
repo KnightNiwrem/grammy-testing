@@ -3,6 +3,7 @@ import type { CanonicalMessageId } from '../types/virtual_message.ts';
 interface UserMessageBox {
   nextMessageId: number;
   readonly messageIdsByCanonicalId: Map<CanonicalMessageId, number>;
+  readonly canonicalIdsByMessageId: Map<number, CanonicalMessageId>;
 }
 
 /**
@@ -26,6 +27,7 @@ export class UserMessageBoxRepository {
 
     const messageId = messageBox.nextMessageId++;
     messageBox.messageIdsByCanonicalId.set(canonicalMessageId, messageId);
+    messageBox.canonicalIdsByMessageId.set(messageId, canonicalMessageId);
     return messageId;
   }
 
@@ -35,13 +37,22 @@ export class UserMessageBoxRepository {
     );
   }
 
+  /** Resolves a Telegram message ID in the owner's box to the canonical message it numbers. */
+  getCanonicalMessageId(ownerId: number, messageId: number): CanonicalMessageId | undefined {
+    return this.#messageBoxesByOwnerId.get(ownerId)?.canonicalIdsByMessageId.get(messageId);
+  }
+
   #getOrCreateMessageBox(ownerId: number): UserMessageBox {
     const existingMessageBox = this.#messageBoxesByOwnerId.get(ownerId);
     if (existingMessageBox !== undefined) {
       return existingMessageBox;
     }
 
-    const messageBox: UserMessageBox = { nextMessageId: 1, messageIdsByCanonicalId: new Map() };
+    const messageBox: UserMessageBox = {
+      nextMessageId: 1,
+      messageIdsByCanonicalId: new Map(),
+      canonicalIdsByMessageId: new Map(),
+    };
     this.#messageBoxesByOwnerId.set(ownerId, messageBox);
     return messageBox;
   }
