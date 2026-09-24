@@ -211,7 +211,9 @@ paths:
         chat with the bot. Unless the bot's allowed_updates subscription excludes callback_query
         updates, the bot receives a callback_query update carrying the message as it is now. The
         bot answers asynchronously with answerCallbackQuery; read the answer from the created
-        callback query.
+        callback query. The press can create the query already expired, so that the bot receives
+        it but cannot answer it, as when a bot that was offline catches up after the answer
+        deadline has passed. The emulator never expires callback queries by time.
       requestBody:
         required: true
         content:
@@ -589,8 +591,8 @@ paths:
         '400':
           description: >-
             The request cannot be decoded or has unsupported parameters, or the callback query
-            does not exist, was sent to another bot, or is already answered (`Bad Request: query
-            is too old and response timeout expired or query ID is invalid`).
+            does not exist, was sent to another bot, is already answered, or has expired (`Bad
+            Request: query is too old and response timeout expired or query ID is invalid`).
           content:
             application/json:
               schema:
@@ -1174,12 +1176,19 @@ components:
           type: string
           minLength: 1
           description: Callback data of the button to press.
+        expired:
+          type: boolean
+          default: false
+          description: >-
+            Creates the callback query already expired: the bot still receives it but cannot
+            answer it.
     CallbackQuery:
       type: object
       additionalProperties: false
       required:
         - id
         - callback_data
+        - status
         - answer
       properties:
         id:
@@ -1187,8 +1196,18 @@ components:
           description: Identifier the bot receives in its callback_query update.
         callback_data:
           type: string
+        status:
+          type: string
+          enum:
+            - awaiting_answer
+            - answered
+            - expired
+          description: >-
+            Whether the bot can still answer the query. A query is created awaiting an answer or
+            already expired; the bot's accepted answer moves an awaiting query to answered. An
+            answered or expired query accepts no answer.
         answer:
-          description: The bot's answer, or null until the bot answers.
+          description: The bot's answer when the status is `answered`, and null otherwise.
           oneOf:
             - type: 'null'
             - type: object

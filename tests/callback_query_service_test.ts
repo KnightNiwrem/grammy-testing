@@ -22,6 +22,7 @@ Deno.test('CallbackQueryService publishes a callback query for a pressed button'
     chat: { type: 'private', botId: chat.bot.profile.id },
     botMessageId: chat.botMessageId,
     callbackData: 'no',
+    expired: false,
   });
   if (!result.pressed) {
     throw new Error(`Expected the button press to succeed, received ${result.reason}`);
@@ -36,7 +37,7 @@ Deno.test('CallbackQueryService publishes a callback query for a pressed button'
     callbackQuery.callbackData !== 'no' ||
     callbackQuery.messageId !== chat.botMessage.id ||
     callbackQuery.chatInstance !== conversation?.chatInstance ||
-    callbackQuery.answer !== undefined
+    callbackQuery.state.status !== 'awaiting_answer'
   ) {
     throw new Error("Expected an unanswered query for the button in the conversation's chat");
   }
@@ -111,6 +112,7 @@ Deno.test('CallbackQueryService validates button presses before changing state',
       chat: { type: 'private', botId },
       botMessageId,
       callbackData,
+      expired: false,
     });
     if (result.pressed || result.reason !== expectedReason) {
       throw new Error(`Expected the button press to fail with ${expectedReason}`);
@@ -129,6 +131,7 @@ Deno.test('CallbackQueryService lets only the receiving bot answer, and only onc
     chat: { type: 'private', botId: chat.bot.profile.id },
     botMessageId: chat.botMessageId,
     callbackData: 'yes',
+    expired: false,
   });
   if (!pressResult.pressed) {
     throw new Error(`Expected the button press to succeed, received ${pressResult.reason}`);
@@ -157,8 +160,11 @@ Deno.test('CallbackQueryService lets only the receiving bot answer, and only onc
   const firstAnswer = answer(chat.bot.profile.id, 'Saved');
   if (
     !firstAnswer.answered ||
-    JSON.stringify(firstAnswer.callbackQuery.answer) !==
-      JSON.stringify({ text: 'Saved', showAlert: true, cacheTimeSeconds: 10 })
+    JSON.stringify(firstAnswer.callbackQuery.state) !==
+      JSON.stringify({
+        status: 'answered',
+        answer: { text: 'Saved', showAlert: true, cacheTimeSeconds: 10 },
+      })
   ) {
     throw new Error("Expected the receiving bot's answer to be recorded");
   }
@@ -174,6 +180,7 @@ Deno.test('CallbackQueryService records an empty answer text as no notification'
     chat: { type: 'private', botId: chat.bot.profile.id },
     botMessageId: chat.botMessageId,
     callbackData: 'yes',
+    expired: false,
   });
   if (!pressResult.pressed) {
     throw new Error(`Expected the button press to succeed, received ${pressResult.reason}`);
@@ -186,10 +193,10 @@ Deno.test('CallbackQueryService records an empty answer text as no notification'
     showAlert: false,
     cacheTimeSeconds: 0,
   });
-  if (!result.answered || result.callbackQuery.answer === undefined) {
+  if (!result.answered || result.callbackQuery.state.status !== 'answered') {
     throw new Error('Expected the answer to be recorded');
   }
-  if ('text' in result.callbackQuery.answer) {
+  if ('text' in result.callbackQuery.state.answer) {
     throw new Error('Expected empty answer text to be omitted');
   }
 });
@@ -202,6 +209,7 @@ Deno.test('CallbackQueryService shows callback queries only to the account that 
     chat: { type: 'private', botId: chat.bot.profile.id },
     botMessageId: chat.botMessageId,
     callbackData: 'yes',
+    expired: false,
   });
   if (!pressResult.pressed) {
     throw new Error(`Expected the button press to succeed, received ${pressResult.reason}`);
@@ -223,6 +231,38 @@ Deno.test('CallbackQueryService shows callback queries only to the account that 
     }) !== undefined
   ) {
     throw new Error("Expected other accounts not to find the account's callback query");
+  }
+});
+
+Deno.test('CallbackQueryService delivers a query created expired that cannot be answered', () => {
+  const { publishedEvents, callbackQueries, chat } = createCallbackQueryFixture();
+
+  const pressResult = callbackQueries.pressCallbackButton({
+    fromAccountId: chat.account.profile.id,
+    chat: { type: 'private', botId: chat.bot.profile.id },
+    botMessageId: chat.botMessageId,
+    callbackData: 'yes',
+    expired: true,
+  });
+  if (!pressResult.pressed || pressResult.callbackQuery.state.status !== 'expired') {
+    throw new Error('Expected the press to create an expired callback query');
+  }
+  const lastEvent = publishedEvents.at(-1);
+  if (
+    lastEvent?.type !== 'callback_query_created' ||
+    lastEvent.callbackQuery !== pressResult.callbackQuery
+  ) {
+    throw new Error('Expected the expired callback query to be published for the bot');
+  }
+
+  const answerResult = callbackQueries.answerCallbackQuery({
+    fromBotId: chat.bot.profile.id,
+    callbackQueryId: pressResult.callbackQuery.id,
+    showAlert: false,
+    cacheTimeSeconds: 0,
+  });
+  if (answerResult.answered) {
+    throw new Error('Expected an expired callback query to reject its answer');
   }
 });
 

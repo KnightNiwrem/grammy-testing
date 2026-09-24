@@ -1000,7 +1000,9 @@ Deno.test('an account presses a callback button and reads the bot answer', async
   const pressBody: unknown = await pressResponse.json();
   if (
     pressResponse.status !== 201 || !isCallbackQueryResponse(pressBody) ||
-    pressBody.callback_query.callback_data !== 'yes' || pressBody.callback_query.answer !== null ||
+    pressBody.callback_query.callback_data !== 'yes' ||
+    pressBody.callback_query.status !== 'awaiting_answer' ||
+    pressBody.callback_query.answer !== null ||
     pressResponse.headers.get('Location') !==
       `${callbackQueriesPath}/${pressBody.callback_query.id}`
   ) {
@@ -1096,6 +1098,145 @@ Deno.test('an account presses a callback button and reads the bot answer', async
         pressFailures.map((response) => response.status).join()
       }`,
     );
+  }
+});
+
+Deno.test('a callback query created expired reaches the bot but refuses its answer', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  await sendText('/start');
+  const accountId = createdAccount.account.id;
+  const reply = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Continue?',
+    reply_markup: { inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] },
+  });
+  const callbackQueriesPath = `${sessionPath}/accounts/${accountId}/callback-queries`;
+  const pressButton = (expired: unknown) =>
+    api.request(callbackQueriesPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat: { type: 'private', botId: createdBot.bot.id },
+        message_id: botApiResult(reply.body)?.message_id,
+        callback_data: 'yes',
+        expired,
+      }),
+    });
+
+  const pressResponse = await pressButton(true);
+  const pressBody: unknown = await pressResponse.json();
+  if (
+    pressResponse.status !== 201 || !isCallbackQueryResponse(pressBody) ||
+    pressBody.callback_query.status !== 'expired' || pressBody.callback_query.answer !== null
+  ) {
+    throw new Error('Expected the press to create an expired callback query');
+  }
+  const callbackQueryId = pressBody.callback_query.id;
+  const updatesBody = (await (await api.request(`${botApiPath}/getUpdates`)).json()) as {
+    result?: Array<{ callback_query?: { id?: string } }>;
+  };
+  if (updatesBody.result?.at(-1)?.callback_query?.id !== callbackQueryId) {
+    throw new Error('Expected the bot to receive the expired callback query');
+  }
+
+  const { status, body } = await callBotApi(api, `${botApiPath}/answerCallbackQuery`, {
+    callback_query_id: callbackQueryId,
+    text: 'Saved',
+  });
+  if (
+    status !== 400 || !isBadRequestResponse(body) ||
+    body.description !==
+      'Bad Request: query is too old and response timeout expired or query ID is invalid'
+  ) {
+    throw new Error('Expected the answer to the expired query to be rejected');
+  }
+  const queryBody: unknown = await (await api.request(`${callbackQueriesPath}/${callbackQueryId}`))
+    .json();
+  if (!isCallbackQueryResponse(queryBody) || queryBody.callback_query.status !== 'expired') {
+    throw new Error('Expected the rejected answer to leave the query expired');
+  }
+
+  if ((await pressButton('yes')).status !== 400) {
+    throw new Error('Expected a non-boolean expired flag to be rejected');
+  }
+});
+
+Deno.test('a grammY bot catching up after downtime cannot answer an expired callback query', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  await sendText('/start');
+  const menu = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Continue?',
+    reply_markup: { inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] },
+  });
+  // The bot is offline when the account presses the button, so the query has expired by the time
+  // the bot polls for it.
+  const pressResponse = await api.request(`${sessionPath}/accounts/${accountId}/callback-queries`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat: { type: 'private', botId: createdBot.bot.id },
+      message_id: botApiResult(menu.body)?.message_id,
+      callback_data: 'yes',
+      expired: true,
+    }),
+  });
+  if (pressResponse.status !== 201) {
+    throw new Error(`Expected the button press to be accepted, received ${pressResponse.status}`);
+  }
+
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const answerErrors: unknown[] = [];
+  const queryHandled = Promise.withResolvers<void>();
+  grammyBot.callbackQuery('yes', async (context) => {
+    try {
+      await context.answerCallbackQuery({ text: 'Saved' });
+    } catch (error) {
+      answerErrors.push(error);
+      await context.reply('That button has expired; please try again.');
+    }
+    queryHandled.resolve();
+  });
+  // Skip the pending /start message so that only the callback query is handled.
+  grammyBot.on('message', () => {});
+  const polling = grammyBot.start();
+
+  try {
+    await expectSettlementWithin(
+      Promise.race([queryHandled.promise, polling]),
+      5_000,
+      'Expected the bot to handle the expired callback query',
+    );
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+
+  const [answerError] = answerErrors;
+  if (
+    answerErrors.length !== 1 || !(answerError instanceof GrammyError) ||
+    answerError.error_code !== 400 ||
+    answerError.description !==
+      'Bad Request: query is too old and response timeout expired or query ID is invalid'
+  ) {
+    throw new Error(`Expected answering to fail as Telegram does, received ${answerErrors}`);
+  }
+  const historyBody: unknown = await (await api.request(
+    `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/messages`,
+  )).json();
+  if (
+    !isMessageHistoryResponse(historyBody) ||
+    historyBody.messages.at(-1)?.text !== 'That button has expired; please try again.'
+  ) {
+    throw new Error("Expected the bot's fallback reply in history");
   }
 });
 
@@ -1519,6 +1660,7 @@ function isCallbackQueryResponse(value: unknown): value is {
   callback_query: {
     id: string;
     callback_data: string;
+    status: 'awaiting_answer' | 'answered' | 'expired';
     answer: { text?: string; show_alert: boolean; cache_time: number } | null;
   };
 } {
@@ -1529,8 +1671,9 @@ function isCallbackQueryResponse(value: unknown): value is {
   if (typeof callbackQuery !== 'object' || callbackQuery === null) {
     return false;
   }
-  const { id, callback_data, answer } = callbackQuery as Record<string, unknown>;
+  const { id, callback_data, status, answer } = callbackQuery as Record<string, unknown>;
   return typeof id === 'string' && typeof callback_data === 'string' &&
+    ['awaiting_answer', 'answered', 'expired'].includes(String(status)) &&
     (answer === null || typeof answer === 'object');
 }
 

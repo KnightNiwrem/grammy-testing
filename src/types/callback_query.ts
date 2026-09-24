@@ -17,6 +17,16 @@ export interface CallbackQueryAnswer {
   readonly cacheTimeSeconds: number;
 }
 
+/**
+ * Where a callback query is in its life. A query starts awaiting an answer, or already expired,
+ * as when a bot that was offline catches up after Telegram's answer deadline has passed. The bot's
+ * accepted answer consumes an awaiting query; an answered or expired query accepts no answer.
+ */
+export type CallbackQueryState =
+  | { readonly status: 'awaiting_answer' }
+  | { readonly status: 'answered'; readonly answer: CallbackQueryAnswer }
+  | { readonly status: 'expired' };
+
 /** An account's press of a callback button on a bot message in their private conversation. */
 export interface CallbackQuery {
   readonly id: CallbackQueryId;
@@ -25,6 +35,5 @@ export interface CallbackQuery {
   /** Telegram's `chat_instance` of the message's chat, fixed when the conversation began. */
   readonly chatInstance: string;
   readonly callbackData: string;
-  /** Omitted until the bot answers; a callback query is answered at most once. */
-  readonly answer?: CallbackQueryAnswer;
+  readonly state: CallbackQueryState;
 }

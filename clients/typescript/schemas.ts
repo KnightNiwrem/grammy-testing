@@ -122,6 +122,7 @@ export const messageHistoryResponseSchema = z.strictObject({
 const callbackQuerySchema: z.ZodType<CallbackQuery> = z.strictObject({
   id: z.string().min(1),
   callback_data: z.string(),
+  status: z.enum(['awaiting_answer', 'answered', 'expired']),
   answer: z.strictObject({
     text: z.string().optional(),
     show_alert: z.boolean(),

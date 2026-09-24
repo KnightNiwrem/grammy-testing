@@ -13,6 +13,7 @@ export type {
   CallbackInlineKeyboardButton,
   CallbackQuery,
   CallbackQueryAnswer,
+  CallbackQueryStatus,
   CreatedVirtualAccount,
   CreatedVirtualBot,
   CreateVirtualAccountInput,

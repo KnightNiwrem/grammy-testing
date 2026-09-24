@@ -14,15 +14,17 @@ optionally with an inline keyboard of callback and URL buttons; formatting and r
 not supported yet. Replies appear in conversation history, and, as on Telegram, the bot receives no
 update for them. An account can press a callback button, which sends the bot a `callback_query`
 update; the bot answers with `answerCallbackQuery`, and the test reads the answer from the pressed
-callback query. Bots edit their messages with `editMessageText` and `editMessageReplyMarkup`. With
-`deleteWebhook` and `getMe` also implemented, a grammY bot can run with `bot.start()` and stop with
-`bot.stop()`. As Telegram does in private chats with bots, the emulator marks bot commands such as
-`/start` with `bot_command` entities, so framework command handlers match them; other entity types
-are not detected yet. Bot API requests follow Telegram's conventions: GET or POST, case-insensitive
-method names, and parameters in the query string or a JSON, URL-encoded, or multipart body. Bot API
-failures, including calls to methods the emulator does not implement, return Telegram-shaped JSON
-errors that clients report as API errors. The session creation response identifies its Bot API root.
-Other routes described in `openapi.yaml` are not implemented yet.
+callback query. A press can create the callback query already expired, to check how a bot handles a
+query it can no longer answer, such as one that arrives after downtime. Bots edit their messages
+with `editMessageText` and `editMessageReplyMarkup`. With `deleteWebhook` and `getMe` also
+implemented, a grammY bot can run with `bot.start()` and stop with `bot.stop()`. As Telegram does in
+private chats with bots, the emulator marks bot commands such as `/start` with `bot_command`
+entities, so framework command handlers match them; other entity types are not detected yet. Bot API
+requests follow Telegram's conventions: GET or POST, case-insensitive method names, and parameters
+in the query string or a JSON, URL-encoded, or multipart body. Bot API failures, including calls to
+methods the emulator does not implement, return Telegram-shaped JSON errors that clients report as
+API errors. The session creation response identifies its Bot API root. Other routes described in
+`openapi.yaml` are not implemented yet.
 
 ## TypeScript client
 

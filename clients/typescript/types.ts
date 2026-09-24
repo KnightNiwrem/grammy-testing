@@ -67,6 +67,11 @@ export interface PressCallbackButtonInput {
   readonly message_id: number;
   /** The callback data of the button to press. */
   readonly callback_data: string;
+  /**
+   * Creates the query already expired: the bot still receives it but cannot answer it, as when a
+   * bot that was offline catches up on queries whose answer deadline has passed.
+   */
+  readonly expired?: boolean;
 }
 
 export interface PrivateChat {
@@ -133,10 +138,15 @@ export interface CallbackQueryAnswer {
   readonly cache_time: number;
 }
 
+/** Whether the bot can still answer a callback query, and if not, why. */
+export type CallbackQueryStatus = 'awaiting_answer' | 'answered' | 'expired';
+
 /** A callback button press by an account, with the bot's answer once it has answered. */
 export interface CallbackQuery {
   readonly id: string;
   readonly callback_data: string;
+  readonly status: CallbackQueryStatus;
+  /** The bot's answer when `status` is `answered`, and `null` otherwise. */
   readonly answer: CallbackQueryAnswer | null;
 }
 

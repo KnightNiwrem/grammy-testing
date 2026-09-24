@@ -45,6 +45,7 @@ const pressCallbackButtonRequestSchema = z.strictObject({
   /** The message's ID as the bot sees it, which is how these routes show messages. */
   message_id: z.int().positive(),
   callback_data: z.string().min(1),
+  expired: z.boolean().default(false),
 });
 
 /**
@@ -166,6 +167,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       chat: parsedRequest.data.chat,
       botMessageId: parsedRequest.data.message_id,
       callbackData: parsedRequest.data.callback_data,
+      expired: parsedRequest.data.expired,
     });
     if (!result.pressed) {
       return context.body(null, result.reason === 'callback_button_not_found' ? 400 : 404);
@@ -203,14 +205,15 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
 }
 
 /** Shows a callback query to the account that created it, with the bot's answer once given. */
-function presentCallbackQueryForAccount({ id, callbackData, answer }: CallbackQuery) {
+function presentCallbackQueryForAccount({ id, callbackData, state }: CallbackQuery) {
   return {
     id,
     callback_data: callbackData,
-    answer: answer === undefined ? null : {
-      ...(answer.text === undefined ? {} : { text: answer.text }),
-      show_alert: answer.showAlert,
-      cache_time: answer.cacheTimeSeconds,
+    status: state.status,
+    answer: state.status !== 'answered' ? null : {
+      ...(state.answer.text === undefined ? {} : { text: state.answer.text }),
+      show_alert: state.answer.showAlert,
+      cache_time: state.answer.cacheTimeSeconds,
     },
   };
 }

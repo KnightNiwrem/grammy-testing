@@ -142,7 +142,10 @@ Deno.test('TypeScript client manages all currently implemented session resources
     message_id: menu.message_id,
     callback_data: 'yes',
   });
-  if (callbackQuery.callback_data !== 'yes' || callbackQuery.answer !== null) {
+  if (
+    callbackQuery.callback_data !== 'yes' || callbackQuery.status !== 'awaiting_answer' ||
+    callbackQuery.answer !== null
+  ) {
     throw new Error('Expected the client to return the unanswered callback query');
   }
   const answerResponse = await api.request(`${botApiPath}/answerCallbackQuery`, {
@@ -155,10 +158,21 @@ Deno.test('TypeScript client manages all currently implemented session resources
   }
   const answeredCallbackQuery = await createdAccount.account.getCallbackQuery(callbackQuery.id);
   if (
+    answeredCallbackQuery.status !== 'answered' ||
     JSON.stringify(answeredCallbackQuery.answer) !==
       JSON.stringify({ text: 'Saved', show_alert: false, cache_time: 0 })
   ) {
     throw new Error("Expected the client to return the bot's answer");
+  }
+
+  const expiredOnCreation = await createdAccount.account.pressCallbackButton({
+    chat: { type: 'private', botId: createdBot.bot.id },
+    message_id: menu.message_id,
+    callback_data: 'yes',
+    expired: true,
+  });
+  if (expiredOnCreation.status !== 'expired') {
+    throw new Error('Expected the client to create an expired callback query');
   }
 
   await session.end();

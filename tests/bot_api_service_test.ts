@@ -211,6 +211,7 @@ Deno.test('BotApiService answers callback queries once, as the bot that received
     chat: { type: 'private', botId: bot.profile.id },
     botMessageId: sentMessage.message_id,
     callbackData: 'yes',
+    expired: false,
   });
   if (!pressResult.pressed) {
     throw new Error(`Expected the button press to succeed, received ${pressResult.reason}`);

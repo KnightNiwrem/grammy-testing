@@ -133,6 +133,7 @@ Deno.test('BotMessageViewService shows a callback query with its message as the 
     messageId: message.id,
     chatInstance: '-42',
     callbackData: 'yes',
+    state: { status: 'awaiting_answer' },
   }, message);
 
   const expectedView = {

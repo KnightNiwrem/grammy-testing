@@ -11,9 +11,11 @@ export interface AddCallbackQueryInput {
   readonly messageId: CanonicalMessageId;
   readonly chatInstance: string;
   readonly callbackData: string;
+  /** Stores the query already expired instead of awaiting an answer. */
+  readonly expired: boolean;
 }
 
-/** Stores callback queries and their answers under session-unique identifiers. */
+/** Stores callback queries and how each one ended under session-unique identifiers. */
 export class CallbackQueryRepository {
   readonly #callbackQueriesById = new Map<CallbackQueryId, CallbackQuery>();
   #nextCallbackQueryNumber = 1;
@@ -25,6 +27,7 @@ export class CallbackQueryRepository {
       messageId: input.messageId,
       chatInstance: input.chatInstance,
       callbackData: input.callbackData,
+      state: input.expired ? { status: 'expired' } : { status: 'awaiting_answer' },
     };
     this.#callbackQueriesById.set(callbackQuery.id, callbackQuery);
     return callbackQuery;
@@ -34,17 +37,20 @@ export class CallbackQueryRepository {
     return this.#callbackQueriesById.get(callbackQueryId);
   }
 
-  /** Records the answer to an unanswered callback query and returns the answered query. */
+  /** Records the answer to a query awaiting one and returns the answered query. */
   recordAnswer(callbackQueryId: CallbackQueryId, answer: CallbackQueryAnswer): CallbackQuery {
     const callbackQuery = this.#callbackQueriesById.get(callbackQueryId);
     if (callbackQuery === undefined) {
       throw new Error(`Callback query ${callbackQueryId} does not exist`);
     }
-    if (callbackQuery.answer !== undefined) {
-      throw new Error(`Callback query ${callbackQueryId} is already answered`);
+    if (callbackQuery.state.status !== 'awaiting_answer') {
+      throw new Error(`Callback query ${callbackQueryId} is already ${callbackQuery.state.status}`);
     }
 
-    const answeredCallbackQuery: CallbackQuery = { ...callbackQuery, answer: { ...answer } };
+    const answeredCallbackQuery: CallbackQuery = {
+      ...callbackQuery,
+      state: { status: 'answered', answer: { ...answer } },
+    };
     this.#callbackQueriesById.set(callbackQueryId, answeredCallbackQuery);
     return answeredCallbackQuery;
   }

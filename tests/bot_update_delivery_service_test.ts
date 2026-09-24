@@ -124,6 +124,7 @@ Deno.test('BotUpdateDeliveryService delivers a callback query to the bot whose b
       messageId: message.id,
       chatInstance: '-42',
       callbackData: 'yes',
+      state: { status: 'awaiting_answer' },
     },
     message,
   });
@@ -178,6 +179,7 @@ Deno.test('BotUpdateDeliveryService skips callback queries excluded by the bot s
       messageId: message.id,
       chatInstance: '-42',
       callbackData: 'yes',
+      state: { status: 'awaiting_answer' },
     },
     message,
   });

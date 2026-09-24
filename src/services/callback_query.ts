@@ -18,6 +18,11 @@ export interface PressCallbackButtonInput {
   /** The ID of the message carrying the button, in the bot's message box. */
   readonly botMessageId: number;
   readonly callbackData: string;
+  /**
+   * Creates the query already expired: the bot still receives it but cannot answer it, as when a
+   * bot that was offline catches up on queries whose answer deadline has passed.
+   */
+  readonly expired: boolean;
 }
 
 export type PressCallbackButtonFailureReason =
@@ -43,7 +48,8 @@ export type BotCallbackQueryAnswerResult =
   | { readonly answered: true; readonly callbackQuery: CallbackQuery }
   | { readonly answered: false; readonly reason: 'callback_query_not_answerable' };
 
-export interface GetAccountCallbackQueryInput {
+/** Identifies a callback query by the account that created it. */
+export interface AccountCallbackQueryKey {
   readonly accountId: number;
   readonly callbackQueryId: CallbackQueryId;
 }
@@ -73,6 +79,7 @@ interface CallbackQueryStore {
     readonly messageId: CanonicalMessageId;
     readonly chatInstance: string;
     readonly callbackData: string;
+    readonly expired: boolean;
   }): CallbackQuery;
   getCallbackQuery(callbackQueryId: CallbackQueryId): CallbackQuery | undefined;
   recordAnswer(callbackQueryId: CallbackQueryId, answer: CallbackQueryAnswer): CallbackQuery;
@@ -93,7 +100,8 @@ interface CallbackQueryServiceDependencies {
 
 /**
  * Carries out callback queries: an account presses a callback button on a bot's message, and the
- * bot answers once with an optional notification for the account.
+ * bot answers once with an optional notification for the account. A press can create the query
+ * already expired; the emulator does not otherwise expire queries by time.
  */
 export class CallbackQueryService {
   readonly #accounts: AccountLookup;
@@ -155,6 +163,7 @@ export class CallbackQueryService {
       messageId: message.id,
       chatInstance: conversation.chatInstance,
       callbackData: input.callbackData,
+      expired: input.expired,
     });
     this.#events.publish({ type: 'callback_query_created', callbackQuery, message });
     return { pressed: true, callbackQuery };
@@ -162,14 +171,14 @@ export class CallbackQueryService {
 
   /**
    * Records the bot's answer to a callback query it received. As on Telegram, a query that does
-   * not exist, belongs to another bot, or is already answered cannot be answered.
+   * not exist, belongs to another bot, is already answered, or has expired cannot be answered.
    */
   answerCallbackQuery(input: BotCallbackQueryAnswerInput): BotCallbackQueryAnswerResult {
     const callbackQuery = this.#callbackQueries.getCallbackQuery(input.callbackQueryId);
     if (
       callbackQuery === undefined ||
       callbackQuery.conversation.botId !== input.fromBotId ||
-      callbackQuery.answer !== undefined
+      callbackQuery.state.status !== 'awaiting_answer'
     ) {
       return { answered: false, reason: 'callback_query_not_answerable' };
     }
@@ -186,7 +195,7 @@ export class CallbackQueryService {
 
   /** Returns a callback query the account created, or `undefined` for any other query. */
   getAccountCallbackQuery(
-    { accountId, callbackQueryId }: GetAccountCallbackQueryInput,
+    { accountId, callbackQueryId }: AccountCallbackQueryKey,
   ): CallbackQuery | undefined {
     const callbackQuery = this.#callbackQueries.getCallbackQuery(callbackQueryId);
     return callbackQuery?.conversation.accountId === accountId ? callbackQuery : undefined;
