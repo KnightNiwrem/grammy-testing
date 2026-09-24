@@ -178,6 +178,21 @@ const BOT_COMMAND_FAILURE_DESCRIPTIONS = {
   command_invalid: 'Bad Request: BOT_COMMAND_INVALID',
 } as const;
 
+/** Telegram's descriptions for rejected requests about chat members. */
+const USER_ID_INVALID_DESCRIPTION = 'Bad Request: invalid user_id specified';
+const MEMBER_NOT_FOUND_DESCRIPTION = 'Bad Request: member not found';
+const PRIVATE_CHAT_HAS_NO_ADMINISTRATORS_DESCRIPTION =
+  'Bad Request: there are no administrators in the private chat';
+const PRIVATE_CHAT_MEMBERS_NOT_BANNABLE_DESCRIPTION =
+  "Bad Request: can't ban members in private chats";
+const METHOD_UNAVAILABLE_IN_PRIVATE_CHATS_DESCRIPTION =
+  'Bad Request: method is available only in supergroup and channel chats';
+const CANNOT_RESTRICT_SELF_DESCRIPTION = "Bad Request: can't restrict self";
+const MEMBER_IS_OWNER_DESCRIPTION = "Bad Request: can't remove chat owner";
+const NOT_ENOUGH_RIGHTS_TO_RESTRICT_DESCRIPTION =
+  'Bad Request: not enough rights to restrict/unrestrict chat member';
+const MEMBER_IS_ADMINISTRATOR_DESCRIPTION = 'Bad Request: user is an administrator of the chat';
+
 /** Telegram caps how long a client may cache a callback query answer at 30 days. */
 const MAX_CALLBACK_QUERY_ANSWER_CACHE_TIME_SECONDS = 30 * 24 * 60 * 60;
 
@@ -315,6 +330,35 @@ const myCommandsTargetParametersSchema = z.strictObject({
   language_code: z.string().default(''),
 });
 
+const getChatMemberParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  user_id: integerParameter(z.int()).optional(),
+});
+
+const getChatAdministratorsParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  return_bots: booleanParameter().default(false),
+});
+
+const getChatMemberCountParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+});
+
+// Telegram always revokes a removed member's access to a supergroup's messages, and the emulator
+// shows no member a history it cannot read, so `revoke_messages` is validated and ignored.
+const banChatMemberParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  user_id: integerParameter(z.int()).optional(),
+  until_date: integerParameter(z.int()).optional(),
+  revoke_messages: booleanParameter().optional(),
+});
+
+const unbanChatMemberParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  user_id: integerParameter(z.int()).optional(),
+  only_if_banned: booleanParameter().default(false),
+});
+
 const getFileParametersSchema = z.strictObject({
   file_id: z.string().default(''),
 });
@@ -359,6 +403,25 @@ type SendOptionsParameters = z.infer<z.ZodObject<typeof sendOptionsParametersSha
 
 type MyCommandsTarget = Parameters<EmulationSession['botApi']['getMyCommands']>[1];
 
+/** Why a request about a chat's members, or a moderation of them, can fail. */
+type ChatMemberFailureReason =
+  | Extract<
+    ReturnType<EmulationSession['botApi']['getChatMember']>,
+    { readonly found: false }
+  >['reason']
+  | Extract<
+    ReturnType<EmulationSession['botApi']['getChatAdministrators']>,
+    { readonly found: false }
+  >['reason']
+  | Extract<
+    ReturnType<EmulationSession['botApi']['banChatMember']>,
+    { readonly banned: false }
+  >['reason']
+  | Extract<
+    ReturnType<EmulationSession['botApi']['unbanChatMember']>,
+    { readonly unbanned: false }
+  >['reason'];
+
 type MyCommandsTargetFailureReason = Extract<
   ReturnType<EmulationSession['botApi']['getMyCommands']>,
   { readonly found: false }
@@ -380,6 +443,7 @@ type BotApiMethodHandler = (
 /** Keyed by lowercase name, because Telegram matches method names case-insensitively. */
 const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHandler>([
   ['answercallbackquery', handleAnswerCallbackQuery],
+  ['banchatmember', handleBanChatMember],
   ['deletemessage', handleDeleteMessage],
   ['deletemessages', handleDeleteMessages],
   ['deletemycommands', handleDeleteMyCommands],
@@ -387,16 +451,24 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['editmessagecaption', handleEditMessageCaption],
   ['editmessagereplymarkup', handleEditMessageReplyMarkup],
   ['editmessagetext', handleEditMessageText],
+  ['getchatadministrators', handleGetChatAdministrators],
+  ['getchatmember', handleGetChatMember],
+  ['getchatmembercount', handleGetChatMemberCount],
+  // Telegram's older name for getChatMemberCount.
+  ['getchatmemberscount', handleGetChatMemberCount],
   ['getfile', handleGetFile],
   ['getme', handleGetMe],
   ['getmycommands', handleGetMyCommands],
   ['getupdates', handleGetUpdates],
+  // Telegram's older name for banChatMember.
+  ['kickchatmember', handleBanChatMember],
   ['leavechat', handleLeaveChat],
   ['sendchataction', handleSendChatAction],
   ['senddocument', handleSendDocument],
   ['sendmessage', handleSendMessage],
   ['sendphoto', handleSendPhoto],
   ['setmycommands', handleSetMyCommands],
+  ['unbanchatmember', handleUnbanChatMember],
 ]);
 
 export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
@@ -1168,6 +1240,169 @@ function handleLeaveChat(
     default: {
       const unhandledReason: never = result.reason;
       throw new Error(`Unhandled leaveChat failure: ${unhandledReason}`);
+    }
+  }
+}
+
+function handleGetChatMember(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = getChatMemberParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid getChatMember parameters');
+  }
+  const targetReading = readChatMemberTarget(context, parsedParameters.data);
+  if (!targetReading.read) {
+    return targetReading.response;
+  }
+
+  const result = context.get('emulationSession').botApi.getChatMember(
+    context.get('authenticatedBot'),
+    targetReading.target,
+  );
+  return result.found
+    ? context.json({ ok: true as const, result: result.member })
+    : chatMemberFailureResponse(context, result.reason);
+}
+
+function handleGetChatAdministrators(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = getChatAdministratorsParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid getChatAdministrators parameters');
+  }
+  const { chat_id: chatId, return_bots: includesOtherBots } = parsedParameters.data;
+  if (chatId === undefined) {
+    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+  }
+
+  const result = context.get('emulationSession').botApi.getChatAdministrators(
+    context.get('authenticatedBot'),
+    { chatId, includesOtherBots },
+  );
+  return result.found
+    ? context.json({ ok: true as const, result: result.administrators })
+    : chatMemberFailureResponse(context, result.reason);
+}
+
+function handleGetChatMemberCount(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = getChatMemberCountParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid getChatMemberCount parameters');
+  }
+  const { chat_id: chatId } = parsedParameters.data;
+  if (chatId === undefined) {
+    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+  }
+
+  const result = context.get('emulationSession').botApi.getChatMemberCount(
+    context.get('authenticatedBot'),
+    { chatId },
+  );
+  return result.found
+    ? context.json({ ok: true as const, result: result.memberCount })
+    : chatMemberFailureResponse(context, result.reason);
+}
+
+function handleBanChatMember(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = banChatMemberParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid banChatMember parameters');
+  }
+  const targetReading = readChatMemberTarget(context, parsedParameters.data);
+  if (!targetReading.read) {
+    return targetReading.response;
+  }
+
+  const result = context.get('emulationSession').botApi.banChatMember(
+    context.get('authenticatedBot'),
+    { ...targetReading.target, untilUnixSeconds: parsedParameters.data.until_date },
+  );
+  return result.banned
+    ? context.json({ ok: true as const, result: true as const })
+    : chatMemberFailureResponse(context, result.reason);
+}
+
+function handleUnbanChatMember(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = unbanChatMemberParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid unbanChatMember parameters');
+  }
+  const targetReading = readChatMemberTarget(context, parsedParameters.data);
+  if (!targetReading.read) {
+    return targetReading.response;
+  }
+
+  const result = context.get('emulationSession').botApi.unbanChatMember(
+    context.get('authenticatedBot'),
+    { ...targetReading.target, onlyIfBanned: parsedParameters.data.only_if_banned },
+  );
+  return result.unbanned
+    ? context.json({ ok: true as const, result: true as const })
+    : chatMemberFailureResponse(context, result.reason);
+}
+
+/**
+ * Reads the chat and the user a member method addresses. Telegram reads the user first, and reads
+ * a missing or non-positive `user_id` as 0, which identifies no user.
+ */
+function readChatMemberTarget(
+  context: BotApiRouteContext,
+  { chat_id: chatId, user_id: userId }: { readonly chat_id?: number; readonly user_id?: number },
+):
+  | { readonly read: true; readonly target: { readonly chatId: number; readonly userId: number } }
+  | { readonly read: false; readonly response: Response } {
+  if (userId === undefined || userId <= 0) {
+    return { read: false, response: botApiError(context, 400, USER_ID_INVALID_DESCRIPTION) };
+  }
+  if (chatId === undefined) {
+    return { read: false, response: botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION) };
+  }
+  return { read: true, target: { chatId, userId } };
+}
+
+function chatMemberFailureResponse(
+  context: BotApiRouteContext,
+  reason: ChatMemberFailureReason,
+): Response {
+  switch (reason) {
+    case 'chat_not_found':
+      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'bot_not_a_member':
+      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+    case 'bot_kicked':
+      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
+    case 'member_not_found':
+      return botApiError(context, 400, MEMBER_NOT_FOUND_DESCRIPTION);
+    case 'private_chat_has_no_administrators':
+      return botApiError(context, 400, PRIVATE_CHAT_HAS_NO_ADMINISTRATORS_DESCRIPTION);
+    case 'private_chat_members_not_bannable':
+      return botApiError(context, 400, PRIVATE_CHAT_MEMBERS_NOT_BANNABLE_DESCRIPTION);
+    case 'method_unavailable_in_private_chats':
+      return botApiError(context, 400, METHOD_UNAVAILABLE_IN_PRIVATE_CHATS_DESCRIPTION);
+    case 'cannot_restrict_self':
+      return botApiError(context, 400, CANNOT_RESTRICT_SELF_DESCRIPTION);
+    case 'member_is_owner':
+      return botApiError(context, 400, MEMBER_IS_OWNER_DESCRIPTION);
+    case 'not_enough_rights':
+      return botApiError(context, 400, NOT_ENOUGH_RIGHTS_TO_RESTRICT_DESCRIPTION);
+    case 'member_is_administrator':
+      return botApiError(context, 400, MEMBER_IS_ADMINISTRATOR_DESCRIPTION);
+    default: {
+      const unhandledReason: never = reason;
+      throw new Error(`Unhandled chat member failure: ${unhandledReason}`);
     }
   }
 }

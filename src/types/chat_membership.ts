@@ -1,21 +1,168 @@
-export type ChatMembership =
-  | {
-    readonly status: 'owner';
-    readonly identityId: number;
+import type { SharedChat, Supergroup } from './virtual_chat.ts';
+
+/**
+ * The rights a supergroup's owner can grant an administrator, by the Bot API's names and in the
+ * order the Bot API shows them. Anonymous administrators and the rights of channel administrators
+ * are not supported.
+ */
+export const SUPERGROUP_ADMINISTRATOR_RIGHTS = [
+  'can_manage_chat',
+  'can_change_info',
+  'can_delete_messages',
+  'can_invite_users',
+  'can_restrict_members',
+  'can_pin_messages',
+  'can_manage_topics',
+  'can_promote_members',
+  'can_manage_video_chats',
+  'can_post_stories',
+  'can_edit_stories',
+  'can_delete_stories',
+  'can_manage_tags',
+  'can_send_welcome_messages',
+] as const;
+
+export type SupergroupAdministratorRight = typeof SUPERGROUP_ADMINISTRATOR_RIGHTS[number];
+
+/** The rights a supergroup administrator holds, which always include `can_manage_chat`. */
+export type SupergroupAdministratorRights = ReadonlySet<SupergroupAdministratorRight>;
+
+/**
+ * Collects the rights granted to an administrator. As TDLib does, any right includes
+ * `can_manage_chat`, so granting no right grants none at all.
+ */
+export function grantSupergroupAdministratorRights(
+  grantedRights: Iterable<SupergroupAdministratorRight>,
+): SupergroupAdministratorRights {
+  const rights = new Set(grantedRights);
+  if (rights.size > 0) {
+    rights.add('can_manage_chat');
   }
+  return rights;
+}
+
+/**
+ * A current member's standing in a shared chat. Only supergroups have administrators, whom the
+ * owner promotes.
+ */
+export type ChatMembership =
+  | { readonly status: 'owner' }
+  | { readonly status: 'administrator'; readonly rights: SupergroupAdministratorRights }
+  | { readonly status: 'member' };
+
+/**
+ * How a former member's membership ended, by the Bot API's status names: the member `left`, or it
+ * was removed, which in a supergroup bans it as `kicked` until the ban is lifted.
+ */
+export type FormerChatMemberStatus =
+  | { readonly status: 'left' }
   | {
-    readonly status: 'member';
-    readonly identityId: number;
+    readonly status: 'kicked';
+    /**
+     * When the ban ends; omitted for a ban that lasts until an administrator lifts it. The
+     * emulator never lifts a ban on its own when this time passes.
+     */
+    readonly bannedUntilUnixSeconds?: number;
   };
 
 /**
- * How a former member's membership ended, by the Bot API's status names: the member `left`, or an
- * administrator removed it, which in a supergroup bans it as `kicked` until it is added again.
+ * A user's standing in a shared chat, whether it is a member or not. A user that never joined the
+ * chat has `left` it.
  */
-export type FormerChatMemberStatus = 'left' | 'kicked';
+export type ChatMemberStatus = ChatMembership | FormerChatMemberStatus;
+
+/** A user that left a chat, or never joined it. */
+export const LEFT_CHAT_MEMBER_STATUS: FormerChatMemberStatus = { status: 'left' };
+
+/** Whether a supergroup member holds an administrator right; the owner holds every right. */
+export function holdsSupergroupAdministratorRight(
+  membership: ChatMembership | undefined,
+  right: SupergroupAdministratorRight,
+): boolean {
+  switch (membership?.status) {
+    case 'owner':
+      return true;
+    case 'administrator':
+      return membership.rights.has(right);
+    case 'member':
+    case undefined:
+      return false;
+    default: {
+      const unhandledMembership: never = membership;
+      throw new Error(`Unhandled chat membership: ${JSON.stringify(unhandledMembership)}`);
+    }
+  }
+}
+
+/** Whether two standings in a chat are the same, rights and ban end included. */
+export function isSameChatMemberStatus(
+  first: ChatMemberStatus,
+  second: ChatMemberStatus,
+): boolean {
+  switch (first.status) {
+    case 'owner':
+    case 'member':
+    case 'left':
+      return first.status === second.status;
+    case 'administrator':
+      return second.status === 'administrator' && first.rights.size === second.rights.size &&
+        [...first.rights].every((right) => second.rights.has(right));
+    case 'kicked':
+      return second.status === 'kicked' &&
+        first.bannedUntilUnixSeconds === second.bannedUntilUnixSeconds;
+    default: {
+      const unhandledStatus: never = first;
+      throw new Error(`Unhandled chat member status: ${JSON.stringify(unhandledStatus)}`);
+    }
+  }
+}
 
 /** Why a bot cannot act in a supergroup it left, or was removed from and so banned from. */
 export type FormerSupergroupMemberFailureReason = 'bot_not_a_member' | 'bot_kicked';
+
+/**
+ * Why a bot cannot act in a supergroup: one it never joined is unknown to it, as on Telegram,
+ * whereas one it left or was removed from turns it away.
+ */
+export type SupergroupBotAccessFailureReason =
+  | 'chat_not_found'
+  | FormerSupergroupMemberFailureReason;
+
+export interface SupergroupMembershipLookup {
+  getSharedChat(chatId: number): SharedChat | undefined;
+  getChatMembership(chatId: number, identityId: number): ChatMembership | undefined;
+  getFormerMemberStatus(chatId: number, identityId: number): FormerChatMemberStatus | undefined;
+}
+
+/**
+ * Checks that a bot is a member of a supergroup, which it needs to act there, and returns the
+ * supergroup with the bot's membership, or why the bot cannot act there.
+ */
+export function resolveSupergroupBotMembership(
+  memberships: SupergroupMembershipLookup,
+  botId: number,
+  chatId: number,
+):
+  | {
+    readonly resolved: true;
+    readonly supergroup: Supergroup;
+    readonly membership: ChatMembership;
+  }
+  | { readonly resolved: false; readonly reason: SupergroupBotAccessFailureReason } {
+  const supergroup = memberships.getSharedChat(chatId);
+  if (supergroup?.kind !== 'supergroup') {
+    return { resolved: false, reason: 'chat_not_found' };
+  }
+  const membership = memberships.getChatMembership(chatId, botId);
+  return membership === undefined
+    ? {
+      resolved: false,
+      reason: getSupergroupNonMemberFailureReason(
+        memberships.getFormerMemberStatus(chatId, botId),
+      ),
+    }
+    : { resolved: true, supergroup, membership };
+}
 
 /**
  * Why a bot that is not a member of a supergroup cannot act there, given how its membership ended:
@@ -25,12 +172,16 @@ export type FormerSupergroupMemberFailureReason = 'bot_not_a_member' | 'bot_kick
 export function getSupergroupNonMemberFailureReason(
   formerStatus: FormerChatMemberStatus | undefined,
 ): 'chat_not_found' | FormerSupergroupMemberFailureReason {
-  switch (formerStatus) {
+  switch (formerStatus?.status) {
     case undefined:
       return 'chat_not_found';
     case 'left':
       return 'bot_not_a_member';
     case 'kicked':
       return 'bot_kicked';
+    default: {
+      const unhandledStatus: never = formerStatus;
+      throw new Error(`Unhandled former member status: ${JSON.stringify(unhandledStatus)}`);
+    }
   }
 }

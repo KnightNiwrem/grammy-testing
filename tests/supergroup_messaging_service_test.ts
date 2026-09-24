@@ -9,6 +9,7 @@ import { SharedChatAdministrationService } from '../src/services/shared_chat_adm
 import { SupergroupMessagingService } from '../src/services/supergroup_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
+import { grantSupergroupAdministratorRights } from '../src/types/chat_membership.ts';
 import { getContentText, type SupergroupMessage } from '../src/types/virtual_message.ts';
 
 Deno.test('SupergroupMessagingService numbers messages once for the supergroup and publishes them', () => {
@@ -304,6 +305,51 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
       ) !== JSON.stringify(['members_joined', 'members_joined', 'Hello /help'])
   ) {
     throw new Error('Expected the account edit to be published and the bot message deleted');
+  }
+});
+
+Deno.test('SupergroupMessagingService lets bots with the right delete any message', () => {
+  const { supergroupMessaging, sharedChatAdministration, owner, bot, supergroup } =
+    createSupergroupMessagingFixture();
+  expectSent(supergroupMessaging.sendAccountMessage({
+    fromAccountId: owner.profile.id,
+    chatId: supergroup.id,
+    content: { kind: 'text', text: 'Spam' },
+  }));
+  const deleteAccountMessages = () => {
+    const result = supergroupMessaging.deleteMessagesByBot({
+      fromBotId: bot.profile.id,
+      chatId: supergroup.id,
+      // The bot's join message, then the account's message.
+      messageIds: [1, 2],
+    });
+    return result.deleted ? result.deletedMessageCount : result.reason;
+  };
+  const promote = (right: 'can_pin_messages' | 'can_delete_messages') =>
+    sharedChatAdministration.promoteChatMember({
+      actorAccountId: owner.profile.id,
+      chatId: supergroup.id,
+      memberId: bot.profile.id,
+      rights: grantSupergroupAdministratorRights([right]),
+    });
+
+  promote('can_pin_messages');
+  const deletionWithoutRight = deleteAccountMessages();
+  promote('can_delete_messages');
+  const deletionWithRight = deleteAccountMessages();
+  const history = supergroupMessaging.getMessageHistory({
+    accountId: owner.profile.id,
+    chatId: supergroup.id,
+  });
+  if (
+    deletionWithoutRight !== 'message_not_deletable' || deletionWithRight !== 2 ||
+    !history.found || history.messages.length !== 0
+  ) {
+    throw new Error(
+      `Expected the bot to delete other members' messages only with the right, received ${
+        JSON.stringify([deletionWithoutRight, deletionWithRight])
+      }`,
+    );
   }
 });
 

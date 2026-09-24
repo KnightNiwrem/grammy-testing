@@ -2,14 +2,15 @@ import {
   type ObservedFile,
   projectBotAsUser,
   projectBotBlockChangeForBot,
-  projectBotJoinedGroupForBot,
-  projectBotLeftGroupForBot,
+  projectBotMembershipChangeForBot,
   projectCallbackQueryForBot,
+  projectChatMember,
   projectPrivateMessageForBot,
   projectSupergroupMessage,
 } from '../projections/bot_api_message.ts';
 import type {
   BotApiCallbackQuery,
+  BotApiChatMember,
   BotApiMessage,
   BotApiMyChatMemberUpdated,
   BotApiPrivateMessage,
@@ -22,9 +23,9 @@ import type { CallbackQuery } from '../types/callback_query.ts';
 import type { StoredFile, StoredFileId } from '../types/stored_file.ts';
 import type {
   BotBlockChangedEvent,
-  ChatMemberAddedEvent,
-  ChatMemberLeftEvent,
+  ChatMemberStatusChangedEvent,
 } from '../types/chat_domain_event.ts';
+import type { ChatMemberStatus } from '../types/chat_membership.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { SharedChat } from '../types/virtual_chat.ts';
@@ -73,8 +74,9 @@ interface BotMessageViewServiceDependencies {
 }
 
 /**
- * Presents committed canonical messages, callback queries on them, and changes of a bot's
- * membership in its chats, as the Bot API shows them to an observing bot.
+ * Presents committed canonical messages, callback queries on them, the standing of users in
+ * groups, and changes of a bot's membership in its chats, as the Bot API shows them to an
+ * observing bot.
  *
  * It reads the participants' profiles, the chats, and the observer's message numbering; it never
  * creates messages or decides whether sending one is permitted. As on Telegram, each observer
@@ -186,44 +188,32 @@ export class BotMessageViewService {
   }
 
   /**
-   * Returns an account's addition of a bot to a group as the added bot receives it. The added
-   * member must be a bot, and the chat a basic group or a supergroup.
+   * Returns a change of a bot's standing in a group as the bot receives it. The member must be a
+   * bot, and the chat a basic group or a supergroup.
    */
-  viewBotJoinedGroupForBot(event: ChatMemberAddedEvent): BotApiMyChatMemberUpdated {
+  viewBotMembershipChangeForBot(event: ChatMemberStatusChangedEvent): BotApiMyChatMemberUpdated {
     const { chat } = event;
     if (chat.kind === 'channel') {
-      throw new Error(`Bot ${event.memberId} cannot join channel ${chat.id}`);
-    }
-    const account = this.#accounts.getById(event.actorAccountId);
-    if (account === undefined) {
-      throw new Error(`Account ${event.actorAccountId} that added a member does not exist`);
-    }
-    const bot = this.#bots.getById(event.memberId);
-    if (bot === undefined) {
-      throw new Error(`Added member ${event.memberId} is no bot`);
-    }
-    return projectBotJoinedGroupForBot({ event, chat, account: account.profile, bot: bot.profile });
-  }
-
-  /**
-   * Returns a bot's departure from a group, which it left or an account removed it from, as the
-   * bot receives it. The departed member must be a bot, and the chat a basic group or a
-   * supergroup.
-   */
-  viewBotLeftGroupForBot(event: ChatMemberLeftEvent): BotApiMyChatMemberUpdated {
-    const { chat } = event;
-    if (chat.kind === 'channel') {
-      throw new Error(`Bot ${event.memberId} cannot leave channel ${chat.id}`);
+      throw new Error(`Bot ${event.memberId} cannot be a member of channel ${chat.id}`);
     }
     const actor = this.#findUser(event.actorId);
     if (actor === undefined) {
-      throw new Error(`User ${event.actorId} that ended a membership does not exist`);
+      throw new Error(`User ${event.actorId} that changed a membership does not exist`);
     }
     const bot = this.#bots.getById(event.memberId);
     if (bot === undefined) {
-      throw new Error(`Departed member ${event.memberId} is no bot`);
+      throw new Error(`Member ${event.memberId} whose membership changed is no bot`);
     }
-    return projectBotLeftGroupForBot({ event, chat, actor, bot: bot.profile });
+    return projectBotMembershipChangeForBot({ event, chat, actor, bot: bot.profile });
+  }
+
+  /**
+   * Returns a user's standing in a group as the Bot API shows it, or `undefined` for a user the
+   * session does not know.
+   */
+  viewChatMember(userId: number, status: ChatMemberStatus): BotApiChatMember | undefined {
+    const user = this.#findUser(userId);
+    return user === undefined ? undefined : projectChatMember(user, status);
   }
 
   /** Projects a supergroup message with the given view of the message it replies to, if any. */

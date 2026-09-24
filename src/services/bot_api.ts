@@ -2,6 +2,7 @@ import { cleanUploadedFileName } from '../media/document_file.ts';
 import { isParseMode, parseMarkup } from '../text_entities/parse_mode.ts';
 import type {
   BotApiBotCommand,
+  BotApiChatMember,
   BotApiDownloadableFile,
   BotApiMessage,
   BotApiPrivateMessage,
@@ -10,6 +11,7 @@ import type {
 import type { BotCommand, BotCommandLanguageCode, BotCommandScope } from '../types/bot_command.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
 import {
+  type ChatMemberStatus,
   type FormerSupergroupMemberFailureReason,
   getSupergroupNonMemberFailureReason,
 } from '../types/chat_membership.ts';
@@ -20,7 +22,14 @@ import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { ChatAction } from '../types/virtual_chat.ts';
 import type { PrivateMessage, SupergroupMessage, TextEntity } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
-import type { LeaveChatResult } from './shared_chat_administration.ts';
+import type {
+  BanChatMemberResult,
+  GetChatAdministratorsResult,
+  GetChatMemberCountResult,
+  GetChatMemberStatusResult,
+  LeaveChatResult,
+  UnbanChatMemberResult,
+} from './shared_chat_administration.ts';
 import type {
   ContentNormalizationFailure,
   OutgoingDocument,
@@ -280,6 +289,86 @@ export type DeleteMessagesResult =
       | 'message_not_deletable';
   };
 
+/** Why a bot cannot address a chat whose members it asks about or moderates. */
+export type ChatMemberAccessFailureReason = 'chat_not_found' | FormerSupergroupMemberFailureReason;
+
+export interface GetChatMemberRequest {
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
+  readonly chatId: number;
+  readonly userId: number;
+}
+
+export type GetChatMemberResult =
+  | { readonly found: true; readonly member: BotApiChatMember }
+  | {
+    readonly found: false;
+    readonly reason: ChatMemberAccessFailureReason | 'member_not_found';
+  };
+
+export interface GetChatAdministratorsRequest {
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
+  readonly chatId: number;
+  /** The Bot API `return_bots`: whether to include administrators that are other bots. */
+  readonly includesOtherBots: boolean;
+}
+
+export type BotApiGetChatAdministratorsResult =
+  | { readonly found: true; readonly administrators: readonly BotApiChatMember[] }
+  | {
+    readonly found: false;
+    readonly reason: ChatMemberAccessFailureReason | 'private_chat_has_no_administrators';
+  };
+
+export interface GetChatMemberCountRequest {
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
+  readonly chatId: number;
+}
+
+export type BotApiGetChatMemberCountResult =
+  | { readonly found: true; readonly memberCount: number }
+  | { readonly found: false; readonly reason: ChatMemberAccessFailureReason };
+
+export interface BanChatMemberRequest {
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
+  readonly chatId: number;
+  readonly userId: number;
+  /** The Bot API `until_date`; omitted for a ban that lasts until it is lifted. */
+  readonly untilUnixSeconds?: number;
+}
+
+/** Why a bot cannot ban a user or lift its ban, as the Bot API reports it. */
+export type ChatMemberModerationFailureReason =
+  | ChatMemberAccessFailureReason
+  | 'member_not_found'
+  | 'member_is_owner'
+  | 'not_enough_rights'
+  | 'member_is_administrator';
+
+export type BotApiBanChatMemberResult =
+  | { readonly banned: true }
+  | {
+    readonly banned: false;
+    readonly reason:
+      | ChatMemberModerationFailureReason
+      | 'cannot_restrict_self'
+      | 'private_chat_members_not_bannable';
+  };
+
+export interface UnbanChatMemberRequest {
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
+  readonly chatId: number;
+  readonly userId: number;
+  /** The Bot API `only_if_banned`. */
+  readonly onlyIfBanned: boolean;
+}
+
+export type BotApiUnbanChatMemberResult =
+  | { readonly unbanned: true }
+  | {
+    readonly unbanned: false;
+    readonly reason: ChatMemberModerationFailureReason | 'method_unavailable_in_private_chats';
+  };
+
 export interface AnswerCallbackQueryRequest {
   readonly callbackQueryId: CallbackQueryId;
   readonly text?: string;
@@ -514,6 +603,29 @@ interface SupergroupBotMessaging {
 
 interface ChatMemberships {
   leaveChat(input: { readonly memberId: number; readonly chatId: number }): LeaveChatResult;
+  getChatMemberStatus(input: {
+    readonly observerBotId: number;
+    readonly chatId: number;
+    readonly userId: number;
+  }): GetChatMemberStatusResult;
+  getChatAdministrators(
+    input: { readonly observerBotId: number; readonly chatId: number },
+  ): GetChatAdministratorsResult;
+  getChatMemberCount(
+    input: { readonly observerBotId: number; readonly chatId: number },
+  ): GetChatMemberCountResult;
+  banChatMember(input: {
+    readonly actorBotId: number;
+    readonly chatId: number;
+    readonly memberId: number;
+    readonly requestedBanEndUnixSeconds?: number;
+  }): BanChatMemberResult;
+  unbanChatMember(input: {
+    readonly actorBotId: number;
+    readonly chatId: number;
+    readonly memberId: number;
+    readonly onlyIfBanned: boolean;
+  }): UnbanChatMemberResult;
 }
 
 interface MediaFiles {
@@ -622,6 +734,7 @@ interface CallbackQueryAnswering {
 interface BotMessageViews {
   viewPrivateMessageForBot(message: PrivateMessage): BotApiPrivateMessage;
   viewSupergroupMessage(message: SupergroupMessage, observerId: number): BotApiSupergroupMessage;
+  viewChatMember(userId: number, status: ChatMemberStatus): BotApiChatMember | undefined;
 }
 
 interface BotApiServiceDependencies {
@@ -1020,11 +1133,12 @@ export class BotApiService {
     { chatId }: LeaveChatRequest,
   ): BotApiLeaveChatResult {
     if (isUserId(chatId)) {
-      const isChatKnown = this.#botMessages.isPrivateConversationStarted({
-        accountId: chatId,
-        botId: authenticatedBot.id,
-      });
-      return { left: false, reason: isChatKnown ? 'private_chat_not_leavable' : 'chat_not_found' };
+      return {
+        left: false,
+        reason: this.#isPrivateChatKnown(authenticatedBot, chatId)
+          ? 'private_chat_not_leavable'
+          : 'chat_not_found',
+      };
     }
     const result = this.#chatMemberships.leaveChat({ memberId: authenticatedBot.id, chatId });
     if (result.left) {
@@ -1044,6 +1158,137 @@ export class BotApiService {
         throw new Error(`Unhandled leaveChat failure: ${unhandledReason}`);
       }
     }
+  }
+
+  /**
+   * Returns a user's standing in a chat: in a private chat, either participant is a member; in a
+   * supergroup, the bot must be a member, and a user of the session that never joined has `left`.
+   */
+  getChatMember(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, userId }: GetChatMemberRequest,
+  ): GetChatMemberResult {
+    if (isUserId(chatId)) {
+      if (!this.#isPrivateChatKnown(authenticatedBot, chatId)) {
+        return { found: false, reason: 'chat_not_found' };
+      }
+      return userId === authenticatedBot.id || userId === chatId
+        ? { found: true, member: this.#viewChatMember(userId, { status: 'member' }) }
+        : { found: false, reason: 'member_not_found' };
+    }
+    const result = this.#chatMemberships.getChatMemberStatus({
+      observerBotId: authenticatedBot.id,
+      chatId,
+      userId,
+    });
+    if (!result.found) {
+      return { found: false, reason: excludeMissingBotFailure(authenticatedBot, result.reason) };
+    }
+    return { found: true, member: this.#viewChatMember(userId, result.status) };
+  }
+
+  /**
+   * Returns the owner and administrators of a supergroup the bot is a member of. As on Telegram,
+   * administrators that are other bots are left out unless requested; a private chat has none.
+   */
+  getChatAdministrators(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, includesOtherBots }: GetChatAdministratorsRequest,
+  ): BotApiGetChatAdministratorsResult {
+    if (isUserId(chatId)) {
+      return {
+        found: false,
+        reason: this.#isPrivateChatKnown(authenticatedBot, chatId)
+          ? 'private_chat_has_no_administrators'
+          : 'chat_not_found',
+      };
+    }
+    const result = this.#chatMemberships.getChatAdministrators({
+      observerBotId: authenticatedBot.id,
+      chatId,
+    });
+    if (!result.found) {
+      return { found: false, reason: excludeMissingBotFailure(authenticatedBot, result.reason) };
+    }
+    const administrators = result.administrators
+      .map(({ userId, status }) => this.#viewChatMember(userId, status))
+      .filter(({ user }) => includesOtherBots || !user.is_bot || user.id === authenticatedBot.id);
+    return { found: true, administrators };
+  }
+
+  /** Returns how many members a chat has: both participants of a private chat, or a supergroup's. */
+  getChatMemberCount(
+    authenticatedBot: VirtualBotProfile,
+    { chatId }: GetChatMemberCountRequest,
+  ): BotApiGetChatMemberCountResult {
+    if (isUserId(chatId)) {
+      return this.#isPrivateChatKnown(authenticatedBot, chatId)
+        ? { found: true, memberCount: 2 }
+        : { found: false, reason: 'chat_not_found' };
+    }
+    const result = this.#chatMemberships.getChatMemberCount({
+      observerBotId: authenticatedBot.id,
+      chatId,
+    });
+    return result.found
+      ? result
+      : { found: false, reason: excludeMissingBotFailure(authenticatedBot, result.reason) };
+  }
+
+  /**
+   * Bans a user from a supergroup, removing it if it is a member, as an administrator with the
+   * `can_restrict_members` right. A private chat has no members to ban.
+   */
+  banChatMember(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, userId, untilUnixSeconds }: BanChatMemberRequest,
+  ): BotApiBanChatMemberResult {
+    if (isUserId(chatId)) {
+      return {
+        banned: false,
+        reason: this.#isPrivateChatKnown(authenticatedBot, chatId)
+          ? 'private_chat_members_not_bannable'
+          : 'chat_not_found',
+      };
+    }
+    const result = this.#chatMemberships.banChatMember({
+      actorBotId: authenticatedBot.id,
+      chatId,
+      memberId: userId,
+      requestedBanEndUnixSeconds: untilUnixSeconds,
+    });
+    if (result.banned) {
+      return result;
+    }
+    return { banned: false, reason: excludeMissingBotFailure(authenticatedBot, result.reason) };
+  }
+
+  /**
+   * Lifts a user's ban from a supergroup, so that it may join again. Unless only a ban is to be
+   * lifted, this removes a member, as on Telegram.
+   */
+  unbanChatMember(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, userId, onlyIfBanned }: UnbanChatMemberRequest,
+  ): BotApiUnbanChatMemberResult {
+    if (isUserId(chatId)) {
+      return {
+        unbanned: false,
+        reason: this.#isPrivateChatKnown(authenticatedBot, chatId)
+          ? 'method_unavailable_in_private_chats'
+          : 'chat_not_found',
+      };
+    }
+    const result = this.#chatMemberships.unbanChatMember({
+      actorBotId: authenticatedBot.id,
+      chatId,
+      memberId: userId,
+      onlyIfBanned,
+    });
+    return result.unbanned ? result : {
+      unbanned: false,
+      reason: excludeMissingBotFailure(authenticatedBot, result.reason),
+    };
   }
 
   /** Replaces the text, entities, and inline keyboard of a text message the bot sent. */
@@ -1318,6 +1563,23 @@ export class BotApiService {
     }
   }
 
+  /** A bot knows a private chat once its account has written to it. */
+  #isPrivateChatKnown(authenticatedBot: VirtualBotProfile, accountId: number): boolean {
+    return this.#botMessages.isPrivateConversationStarted({
+      accountId,
+      botId: authenticatedBot.id,
+    });
+  }
+
+  /** Shows a user of the session, which the caller found, in its standing in a chat. */
+  #viewChatMember(userId: number, status: ChatMemberStatus): BotApiChatMember {
+    const member = this.#botMessageViews.viewChatMember(userId, status);
+    if (member === undefined) {
+      throw new Error(`Chat member ${userId} does not exist`);
+    }
+    return member;
+  }
+
   #presentPrivateEdit<Failure extends { readonly edited: false }>(
     result: { readonly edited: true; readonly message: PrivateMessage } | Failure,
   ): { readonly edited: true; readonly message: BotApiMessage } | Failure {
@@ -1377,6 +1639,20 @@ function isUserId(chatId: number): boolean {
 /** Shows a command as the Bot API does, with `is_ephemeral` only when set. */
 function projectBotCommand({ command, description, isEphemeral }: BotCommand): BotApiBotCommand {
   return { command, description, ...(isEphemeral ? { is_ephemeral: true as const } : {}) };
+}
+
+/**
+ * Narrows why a member query or moderation of the authenticated bot failed to the reasons it can
+ * meet: the authenticated bot itself always exists.
+ */
+function excludeMissingBotFailure<Reason extends string>(
+  authenticatedBot: VirtualBotProfile,
+  reason: Reason | 'bot_not_found',
+): Reason {
+  if (reason === 'bot_not_found') {
+    throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+  }
+  return reason;
 }
 
 /** Translates the edit failures shared by both edit methods into Bot API failures. */

@@ -129,6 +129,40 @@ export interface LeaveChatInput {
   readonly chat: SupergroupMessageTarget;
 }
 
+/**
+ * A supergroup administrator right, by the Bot API's name. Any right includes `can_manage_chat`,
+ * as on Telegram.
+ */
+export type SupergroupAdministratorRight =
+  | 'can_manage_chat'
+  | 'can_change_info'
+  | 'can_delete_messages'
+  | 'can_invite_users'
+  | 'can_restrict_members'
+  | 'can_pin_messages'
+  | 'can_manage_topics'
+  | 'can_promote_members'
+  | 'can_manage_video_chats'
+  | 'can_post_stories'
+  | 'can_edit_stories'
+  | 'can_delete_stories'
+  | 'can_manage_tags'
+  | 'can_send_welcome_messages';
+
+export interface PromoteChatMemberInput {
+  readonly chat: SupergroupMessageTarget;
+  /** The member, account or bot, to promote. */
+  readonly userId: number;
+  /** The rights the administrator holds from now on; a right set to `true` is held. */
+  readonly rights: Readonly<Partial<Record<SupergroupAdministratorRight, boolean>>>;
+}
+
+export interface DemoteChatMemberInput {
+  readonly chat: SupergroupMessageTarget;
+  /** The administrator, account or bot, to demote. */
+  readonly userId: number;
+}
+
 export interface AccountEditMessageInput<Target extends MessageTarget = MessageTarget> {
   readonly chat: Target;
   /** The ID of the account's message to edit, as message history shows it. */
@@ -518,6 +552,20 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    * leave. Leaving a supergroup this account is not a member of has no effect.
    */
   leaveChat(input: LeaveChatInput): Promise<void>;
+  /**
+   * Promotes a member of a supergroup this account owns to administrator with the given rights,
+   * which must include at least one, or replaces an administrator's rights. A promoted bot
+   * receives a `my_chat_member` update showing it as `administrator`, receives every message of
+   * the supergroup, and uses its rights: `can_delete_messages` lets it delete any message there,
+   * and `can_restrict_members` lets it ban and unban members.
+   */
+  promoteChatMember(input: PromoteChatMemberInput): Promise<void>;
+  /**
+   * Demotes an administrator of a supergroup this account owns to a member. A demoted bot
+   * receives a `my_chat_member` update showing it as `member`. Demoting a member that is no
+   * administrator has no effect.
+   */
+  demoteChatMember(input: DemoteChatMemberInput): Promise<void>;
   /**
    * Blocks a bot, which Telegram calls stopping it. The bot receives a `my_chat_member` update
    * showing it as `kicked`, its messages to this account fail with `403 Forbidden: bot was

@@ -1,14 +1,14 @@
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import {
-  type ChatMembership,
-  type FormerChatMemberStatus,
-  type FormerSupergroupMemberFailureReason,
-  getSupergroupNonMemberFailureReason,
+  holdsSupergroupAdministratorRight,
+  resolveSupergroupBotMembership,
+  type SupergroupBotAccessFailureReason,
+  type SupergroupMembershipLookup,
 } from '../types/chat_membership.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
-import type { ChatAction, SharedChat, Supergroup } from '../types/virtual_chat.ts';
+import type { ChatAction, Supergroup } from '../types/virtual_chat.ts';
 import {
   type CanonicalMessageId,
   isSupergroupContentMessage,
@@ -41,14 +41,6 @@ import {
   type TextInvalidFailure,
   toOutgoingAccountContent,
 } from './message_content.ts';
-
-/**
- * Why a bot cannot act in a supergroup: one it never joined is unknown to it, as on Telegram,
- * whereas one it left or was removed from turns it away.
- */
-type SupergroupBotAccessFailureReason =
-  | 'chat_not_found'
-  | FormerSupergroupMemberFailureReason;
 
 export interface SendSupergroupAccountMessageInput {
   readonly fromAccountId: number;
@@ -249,12 +241,6 @@ interface BotLookup {
   getById(botId: number): VirtualBot | undefined;
 }
 
-interface SupergroupMembershipLookup {
-  getSharedChat(chatId: number): SharedChat | undefined;
-  getChatMembership(chatId: number, identityId: number): ChatMembership | undefined;
-  getFormerMemberStatus(chatId: number, identityId: number): FormerChatMemberStatus | undefined;
-}
-
 /** A message to store, before the store gives it an identity. */
 interface NewSupergroupMessage {
   readonly chatId: number;
@@ -304,8 +290,8 @@ interface SupergroupMessagingServiceDependencies {
  * stored, numbered once in the supergroup's own message box, then published. Only members write to
  * a supergroup or read its messages.
  *
- * Bots attach inline keyboards, edit their own messages, and delete them; as on Telegram, a bot
- * that is no administrator cannot delete other members' messages. Accounts edit the text or
+ * Bots attach inline keyboards, edit their own messages, and delete them; as on Telegram, only an
+ * administrator bot with the right to delete messages deletes other members'. Accounts edit the text or
  * caption of their own messages. Reply keyboards and forced replies, which Telegram shows to chosen members of a
  * group, are not supported.
  *
@@ -529,9 +515,11 @@ export class SupergroupMessagingService {
   }
 
   /**
-   * Deletes messages the bot sent to a supergroup, for every member. IDs that identify no message
-   * of the supergroup, including messages already deleted, are skipped. As on Telegram, a bot that
-   * is no administrator cannot delete another member's message, and then deletes none.
+   * Deletes messages of a supergroup for every member. IDs that identify no message of the
+   * supergroup, including messages already deleted, are skipped. As on Telegram, a bot deletes its
+   * own messages, and any message, service messages included, as an administrator with the
+   * `can_delete_messages` right; otherwise a message of another member cannot be deleted, and then
+   * none is.
    */
   deleteMessagesByBot(
     input: DeleteSupergroupMessagesByBotInput,
@@ -539,10 +527,18 @@ export class SupergroupMessagingService {
     if (this.#bots.getById(input.fromBotId) === undefined) {
       return { deleted: false, reason: 'bot_not_found' };
     }
-    const accessFailure = this.#checkBotAccess(input.fromBotId, input.chatId);
-    if (accessFailure !== undefined) {
-      return { deleted: false, reason: accessFailure };
+    const botMembership = resolveSupergroupBotMembership(
+      this.#sharedChats,
+      input.fromBotId,
+      input.chatId,
+    );
+    if (!botMembership.resolved) {
+      return { deleted: false, reason: botMembership.reason };
     }
+    const deletesAnyMessage = holdsSupergroupAdministratorRight(
+      botMembership.membership,
+      'can_delete_messages',
+    );
 
     const messages = new Map<CanonicalMessageId, SupergroupMessage>();
     for (const messageId of input.messageIds) {
@@ -550,7 +546,9 @@ export class SupergroupMessagingService {
       if (message === undefined) {
         continue;
       }
-      if (message.author.kind !== 'bot' || message.author.botId !== input.fromBotId) {
+      const isOwnMessage = message.author.kind === 'bot' &&
+        message.author.botId === input.fromBotId;
+      if (!isOwnMessage && !deletesAnyMessage) {
         return { deleted: false, reason: 'message_not_deletable' };
       }
       messages.set(message.id, message);
@@ -636,12 +634,8 @@ export class SupergroupMessagingService {
 
   /** Checks that the bot is a member of the supergroup, which it needs to act there. */
   #checkBotAccess(botId: number, chatId: number): SupergroupBotAccessFailureReason | undefined {
-    if (this.#sharedChats.getSharedChat(chatId)?.kind !== 'supergroup') {
-      return 'chat_not_found';
-    }
-    return this.#sharedChats.getChatMembership(chatId, botId) === undefined
-      ? getSupergroupNonMemberFailureReason(this.#sharedChats.getFormerMemberStatus(chatId, botId))
-      : undefined;
+    const resolution = resolveSupergroupBotMembership(this.#sharedChats, botId, chatId);
+    return resolution.resolved ? undefined : resolution.reason;
   }
 
   /**

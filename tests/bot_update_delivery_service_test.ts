@@ -11,6 +11,7 @@ import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { BotApiMessage, BotApiUpdate } from '../src/types/bot_api.ts';
+import { grantSupergroupAdministratorRights } from '../src/types/chat_membership.ts';
 
 Deno.test('BotUpdateDeliveryService delivers a private message to its conversation bot', () => {
   const { virtualUsers, messages, messageBoxes, botUpdates, botUpdateDelivery } =
@@ -335,12 +336,13 @@ Deno.test('BotUpdateDeliveryService delivers supergroup additions and edits to t
   for (const memberId of [privacyModeBot.profile.id, readerBot.profile.id, 999]) {
     sharedChats.addChatMember(supergroup.id, memberId);
     botUpdateDelivery.publish({
-      type: 'chat_member_added',
+      type: 'chat_member_status_changed',
       chat: supergroup,
-      actorAccountId: owner.profile.id,
+      actorId: owner.profile.id,
       memberId,
-      statusBeforeJoining: 'left',
-      addedAtUnixSeconds: 1_700_000_000,
+      oldStatus: { status: 'left' },
+      newStatus: { status: 'member' },
+      changedAtUnixSeconds: 1_700_000_000,
     });
   }
   const message = messages.addSupergroupMessage({
@@ -377,6 +379,96 @@ Deno.test('BotUpdateDeliveryService delivers supergroup additions and edits to t
   if (privacyModeUpdates.length !== 0) {
     throw new Error(
       'Expected no unsubscribed join and no unaddressed edit for the privacy-mode bot',
+    );
+  }
+});
+
+Deno.test('BotUpdateDeliveryService delivers a promotion and every message to an administrator bot', () => {
+  const { virtualUsers, sharedChats, messages, messageBoxes, botUpdates, botUpdateDelivery } =
+    createDeliveryFixture();
+  const owner = createAccount(virtualUsers);
+  const administratorBot = createBot(virtualUsers, 'admin_bot');
+  const supergroup = {
+    kind: 'supergroup',
+    id: -1_000_000_000_001,
+    title: 'Team',
+    chatInstance: '-42',
+  } as const;
+  sharedChats.registerSupergroup(supergroup, owner.profile.id);
+  sharedChats.addChatMember(supergroup.id, administratorBot.profile.id);
+  const administratorStatus = {
+    status: 'administrator',
+    rights: grantSupergroupAdministratorRights(['can_delete_messages']),
+  } as const;
+  sharedChats.updateChatMemberStatus(
+    supergroup.id,
+    administratorBot.profile.id,
+    administratorStatus,
+  );
+  botUpdateDelivery.publish({
+    type: 'chat_member_status_changed',
+    chat: supergroup,
+    actorId: owner.profile.id,
+    memberId: administratorBot.profile.id,
+    oldStatus: { status: 'member' },
+    newStatus: administratorStatus,
+    changedAtUnixSeconds: 1_700_000_000,
+  });
+  const message = messages.addSupergroupMessage({
+    chatId: supergroup.id,
+    author: { kind: 'account', accountId: owner.profile.id },
+    sentAtUnixSeconds: 1_700_000_001,
+    content: { kind: 'text', text: 'Not addressed to any bot', entities: [] },
+  });
+  messageBoxes.assignMessageId(supergroup.id, message.id);
+  botUpdateDelivery.publish({ type: 'message_created', message });
+
+  const updates = botUpdates.confirmAndReadPendingUpdates(administratorBot.profile.id, {
+    limit: 100,
+  });
+  const user = {
+    id: administratorBot.profile.id,
+    is_bot: true,
+    first_name: 'Test Bot',
+    username: 'admin_bot',
+  };
+  const expectedPromotion = {
+    chat: { id: supergroup.id, title: 'Team', type: 'supergroup' },
+    from: owner.profile,
+    date: 1_700_000_000,
+    old_chat_member: { user, status: 'member' },
+    new_chat_member: {
+      user,
+      status: 'administrator',
+      can_be_edited: false,
+      can_manage_chat: true,
+      can_change_info: false,
+      can_delete_messages: true,
+      can_invite_users: false,
+      can_restrict_members: false,
+      can_pin_messages: false,
+      can_manage_topics: false,
+      can_promote_members: false,
+      can_manage_video_chats: false,
+      can_post_stories: false,
+      can_edit_stories: false,
+      can_delete_stories: false,
+      can_manage_tags: false,
+      can_send_welcome_messages: false,
+      is_anonymous: false,
+      can_manage_voice_chats: false,
+    },
+  };
+  const [promotionUpdate, messageUpdate] = updates;
+  if (
+    updates.length !== 2 || !('my_chat_member' in promotionUpdate) ||
+    JSON.stringify(promotionUpdate.my_chat_member) !== JSON.stringify(expectedPromotion) ||
+    !('message' in messageUpdate) || messageUpdate.message.message_id !== 1
+  ) {
+    throw new Error(
+      `Expected the administrator bot to learn of its promotion and read every message, received ${
+        JSON.stringify(updates)
+      }`,
     );
   }
 });

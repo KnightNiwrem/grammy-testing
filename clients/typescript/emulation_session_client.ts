@@ -32,6 +32,7 @@ import type {
   CreateSupergroupInput,
   CreateVirtualAccountInput,
   CreateVirtualBotInput,
+  DemoteChatMemberInput,
   EmulationSession,
   LeaveChatInput,
   MessageIn,
@@ -39,6 +40,7 @@ import type {
   PressCallbackButtonInput,
   PressReplyKeyboardButtonInput,
   PrivateMessage,
+  PromoteChatMemberInput,
   RemoveChatMemberInput,
   ReplyInterface,
   Supergroup,
@@ -251,6 +253,25 @@ function createVirtualAccountClient(
       await requestEmptyResponse(fetchImplementation, {
         method: 'DELETE',
         url: `${conversationUrl(accountUrl, input.chat)}/members/${encodeURIComponent(profile.id)}`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+      });
+    },
+    async promoteChatMember(input: PromoteChatMemberInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'PUT',
+        url: `${conversationUrl(accountUrl, input.chat)}/administrators/${
+          encodeURIComponent(input.userId)
+        }`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+        body: input.rights,
+      });
+    },
+    async demoteChatMember(input: DemoteChatMemberInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'DELETE',
+        url: `${conversationUrl(accountUrl, input.chat)}/administrators/${
+          encodeURIComponent(input.userId)
+        }`,
         expectedStatus: HTTP_STATUS_NO_CONTENT,
       });
     },

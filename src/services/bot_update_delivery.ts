@@ -11,9 +11,9 @@ import type {
   BotBlockChangedEvent,
   CallbackQueryCreatedEvent,
   ChatDomainEvent,
-  ChatMemberAddedEvent,
-  ChatMemberLeftEvent,
+  ChatMemberStatusChangedEvent,
 } from '../types/chat_domain_event.ts';
+import type { ChatMembership } from '../types/chat_membership.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import {
   type CanonicalMessageId,
@@ -32,8 +32,7 @@ interface BotMessageViews {
     message: ChatMessage,
   ): BotApiCallbackQuery;
   viewBotBlockChangeForBot(event: BotBlockChangedEvent): BotApiMyChatMemberUpdated;
-  viewBotJoinedGroupForBot(event: ChatMemberAddedEvent): BotApiMyChatMemberUpdated;
-  viewBotLeftGroupForBot(event: ChatMemberLeftEvent): BotApiMyChatMemberUpdated;
+  viewBotMembershipChangeForBot(event: ChatMemberStatusChangedEvent): BotApiMyChatMemberUpdated;
 }
 
 interface BotUpdateMailboxes {
@@ -53,6 +52,7 @@ interface BotLookup {
 
 interface ChatMemberLookup {
   getChatMemberIds(chatId: number): readonly number[];
+  getChatMembership(chatId: number, identityId: number): ChatMembership | undefined;
 }
 
 interface SupergroupMessageLookup {
@@ -113,11 +113,8 @@ export class BotUpdateDeliveryService {
       case 'bot_block_changed':
         this.#deliverBotBlockChange(event);
         return;
-      case 'chat_member_added':
-        this.#deliverChatMemberAddition(event);
-        return;
-      case 'chat_member_left':
-        this.#deliverChatMemberDeparture(event);
+      case 'chat_member_status_changed':
+        this.#deliverChatMemberStatusChange(event);
         return;
       default: {
         const unhandledEvent: never = event;
@@ -161,7 +158,7 @@ export class BotUpdateDeliveryService {
   /**
    * A supergroup message, and each edit of it, is observed by the supergroup's bots that can read
    * it. As on Telegram, bots never observe messages of bots, their own included, and a bot in
-   * privacy mode observes only messages addressed to it.
+   * privacy mode observes only messages addressed to it, unless it is an administrator.
    */
   #deliverSupergroupMessage(
     message: SupergroupMessage,
@@ -181,7 +178,8 @@ export class BotUpdateDeliveryService {
       const bot = this.#bots.getById(memberId)?.profile;
       if (
         bot === undefined || !this.#isSubscribed(bot.id, updateType) ||
-        !(bot.can_read_all_group_messages || isAddressedToBot(message, repliedMessage, bot))
+        !(this.#readsAllGroupMessages(bot, message.chatId) ||
+          isAddressedToBot(message, repliedMessage, bot))
       ) {
         continue;
       }
@@ -253,10 +251,10 @@ export class BotUpdateDeliveryService {
   }
 
   /**
-   * A bot's addition to a group is observed by the added bot. The group's bots learn of every
-   * addition from the service message that records it.
+   * A change of a bot's standing in a group is observed by that bot. The group's bots learn of
+   * members joining and leaving from the service messages that record it.
    */
-  #deliverChatMemberAddition(event: ChatMemberAddedEvent): void {
+  #deliverChatMemberStatusChange(event: ChatMemberStatusChangedEvent): void {
     if (
       this.#bots.getById(event.memberId) === undefined ||
       !this.#isSubscribed(event.memberId, 'my_chat_member')
@@ -266,26 +264,17 @@ export class BotUpdateDeliveryService {
 
     this.#botUpdates.enqueueMyChatMemberUpdate(
       event.memberId,
-      this.#botMessageViews.viewBotJoinedGroupForBot(event),
+      this.#botMessageViews.viewBotMembershipChangeForBot(event),
     );
   }
 
   /**
-   * A bot's departure from a group is observed by the departed bot. The group's bots learn of
-   * every departure from the service message that records it.
+   * Whether a bot receives every message of a group it is a member of: with privacy mode disabled,
+   * or, as Telegram documents, as one of the group's administrators.
    */
-  #deliverChatMemberDeparture(event: ChatMemberLeftEvent): void {
-    if (
-      this.#bots.getById(event.memberId) === undefined ||
-      !this.#isSubscribed(event.memberId, 'my_chat_member')
-    ) {
-      return;
-    }
-
-    this.#botUpdates.enqueueMyChatMemberUpdate(
-      event.memberId,
-      this.#botMessageViews.viewBotLeftGroupForBot(event),
-    );
+  #readsAllGroupMessages(bot: VirtualBotProfile, chatId: number): boolean {
+    return bot.can_read_all_group_messages ||
+      this.#sharedChats.getChatMembership(chatId, bot.id)?.status === 'administrator';
   }
 
   #isSubscribed(botId: number, updateType: BotApiUpdateType): boolean {

@@ -174,7 +174,8 @@ paths:
         supergroup the account is a member of. In a supergroup, the supergroup's bots receive the
         message unless it is not addressed to a bot in privacy mode: such a bot receives only
         messages whose text or caption starts with a command not addressed to another bot, replies
-        to one of its messages, or mentions it.
+        to one of its messages, or mentions it. As on Telegram, a bot that is an administrator of
+        the supergroup receives every message, privacy mode notwithstanding.
         Telegram documents that a command without a bot's username reaches only the bot that last
         wrote to the group; the emulator delivers it to every bot in privacy mode.
       requestBody:
@@ -344,6 +345,61 @@ paths:
           description: The session, account, supergroup, or user to remove does not exist.
         '409':
           description: The account owns the supergroup and cannot leave it.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/administrators/{userId}:
+    description: >-
+      An administrator of a supergroup, as the supergroup's owner promotes a member or demotes it.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/SupergroupChatId'
+      - $ref: '#/components/parameters/UserId'
+    put:
+      operationId: promoteSupergroupMember
+      summary: Promote a member of a supergroup the account owns to administrator
+      description: >-
+        Makes the member, an account or a bot, an administrator holding the given rights, or
+        replaces an administrator's rights; as on Telegram, any right includes `can_manage_chat`.
+        A promoted bot receives a my_chat_member update from the account showing it as
+        `administrator` with its rights. As on Telegram, an administrator bot receives every
+        message of the supergroup, privacy mode notwithstanding; with `can_delete_messages` it
+        deletes any message there, and with `can_restrict_members` it bans and unbans users. Bots
+        see the other rights but the emulator does not enforce them. Promoting an administrator
+        with the rights it holds changes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromoteSupergroupMemberRequest'
+      responses:
+        '204':
+          description: The member is an administrator with the given rights.
+        '400':
+          description: A path identifier or the body is invalid, or the body grants no right.
+        '403':
+          description: The account does not own the supergroup.
+        '404':
+          description: The session, account, supergroup, or user to promote does not exist.
+        '409':
+          description: The user is not a member of the supergroup, or is its owner.
+    delete:
+      operationId: demoteSupergroupMember
+      summary: Demote an administrator of a supergroup the account owns to a member
+      description: >-
+        Makes the administrator a member without rights. A demoted bot receives a my_chat_member
+        update from the account showing it as `member`. Demoting a member that is no administrator
+        changes nothing.
+      responses:
+        '204':
+          description: The user is a member of the supergroup without administrator rights.
+        '400':
+          description: A path identifier is invalid.
+        '403':
+          description: The account does not own the supergroup.
+        '404':
+          description: The session, account, supergroup, or user to demote does not exist.
+        '409':
+          description: The user is not a member of the supergroup, or is its owner.
   /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/messages:
     description: Stored messages of a supergroup the account is a member of.
     parameters:
@@ -1292,8 +1348,9 @@ paths:
     description: >-
       Telegram Bot API method for deleting a message of a private chat or a supergroup for every
       member. As on Telegram, a bot can delete messages either participant of a private chat
-      wrote, but in a supergroup, where it is no administrator, only its own; it receives no
-      update for the deletion. The deleted message leaves the conversation history, and its buttons can no
+      wrote; in a supergroup, it deletes its own messages, and any message, service messages
+      included, as an administrator with the `can_delete_messages` right. It receives no update
+      for the deletion. The deleted message leaves the conversation history, and its buttons can no
       longer be pressed; message IDs are never reused. The emulator does not age messages, so
       Telegram's 48-hour deletion limit never applies.
     parameters:
@@ -1577,6 +1634,327 @@ paths:
           description: >-
             The bot already left the supergroup (`Forbidden: bot is not a member of the supergroup
             chat`) or was removed from it (`Forbidden: bot was kicked from the supergroup chat`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/getChatMember:
+    description: >-
+      Telegram Bot API method for reading a user's standing in a chat. In a private chat, the
+      account and the bot are members. In a supergroup the bot is a member of, the owner is
+      `creator`, administrators show their rights, and a user of the session that never joined
+      or has left is `left`; a banned user is `kicked` until the date its ban ends, or 0 for a
+      ban that lasts until it is lifted. Custom titles and member tags are not supported.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getChatMember
+      summary: Get the standing of a user in one of the authenticated virtual bot's chats
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetChatMemberRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GetChatMemberRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GetChatMemberRequest'
+      responses:
+        '200':
+          description: The user's standing in the chat.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMemberResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram
+            would reject it: `user_id` is missing or not positive (`Bad Request: invalid
+            user_id specified`), which is checked first; `chat_id` is missing (`Bad
+            Request: chat_id is empty`); the chat is neither a private chat with an
+            account that has written to the bot nor a supergroup the bot is or was a
+            member of (`Bad Request: chat not found`); or the user is no user of the
+            session, or, in a private chat, neither of its participants (`Bad Request:
+            member not found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            The bot left the supergroup (`Forbidden: bot is not a member of the
+            supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+            the supergroup chat`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/getChatAdministrators:
+    description: >-
+      Telegram Bot API method for listing a supergroup's owner, then its administrators in the
+      order they joined. As on Telegram, administrators that are other bots are left out
+      unless `return_bots` is set; the calling bot is listed when it is an administrator.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getChatAdministrators
+      summary: List the administrators of a supergroup the authenticated virtual bot is a member of
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetChatAdministratorsRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GetChatAdministratorsRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GetChatAdministratorsRequest'
+      responses:
+        '200':
+          description: The owner and administrators of the supergroup.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMembersResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram
+            would reject it: `chat_id` is missing (`Bad Request: chat_id is empty`); the
+            chat is a private chat with an account that has written to the bot (`Bad
+            Request: there are no administrators in the private chat`); or the chat is
+            neither a private chat with an account that has written to the bot nor a
+            supergroup the bot is or was a member of (`Bad Request: chat not found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            The bot left the supergroup (`Forbidden: bot is not a member of the
+            supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+            the supergroup chat`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/getChatMemberCount:
+    description: >-
+      Telegram Bot API method for counting a chat's members: the two participants of a private
+      chat, or a supergroup's members, its owner and bots included. Telegram's older name,
+      `getChatMembersCount`, is accepted too.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getChatMemberCount
+      summary: Count the members of one of the authenticated virtual bot's chats
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetChatMemberCountRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GetChatMemberCountRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GetChatMemberCountRequest'
+      responses:
+        '200':
+          description: The number of members of the chat.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegerResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram
+            would reject it: `chat_id` is missing (`Bad Request: chat_id is empty`), or
+            the chat is neither a private chat with an account that has written to the
+            bot nor a supergroup the bot is or was a member of (`Bad Request: chat not
+            found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            The bot left the supergroup (`Forbidden: bot is not a member of the
+            supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+            the supergroup chat`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/banChatMember:
+    description: >-
+      Telegram Bot API method for banning a user from a supergroup, which needs the
+      `can_restrict_members` administrator right. A member is removed, which a service message
+      from the bot records with `left_chat_member`; as on Telegram, only the bot receives it,
+      since bots never receive other bots' messages. A removed bot receives a my_chat_member
+      update showing it as `kicked`. A user that is not a member is banned before it can join.
+      A ban shorter than 30 seconds or longer than 366 days lasts until it is lifted, as on
+      Telegram; the emulator never lifts a ban when its `until_date` passes. Banning a user as
+      it is already banned succeeds without rights. `revoke_messages` is accepted and ignored.
+      Telegram's older name, `kickChatMember`, is accepted too.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: banChatMember
+      summary: Ban a user from a supergroup as the authenticated virtual bot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BanChatMemberRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BanChatMemberRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BanChatMemberRequest'
+      responses:
+        '200':
+          description: The user is banned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrueResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram
+            would reject it, in this order: `user_id` is missing or not positive (`Bad
+            Request: invalid user_id specified`); `chat_id` is missing (`Bad Request:
+            chat_id is empty`); the chat is neither a private chat with an account that
+            has written to the bot nor a supergroup the bot is or was a member of (`Bad
+            Request: chat not found`); the chat is a private chat (`Bad Request: can't
+            ban members in private chats`); the user is the bot itself (`Bad Request:
+            can't restrict self`) or no user of the session (`Bad Request: member not
+            found`); the user is the owner (`Bad Request: can't remove chat owner`); the
+            bot lacks the right (`Bad Request: not enough rights to restrict/unrestrict
+            chat member`); or the user is an administrator, which Telegram lets a bot
+            ban only if it promoted it, and bots promote none here (`Bad Request: user
+            is an administrator of the chat`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            The bot left the supergroup (`Forbidden: bot is not a member of the
+            supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+            the supergroup chat`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/unbanChatMember:
+    description: >-
+      Telegram Bot API method for lifting a user's ban from a supergroup, so that it may be
+      added again, which needs the `can_restrict_members` administrator right. As on Telegram,
+      unless `only_if_banned` is set, this also removes a member: the bot bans it for a
+      minute, which a service message from the bot records, then lifts the ban, and a removed
+      bot receives a my_chat_member update for each step. A bot that names itself leaves the
+      supergroup. Lifting the ban of a user that is not banned and not a member succeeds
+      without rights, and with `only_if_banned`, so does any request about a user that is not
+      banned.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: unbanChatMember
+      summary: Lift a user's ban from a supergroup as the authenticated virtual bot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnbanChatMemberRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UnbanChatMemberRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UnbanChatMemberRequest'
+      responses:
+        '200':
+          description: The user is not banned and not a member, or, with `only_if_banned`, was not banned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrueResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram
+            would reject it, in this order: `user_id` is missing or not positive (`Bad
+            Request: invalid user_id specified`); `chat_id` is missing (`Bad Request:
+            chat_id is empty`); the chat is neither a private chat with an account that
+            has written to the bot nor a supergroup the bot is or was a member of (`Bad
+            Request: chat not found`); the chat is a private chat (`Bad Request: method
+            is available only in supergroup and channel chats`); the user is no user of
+            the session (`Bad Request: member not found`); the user is the owner (`Bad
+            Request: can't remove chat owner`); the bot lacks the right (`Bad Request:
+            not enough rights to restrict/unrestrict chat member`); or the user is an
+            administrator (`Bad Request: user is an administrator of the chat`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            The bot left the supergroup (`Forbidden: bot is not a member of the
+            supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+            the supergroup chat`).
           content:
             application/json:
               schema:
@@ -2662,9 +3040,10 @@ components:
       type: object
       additionalProperties: false
       description: >-
-        A change of the bot's membership in a supergroup: it becomes `member` from `left`, or from
-        `kicked` after a removal, when an account adds it; `left` when it leaves with `leaveChat`;
-        and `kicked`, which is forever, when an account removes it.
+        A change of the bot's standing in a supergroup: it becomes `member` from `left`, or from
+        `kicked` after a ban, when an account adds it; `administrator` when the owner promotes it
+        or changes its rights, and `member` again when the owner demotes it; `left` when it leaves
+        or a bot lifts its ban; and `kicked` when an account removes it or a bot bans it.
       required:
         - chat
         - from
@@ -2676,46 +3055,143 @@ components:
           $ref: '#/components/schemas/SupergroupChat'
         from:
           $ref: '#/components/schemas/MessageUser'
-          description: The account that added or removed the bot, or the bot itself when it left.
+          description: >-
+            The account or bot that changed the bot's standing, or the bot itself when it left.
         date:
           type: integer
           minimum: 0
           description: Unix timestamp of the change.
         old_chat_member:
-          $ref: '#/components/schemas/SupergroupBotMember'
+          $ref: '#/components/schemas/ChatMember'
+          description: The bot's standing before the change; a bot never owns a supergroup.
         new_chat_member:
-          $ref: '#/components/schemas/SupergroupBotMember'
-    SupergroupBotMember:
+          $ref: '#/components/schemas/ChatMember'
+          description: The bot's standing after the change.
+    ChatMember:
+      description: >-
+        A user's standing in a chat, in the field order Telegram uses. Custom titles and member tags
+        are not supported.
       oneOf:
         - type: object
           additionalProperties: false
+          description: The supergroup's owner.
+          required:
+            - user
+            - status
+            - is_anonymous
+          properties:
+            user:
+              $ref: '#/components/schemas/MessageUser'
+            status:
+              type: string
+              const: creator
+            is_anonymous:
+              type: boolean
+              const: false
+        - $ref: '#/components/schemas/ChatAdministrator'
+        - type: object
+          additionalProperties: false
+          description: >-
+            A member without administrator rights, or a user that left the supergroup or never
+            joined it.
           required:
             - user
             - status
           properties:
             user:
-              $ref: '#/components/schemas/MessageSenderBot'
+              $ref: '#/components/schemas/MessageUser'
             status:
               type: string
               enum:
-                - left
                 - member
+                - left
         - type: object
           additionalProperties: false
-          description: The bot after an account removed it, which bans it forever.
+          description: A banned user, which cannot be a member until its ban is lifted.
           required:
             - user
             - status
             - until_date
           properties:
             user:
-              $ref: '#/components/schemas/MessageSenderBot'
+              $ref: '#/components/schemas/MessageUser'
             status:
               type: string
               const: kicked
             until_date:
               type: integer
-              const: 0
+              minimum: 0
+              description: >-
+                Unix timestamp when the ban ends, or 0 for a ban that lasts until it is lifted.
+    ChatAdministrator:
+      type: object
+      additionalProperties: false
+      description: >-
+        A supergroup administrator with every right Telegram shows, held or not. No bot may change
+        an administrator's rights, since only the owner promotes administrators here.
+      required:
+        - user
+        - status
+        - can_be_edited
+        - can_manage_chat
+        - can_change_info
+        - can_delete_messages
+        - can_invite_users
+        - can_restrict_members
+        - can_pin_messages
+        - can_manage_topics
+        - can_promote_members
+        - can_manage_video_chats
+        - can_post_stories
+        - can_edit_stories
+        - can_delete_stories
+        - can_manage_tags
+        - can_send_welcome_messages
+        - is_anonymous
+        - can_manage_voice_chats
+      properties:
+        user:
+          $ref: '#/components/schemas/MessageUser'
+        status:
+          type: string
+          const: administrator
+        can_be_edited:
+          type: boolean
+          const: false
+        can_manage_chat:
+          type: boolean
+        can_change_info:
+          type: boolean
+        can_delete_messages:
+          type: boolean
+        can_invite_users:
+          type: boolean
+        can_restrict_members:
+          type: boolean
+        can_pin_messages:
+          type: boolean
+        can_manage_topics:
+          type: boolean
+        can_promote_members:
+          type: boolean
+        can_manage_video_chats:
+          type: boolean
+        can_post_stories:
+          type: boolean
+        can_edit_stories:
+          type: boolean
+        can_delete_stories:
+          type: boolean
+        can_manage_tags:
+          type: boolean
+        can_send_welcome_messages:
+          type: boolean
+        is_anonymous:
+          type: boolean
+          const: false
+        can_manage_voice_chats:
+          type: boolean
+          description: Legacy alias of `can_manage_video_chats`.
     PrivateChatBotMember:
       oneOf:
         - type: object
@@ -3449,6 +3925,174 @@ components:
         result:
           type: boolean
           const: true
+    PromoteSupergroupMemberRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        The rights the administrator holds, by the Bot API's names, of which at least one must be
+        `true`; an omitted right is not held. Anonymous administrators are not supported.
+      properties:
+        can_manage_chat:
+          type: boolean
+          default: false
+        can_change_info:
+          type: boolean
+          default: false
+        can_delete_messages:
+          type: boolean
+          default: false
+        can_invite_users:
+          type: boolean
+          default: false
+        can_restrict_members:
+          type: boolean
+          default: false
+        can_pin_messages:
+          type: boolean
+          default: false
+        can_manage_topics:
+          type: boolean
+          default: false
+        can_promote_members:
+          type: boolean
+          default: false
+        can_manage_video_chats:
+          type: boolean
+          default: false
+        can_post_stories:
+          type: boolean
+          default: false
+        can_edit_stories:
+          type: boolean
+          default: false
+        can_delete_stories:
+          type: boolean
+          default: false
+        can_manage_tags:
+          type: boolean
+          default: false
+        can_send_welcome_messages:
+          type: boolean
+          default: false
+    GetChatMemberRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+        - user_id
+      properties:
+        chat_id:
+          type: integer
+          description: >-
+            Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+            its negative chat ID.
+        user_id:
+          $ref: '#/components/schemas/TelegramUserId'
+    GetChatAdministratorsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+      properties:
+        chat_id:
+          type: integer
+          description: >-
+            Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
+            which has no administrators, the account's user ID.
+        return_bots:
+          type: boolean
+          default: false
+          description: Whether to list administrators that are other bots too.
+    GetChatMemberCountRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+      properties:
+        chat_id:
+          type: integer
+          description: >-
+            Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+            its negative chat ID.
+    BanChatMemberRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+        - user_id
+      properties:
+        chat_id:
+          type: integer
+          description: >-
+            Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
+            whose members cannot be banned, the account's user ID.
+        user_id:
+          $ref: '#/components/schemas/TelegramUserId'
+        until_date:
+          type: integer
+          description: >-
+            Unix timestamp when the ban ends; a ban shorter than 30 seconds or longer than 366 days
+            lasts until it is lifted, as does one without an end.
+        revoke_messages:
+          type: boolean
+          description: Accepted and ignored; Telegram always revokes access in supergroups.
+    UnbanChatMemberRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+        - user_id
+      properties:
+        chat_id:
+          type: integer
+          description: >-
+            Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
+            where the method is unavailable, the account's user ID.
+        user_id:
+          $ref: '#/components/schemas/TelegramUserId'
+        only_if_banned:
+          type: boolean
+          default: false
+          description: Changes nothing unless the user is banned, rather than removing a member.
+    ChatMemberResultResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          $ref: '#/components/schemas/ChatMember'
+    ChatMembersResultResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMember'
+    IntegerResultResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: integer
+          minimum: 0
     LeaveChatRequest:
       type: object
       additionalProperties: false

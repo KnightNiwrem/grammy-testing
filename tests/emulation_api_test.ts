@@ -3303,6 +3303,405 @@ Deno.test('a grammY bot welcomes new members and learns it was removed', async (
   }
 });
 
+Deno.test('the owner promotes administrators, whom bots find with getChatMember and getChatAdministrators', async () => {
+  const { api, sessionPath, owner, member, bot, readerBot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const outsider = await createAccount(api, sessionPath, 'Linus');
+  const readNewUpdates = createUpdateReader(api);
+  await readNewUpdates(bot.botApiPath);
+  const administratorsPath = `${supergroupPath(owner.id)}/administrators`;
+  const botUser = (created: typeof bot) => ({
+    id: created.bot.id,
+    is_bot: true,
+    first_name: created.bot.first_name,
+    username: created.bot.username,
+  });
+  const chat = { id: supergroup.id, title: 'Team', type: 'supergroup' };
+
+  const promotionStatuses = await Promise.all([
+    api.request(
+      `${administratorsPath}/${bot.bot.id}`,
+      jsonRequest('PUT', { can_delete_messages: true, can_restrict_members: true }),
+    ),
+    api.request(
+      `${administratorsPath}/${readerBot.bot.id}`,
+      jsonRequest('PUT', { can_pin_messages: true }),
+    ),
+  ]).then((responses) => responses.map((response) => response.status));
+  const promotionUpdates = await readNewUpdates(bot.botApiPath);
+  const promotedBot = administratorMember(botUser(bot), [
+    'can_manage_chat',
+    'can_delete_messages',
+    'can_restrict_members',
+  ]);
+  const promotion = promotionUpdates[0]?.my_chat_member as Record<string, unknown> | undefined;
+  if (
+    JSON.stringify(promotionStatuses) !== JSON.stringify([204, 204]) ||
+    promotionUpdates.length !== 1 ||
+    JSON.stringify({ ...promotion, date: 0 }) !== JSON.stringify({
+        chat,
+        from: owner,
+        date: 0,
+        old_chat_member: { user: botUser(bot), status: 'member' },
+        new_chat_member: promotedBot,
+      })
+  ) {
+    throw new Error(
+      `Expected the bot to learn of its promotion, received ${JSON.stringify(promotionUpdates)}`,
+    );
+  }
+
+  const getChatMember = (userId: number) =>
+    callBotApi(api, `${bot.botApiPath}/getChatMember`, { chat_id: supergroup.id, user_id: userId })
+      .then(({ body }) => (body as { result: unknown }).result);
+  const members = await Promise.all(
+    [owner.id, member.id, bot.bot.id, outsider.id].map(getChatMember),
+  );
+  const expectedMembers = [
+    { user: owner, status: 'creator', is_anonymous: false },
+    { user: member, status: 'member' },
+    promotedBot,
+    { user: outsider, status: 'left' },
+  ];
+  if (JSON.stringify(members) !== JSON.stringify(expectedMembers)) {
+    throw new Error(`Expected each user's standing, received ${JSON.stringify(members)}`);
+  }
+
+  // As on Telegram, administrators that are other bots are listed only when requested.
+  const [administrators, administratorsWithBots, memberCount] = await Promise.all([
+    callBotApi(api, `${bot.botApiPath}/getChatAdministrators`, { chat_id: supergroup.id }),
+    callBotApi(api, `${bot.botApiPath}/getChatAdministrators`, {
+      chat_id: supergroup.id,
+      return_bots: true,
+    }),
+    callBotApi(api, `${bot.botApiPath}/getChatMemberCount`, { chat_id: supergroup.id }),
+  ]).then((responses) => responses.map(({ body }) => (body as { result: unknown }).result));
+  const owningMember = expectedMembers[0];
+  const promotedReader = administratorMember(botUser(readerBot), [
+    'can_manage_chat',
+    'can_pin_messages',
+  ]);
+  if (
+    JSON.stringify(administrators) !== JSON.stringify([owningMember, promotedBot]) ||
+    JSON.stringify(administratorsWithBots) !==
+      JSON.stringify([owningMember, promotedBot, promotedReader]) ||
+    memberCount !== 4
+  ) {
+    throw new Error(
+      `Expected the administrators and member count, received ${
+        JSON.stringify([administrators, administratorsWithBots, memberCount])
+      }`,
+    );
+  }
+
+  const failures = await Promise.all([
+    callBotApi(api, `${bot.botApiPath}/getChatMember`, { chat_id: supergroup.id }),
+    callBotApi(api, `${bot.botApiPath}/getChatMember`, { user_id: owner.id }),
+    callBotApi(api, `${bot.botApiPath}/getChatMember`, { chat_id: supergroup.id, user_id: 999 }),
+    callBotApi(api, `${bot.botApiPath}/getChatMember`, {
+      chat_id: -1_000_000_009_999,
+      user_id: owner.id,
+    }),
+    callBotApi(api, `${bot.botApiPath}/getChatAdministrators`, {}),
+  ]);
+  const failureDescriptions = failures.map(({ body }) =>
+    (body as { description?: string }).description
+  );
+  if (
+    JSON.stringify(failureDescriptions) !== JSON.stringify([
+      'Bad Request: invalid user_id specified',
+      'Bad Request: chat_id is empty',
+      'Bad Request: member not found',
+      'Bad Request: chat not found',
+      'Bad Request: chat_id is empty',
+    ])
+  ) {
+    throw new Error(`Expected Telegram's checks, received ${JSON.stringify(failures)}`);
+  }
+
+  // Only the owner changes roles, only of other members, and a promotion grants some right.
+  const routeStatuses = await Promise.all([
+    api.request(
+      `${supergroupPath(member.id)}/administrators/${bot.bot.id}`,
+      jsonRequest('PUT', { can_delete_messages: true }),
+    ),
+    api.request(
+      `${administratorsPath}/${owner.id}`,
+      jsonRequest('PUT', { can_delete_messages: true }),
+    ),
+    api.request(
+      `${administratorsPath}/${outsider.id}`,
+      jsonRequest('PUT', { can_delete_messages: true }),
+    ),
+    api.request(`${administratorsPath}/999`, jsonRequest('PUT', { can_delete_messages: true })),
+    api.request(`${administratorsPath}/${member.id}`, jsonRequest('PUT', {})),
+    api.request(
+      `${administratorsPath}/${member.id}`,
+      jsonRequest('PUT', { can_delete_messages: false }),
+    ),
+    api.request(`${administratorsPath}/${member.id}`, jsonRequest('PUT', { can_fly: true })),
+  ]).then((responses) => responses.map((response) => response.status));
+  if (JSON.stringify(routeStatuses) !== JSON.stringify([403, 409, 409, 404, 400, 400, 400])) {
+    throw new Error(`Expected administrator route checks, received ${routeStatuses.join()}`);
+  }
+
+  const demotionStatuses = await Promise.all([
+    api.request(`${administratorsPath}/${bot.bot.id}`, { method: 'DELETE' }),
+    api.request(`${administratorsPath}/${bot.bot.id}`, { method: 'DELETE' }),
+  ]).then((responses) => responses.map((response) => response.status));
+  const demotionUpdates = await readNewUpdates(bot.botApiPath);
+  const demotion = demotionUpdates[0]?.my_chat_member as Record<string, unknown> | undefined;
+  if (
+    JSON.stringify(demotionStatuses) !== JSON.stringify([204, 204]) ||
+    demotionUpdates.length !== 1 ||
+    JSON.stringify([demotion?.old_chat_member, demotion?.new_chat_member]) !==
+      JSON.stringify([promotedBot, { user: botUser(bot), status: 'member' }])
+  ) {
+    throw new Error(
+      `Expected the bot to be demoted once, received ${JSON.stringify(demotionUpdates)}`,
+    );
+  }
+});
+
+Deno.test('banChatMember, unbanChatMember, and deleteMessage follow Telegram checks for administrators', async () => {
+  const {
+    api,
+    sessionPath,
+    owner,
+    member,
+    bot,
+    readerBot,
+    supergroup,
+    supergroupPath,
+    sendSupergroupText,
+  } = await createSupergroupFixture();
+  const outsider = await createAccount(api, sessionPath, 'Linus');
+  const readNewUpdates = createUpdateReader(api);
+  await readNewUpdates(bot.botApiPath);
+  await readNewUpdates(readerBot.botApiPath);
+  const callBot = (method: string, parameters: Record<string, unknown>) =>
+    callBotApi(api, `${bot.botApiPath}/${method}`, parameters);
+  const describe = (responses: Array<{ status: number; body: unknown }>) =>
+    responses.map(({ status, body }) => {
+      const { result, description } = body as { result?: unknown; description?: string };
+      return [status, description ?? result];
+    });
+  const target = (userId: number) => ({ chat_id: supergroup.id, user_id: userId });
+
+  // Without rights, the bot bans nobody; nobody bans the owner or itself.
+  const refusals = describe(
+    await Promise.all([
+      callBot('banChatMember', target(member.id)),
+      callBot('unbanChatMember', target(member.id)),
+      callBot('banChatMember', target(owner.id)),
+      callBot('banChatMember', target(bot.bot.id)),
+      callBot('banChatMember', { chat_id: supergroup.id }),
+    ]),
+  );
+  const notEnoughRights = 'Bad Request: not enough rights to restrict/unrestrict chat member';
+  if (
+    JSON.stringify(refusals) !== JSON.stringify([
+      [400, notEnoughRights],
+      [400, notEnoughRights],
+      [400, "Bad Request: can't remove chat owner"],
+      [400, "Bad Request: can't restrict self"],
+      [400, 'Bad Request: invalid user_id specified'],
+    ])
+  ) {
+    throw new Error(`Expected refusals without rights, received ${JSON.stringify(refusals)}`);
+  }
+
+  const administratorsPath = `${supergroupPath(owner.id)}/administrators`;
+  await api.request(
+    `${administratorsPath}/${bot.bot.id}`,
+    jsonRequest('PUT', { can_restrict_members: true, can_delete_messages: true }),
+  );
+  await api.request(
+    `${administratorsPath}/${readerBot.bot.id}`,
+    jsonRequest('PUT', { can_pin_messages: true }),
+  );
+  await readNewUpdates(bot.botApiPath);
+  await readNewUpdates(readerBot.botApiPath);
+
+  // An administrator bot receives every message, deletes any, and bans members, which a service
+  // message of the bot records; as bots never see other bots' messages, only the bot receives it.
+  const spam = await sendSupergroupText(member.id, 'Buy now!');
+  const untilDate = Math.floor(Date.now() / 1_000) + 3_600;
+  const moderation = describe(
+    await Promise.all([
+      callBot('deleteMessage', { chat_id: supergroup.id, message_id: spam.message_id }),
+      callBot('banChatMember', { ...target(member.id), until_date: untilDate }),
+      callBot('banChatMember', target(readerBot.bot.id)),
+      callBot('kickChatMember', target(outsider.id)),
+    ]),
+  );
+  const [bannedMember, preBannedOutsider] = await Promise.all([
+    callBot('getChatMember', target(member.id)),
+    callBot('getChatMember', target(outsider.id)),
+  ]).then((responses) => responses.map(({ body }) => (body as { result: unknown }).result));
+  const botUpdates = await readNewUpdates(bot.botApiPath);
+  const readerUpdates = await readNewUpdates(readerBot.botApiPath);
+  const bannedMemberHistory = await api.request(`${supergroupPath(member.id)}/messages`);
+  if (
+    JSON.stringify(moderation) !== JSON.stringify([
+        [200, true],
+        [200, true],
+        [400, 'Bad Request: user is an administrator of the chat'],
+        [200, true],
+      ]) ||
+    JSON.stringify(bannedMember) !==
+      JSON.stringify({ user: member, status: 'kicked', until_date: untilDate }) ||
+    JSON.stringify(preBannedOutsider) !==
+      JSON.stringify({ user: outsider, status: 'kicked', until_date: 0 }) ||
+    bannedMemberHistory.status !== 403
+  ) {
+    throw new Error(
+      `Expected the bot to delete the spam and ban its sender, received ${
+        JSON.stringify([moderation, bannedMember, preBannedOutsider])
+      }`,
+    );
+  }
+  const describeUpdates = (updates: Array<Record<string, unknown>>) =>
+    updates.map(({ message }) => {
+      const { text, from, left_chat_member } = message as {
+        text?: string;
+        from: { id: number };
+        left_chat_member?: { id: number };
+      };
+      return [from.id, text ?? `left_chat_member ${left_chat_member?.id}`];
+    });
+  const spamUpdate = [member.id, 'Buy now!'];
+  if (
+    JSON.stringify(describeUpdates(botUpdates)) !==
+      JSON.stringify([spamUpdate, [bot.bot.id, `left_chat_member ${member.id}`]]) ||
+    JSON.stringify(describeUpdates(readerUpdates)) !== JSON.stringify([spamUpdate])
+  ) {
+    throw new Error(
+      `Expected the spam and the ban's service message, received ${
+        JSON.stringify([botUpdates, readerUpdates])
+      }`,
+    );
+  }
+
+  // Lifting only a ban leaves the user free to be added again. Otherwise, as on Telegram,
+  // unbanning a member removes it.
+  const unbanning = describe(
+    await Promise.all([
+      callBot('unbanChatMember', { ...target(member.id), only_if_banned: true }),
+      callBot('unbanChatMember', { ...target(owner.id), only_if_banned: true }),
+    ]),
+  );
+  const readdition = await api.request(`${supergroupPath(owner.id)}/members/${member.id}`, {
+    method: 'PUT',
+  });
+  const removal = describe([await callBot('unbanChatMember', target(member.id))]);
+  const removedMember = await callBot('getChatMember', target(member.id));
+  if (
+    JSON.stringify([...unbanning, ...removal]) !==
+      JSON.stringify([[200, true], [200, true], [200, true]]) ||
+    readdition.status !== 204 ||
+    JSON.stringify((removedMember.body as { result: unknown }).result) !==
+      JSON.stringify({ user: member, status: 'left' })
+  ) {
+    throw new Error(
+      `Expected unbanning to lift the ban and then remove the member, received ${
+        JSON.stringify([unbanning, removal, removedMember])
+      }`,
+    );
+  }
+
+  // A private chat has two members and no administrators, and its members cannot be banned.
+  await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: '/start' }),
+  );
+  const privateChat = { chat_id: owner.id, user_id: owner.id };
+  const privateResponses = describe(
+    await Promise.all([
+      callBot('getChatMember', privateChat),
+      callBot('getChatMemberCount', { chat_id: owner.id }),
+      callBot('getChatAdministrators', { chat_id: owner.id }),
+      callBot('banChatMember', privateChat),
+      callBot('unbanChatMember', privateChat),
+      callBot('banChatMember', { chat_id: outsider.id, user_id: outsider.id }),
+    ]),
+  );
+  if (
+    JSON.stringify(privateResponses) !== JSON.stringify([
+      [200, { user: owner, status: 'member' }],
+      [200, 2],
+      [400, 'Bad Request: there are no administrators in the private chat'],
+      [400, "Bad Request: can't ban members in private chats"],
+      [400, 'Bad Request: method is available only in supergroup and channel chats'],
+      [400, 'Bad Request: chat not found'],
+    ])
+  ) {
+    throw new Error(`Expected private chat checks, received ${JSON.stringify(privateResponses)}`);
+  }
+});
+
+Deno.test('a grammY bot bans a spammer for an administrator and deletes the spam', async () => {
+  const { api, sessionPath, owner, member, bot, supergroupPath, sendSupergroupText } =
+    await createSupergroupFixture();
+  await api.request(
+    `${supergroupPath(owner.id)}/administrators/${bot.bot.id}`,
+    jsonRequest('PUT', { can_restrict_members: true, can_delete_messages: true }),
+  );
+  const grammyBot = new Bot(bot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const handledCommands: Array<PromiseWithResolvers<void>> = [
+    Promise.withResolvers<void>(),
+    Promise.withResolvers<void>(),
+  ];
+  let handledCommandCount = 0;
+  grammyBot.command('ban', async (context) => {
+    const spam = context.message?.reply_to_message;
+    const author = await context.getAuthor();
+    if (author.status !== 'creator' && author.status !== 'administrator') {
+      await context.reply('Only administrators can ban.');
+    } else if (spam?.from !== undefined) {
+      await context.banChatMember(spam.from.id);
+      await context.api.deleteMessages(context.chat.id, [spam.message_id, context.msgId]);
+    }
+    handledCommands[handledCommandCount++]?.resolve();
+  });
+  const polling = grammyBot.start();
+
+  try {
+    const spam = await sendSupergroupText(member.id, 'Buy now!');
+    await sendSupergroupText(member.id, '/ban', spam.message_id);
+    await Promise.race([handledCommands[0].promise, polling]);
+    await sendSupergroupText(owner.id, '/ban', spam.message_id);
+    await Promise.race([handledCommands[1].promise, polling]);
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: Array<{ from: { id: number }; text?: string; left_chat_member?: { id: number } }>;
+  };
+  const shownMessages = history.messages.slice(3).map(({ from, text, left_chat_member }) => [
+    from.id,
+    text ?? `left_chat_member ${left_chat_member?.id}`,
+  ]);
+  if (
+    JSON.stringify(shownMessages) !== JSON.stringify([
+      [member.id, '/ban'],
+      [bot.bot.id, 'Only administrators can ban.'],
+      [bot.bot.id, `left_chat_member ${member.id}`],
+    ])
+  ) {
+    throw new Error(
+      `Expected the spam and command to be deleted, received ${JSON.stringify(history)}`,
+    );
+  }
+});
+
 Deno.test('sendPhoto and sendDocument upload files, reuse file IDs, and follow Telegram checks', async () => {
   const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
   await sendText('/start');
@@ -3862,7 +4261,40 @@ async function createBot(
   return { ...body, botApiPath: `${sessionPath}/bot-api/bot${body.token}` };
 }
 
-function jsonRequest(method: 'PATCH' | 'POST', body: unknown): RequestInit {
+/**
+ * A supergroup administrator as the Bot API shows it, holding the given rights; the list includes
+ * `can_manage_chat`, which any right includes.
+ */
+function administratorMember(user: unknown, heldRights: readonly string[]) {
+  const holds = (right: string) => heldRights.includes(right);
+  return {
+    user,
+    status: 'administrator',
+    can_be_edited: false,
+    ...Object.fromEntries(
+      [
+        'can_manage_chat',
+        'can_change_info',
+        'can_delete_messages',
+        'can_invite_users',
+        'can_restrict_members',
+        'can_pin_messages',
+        'can_manage_topics',
+        'can_promote_members',
+        'can_manage_video_chats',
+        'can_post_stories',
+        'can_edit_stories',
+        'can_delete_stories',
+        'can_manage_tags',
+        'can_send_welcome_messages',
+      ].map((right) => [right, holds(right)]),
+    ),
+    is_anonymous: false,
+    can_manage_voice_chats: holds('can_manage_video_chats'),
+  };
+}
+
+function jsonRequest(method: 'PATCH' | 'POST' | 'PUT', body: unknown): RequestInit {
   return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 

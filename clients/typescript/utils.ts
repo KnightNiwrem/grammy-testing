@@ -18,6 +18,11 @@ interface SerializableRequest extends RequestDetails {
   readonly body?: unknown;
 }
 
+/** A request, optionally with a JSON body, whose success response has no content. */
+interface EmptyResponseRequest extends SerializableRequest {
+  readonly expectedStatus: number;
+}
+
 export async function requestJson<T>(
   fetchImplementation: typeof globalThis.fetch,
   request: JsonRequest<T>,
@@ -73,7 +78,7 @@ export async function requestBytes(
 
 export async function requestEmptyResponse(
   fetchImplementation: typeof globalThis.fetch,
-  request: RawResponseRequest,
+  request: EmptyResponseRequest,
 ): Promise<void> {
   const response = await sendRequest(fetchImplementation, request);
   if (response.status === request.expectedStatus) {

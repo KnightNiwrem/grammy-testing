@@ -4,6 +4,10 @@ import { z } from 'zod';
 
 import type { BotCommand } from '../../../types/bot_command.ts';
 import type { CallbackQuery } from '../../../types/callback_query.ts';
+import {
+  grantSupergroupAdministratorRights,
+  SUPERGROUP_ADMINISTRATOR_RIGHTS,
+} from '../../../types/chat_membership.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { ReplyInterface } from '../../../types/reply_interface.ts';
 import {
@@ -43,6 +47,8 @@ const SUPERGROUP_MESSAGE_PATH =
 const USER_ID_PARAMETER = 'userId';
 const SUPERGROUP_MEMBER_PATH =
   `${SUPERGROUP_CONVERSATION_PATH}/members/:${USER_ID_PARAMETER}` as const;
+const SUPERGROUP_ADMINISTRATOR_PATH =
+  `${SUPERGROUP_CONVERSATION_PATH}/administrators/:${USER_ID_PARAMETER}` as const;
 
 const telegramUserIdSchema = z.number().int()
   .min(MIN_TELEGRAM_USER_ID)
@@ -116,6 +122,12 @@ const sendMessageRequestSchema = z.union([
     caption: captionSchema,
   }),
 ]);
+
+/** The rights an administrator holds, by the Bot API's names; an omitted right is not held. */
+const promoteChatMemberRequestSchema = z.partialRecord(
+  z.enum(SUPERGROUP_ADMINISTRATOR_RIGHTS),
+  z.boolean(),
+);
 
 const createSupergroupRequestSchema = z.strictObject({
   title: z.string().min(1),
@@ -362,6 +374,59 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
         throw new Error(`Unhandled chat member removal failure: ${unhandledReason}`);
       }
     }
+  });
+
+  // The owner promotes a member to administrator, or changes an administrator's rights.
+  accountRoutes.put(SUPERGROUP_ADMINISTRATOR_PATH, async (context) => {
+    const memberPath = supergroupMemberPathSchema.safeParse(context.req.param());
+    if (!memberPath.success) {
+      return context.body(null, 400);
+    }
+    let requestBody: unknown;
+    try {
+      requestBody = await context.req.json();
+    } catch {
+      return context.body(null, 400);
+    }
+    const parsedRequest = promoteChatMemberRequestSchema.safeParse(requestBody);
+    if (!parsedRequest.success) {
+      return context.body(null, 400);
+    }
+    const { accountId, chatId, userId } = memberPath.data;
+
+    const result = context.get('emulationSession').sharedChatAdministration.promoteChatMember({
+      actorAccountId: accountId,
+      chatId,
+      memberId: userId,
+      rights: grantSupergroupAdministratorRights(
+        SUPERGROUP_ADMINISTRATOR_RIGHTS.filter((right) => parsedRequest.data[right] === true),
+      ),
+    });
+    if (result.promoted) {
+      return context.body(null, 204);
+    }
+    // An administrator without rights would be a member; DELETE demotes one instead.
+    return result.reason === 'no_rights_granted'
+      ? context.body(null, 400)
+      : context.body(null, memberRoleChangeFailureStatus(result.reason));
+  });
+
+  // The owner demotes an administrator to a member; demoting a member changes nothing.
+  accountRoutes.delete(SUPERGROUP_ADMINISTRATOR_PATH, (context) => {
+    const memberPath = supergroupMemberPathSchema.safeParse(context.req.param());
+    if (!memberPath.success) {
+      return context.body(null, 400);
+    }
+    const { accountId, chatId, userId } = memberPath.data;
+
+    const result = context.get('emulationSession').sharedChatAdministration.demoteChatMember({
+      actorAccountId: accountId,
+      chatId,
+      memberId: userId,
+    });
+    return result.demoted
+      ? context.body(null, 204)
+      : context.body(null, memberRoleChangeFailureStatus(result.reason));
   });
 
   accountRoutes.get(SUPERGROUP_MESSAGE_HISTORY_PATH, (context) => {
@@ -749,6 +814,33 @@ function supergroupMemberFailureStatus(reason: SupergroupAccountFailureReason): 
       return 403;
     default:
       return 400;
+  }
+}
+
+/**
+ * Only the owner changes a member's role, and only a current member other than the owner has a
+ * role to change.
+ */
+function memberRoleChangeFailureStatus(
+  reason: Extract<
+    ReturnType<EmulationSession['sharedChatAdministration']['demoteChatMember']>,
+    { readonly demoted: false }
+  >['reason'],
+): 403 | 404 | 409 {
+  switch (reason) {
+    case 'actor_account_not_found':
+    case 'chat_not_found':
+    case 'member_not_found':
+      return 404;
+    case 'actor_not_authorized':
+      return 403;
+    case 'not_a_member':
+    case 'member_is_owner':
+      return 409;
+    default: {
+      const unhandledReason: never = reason;
+      throw new Error(`Unhandled member role change failure: ${unhandledReason}`);
+    }
   }
 }
 

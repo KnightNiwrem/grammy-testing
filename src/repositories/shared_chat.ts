@@ -41,10 +41,32 @@ export type ChatMemberRemovalResult =
     readonly reason: ChatMemberRemovalFailureReason;
   };
 
+/** The standing of a member that is not the owner, which the owner can change. */
+export type NonOwnerMemberStatus = Exclude<ChatMembership, { readonly status: 'owner' }>;
+
+export type ChatMemberStatusUpdateFailureReason =
+  | 'chat_not_found'
+  | 'not_a_member'
+  | 'member_is_owner';
+
+export type ChatMemberStatusUpdateResult =
+  | { readonly updated: true }
+  | {
+    readonly updated: false;
+    readonly reason: ChatMemberStatusUpdateFailureReason;
+  };
+
+export type FormerMemberStatusUpdateResult =
+  | { readonly updated: true }
+  | {
+    readonly updated: false;
+    readonly reason: 'chat_not_found' | 'member_present';
+  };
+
 /**
- * Stores shared chats together with their memberships, so that a registered chat always has its
- * owner and initial members. It remembers how each former member's membership ended until the
- * member is added again.
+ * Stores shared chats together with their memberships, so that a registered chat always has
+ * exactly one owner, who stays a member. It remembers how each former member's membership ended,
+ * including bans of users that never joined, until the user is added again.
  */
 export class SharedChatRepository {
   readonly #sharedChatsById = new Map<number, SharedChat>();
@@ -61,16 +83,13 @@ export class SharedChatRepository {
     }
 
     const membershipsByIdentityId = new Map<number, ChatMembership>([
-      [ownerAccountId, { status: 'owner', identityId: ownerAccountId }],
+      [ownerAccountId, { status: 'owner' }],
     ]);
     for (const initialMemberId of initialMemberIds) {
       if (membershipsByIdentityId.has(initialMemberId)) {
         return { registered: false, reason: 'initial_members_not_unique' };
       }
-      membershipsByIdentityId.set(initialMemberId, {
-        status: 'member',
-        identityId: initialMemberId,
-      });
+      membershipsByIdentityId.set(initialMemberId, { status: 'member' });
     }
 
     this.#storeSharedChat(group, membershipsByIdentityId);
@@ -102,7 +121,7 @@ export class SharedChatRepository {
     this.#storeSharedChat(
       chat,
       new Map([
-        [ownerAccountId, { status: 'owner', identityId: ownerAccountId }],
+        [ownerAccountId, { status: 'owner' }],
       ]),
     );
     return { registered: true };
@@ -147,12 +166,31 @@ export class SharedChatRepository {
       return { added: false, reason: 'member_already_present' };
     }
 
-    membershipsByIdentityId.set(memberId, {
-      status: 'member',
-      identityId: memberId,
-    });
+    membershipsByIdentityId.set(memberId, { status: 'member' });
     this.#formerMemberStatusesByChatId.get(chatId)?.delete(memberId);
     return { added: true };
+  }
+
+  /** Promotes a member to administrator, changes its rights, or demotes it; never the owner. */
+  updateChatMemberStatus(
+    chatId: number,
+    memberId: number,
+    status: NonOwnerMemberStatus,
+  ): ChatMemberStatusUpdateResult {
+    const membershipsByIdentityId = this.#sharedChatMembershipsByChatId.get(chatId);
+    if (membershipsByIdentityId === undefined) {
+      return { updated: false, reason: 'chat_not_found' };
+    }
+    const membership = membershipsByIdentityId.get(memberId);
+    if (membership === undefined) {
+      return { updated: false, reason: 'not_a_member' };
+    }
+    if (membership.status === 'owner') {
+      return { updated: false, reason: 'member_is_owner' };
+    }
+
+    membershipsByIdentityId.set(memberId, status);
+    return { updated: true };
   }
 
   /** Ends a membership, remembering how it ended. */
@@ -172,5 +210,24 @@ export class SharedChatRepository {
 
     formerMemberStatuses.set(memberId, formerStatus);
     return { removed: true };
+  }
+
+  /** Bans a user that is not a member, or lifts its ban, which leaves it as having left. */
+  updateFormerMemberStatus(
+    chatId: number,
+    identityId: number,
+    formerStatus: FormerChatMemberStatus,
+  ): FormerMemberStatusUpdateResult {
+    const membershipsByIdentityId = this.#sharedChatMembershipsByChatId.get(chatId);
+    const formerMemberStatuses = this.#formerMemberStatusesByChatId.get(chatId);
+    if (membershipsByIdentityId === undefined || formerMemberStatuses === undefined) {
+      return { updated: false, reason: 'chat_not_found' };
+    }
+    if (membershipsByIdentityId.has(identityId)) {
+      return { updated: false, reason: 'member_present' };
+    }
+
+    formerMemberStatuses.set(identityId, formerStatus);
+    return { updated: true };
   }
 }

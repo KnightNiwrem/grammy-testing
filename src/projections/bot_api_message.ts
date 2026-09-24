@@ -1,6 +1,7 @@
 import type {
   BotApiBotUser,
   BotApiCallbackQuery,
+  BotApiChatMember,
   BotApiDocument,
   BotApiGroupChat,
   BotApiGroupChatBotMember,
@@ -17,6 +18,7 @@ import type {
   BotApiPrivateMessage,
   BotApiRepliedPrivateMessage,
   BotApiRepliedSupergroupMessage,
+  BotApiSupergroupAdministratorRights,
   BotApiSupergroupChat,
   BotApiSupergroupMessage,
   BotApiSupergroupMessageContent,
@@ -25,10 +27,9 @@ import type {
 import type { CallbackQuery } from '../types/callback_query.ts';
 import type {
   BotBlockChangedEvent,
-  ChatMemberAddedEvent,
-  ChatMemberLeftEvent,
+  ChatMemberStatusChangedEvent,
 } from '../types/chat_domain_event.ts';
-import type { FormerChatMemberStatus } from '../types/chat_membership.ts';
+import type { ChatMemberStatus, SupergroupAdministratorRights } from '../types/chat_membership.ts';
 import type { InlineKeyboard, InlineKeyboardButton } from '../types/inline_keyboard.ts';
 import type { StoredFile } from '../types/stored_file.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
@@ -310,64 +311,92 @@ export function projectBotBlockChangeForBot(
   };
 }
 
-export interface BotJoinedGroupProjectionInput {
-  readonly event: ChatMemberAddedEvent;
+export interface BotMembershipChangeProjectionInput {
+  readonly event: ChatMemberStatusChangedEvent;
   readonly chat: BasicGroup | Supergroup;
-  /** The account that added the bot. */
-  readonly account: VirtualAccountProfile;
-  /** The bot that joined the group, which observes the change. */
-  readonly bot: VirtualBotProfile;
-}
-
-/**
- * Projects an account's addition of a bot to a group as the added bot receives it: the bot's
- * membership changes to `member` from `left`, or from `kicked` for a bot removed before, and the
- * account made the change.
- */
-export function projectBotJoinedGroupForBot(
-  { event, chat, account, bot }: BotJoinedGroupProjectionInput,
-): BotApiMyChatMemberUpdated {
-  const user = projectBotAsUser(bot);
-  return {
-    chat: projectGroupChat(chat),
-    from: account,
-    date: event.addedAtUnixSeconds,
-    old_chat_member: projectFormerGroupChatBotMember(user, event.statusBeforeJoining),
-    new_chat_member: { user, status: 'member' },
-  };
-}
-
-export interface BotLeftGroupProjectionInput {
-  readonly event: ChatMemberLeftEvent;
-  readonly chat: BasicGroup | Supergroup;
-  /** The bot itself when it left, or the account that removed it. */
+  /** The user that made the change: the bot itself when it left. */
   readonly actor: BotApiUser;
-  /** The bot that left the group, which observes the change. */
+  /** The bot whose membership changed, which observes the change. */
   readonly bot: VirtualBotProfile;
 }
 
-/**
- * Projects a bot's departure from a group as the bot receives it: its membership changes from
- * `member` to `left` when it left, or to `kicked` when an account removed it.
- */
-export function projectBotLeftGroupForBot(
-  { event, chat, actor, bot }: BotLeftGroupProjectionInput,
+/** Projects a change of a bot's standing in a group as the bot receives it. */
+export function projectBotMembershipChangeForBot(
+  { event, chat, actor, bot }: BotMembershipChangeProjectionInput,
 ): BotApiMyChatMemberUpdated {
   const user = projectBotAsUser(bot);
   return {
     chat: projectGroupChat(chat),
     from: actor,
-    date: event.leftAtUnixSeconds,
-    old_chat_member: { user, status: 'member' },
-    new_chat_member: projectFormerGroupChatBotMember(user, event.statusAfterLeaving),
+    date: event.changedAtUnixSeconds,
+    old_chat_member: projectGroupChatBotMember(user, event.oldStatus),
+    new_chat_member: projectGroupChatBotMember(user, event.newStatus),
   };
 }
 
-function projectFormerGroupChatBotMember(
+function projectGroupChatBotMember(
   user: BotApiBotUser,
-  status: FormerChatMemberStatus,
+  status: ChatMemberStatus,
 ): BotApiGroupChatBotMember {
-  return status === 'kicked' ? { user, status, until_date: 0 } : { user, status };
+  const member = projectChatMember(user, status);
+  if (member.status === 'creator') {
+    throw new Error(`Bot ${user.id} cannot own a group`);
+  }
+  return member;
+}
+
+/**
+ * Projects a user's standing in a group as the Bot API shows it to a bot. Bots never promote
+ * administrators here, so no bot may change an administrator's rights.
+ */
+export function projectChatMember<User extends BotApiUser>(
+  user: User,
+  status: ChatMemberStatus,
+): BotApiChatMember<User> {
+  switch (status.status) {
+    case 'owner':
+      return { user, status: 'creator', is_anonymous: false };
+    case 'administrator':
+      return {
+        user,
+        status: 'administrator',
+        can_be_edited: false,
+        ...projectSupergroupAdministratorRights(status.rights),
+        can_manage_voice_chats: status.rights.has('can_manage_video_chats'),
+      };
+    case 'member':
+    case 'left':
+      return { user, status: status.status };
+    case 'kicked':
+      return { user, status: 'kicked', until_date: status.bannedUntilUnixSeconds ?? 0 };
+    default: {
+      const unhandledStatus: never = status;
+      throw new Error(`Unhandled chat member status: ${JSON.stringify(unhandledStatus)}`);
+    }
+  }
+}
+
+/** Shows every supergroup right, held or not, in the order the Bot API shows them. */
+function projectSupergroupAdministratorRights(
+  rights: SupergroupAdministratorRights,
+): BotApiSupergroupAdministratorRights {
+  return {
+    can_manage_chat: rights.has('can_manage_chat'),
+    can_change_info: rights.has('can_change_info'),
+    can_delete_messages: rights.has('can_delete_messages'),
+    can_invite_users: rights.has('can_invite_users'),
+    can_restrict_members: rights.has('can_restrict_members'),
+    can_pin_messages: rights.has('can_pin_messages'),
+    can_manage_topics: rights.has('can_manage_topics'),
+    can_promote_members: rights.has('can_promote_members'),
+    can_manage_video_chats: rights.has('can_manage_video_chats'),
+    can_post_stories: rights.has('can_post_stories'),
+    can_edit_stories: rights.has('can_edit_stories'),
+    can_delete_stories: rights.has('can_delete_stories'),
+    can_manage_tags: rights.has('can_manage_tags'),
+    can_send_welcome_messages: rights.has('can_send_welcome_messages'),
+    is_anonymous: false,
+  };
 }
 
 /** Shows a bot as messages show users, without the capabilities that only `getMe` reports. */

@@ -1,3 +1,4 @@
+import type { SupergroupAdministratorRight } from './chat_membership.ts';
 import type { VirtualAccountProfile } from './virtual_account.ts';
 import type { PlainTextEntityType } from './virtual_message.ts';
 
@@ -216,13 +217,49 @@ export type BotApiPrivateChatBotMember =
   | { readonly user: BotApiBotUser; readonly status: 'kicked'; readonly until_date: 0 };
 
 /**
- * The bot's membership in a group: `left` before it joins and after it leaves, and `kicked`, which
- * is forever, after an administrator removes it from a supergroup.
+ * A supergroup administrator's rights, in the order the Bot API shows them. Anonymous
+ * administrators are not supported.
  */
-export type BotApiGroupChatBotMember =
-  | { readonly user: BotApiBotUser; readonly status: 'left' }
-  | { readonly user: BotApiBotUser; readonly status: 'member' }
-  | { readonly user: BotApiBotUser; readonly status: 'kicked'; readonly until_date: 0 };
+export type BotApiSupergroupAdministratorRights =
+  & { readonly [Right in SupergroupAdministratorRight]: boolean }
+  & { readonly is_anonymous: false };
+
+/**
+ * A user's standing in a group, in the field order Telegram uses. Custom titles and member tags
+ * are not supported.
+ */
+export type BotApiChatMember<User extends BotApiUser = BotApiUser> =
+  | { readonly user: User; readonly status: 'creator'; readonly is_anonymous: false }
+  | (
+    & {
+      readonly user: User;
+      readonly status: 'administrator';
+      /** Whether the observing bot may change the administrator's rights. */
+      readonly can_be_edited: boolean;
+    }
+    & BotApiSupergroupAdministratorRights
+    & {
+      /** Legacy alias of `can_manage_video_chats`. */
+      readonly can_manage_voice_chats: boolean;
+    }
+  )
+  | { readonly user: User; readonly status: 'member' }
+  | { readonly user: User; readonly status: 'left' }
+  | {
+    readonly user: User;
+    readonly status: 'kicked';
+    /** When the ban ends; 0 for a ban that lasts until it is lifted. */
+    readonly until_date: number;
+  };
+
+/**
+ * The bot's membership in a group: `left` before it joins and after it leaves, `kicked` while it is
+ * banned, and `administrator` while the owner grants it rights. A bot never owns a group.
+ */
+export type BotApiGroupChatBotMember = Exclude<
+  BotApiChatMember<BotApiBotUser>,
+  { readonly status: 'creator' }
+>;
 
 /** A change of the bot's own membership in a chat, in the field order Telegram uses. */
 interface BotApiMyChatMemberUpdatedInChat<Chat, ChatMember> {

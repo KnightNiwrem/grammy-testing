@@ -16,7 +16,12 @@ import {
 import type { RecordSupergroupMembershipChangeInput } from '../src/services/supergroup_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
-import type { ChatMembership } from '../src/types/chat_membership.ts';
+import {
+  type ChatMembership,
+  type ChatMemberStatus,
+  grantSupergroupAdministratorRights,
+  type SupergroupAdministratorRight,
+} from '../src/types/chat_membership.ts';
 import type { BasicGroup, Channel, Supergroup } from '../src/types/virtual_chat.ts';
 
 Deno.test('SharedChatAdministrationService creates a basic group with its initial participants', () => {
@@ -213,12 +218,13 @@ Deno.test('SharedChatAdministrationService adds permitted members to shared chat
     { chat: channel, memberId: account.profile.id },
   ];
   const expectedEvents = additions.map(({ chat, memberId }) => ({
-    type: 'chat_member_added',
+    type: 'chat_member_status_changed',
     chat,
-    actorAccountId: owner.profile.id,
+    actorId: owner.profile.id,
     memberId,
-    statusBeforeJoining: 'left',
-    addedAtUnixSeconds: 1_700_000_000,
+    oldStatus: { status: 'left' },
+    newStatus: { status: 'member' },
+    changedAtUnixSeconds: 1_700_000_000,
   }));
   if (JSON.stringify(publishedEvents) !== JSON.stringify(expectedEvents)) {
     throw new Error(
@@ -492,8 +498,8 @@ Deno.test('SharedChatAdministrationService ends memberships as members leave or 
   }
   if (
     sharedChats.getChatMembership(supergroup.id, member.profile.id) !== undefined ||
-    sharedChats.getFormerMemberStatus(supergroup.id, member.profile.id) !== 'left' ||
-    sharedChats.getFormerMemberStatus(supergroup.id, bot.profile.id) !== 'kicked'
+    sharedChats.getFormerMemberStatus(supergroup.id, member.profile.id)?.status !== 'left' ||
+    sharedChats.getFormerMemberStatus(supergroup.id, bot.profile.id)?.status !== 'kicked'
   ) {
     throw new Error('Expected the member to have left and the bot to be banned');
   }
@@ -501,12 +507,13 @@ Deno.test('SharedChatAdministrationService ends memberships as members leave or 
     [member.profile.id, member.profile.id, 'left'],
     [owner.profile.id, bot.profile.id, 'kicked'],
   ].map(([actorId, memberId, statusAfterLeaving]) => ({
-    type: 'chat_member_left',
+    type: 'chat_member_status_changed',
     chat: supergroup,
     actorId,
     memberId,
-    statusAfterLeaving,
-    leftAtUnixSeconds: 1_700_000_000,
+    oldStatus: { status: 'member' },
+    newStatus: { status: statusAfterLeaving },
+    changedAtUnixSeconds: 1_700_000_000,
   }));
   const expectedChanges = [
     [{ kind: 'account', accountId: member.profile.id }, member.profile.id],
@@ -534,7 +541,7 @@ Deno.test('SharedChatAdministrationService ends memberships as members leave or 
   });
   if (
     JSON.stringify(repeatedLeaving) !==
-      '{"left":false,"reason":"not_a_member","formerStatus":"kicked"}'
+      '{"left":false,"reason":"not_a_member","formerStatus":{"status":"kicked"}}'
   ) {
     throw new Error(
       `Expected a removed bot to be told how it left, received ${JSON.stringify(repeatedLeaving)}`,
@@ -547,7 +554,8 @@ Deno.test('SharedChatAdministrationService ends memberships as members leave or 
   }));
   const readdition = publishedEvents.at(-1);
   if (
-    readdition?.type !== 'chat_member_added' || readdition.statusBeforeJoining !== 'kicked' ||
+    readdition?.type !== 'chat_member_status_changed' ||
+    readdition.oldStatus.status !== 'kicked' ||
     sharedChats.getFormerMemberStatus(supergroup.id, bot.profile.id) !== undefined
   ) {
     throw new Error(
@@ -555,6 +563,374 @@ Deno.test('SharedChatAdministrationService ends memberships as members leave or 
     );
   }
 });
+
+Deno.test('SharedChatAdministrationService lets the owner promote and demote members', () => {
+  const { owner, member, moderatorBot, supergroup, publishedEvents, sharedChatAdministration } =
+    createModerationFixture();
+  const changeRole = (
+    memberId: number,
+    rights?: readonly SupergroupAdministratorRight[],
+    actorAccountId = owner.profile.id,
+  ) => {
+    const input = { actorAccountId, chatId: supergroup.id, memberId };
+    if (rights === undefined) {
+      const demotion = sharedChatAdministration.demoteChatMember(input);
+      return demotion.demoted ? 'changed' : demotion.reason;
+    }
+    const promotion = sharedChatAdministration.promoteChatMember({
+      ...input,
+      rights: grantSupergroupAdministratorRights(rights),
+    });
+    return promotion.promoted ? 'changed' : promotion.reason;
+  };
+
+  const outcomes = [
+    changeRole(moderatorBot.profile.id, ['can_delete_messages']),
+    changeRole(moderatorBot.profile.id, ['can_delete_messages']),
+    changeRole(moderatorBot.profile.id, ['can_restrict_members']),
+    changeRole(moderatorBot.profile.id),
+    changeRole(moderatorBot.profile.id),
+    changeRole(moderatorBot.profile.id, ['can_delete_messages'], member.profile.id),
+    changeRole(owner.profile.id, ['can_delete_messages']),
+    changeRole(999, ['can_delete_messages']),
+    changeRole(member.profile.id, []),
+  ];
+  if (
+    JSON.stringify(outcomes) !== JSON.stringify([
+      'changed',
+      'changed',
+      'changed',
+      'changed',
+      'changed',
+      'actor_not_authorized',
+      'member_is_owner',
+      'member_not_found',
+      'no_rights_granted',
+    ])
+  ) {
+    throw new Error(`Expected the owner alone to change roles, received ${outcomes.join()}`);
+  }
+
+  // Repeating a promotion or a demotion publishes nothing; any right includes can_manage_chat.
+  const statusChanges = publishedEvents.map((event) =>
+    event.type === 'chat_member_status_changed'
+      ? [event.actorId, describeStatus(event.oldStatus), describeStatus(event.newStatus)]
+      : event.type
+  );
+  const promotedTo = (rights: string) => `administrator(${rights})`;
+  const expectedStatusChanges = [
+    [owner.profile.id, 'member', promotedTo('can_delete_messages,can_manage_chat')],
+    [
+      owner.profile.id,
+      promotedTo('can_delete_messages,can_manage_chat'),
+      promotedTo('can_manage_chat,can_restrict_members'),
+    ],
+    [owner.profile.id, promotedTo('can_manage_chat,can_restrict_members'), 'member'],
+  ];
+  if (JSON.stringify(statusChanges) !== JSON.stringify(expectedStatusChanges)) {
+    throw new Error(`Expected each role change once, received ${JSON.stringify(statusChanges)}`);
+  }
+
+  // An administrator that leaves is no member any more, and a non-member has no role to change.
+  changeRole(member.profile.id, ['can_pin_messages']);
+  publishedEvents.length = 0;
+  sharedChatAdministration.leaveChat({ memberId: member.profile.id, chatId: supergroup.id });
+  const departure = publishedEvents[0];
+  if (
+    departure?.type !== 'chat_member_status_changed' ||
+    describeStatus(departure.oldStatus) !== promotedTo('can_manage_chat,can_pin_messages') ||
+    changeRole(member.profile.id, ['can_pin_messages']) !== 'not_a_member'
+  ) {
+    throw new Error(`Expected the administrator to leave, received ${JSON.stringify(departure)}`);
+  }
+});
+
+Deno.test('SharedChatAdministrationService lets bots ban and unban users in TDLib order', () => {
+  const {
+    owner,
+    member,
+    stranger,
+    moderatorBot,
+    otherBot,
+    supergroup,
+    sharedChats,
+    publishedEvents,
+    recordedMembershipChanges,
+    sharedChatAdministration,
+  } = createModerationFixture();
+  const now = 1_700_000_000;
+  const ban = (memberId: number, requestedBanEndUnixSeconds?: number) => {
+    const result = sharedChatAdministration.banChatMember({
+      actorBotId: moderatorBot.profile.id,
+      chatId: supergroup.id,
+      memberId,
+      ...(requestedBanEndUnixSeconds === undefined ? {} : { requestedBanEndUnixSeconds }),
+    });
+    return result.banned ? 'banned' : result.reason;
+  };
+  const unban = (memberId: number, onlyIfBanned = false) => {
+    const result = sharedChatAdministration.unbanChatMember({
+      actorBotId: moderatorBot.profile.id,
+      chatId: supergroup.id,
+      memberId,
+      onlyIfBanned,
+    });
+    return result.unbanned ? 'unbanned' : result.reason;
+  };
+  const statusOf = (userId: number) =>
+    describeStatus(
+      sharedChats.getChatMembership(supergroup.id, userId) ??
+        sharedChats.getFormerMemberStatus(supergroup.id, userId) ?? { status: 'left' },
+    );
+
+  // Nobody bans the owner, and banning needs the right to restrict members.
+  const refusalsWithoutRights = [
+    ban(owner.profile.id),
+    ban(moderatorBot.profile.id),
+    ban(999),
+    ban(member.profile.id),
+    unban(member.profile.id),
+  ];
+  if (
+    JSON.stringify(refusalsWithoutRights) !== JSON.stringify([
+        'member_is_owner',
+        'cannot_restrict_self',
+        'member_not_found',
+        'not_enough_rights',
+        'not_enough_rights',
+      ]) || publishedEvents.length !== 0
+  ) {
+    throw new Error(`Expected refusals without rights, received ${refusalsWithoutRights.join()}`);
+  }
+
+  for (
+    const [memberId, rights] of [
+      [moderatorBot.profile.id, ['can_restrict_members']],
+      [otherBot.profile.id, ['can_delete_messages']],
+    ] as const
+  ) {
+    sharedChatAdministration.promoteChatMember({
+      actorAccountId: owner.profile.id,
+      chatId: supergroup.id,
+      memberId,
+      rights: grantSupergroupAdministratorRights(rights),
+    });
+  }
+  publishedEvents.length = 0;
+  recordedMembershipChanges.length = 0;
+
+  // Telegram lets a bot ban only administrators it promoted, and bots promote none here.
+  const outcomes = [
+    ban(otherBot.profile.id),
+    ban(member.profile.id, now + 3_600),
+    ban(member.profile.id, now + 3_600),
+    ban(member.profile.id, now + 10),
+    ban(stranger.profile.id),
+  ];
+  if (
+    JSON.stringify(outcomes) !==
+      JSON.stringify(['member_is_administrator', 'banned', 'banned', 'banned', 'banned']) ||
+    statusOf(member.profile.id) !== 'kicked' || statusOf(stranger.profile.id) !== 'kicked'
+  ) {
+    throw new Error(`Expected bans of non-administrators, received ${outcomes.join()}`);
+  }
+  // A ban that changes nothing publishes nothing, and one shorter than 30 seconds is forever.
+  // Only the removal of a member is recorded as a service message, which the bot wrote.
+  const botId = moderatorBot.profile.id;
+  const describeChanges = () =>
+    publishedEvents.splice(0).map((event) =>
+      event.type === 'chat_member_status_changed'
+        ? [
+          event.actorId,
+          event.memberId,
+          describeStatus(event.oldStatus),
+          describeStatus(event.newStatus),
+        ]
+        : event.type
+    );
+  const banChanges = describeChanges();
+  const expectedBanChanges = [
+    [botId, member.profile.id, 'member', `kicked(${now + 3_600})`],
+    [botId, member.profile.id, `kicked(${now + 3_600})`, 'kicked'],
+    [botId, stranger.profile.id, 'left', 'kicked'],
+  ];
+  const removalRecord = {
+    chatId: supergroup.id,
+    author: { kind: 'bot', botId },
+    content: { kind: 'member_left', memberId: member.profile.id },
+    changedAtUnixSeconds: now,
+  };
+  if (
+    JSON.stringify(banChanges) !== JSON.stringify(expectedBanChanges) ||
+    JSON.stringify(recordedMembershipChanges.splice(0)) !== JSON.stringify([removalRecord])
+  ) {
+    throw new Error(`Expected each ban once, received ${JSON.stringify(banChanges)}`);
+  }
+
+  // Unbanning lifts a ban, and, unless only a ban is to be lifted, removes a member by banning it
+  // for a minute first, as Telegram does. A bot that unbans itself leaves.
+  sharedChatAdministration.addChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: supergroup.id,
+    memberId: member.profile.id,
+  });
+  publishedEvents.length = 0;
+  recordedMembershipChanges.length = 0;
+  const unbanOutcomes = [
+    unban(member.profile.id, true),
+    unban(stranger.profile.id),
+    unban(stranger.profile.id),
+    unban(member.profile.id),
+    unban(owner.profile.id),
+    unban(otherBot.profile.id),
+    unban(999, true),
+    unban(moderatorBot.profile.id),
+  ];
+  if (
+    JSON.stringify(unbanOutcomes) !== JSON.stringify([
+      'unbanned',
+      'unbanned',
+      'unbanned',
+      'unbanned',
+      'member_is_owner',
+      'member_is_administrator',
+      'member_not_found',
+      'unbanned',
+    ])
+  ) {
+    throw new Error(`Expected unbans in TDLib order, received ${unbanOutcomes.join()}`);
+  }
+  const unbanChanges = describeChanges();
+  const expectedUnbanChanges = [
+    [botId, stranger.profile.id, 'kicked', 'left'],
+    [botId, member.profile.id, 'member', `kicked(${now + 60})`],
+    [botId, member.profile.id, `kicked(${now + 60})`, 'left'],
+    [botId, botId, 'administrator(can_manage_chat,can_restrict_members)', 'left'],
+  ];
+  if (
+    JSON.stringify(unbanChanges) !== JSON.stringify(expectedUnbanChanges) ||
+    recordedMembershipChanges.length !== 2
+  ) {
+    throw new Error(
+      `Expected unbans to change standings, received ${JSON.stringify(unbanChanges)}`,
+    );
+  }
+  if (ban(member.profile.id) !== 'bot_not_a_member') {
+    throw new Error('Expected a bot that left to be turned away');
+  }
+});
+
+Deno.test('SharedChatAdministrationService tells member bots the standing of supergroup users', () => {
+  const {
+    owner,
+    member,
+    stranger,
+    moderatorBot,
+    otherBot,
+    supergroup,
+    sharedChatAdministration,
+  } = createModerationFixture();
+  sharedChatAdministration.promoteChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: supergroup.id,
+    memberId: otherBot.profile.id,
+    rights: grantSupergroupAdministratorRights(['can_restrict_members']),
+  });
+  sharedChatAdministration.banChatMember({
+    actorBotId: otherBot.profile.id,
+    chatId: supergroup.id,
+    memberId: member.profile.id,
+  });
+  const query = { observerBotId: moderatorBot.profile.id, chatId: supergroup.id };
+
+  const standings = [owner, member, stranger, otherBot, moderatorBot].map(({ profile }) => {
+    const result = sharedChatAdministration.getChatMemberStatus({ ...query, userId: profile.id });
+    return result.found ? describeStatus(result.status) : result.reason;
+  });
+  const administrators = sharedChatAdministration.getChatAdministrators(query);
+  const memberCount = sharedChatAdministration.getChatMemberCount(query);
+  if (
+    JSON.stringify(standings) !== JSON.stringify([
+        'owner',
+        'kicked',
+        'left',
+        'administrator(can_manage_chat,can_restrict_members)',
+        'member',
+      ]) ||
+    !administrators.found ||
+    JSON.stringify(administrators.administrators.map(({ userId }) => userId)) !==
+      JSON.stringify([owner.profile.id, otherBot.profile.id]) ||
+    !memberCount.found || memberCount.memberCount !== 3
+  ) {
+    throw new Error(
+      `Expected the standings of the supergroup's users, received ${
+        JSON.stringify([standings, administrators, memberCount])
+      }`,
+    );
+  }
+
+  const unknownUser = sharedChatAdministration.getChatMemberStatus({ ...query, userId: 999 });
+  const bannedBotQuery = { observerBotId: otherBot.profile.id, chatId: supergroup.id };
+  sharedChatAdministration.removeChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: supergroup.id,
+    memberId: otherBot.profile.id,
+  });
+  const refusals = [
+    unknownUser,
+    sharedChatAdministration.getChatAdministrators(bannedBotQuery),
+    sharedChatAdministration.getChatMemberCount({ ...query, chatId: -1_000_000_009_999 }),
+  ].map((result) => result.found ? 'found' : result.reason);
+  if (
+    JSON.stringify(refusals) !==
+      JSON.stringify(['member_not_found', 'bot_kicked', 'chat_not_found'])
+  ) {
+    throw new Error(`Expected member queries to be refused, received ${refusals.join()}`);
+  }
+});
+
+/** Describes a standing compactly: rights sorted, and a ban's end when it has one. */
+function describeStatus(status: ChatMemberStatus): string {
+  switch (status.status) {
+    case 'administrator':
+      return `administrator(${[...status.rights].sort().join()})`;
+    case 'kicked':
+      return status.bannedUntilUnixSeconds === undefined
+        ? 'kicked'
+        : `kicked(${status.bannedUntilUnixSeconds})`;
+    default:
+      return status.status;
+  }
+}
+
+/**
+ * A supergroup with its owner, a member account, a moderator bot, and another bot, and an account
+ * that never joined it.
+ */
+function createModerationFixture() {
+  const fixture = createSharedChatAdministrationFixture();
+  const { virtualUsers, sharedChatAdministration, publishedEvents, recordedMembershipChanges } =
+    fixture;
+  const owner = createAccount(virtualUsers, 'Ada');
+  const member = createAccount(virtualUsers, 'Grace');
+  const stranger = createAccount(virtualUsers, 'Linus');
+  const moderatorBot = createBot(virtualUsers, 'Moderator Bot', 'moderator_bot');
+  const otherBot = createBot(virtualUsers, 'Other Bot', 'other_bot');
+  const supergroup = getCreatedSupergroup(sharedChatAdministration.createSupergroup({
+    title: 'Team',
+    creatorAccountId: owner.profile.id,
+  }));
+  for (const memberId of [member.profile.id, moderatorBot.profile.id, otherBot.profile.id]) {
+    assertMemberAdded(sharedChatAdministration.addChatMember({
+      actorAccountId: owner.profile.id,
+      chatId: supergroup.id,
+      memberId,
+    }));
+  }
+  publishedEvents.length = 0;
+  recordedMembershipChanges.length = 0;
+  return { ...fixture, owner, member, stranger, moderatorBot, otherBot, supergroup };
+}
 
 function failureReason(result: LeaveChatResult | RemoveChatMemberResult): string | undefined {
   if ('left' in result) {

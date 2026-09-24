@@ -365,10 +365,30 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     throw new Error('Expected the client to exchange messages and press buttons in the supergroup');
   }
 
+  // Only an administrator with the right deletes another member's message.
+  const deleteGreeting = () =>
+    api.request(`${botApiPath}/deleteMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: supergroup.id, message_id: greeting.message_id }),
+    });
+  const deletionBeforePromotion = await deleteGreeting();
+  await owner.promoteChatMember({ chat, userId: bot.id, rights: { can_delete_messages: true } });
+  const deletionAfterPromotion = await deleteGreeting();
+  await owner.demoteChatMember({ chat, userId: bot.id });
+  await owner.demoteChatMember({ chat, userId: bot.id });
+  if (deletionBeforePromotion.status !== 400 || deletionAfterPromotion.status !== 200) {
+    throw new Error(
+      `Expected the promoted bot to delete the greeting, received ${
+        [deletionBeforePromotion.status, deletionAfterPromotion.status].join()
+      }`,
+    );
+  }
+
   await owner.removeChatMember({ chat, userId: bot.id });
   await owner.removeChatMember({ chat, userId: bot.id });
   await member.leaveChat({ chat });
-  const departures = (await owner.getMessages({ chat })).slice(4);
+  const departures = (await owner.getMessages({ chat })).slice(3);
   if (
     JSON.stringify(
       departures.map(({ from, left_chat_member }) => [from.id, left_chat_member?.id]),

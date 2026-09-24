@@ -69,7 +69,7 @@ default, receives only account messages addressed to it: commands not addressed 
 replies to its messages, and mentions of it. Telegram delivers a command without a bot's username
 only to the bot that last wrote to the group; the emulator delivers it to every bot in privacy mode.
 A bot created with `can_read_all_group_messages` receives every account message. In a supergroup, a
-bot edits and deletes only its own messages, as a bot without administrator rights does.
+bot edits only its own messages, and deletes only its own unless it is an administrator.
 
 Members join and leave supergroups as on Telegram, so tests can drive welcome and moderation bots.
 Each addition, departure, and removal is a service message in the supergroup's history, with
@@ -82,9 +82,24 @@ later requests to the supergroup fail with Telegram's
 supergroup chat`. A bot leaves with `leaveChat`, after which
 its requests fail with `403 Forbidden:
 bot is not a member of the supergroup chat`. The owner cannot
-leave its supergroup, whereas Telegram lets a creator leave and stay the owner. Reply keyboards and
-forced replies in groups, members joining on their own, administrators, chat scopes of command lists
-for supergroups, basic groups, and channels are not supported yet.
+leave its supergroup, whereas Telegram lets a creator leave and stay the owner.
+
+Owners promote members to administrators, so tests can drive moderation bots. The owner grants an
+account or a bot administrator rights by their Bot API names, changes them, and demotes it again,
+and a promoted or demoted bot receives a `my_chat_member` update showing its new standing. As on
+Telegram, an administrator bot receives every message of the supergroup, privacy mode
+notwithstanding. With `can_delete_messages` it deletes any message there, service messages included,
+and with `can_restrict_members` it bans users with `banChatMember`, which removes a member with a
+service message of the bot, and lifts bans with `unbanChatMember`, which, as on Telegram, also
+removes a member unless `only_if_banned` is set. The emulator checks these requests in TDLib's order
+and fails them with Telegram's errors, such as `can't remove chat owner` and
+`not enough rights to restrict/unrestrict chat member`. Bots read users' standings with
+`getChatMember`, `getChatAdministrators`, and `getChatMemberCount`. Bots see the other rights, but
+the emulator does not enforce them, and bots cannot promote members. A ban lasts until it is lifted,
+even when its `until_date` passes. Restricting members with `restrictChatMember`, `chat_member`
+updates, anonymous administrators, and custom titles are not supported yet, nor are reply keyboards
+and forced replies in groups, members joining on their own, chat scopes of command lists for
+supergroups, basic groups, and channels.
 
 ## TypeScript client
 
@@ -175,6 +190,15 @@ try {
   await account.sendMessage({ to: groupChat, text: '/start@test_bot' });
   const groupHistory = await account.getMessages({ chat: groupChat });
   console.log(groupHistory.map(({ from, text }) => `${from.first_name}: ${text ?? '(service)'}`));
+
+  // Promote the bot to administrator. It then receives every message of the supergroup, deletes
+  // any, and bans spammers with banChatMember; demoting it takes its rights away again.
+  await account.promoteChatMember({
+    chat: groupChat,
+    userId: bot.id,
+    rights: { can_delete_messages: true, can_restrict_members: true },
+  });
+  await account.demoteChatMember({ chat: groupChat, userId: bot.id });
 
   // Remove the bot, which bans it: it receives a my_chat_member update showing it as kicked, and
   // its requests to the supergroup fail with 403 until the owner adds it again.
