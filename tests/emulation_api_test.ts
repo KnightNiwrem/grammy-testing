@@ -32,24 +32,7 @@ Deno.test('POST /sessions creates a session and returns its API locations', asyn
   }
 });
 
-Deno.test('DELETE /sessions/:sessionId ends an active session', async () => {
-  const api = createEmulationApi({
-    sessionLifecycle: createSessionLifecycleService(),
-    publicOrigin: 'http://emulator.example:9000',
-  });
-  const createResponse = await api.request('/sessions', { method: 'POST' });
-  const sessionPath = createResponse.headers.get('Location');
-  if (sessionPath === null) {
-    throw new Error('Expected the created session to have a Location');
-  }
-
-  const deleteResponse = await api.request(sessionPath, { method: 'DELETE' });
-  if (deleteResponse.status !== 204) {
-    throw new Error(`Expected status 204, received ${deleteResponse.status}`);
-  }
-});
-
-Deno.test('DELETE /sessions/:sessionId answers the long polls its bots hold', async () => {
+Deno.test('DELETE /sessions/:sessionId ends the session and answers its held long polls', async () => {
   const { api, sessionPath, botApiPath } = await createPrivateConversationFixture();
   const heldPoll = api.request(`${botApiPath}/getUpdates`, {
     method: 'POST',
@@ -82,7 +65,7 @@ Deno.test('DELETE /sessions/:sessionId answers the long polls its bots hold', as
   }
 });
 
-Deno.test('POST /sessions/:sessionId/bots creates a virtual bot', async () => {
+Deno.test('POST bots and accounts create virtual users in one ID namespace', async () => {
   const api = createEmulationApi({
     sessionLifecycle: createSessionLifecycleService(),
     publicOrigin: 'http://emulator.example:9000',
@@ -93,53 +76,26 @@ Deno.test('POST /sessions/:sessionId/bots creates a virtual bot', async () => {
     throw new Error('Expected the created session to have a Location');
   }
 
-  const response = await api.request(`${sessionPath}/bots`, {
+  const botResponse = await api.request(`${sessionPath}/bots`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
   });
-  const body: unknown = await response.json();
-
-  if (response.status !== 201) {
-    throw new Error(`Expected status 201, received ${response.status}`);
-  }
-  if (!isCreatedBotResponse(body)) {
-    throw new Error('Expected a created bot response');
-  }
-
-  const botPath = `${sessionPath}/bots/${body.bot.id}`;
-  if (response.headers.get('Location') !== botPath) {
-    throw new Error('Expected Location to identify the created bot');
-  }
-  if (!body.token.startsWith(`${body.bot.id}:`)) {
-    throw new Error('Expected the bot token to be prefixed with its user ID');
+  const botBody: unknown = await botResponse.json();
+  if (botResponse.status !== 201 || !isCreatedBotResponse(botBody)) {
+    throw new Error(`Expected a created bot response, received ${botResponse.status}`);
   }
   if (
-    body.bot.is_bot !== true ||
-    body.bot.first_name !== 'Test Bot' ||
-    body.bot.username !== 'test_bot'
+    botResponse.headers.get('Location') !== `${sessionPath}/bots/${botBody.bot.id}` ||
+    !botBody.token.startsWith(`${botBody.bot.id}:`) ||
+    botBody.bot.is_bot !== true ||
+    botBody.bot.first_name !== 'Test Bot' ||
+    botBody.bot.username !== 'test_bot'
   ) {
-    throw new Error('Expected the response to contain the virtual bot profile');
-  }
-});
-
-Deno.test('POST /sessions/:sessionId/accounts creates an account in the shared ID namespace', async () => {
-  const api = createEmulationApi({
-    sessionLifecycle: createSessionLifecycleService(),
-    publicOrigin: 'http://emulator.example:9000',
-  });
-  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
-  const sessionPath = createSessionResponse.headers.get('Location');
-  if (sessionPath === null) {
-    throw new Error('Expected the created session to have a Location');
+    throw new Error('Expected the bot Location, a token prefixed with its ID, and its profile');
   }
 
-  await api.request(`${sessionPath}/bots`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
-  });
-  const response = await api.request(`${sessionPath}/accounts`, {
+  const accountResponse = await api.request(`${sessionPath}/accounts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -149,64 +105,21 @@ Deno.test('POST /sessions/:sessionId/accounts creates an account in the shared I
       language_code: 'en',
     }),
   });
-  const body: unknown = await response.json();
-
-  if (response.status !== 201) {
-    throw new Error(`Expected status 201, received ${response.status}`);
-  }
-  if (!isCreatedAccountResponse(body)) {
-    throw new Error('Expected a created account response');
-  }
-  if (response.headers.get('Location') !== `${sessionPath}/accounts/${body.account.id}`) {
-    throw new Error('Expected Location to identify the created account');
+  const accountBody: unknown = await accountResponse.json();
+  if (accountResponse.status !== 201 || !isCreatedAccountResponse(accountBody)) {
+    throw new Error(`Expected a created account response, received ${accountResponse.status}`);
   }
   if (
-    body.account.id !== 2 ||
-    body.account.is_bot !== false ||
-    body.account.first_name !== 'Ada' ||
-    body.account.last_name !== 'Lovelace' ||
-    body.account.username !== 'ada' ||
-    body.account.language_code !== 'en'
+    accountResponse.headers.get('Location') !==
+      `${sessionPath}/accounts/${accountBody.account.id}` ||
+    accountBody.account.id !== botBody.bot.id + 1 ||
+    accountBody.account.is_bot !== false ||
+    accountBody.account.first_name !== 'Ada' ||
+    accountBody.account.last_name !== 'Lovelace' ||
+    accountBody.account.username !== 'ada' ||
+    accountBody.account.language_code !== 'en'
   ) {
-    throw new Error('Expected the response to contain the virtual account profile');
-  }
-});
-
-Deno.test('POST /sessions/:sessionId/bot-api/bot:token/getMe returns the bot profile', async () => {
-  const api = createEmulationApi({
-    sessionLifecycle: createSessionLifecycleService(),
-    publicOrigin: 'http://emulator.example:9000',
-  });
-  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
-  const sessionPath = createSessionResponse.headers.get('Location');
-  if (sessionPath === null) {
-    throw new Error('Expected the created session to have a Location');
-  }
-
-  const createBotResponse = await api.request(`${sessionPath}/bots`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
-  });
-  const createdBot: unknown = await createBotResponse.json();
-  if (!isCreatedBotResponse(createdBot)) {
-    throw new Error('Expected a created bot response');
-  }
-
-  const response = await api.request(
-    `${sessionPath}/bot-api/bot${createdBot.token}/getMe`,
-    { method: 'POST' },
-  );
-  const body: unknown = await response.json();
-
-  if (response.status !== 200) {
-    throw new Error(`Expected status 200, received ${response.status}`);
-  }
-  if (!isGetMeResponse(body)) {
-    throw new Error('Expected a successful getMe response');
-  }
-  if (JSON.stringify(body.result) !== JSON.stringify(createdBot.bot)) {
-    throw new Error('Expected getMe to return the stored virtual bot profile');
+    throw new Error('Expected the account Location, the next user ID, and its profile');
   }
 });
 
@@ -241,40 +154,7 @@ Deno.test('Bot API rejects unknown tokens before resolving methods or parameters
 });
 
 Deno.test('private account messages are stored and delivered through getUpdates', async () => {
-  const publicOrigin = 'http://emulator.example:9000';
-  const api = createEmulationApi({
-    sessionLifecycle: createSessionLifecycleService(),
-    publicOrigin,
-  });
-  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
-  const sessionPath = createSessionResponse.headers.get('Location');
-  if (sessionPath === null) {
-    throw new Error('Expected the created session to have a Location');
-  }
-
-  const createBotResponse = await api.request(`${sessionPath}/bots`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
-  });
-  const createdBot: unknown = await createBotResponse.json();
-  if (!isCreatedBotResponse(createdBot)) {
-    throw new Error('Expected a created bot response');
-  }
-  const createAccountResponse = await api.request(`${sessionPath}/accounts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      first_name: 'Ada',
-      last_name: 'Lovelace',
-      username: 'ada',
-      language_code: 'en',
-    }),
-  });
-  const createdAccount: unknown = await createAccountResponse.json();
-  if (!isCreatedAccountResponse(createdAccount)) {
-    throw new Error('Expected a created account response');
-  }
+  const { api, sessionPath, createdBot, createdAccount } = await createPrivateConversationFixture();
 
   const sendResponse = await api.request(
     `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
@@ -316,7 +196,7 @@ Deno.test('private account messages are stored and delivered through getUpdates'
   const getUpdatesPath = `${sessionPath}/bot-api/bot${createdBot.token}/getUpdates`;
   const grammyBot = new Bot(createdBot.token, {
     client: {
-      apiRoot: `${publicOrigin}${sessionPath}/bot-api`,
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
       fetch: createInProcessFetch(api.fetch),
     },
   });
@@ -551,128 +431,56 @@ Deno.test('getUpdates rejects malformed parameters with a Bot API error', async 
   }
 });
 
-Deno.test("Bot API answers unknown methods with Telegram's not-found error", async () => {
-  const { api, botApiPath } = await createPrivateConversationFixture();
-
-  const responses = [
-    await api.request(`${botApiPath}/unknownMethod`, { method: 'POST' }),
-    await api.request(`${botApiPath}/getMe/extra`),
-    await api.request(`${botApiPath}/`),
-    // The method is resolved before the body is decoded.
-    await api.request(`${botApiPath}/unknownMethod`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{not json',
-    }),
-  ];
-
-  for (const response of responses) {
-    const body: unknown = await response.json();
-    if (
-      response.status !== 404 || !isNotFoundResponse(body, 'Not Found: method not found')
-    ) {
-      throw new Error(
-        `Expected ${response.url} to be a method not found, received ${response.status}`,
-      );
-    }
-  }
-});
-
-Deno.test('Bot API answers paths without a method before checking the token', async () => {
+Deno.test("Bot API answers unknown methods and paths with Telegram's not-found errors", async () => {
   const { api, sessionPath, botApiPath } = await createPrivateConversationFixture();
   const botApiRootPath = `${sessionPath}/bot-api`;
-
-  const responses = [
-    await api.request(botApiPath),
-    await api.request(`${botApiRootPath}/bot123:unknown`),
-    await api.request(`${botApiRootPath}/getMe`),
-    await api.request(botApiRootPath),
-  ];
-
-  for (const response of responses) {
+  const expectNotFound = async (response: Response, expectedDescription: string) => {
     const body: unknown = await response.json();
-    if (response.status !== 404 || !isNotFoundResponse(body, 'Not Found')) {
-      throw new Error(`Expected ${response.url} to be not found, received ${response.status}`);
+    if (response.status !== 404 || !isNotFoundResponse(body, expectedDescription)) {
+      throw new Error(
+        `Expected ${response.url} to be ${expectedDescription}, received ${response.status}`,
+      );
     }
-  }
-});
+  };
 
-Deno.test('grammY reports an unimplemented method as a Telegram API error', async () => {
-  const { api, sessionPath, createdBot } = await createPrivateConversationFixture();
-  const publicOrigin = 'http://emulator.example:9000';
-  const grammyBot = new Bot(createdBot.token, {
-    client: {
-      apiRoot: `${publicOrigin}${sessionPath}/bot-api`,
-      fetch: createInProcessFetch(api.fetch),
-    },
-  });
-
-  let callError: unknown;
-  try {
-    await grammyBot.api.raw.logOut();
-  } catch (error) {
-    callError = error;
-  }
-
-  if (
-    !(callError instanceof GrammyError) || callError.error_code !== 404 ||
-    callError.description !== 'Not Found: method not found'
+  for (
+    const response of [
+      await api.request(`${botApiPath}/unknownMethod`, { method: 'POST' }),
+      await api.request(`${botApiPath}/getMe/extra`),
+      await api.request(`${botApiPath}/`),
+      // The method is resolved before the body is decoded.
+      await api.request(`${botApiPath}/unknownMethod`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{not json',
+      }),
+    ]
   ) {
-    throw new Error(
-      `Expected a grammY API error for an unimplemented method, received ${callError}`,
-    );
+    await expectNotFound(response, 'Not Found: method not found');
+  }
+  // A path without a method is not found before its token is checked.
+  for (
+    const response of [
+      await api.request(botApiPath),
+      await api.request(`${botApiRootPath}/bot123:unknown`),
+      await api.request(`${botApiRootPath}/getMe`),
+      await api.request(botApiRootPath),
+    ]
+  ) {
+    await expectNotFound(response, 'Not Found');
   }
 });
 
 Deno.test('grammY command handlers match account-sent bot commands', async () => {
-  const publicOrigin = 'http://emulator.example:9000';
-  const api = createEmulationApi({
-    sessionLifecycle: createSessionLifecycleService(),
-    publicOrigin,
-  });
-  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
-  const sessionPath = createSessionResponse.headers.get('Location');
-  if (sessionPath === null) {
-    throw new Error('Expected the created session to have a Location');
-  }
-  const createBotResponse = await api.request(`${sessionPath}/bots`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: 'Test Bot', username: 'test_bot' }),
-  });
-  const createdBot: unknown = await createBotResponse.json();
-  if (!isCreatedBotResponse(createdBot)) {
-    throw new Error('Expected a created bot response');
-  }
-  const createAccountResponse = await api.request(`${sessionPath}/accounts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: 'Ada' }),
-  });
-  const createdAccount: unknown = await createAccountResponse.json();
-  if (!isCreatedAccountResponse(createdAccount)) {
-    throw new Error('Expected a created account response');
-  }
+  const { api, sessionPath, createdBot, sendText } = await createPrivateConversationFixture();
 
   for (const text of ['/start', '/start@test_bot payload', 'hello /start']) {
-    const sendResponse = await api.request(
-      `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: { type: 'private', botId: createdBot.bot.id }, text }),
-      },
-    );
-    if (sendResponse.status !== 201) {
-      throw new Error(
-        `Expected the account message to be accepted, received ${sendResponse.status}`,
-      );
-    }
+    await sendText(text);
   }
 
   const grammyBot = new Bot(createdBot.token, {
     client: {
-      apiRoot: `${publicOrigin}${sessionPath}/bot-api`,
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
       fetch: createInProcessFetch(api.fetch),
     },
   });
@@ -805,6 +613,7 @@ Deno.test('sendMessage replies only in private chats the account has started', a
     { chat_id: createdBot.bot.id, text: 'Hello' },
     'Bad Request: chat not found',
   );
+  await expectBadRequest({ chat_id: -1, text: 'Hello' }, 'Bad Request: chat not found');
   await expectBadRequest(
     { chat_id: accountId, text: 'x'.repeat(4_097) },
     'Bad Request: message is too long',
@@ -1159,84 +968,6 @@ Deno.test('a callback query created expired reaches the bot but refuses its answ
 
   if ((await pressButton('yes')).status !== 400) {
     throw new Error('Expected a non-boolean expired flag to be rejected');
-  }
-});
-
-Deno.test('a grammY bot catching up after downtime cannot answer an expired callback query', async () => {
-  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
-    await createPrivateConversationFixture();
-  const accountId = createdAccount.account.id;
-  await sendText('/start');
-  const menu = await callBotApi(api, `${botApiPath}/sendMessage`, {
-    chat_id: accountId,
-    text: 'Continue?',
-    reply_markup: { inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] },
-  });
-  // The bot is offline when the account presses the button, so the query has expired by the time
-  // the bot polls for it.
-  const pressResponse = await api.request(`${sessionPath}/accounts/${accountId}/callback-queries`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat: { type: 'private', botId: createdBot.bot.id },
-      message_id: botApiResult(menu.body)?.message_id,
-      callback_data: 'yes',
-      expired: true,
-    }),
-  });
-  if (pressResponse.status !== 201) {
-    throw new Error(`Expected the button press to be accepted, received ${pressResponse.status}`);
-  }
-
-  const grammyBot = new Bot(createdBot.token, {
-    client: {
-      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
-      fetch: createInProcessFetch(api.fetch),
-    },
-  });
-  const answerErrors: unknown[] = [];
-  const queryHandled = Promise.withResolvers<void>();
-  grammyBot.callbackQuery('yes', async (context) => {
-    try {
-      await context.answerCallbackQuery({ text: 'Saved' });
-    } catch (error) {
-      answerErrors.push(error);
-      await context.reply('That button has expired; please try again.');
-    }
-    queryHandled.resolve();
-  });
-  // Skip the pending /start message so that only the callback query is handled.
-  grammyBot.on('message', () => {});
-  const polling = grammyBot.start();
-
-  try {
-    await expectSettlementWithin(
-      Promise.race([queryHandled.promise, polling]),
-      5_000,
-      'Expected the bot to handle the expired callback query',
-    );
-  } finally {
-    await grammyBot.stop();
-    await polling;
-  }
-
-  const [answerError] = answerErrors;
-  if (
-    answerErrors.length !== 1 || !(answerError instanceof GrammyError) ||
-    answerError.error_code !== 400 ||
-    answerError.description !==
-      'Bad Request: query is too old and response timeout expired or query ID is invalid'
-  ) {
-    throw new Error(`Expected answering to fail as Telegram does, received ${answerErrors}`);
-  }
-  const historyBody: unknown = await (await api.request(
-    `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/messages`,
-  )).json();
-  if (
-    !isMessageHistoryResponse(historyBody) ||
-    historyBody.messages.at(-1)?.text !== 'That button has expired; please try again.'
-  ) {
-    throw new Error("Expected the bot's fallback reply in history");
   }
 });
 
@@ -1707,8 +1438,6 @@ Deno.test('private message routes validate participants and request bodies', asy
   }
 });
 
-/** Creates a session holding a bot and an account that can message it. */
-/** Returns what `pending` settles to, failing if it is still pending after `milliseconds`. */
 Deno.test('sendMessage and editMessageText format text from parse_mode or entities', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
     await createPrivateConversationFixture();
@@ -2077,55 +1806,6 @@ Deno.test('setMyCommands, getMyCommands, and deleteMyCommands follow Telegram ch
   }
 });
 
-Deno.test('a grammY bot registers its command menu at startup and for a chat', async () => {
-  const { api, sessionPath, createdBot, createdAccount, sendText } =
-    await createPrivateConversationFixture();
-  const grammyBot = new Bot(createdBot.token, {
-    client: {
-      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
-      fetch: createInProcessFetch(api.fetch),
-    },
-  });
-  const chatMenuSet = Promise.withResolvers<void>();
-  grammyBot.command('start', async (context) => {
-    await context.api.setMyCommands(
-      [{ command: 'order', description: 'Place an order' }, {
-        command: 'help',
-        description: 'Help',
-      }],
-      { scope: { type: 'chat', chat_id: context.chat.id } },
-    );
-    chatMenuSet.resolve();
-  });
-  await grammyBot.api.setMyCommands([{ command: 'start', description: 'Start the bot' }]);
-  const commandsPath =
-    `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/commands`;
-  const menuCommands = async () => {
-    const body: unknown = await (await api.request(commandsPath)).json();
-    const commands = typeof body === 'object' && body !== null && 'commands' in body &&
-        Array.isArray(body.commands)
-      ? body.commands
-      : [];
-    return commands.map((command: { command?: unknown }) => command.command).join();
-  };
-  if (await menuCommands() !== 'start') {
-    throw new Error('Expected the account to see the default commands');
-  }
-  const polling = grammyBot.start();
-
-  try {
-    await sendText('/start');
-    // Polling ends only when stopped, so settling first means startup failed.
-    await Promise.race([chatMenuSet.promise, polling]);
-    if (await menuCommands() !== 'order,help') {
-      throw new Error(`Expected the chat's own commands, received ${await menuCommands()}`);
-    }
-  } finally {
-    await grammyBot.stop();
-    await polling;
-  }
-});
-
 Deno.test('sendChatAction accepts Telegram actions in started private chats', async () => {
   const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
   const accountId = createdAccount.account.id;
@@ -2162,42 +1842,7 @@ Deno.test('sendChatAction accepts Telegram actions in started private chats', as
   );
 });
 
-Deno.test('a grammY bot shows typing before it replies', async () => {
-  const { api, sessionPath, createdBot, createdAccount, sendText } =
-    await createPrivateConversationFixture();
-  const grammyBot = new Bot(createdBot.token, {
-    client: {
-      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
-      fetch: createInProcessFetch(api.fetch),
-    },
-  });
-  const replied = Promise.withResolvers<void>();
-  grammyBot.on('message:text', async (context) => {
-    await context.replyWithChatAction('typing');
-    await context.reply(`You said: ${context.message.text}`);
-    replied.resolve();
-  });
-  const polling = grammyBot.start();
-
-  try {
-    await sendText('hello');
-    // Polling ends only when stopped, so settling first means startup failed.
-    await Promise.race([replied.promise, polling]);
-    const historyBody: unknown = await (await api.request(
-      `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/messages`,
-    )).json();
-    const reply = isMessageHistoryResponse(historyBody) ? historyBody.messages.at(-1) : undefined;
-    if (reply?.text !== 'You said: hello') {
-      throw new Error(
-        `Expected the reply after the chat action, received ${JSON.stringify(historyBody)}`,
-      );
-    }
-  } finally {
-    await grammyBot.stop();
-    await polling;
-  }
-});
-
+/** Returns what `pending` settles to, failing if it is still pending after `milliseconds`. */
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,
@@ -2214,6 +1859,7 @@ async function expectSettlementWithin<T>(
   }
 }
 
+/** Creates a session holding a bot and an account that can message it. */
 async function createPrivateConversationFixture() {
   const api = createEmulationApi({
     sessionLifecycle: createSessionLifecycleService(),

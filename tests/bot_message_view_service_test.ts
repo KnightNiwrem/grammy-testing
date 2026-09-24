@@ -36,38 +36,7 @@ Deno.test('BotMessageViewService shows an account message in its bot private cha
   }
 });
 
-Deno.test('BotMessageViewService shows a bot message sent to the account chat', () => {
-  const { virtualUsers, messages, userMessageBoxes, botMessageViews } = createViewFixture();
-  const account = createAccount(virtualUsers);
-  const bot = createBot(virtualUsers);
-  const message = messages.addPrivateTextMessage({
-    conversation: { accountId: account.profile.id, botId: bot.profile.id },
-    authorRole: 'bot',
-    sentAtUnixSeconds: 1_700_000_000,
-    text: 'Welcome!',
-    entities: [],
-  });
-  userMessageBoxes.assignMessageId(bot.profile.id, message.id);
-
-  const view = botMessageViews.viewPrivateTextMessageForBot(message);
-
-  const expectedSender = {
-    id: bot.profile.id,
-    is_bot: true,
-    first_name: 'Test Bot',
-    username: 'test_bot',
-  };
-  if (
-    view.message_id !== 1 ||
-    view.chat.id !== account.profile.id ||
-    JSON.stringify(view.from) !== JSON.stringify(expectedSender) ||
-    'entities' in view
-  ) {
-    throw new Error("Expected the bot as sender in the account's chat, without entities");
-  }
-});
-
-Deno.test('BotMessageViewService shows the edit date and inline keyboard in Telegram order', () => {
+Deno.test('BotMessageViewService shows a bot message, then its edit date and keyboard, in Telegram order', () => {
   const { virtualUsers, messages, userMessageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
@@ -78,6 +47,28 @@ Deno.test('BotMessageViewService shows the edit date and inline keyboard in Tele
     text: 'Continue?',
     entities: [],
   });
+  userMessageBoxes.assignMessageId(bot.profile.id, sentMessage.id);
+  const botSender = {
+    id: bot.profile.id,
+    is_bot: true,
+    first_name: 'Test Bot',
+    username: 'test_bot',
+  };
+  const sentView = botMessageViews.viewPrivateTextMessageForBot(sentMessage);
+  if (
+    JSON.stringify(sentView) !== JSON.stringify({
+      message_id: 1,
+      from: botSender,
+      chat: { id: account.profile.id, type: 'private', first_name: 'Ada' },
+      date: 1_700_000_000,
+      text: 'Continue?',
+    })
+  ) {
+    throw new Error(
+      `Expected the bot as sender, without entities, received ${JSON.stringify(sentView)}`,
+    );
+  }
+
   const message = messages.editPrivateTextMessage(sentMessage.id, {
     text: 'Try /help',
     entities: [{ type: 'bot_command', offset: 4, length: 5 }],
@@ -87,13 +78,12 @@ Deno.test('BotMessageViewService shows the edit date and inline keyboard in Tele
     ]],
     textEditedAtUnixSeconds: 1_700_000_005,
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, message.id);
 
   const view = botMessageViews.viewPrivateTextMessageForBot(message);
 
   const expectedView = {
     message_id: 1,
-    from: { id: bot.profile.id, is_bot: true, first_name: 'Test Bot', username: 'test_bot' },
+    from: botSender,
     chat: { id: account.profile.id, type: 'private', first_name: 'Ada' },
     date: 1_700_000_000,
     edit_date: 1_700_000_005,

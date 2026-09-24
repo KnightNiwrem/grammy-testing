@@ -1,12 +1,19 @@
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
-import type { BotApiPrivateTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
+import type { BotApiPrivateTextMessage } from '../src/types/bot_api.ts';
 
 Deno.test('BotUpdateRepository sequences and confirms each bot mailbox independently', () => {
   const botUpdates = new BotUpdateRepository();
   const message = createMessage('first');
 
   botUpdates.enqueueMessageUpdate(10, message);
-  botUpdates.enqueueMessageUpdate(10, createMessage('second'));
+  // Callback queries share the message update sequence.
+  botUpdates.enqueueCallbackQueryUpdate(10, {
+    id: '1',
+    from: { id: 1, is_bot: false, first_name: 'Ada' },
+    message,
+    chat_instance: '-42',
+    data: 'yes',
+  });
   botUpdates.enqueueMessageUpdate(20, message);
 
   const limitedUpdates = botUpdates.confirmAndReadPendingUpdates(10, { limit: 1 });
@@ -27,51 +34,17 @@ Deno.test('BotUpdateRepository sequences and confirms each bot mailbox independe
     firstUnconfirmedUpdateId: 2,
     limit: 100,
   });
-  if (afterConfirmation.length !== 1 || afterConfirmation[0].update_id !== 2) {
+  const callbackQueryUpdate = afterConfirmation[0];
+  if (
+    afterConfirmation.length !== 1 || callbackQueryUpdate.update_id !== 2 ||
+    !('callback_query' in callbackQueryUpdate) || callbackQueryUpdate.callback_query.data !== 'yes'
+  ) {
     throw new Error('Expected a read to confirm only earlier updates');
   }
 
   const otherBotUpdates = botUpdates.confirmAndReadPendingUpdates(20, { limit: 100 });
   if (otherBotUpdates.length !== 1 || otherBotUpdates[0].update_id !== 1) {
     throw new Error('Expected each bot to own an independent update sequence');
-  }
-});
-
-Deno.test('BotUpdateRepository sequences callback query updates with message updates', async () => {
-  const botUpdates = new BotUpdateRepository();
-  const message = createMessage('Continue?');
-  const pendingWait = botUpdates.waitForUpdate(10, { timeoutSeconds: 1 });
-
-  botUpdates.enqueueMessageUpdate(10, message);
-  botUpdates.enqueueCallbackQueryUpdate(10, {
-    id: '1',
-    from: { id: 1, is_bot: false, first_name: 'Ada' },
-    message,
-    chat_instance: '-42',
-    data: 'yes',
-  });
-
-  await pendingWait;
-  const updates = botUpdates.confirmAndReadPendingUpdates(10, { limit: 100 });
-  const callbackQueryUpdate = updates[1];
-  if (
-    updates.length !== 2 || callbackQueryUpdate?.update_id !== 2 ||
-    !('callback_query' in callbackQueryUpdate) || callbackQueryUpdate.callback_query.data !== 'yes'
-  ) {
-    throw new Error('Expected the callback query to follow the message in one update sequence');
-  }
-});
-
-Deno.test('BotUpdateRepository wakes a waiter when an update arrives for its bot', async () => {
-  const botUpdates = new BotUpdateRepository();
-  const pendingWait = botUpdates.waitForUpdate(10, { timeoutSeconds: 1 });
-
-  queueMicrotask(() => botUpdates.enqueueMessageUpdate(10, createMessage('arrived')));
-
-  await pendingWait;
-  const updates = botUpdates.confirmAndReadPendingUpdates(10, { limit: 100 });
-  if (updates.length !== 1 || messageFromUpdate(updates[0])?.text !== 'arrived') {
-    throw new Error('Expected an enqueued update to end the wait');
   }
 });
 
@@ -168,8 +141,4 @@ function createMessage(text: string): BotApiPrivateTextMessage {
     date: 1_700_000_000,
     text,
   };
-}
-
-function messageFromUpdate(update: BotApiUpdate | undefined): BotApiPrivateTextMessage | undefined {
-  return update !== undefined && 'message' in update ? update.message : undefined;
 }

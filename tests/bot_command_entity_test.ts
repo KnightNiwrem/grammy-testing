@@ -11,10 +11,7 @@ Deno.test('findBotCommandEntities marks commands with optional bot addresses', (
   assertBotCommands('/a /b', [[0, 2], [3, 2]]);
   assertBotCommands(`/${'a'.repeat(64)}`, [[0, 65]]);
   assertBotCommands(`/start@${'b'.repeat(32)}`, [[0, 39]]);
-});
-
-Deno.test('findBotCommandEntities measures offsets in UTF-16 code units', () => {
-  // The emoji is one code point but two UTF-16 code units.
+  // Offsets count UTF-16 code units: the emoji is one code point but two code units.
   assertBotCommands('😀 /start', [[3, 6]]);
 });
 

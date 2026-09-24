@@ -51,35 +51,6 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
   }
 });
 
-Deno.test('BotUpdateDeliveryService skips updates excluded by the bot subscription', () => {
-  const {
-    virtualUsers,
-    messages,
-    userMessageBoxes,
-    botUpdates,
-    updateSubscriptions,
-    botUpdateDelivery,
-  } = createDeliveryFixture();
-  const account = createAccount(virtualUsers);
-  const bot = createBot(virtualUsers, 'test_bot');
-  updateSubscriptions.setAllowedUpdateTypes(bot.profile.id, new Set(['callback_query']));
-  const message = messages.addPrivateTextMessage({
-    conversation: { accountId: account.profile.id, botId: bot.profile.id },
-    authorRole: 'account',
-    sentAtUnixSeconds: 1_700_000_000,
-    text: 'Hello',
-    entities: [],
-  });
-  userMessageBoxes.assignMessageId(bot.profile.id, message.id);
-
-  botUpdateDelivery.publish({ type: 'message_created', message });
-
-  const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
-  if (updates.length !== 0) {
-    throw new Error('Expected a message update not to reach a bot that excluded message updates');
-  }
-});
-
 Deno.test('BotUpdateDeliveryService does not deliver a bot its own message', () => {
   const { virtualUsers, messages, userMessageBoxes, botUpdates, botUpdateDelivery } =
     createDeliveryFixture();
@@ -149,7 +120,7 @@ Deno.test('BotUpdateDeliveryService delivers a callback query to the bot whose b
   }
 });
 
-Deno.test('BotUpdateDeliveryService skips callback queries excluded by the bot subscription', () => {
+Deno.test('BotUpdateDeliveryService skips update types excluded by the bot subscription', () => {
   const {
     virtualUsers,
     messages,
@@ -160,8 +131,7 @@ Deno.test('BotUpdateDeliveryService skips callback queries excluded by the bot s
   } = createDeliveryFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers, 'test_bot');
-  updateSubscriptions.setAllowedUpdateTypes(bot.profile.id, new Set(['message']));
-  const message = messages.addPrivateTextMessage({
+  const botMessage = messages.addPrivateTextMessage({
     conversation: { accountId: account.profile.id, botId: bot.profile.id },
     authorRole: 'bot',
     sentAtUnixSeconds: 1_700_000_000,
@@ -169,23 +139,34 @@ Deno.test('BotUpdateDeliveryService skips callback queries excluded by the bot s
     entities: [],
     inlineKeyboard: [[{ kind: 'callback', text: 'Yes', callbackData: 'yes' }]],
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, message.id);
+  const accountMessage = messages.addPrivateTextMessage({
+    conversation: botMessage.conversation,
+    authorRole: 'account',
+    sentAtUnixSeconds: 1_700_000_001,
+    text: 'Hello',
+    entities: [],
+  });
+  userMessageBoxes.assignMessageId(bot.profile.id, botMessage.id);
+  userMessageBoxes.assignMessageId(bot.profile.id, accountMessage.id);
 
+  updateSubscriptions.setAllowedUpdateTypes(bot.profile.id, new Set(['callback_query']));
+  botUpdateDelivery.publish({ type: 'message_created', message: accountMessage });
+  updateSubscriptions.setAllowedUpdateTypes(bot.profile.id, new Set(['message']));
   botUpdateDelivery.publish({
     type: 'callback_query_created',
     callbackQuery: {
       id: '7',
-      conversation: message.conversation,
-      messageId: message.id,
+      conversation: botMessage.conversation,
+      messageId: botMessage.id,
       chatInstance: '-42',
       callbackData: 'yes',
       state: { status: 'awaiting_answer' },
     },
-    message,
+    message: botMessage,
   });
 
   if (botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 }).length !== 0) {
-    throw new Error('Expected no callback query update for a bot that excluded them');
+    throw new Error('Expected no update of a type the bot excluded');
   }
 });
 

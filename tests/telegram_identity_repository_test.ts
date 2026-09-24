@@ -11,22 +11,25 @@ Deno.test('Telegram user IDs use the official MTProto user range', () => {
   }
 });
 
-Deno.test('TelegramIdentityRepository shares sequential IDs across username reservations', () => {
+Deno.test('TelegramIdentityRepository reserves usernames globally without consuming rejected IDs', () => {
   const identities = new TelegramIdentityRepository();
 
   const botIdentity = reserveIdentity(identities, { kind: 'bot', username: 'TestBot' });
 
-  const duplicateUsername = identities.reserveIdentity({
-    kind: 'account',
-    username: 'testbot',
-  });
-  if (duplicateUsername.reserved || duplicateUsername.reason !== 'username_taken') {
-    throw new Error('Expected usernames to be reserved case-insensitively');
+  for (const kind of ['account', 'supergroup'] as const) {
+    const duplicateUsername = identities.reserveIdentity({ kind, username: 'testbot' });
+    if (duplicateUsername.reserved || duplicateUsername.reason !== 'username_taken') {
+      throw new Error(`Expected a bot username to be unavailable to a ${kind}, in any case`);
+    }
   }
 
   const nextIdentity = reserveIdentity(identities, { kind: 'account' });
-  if (botIdentity.kind !== 'bot' || botIdentity.id !== 1 || nextIdentity.id !== 2) {
-    throw new Error('Expected a rejected username not to consume a user ID');
+  const channelIdentity = reserveIdentity(identities, { kind: 'channel' });
+  if (
+    botIdentity.kind !== 'bot' || botIdentity.id !== 1 || nextIdentity.id !== 2 ||
+    channelIdentity.id !== -1_000_000_000_001
+  ) {
+    throw new Error('Expected rejected usernames not to consume user or shared-chat IDs');
   }
 });
 
@@ -42,31 +45,6 @@ Deno.test('TelegramIdentityRepository resolves identities by ID and normalized u
     identities.getByUsername('unknown') !== undefined
   ) {
     throw new Error('Expected username lookup to be case-insensitive');
-  }
-});
-
-Deno.test('TelegramIdentityRepository reserves usernames globally across identity kinds', () => {
-  const identities = new TelegramIdentityRepository();
-
-  reserveIdentity(identities, {
-    kind: 'account',
-    username: 'public_name',
-  });
-
-  const duplicateSupergroupUsername = identities.reserveIdentity({
-    kind: 'supergroup',
-    username: 'PUBLIC_NAME',
-  });
-  if (
-    duplicateSupergroupUsername.reserved ||
-    duplicateSupergroupUsername.reason !== 'username_taken'
-  ) {
-    throw new Error('Expected an account username to be unavailable to a supergroup');
-  }
-
-  const channelIdentity = reserveIdentity(identities, { kind: 'channel' });
-  if (channelIdentity.id !== -1_000_000_000_001) {
-    throw new Error('Expected a rejected username not to consume a shared channel ID');
   }
 });
 

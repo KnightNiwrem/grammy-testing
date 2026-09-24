@@ -28,14 +28,6 @@ Deno.test("booleanParameter reads Telegram's boolean spellings and rejects other
   }
 });
 
-Deno.test('decodeBotApiRequestParameters reads the query string without a body', async () => {
-  const decoding = await decodeBotApiRequestParameters(
-    new Request(`${METHOD_URL}?offset=2&allowed_updates=%5B%22message%22%5D`),
-  );
-
-  assertDecodedParameters(decoding, { offset: '2', allowed_updates: '["message"]' });
-});
-
 Deno.test('decodeBotApiRequestParameters decodes every supported body encoding alike', async () => {
   const expectedParameters = { offset: '2', allowed_updates: '["message"]' };
   const multipartBody = new FormData();
@@ -73,7 +65,12 @@ Deno.test('decodeBotApiRequestParameters decodes every supported body encoding a
   }
 });
 
-Deno.test('decodeBotApiRequestParameters prefers query-string parameters to body ones', async () => {
+Deno.test('decodeBotApiRequestParameters reads the query string, preferring it to the body', async () => {
+  const queryOnlyDecoding = await decodeBotApiRequestParameters(
+    new Request(`${METHOD_URL}?offset=2&allowed_updates=%5B%22message%22%5D`),
+  );
+  assertDecodedParameters(queryOnlyDecoding, { offset: '2', allowed_updates: '["message"]' });
+
   const decoding = await decodeBotApiRequestParameters(
     new Request(`${METHOD_URL}?offset=5`, {
       method: 'POST',

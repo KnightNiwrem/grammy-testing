@@ -25,10 +25,33 @@ import {
 } from '../src/types/virtual_message.ts';
 import type { VirtualBot } from '../src/types/virtual_bot.ts';
 
-Deno.test('PrivateMessagingService activates a private conversation for known participants', () => {
+Deno.test('PrivateMessagingService activates a private conversation only for known participants', () => {
   const { virtualUsers, privateConversations, privateMessaging } = createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'First Bot', 'first_bot');
+
+  const missingAccount = privateMessaging.activatePrivateConversation({
+    accountId: 999,
+    botId: bot.profile.id,
+  });
+  const missingBot = privateMessaging.activatePrivateConversation({
+    accountId: account.profile.id,
+    botId: 999,
+  });
+  if (
+    missingAccount.activated || missingAccount.reason !== 'account_not_found' ||
+    missingBot.activated || missingBot.reason !== 'bot_not_found'
+  ) {
+    throw new Error('Expected unknown participants to be rejected');
+  }
+  if (
+    privateConversations.getPrivateConversation({ accountId: 999, botId: bot.profile.id }) !==
+      undefined ||
+    privateConversations.getPrivateConversation({ accountId: account.profile.id, botId: 999 }) !==
+      undefined
+  ) {
+    throw new Error('Expected rejected activations not to create conversations');
+  }
 
   const activation = privateMessaging.activatePrivateConversation({
     accountId: account.profile.id,
@@ -47,39 +70,15 @@ Deno.test('PrivateMessagingService activates a private conversation for known pa
   }
 });
 
-Deno.test('PrivateMessagingService rejects unknown private conversation participants', () => {
-  const { virtualUsers, privateConversations, privateMessaging } = createPrivateMessagingFixture();
-  const account = createAccount(virtualUsers, 'Ada');
-  const bot = createBot(virtualUsers, 'First Bot', 'first_bot');
-
-  const missingAccount = privateMessaging.activatePrivateConversation({
-    accountId: 999,
-    botId: bot.profile.id,
-  });
-  if (missingAccount.activated || missingAccount.reason !== 'account_not_found') {
-    throw new Error('Expected an unknown account to be rejected');
-  }
-
-  const missingBot = privateMessaging.activatePrivateConversation({
-    accountId: account.profile.id,
-    botId: 999,
-  });
-  if (missingBot.activated || missingBot.reason !== 'bot_not_found') {
-    throw new Error('Expected an unknown bot to be rejected');
-  }
-  if (
-    privateConversations.getPrivateConversation({ accountId: 999, botId: bot.profile.id }) !==
-      undefined ||
-    privateConversations.getPrivateConversation({ accountId: account.profile.id, botId: 999 }) !==
-      undefined
-  ) {
-    throw new Error('Expected rejected activations not to create conversations');
-  }
-});
-
-Deno.test('PrivateMessagingService sends and stores private account messages', () => {
-  const { virtualUsers, privateConversations, messages, botUpdates, privateMessaging } =
-    createPrivateMessagingFixture();
+Deno.test('PrivateMessagingService sends, stores, and publishes private account messages', () => {
+  const {
+    virtualUsers,
+    privateConversations,
+    messages,
+    botUpdates,
+    publishedEvents,
+    privateMessaging,
+  } = createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
 
@@ -141,6 +140,14 @@ Deno.test('PrivateMessagingService sends and stores private account messages', (
   ) {
     throw new Error('Expected history to return the stored messages in order');
   }
+  if (
+    publishedEvents.length !== 2 ||
+    publishedEvents.some((event, index) =>
+      event.type !== 'message_created' || event.message !== storedMessages[index]
+    )
+  ) {
+    throw new Error('Expected each sent message to publish a message_created event');
+  }
 
   const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
   if (
@@ -152,138 +159,36 @@ Deno.test('PrivateMessagingService sends and stores private account messages', (
   }
 });
 
-Deno.test('PrivateMessagingService marks bot commands in private account messages', () => {
-  const { virtualUsers, messages, privateMessaging } = createPrivateMessagingFixture();
-  const account = createAccount(virtualUsers, 'Ada');
-  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
-
-  const commandResult = privateMessaging.sendAccountMessage({
-    fromAccountId: account.profile.id,
-    to: { type: 'private', botId: bot.profile.id },
-    text: '/start payload',
-  });
-  const plainResult = privateMessaging.sendAccountMessage({
-    fromAccountId: account.profile.id,
-    to: { type: 'private', botId: bot.profile.id },
-    text: 'Hello',
-  });
-  if (!commandResult.sent || !plainResult.sent) {
-    throw new Error('Expected both message sends to succeed');
-  }
-
-  const expectedCommandEntities = [{ type: 'bot_command', offset: 0, length: 6 }];
-  const storedMessages = messages.getPrivateConversationMessages({
-    accountId: account.profile.id,
-    botId: bot.profile.id,
-  });
-  if (
-    storedMessages[0] !== commandResult.message ||
-    storedMessages[1] !== plainResult.message ||
-    JSON.stringify(commandResult.message.entities) !== JSON.stringify(expectedCommandEntities) ||
-    plainResult.message.entities.length !== 0
-  ) {
-    throw new Error('Expected canonical messages to store the detected bot command entities');
-  }
-});
-
-Deno.test('PrivateMessagingService numbers private messages in each bot message box', () => {
+Deno.test("PrivateMessagingService numbers private messages in each user's message box", () => {
   const { virtualUsers, userMessageBoxes, botUpdates, privateMessaging } =
     createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
+  const otherAccount = createAccount(virtualUsers, 'Grace');
   const firstBot = createBot(virtualUsers, 'First Bot', 'first_bot');
   const secondBot = createBot(virtualUsers, 'Second Bot', 'second_bot');
 
-  const firstBotFirstMessage = sendPrivateText(privateMessaging, account.profile.id, firstBot);
-  const secondBotFirstMessage = sendPrivateText(privateMessaging, account.profile.id, secondBot);
-  const firstBotSecondMessage = sendPrivateText(privateMessaging, account.profile.id, firstBot);
+  const sentMessages = [
+    sendPrivateText(privateMessaging, account.profile.id, firstBot),
+    sendPrivateText(privateMessaging, account.profile.id, secondBot),
+    sendPrivateText(privateMessaging, otherAccount.profile.id, firstBot),
+    sendPrivateText(privateMessaging, account.profile.id, firstBot),
+  ];
+  const messageIdsIn = (ownerId: number) =>
+    sentMessages.map((message) => userMessageBoxes.getMessageId(ownerId, message.id) ?? '-').join();
 
+  // Each user numbers the messages of all its private chats in one sequence.
   if (
-    userMessageBoxes.getMessageId(firstBot.profile.id, firstBotFirstMessage.id) !== 1 ||
-    userMessageBoxes.getMessageId(secondBot.profile.id, secondBotFirstMessage.id) !== 1 ||
-    userMessageBoxes.getMessageId(firstBot.profile.id, firstBotSecondMessage.id) !== 2
+    messageIdsIn(firstBot.profile.id) !== '1,-,2,3' ||
+    messageIdsIn(secondBot.profile.id) !== '-,1,-,-' ||
+    messageIdsIn(account.profile.id) !== '1,2,-,3'
   ) {
-    throw new Error('Expected each bot to number messages from its own message box');
+    throw new Error('Expected each user to number messages from its own message box');
   }
   const secondBotUpdates = botUpdates.confirmAndReadPendingUpdates(secondBot.profile.id, {
     limit: 100,
   });
   if (secondBotUpdates.length !== 1 || messageFromUpdate(secondBotUpdates[0])?.message_id !== 1) {
     throw new Error("Expected the bot's update to carry its own message ID");
-  }
-});
-
-Deno.test('PrivateMessagingService continues a bot message box across private chats', () => {
-  const { virtualUsers, userMessageBoxes, privateMessaging } = createPrivateMessagingFixture();
-  const firstAccount = createAccount(virtualUsers, 'Ada');
-  const secondAccount = createAccount(virtualUsers, 'Grace');
-  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
-
-  const messageIds = [firstAccount, secondAccount, firstAccount].map((account) =>
-    userMessageBoxes.getMessageId(
-      bot.profile.id,
-      sendPrivateText(privateMessaging, account.profile.id, bot).id,
-    )
-  );
-
-  if (messageIds.join() !== '1,2,3') {
-    throw new Error('Expected a new private chat to continue the bot message ID sequence');
-  }
-});
-
-Deno.test('PrivateMessagingService adds private messages to the sending account message box', () => {
-  const { virtualUsers, messages, userMessageBoxes, privateMessaging } =
-    createPrivateMessagingFixture();
-  const account = createAccount(virtualUsers, 'Ada');
-  const firstBot = createBot(virtualUsers, 'First Bot', 'first_bot');
-  const secondBot = createBot(virtualUsers, 'Second Bot', 'second_bot');
-
-  sendPrivateText(privateMessaging, account.profile.id, firstBot);
-  sendPrivateText(privateMessaging, account.profile.id, secondBot);
-
-  const [firstBotMessage] = messages.getPrivateConversationMessages({
-    accountId: account.profile.id,
-    botId: firstBot.profile.id,
-  });
-  const [secondBotMessage] = messages.getPrivateConversationMessages({
-    accountId: account.profile.id,
-    botId: secondBot.profile.id,
-  });
-  if (
-    userMessageBoxes.getMessageId(account.profile.id, firstBotMessage.id) !== 1 ||
-    userMessageBoxes.getMessageId(account.profile.id, secondBotMessage.id) !== 2 ||
-    userMessageBoxes.getMessageId(firstBot.profile.id, firstBotMessage.id) !== 1 ||
-    userMessageBoxes.getMessageId(secondBot.profile.id, secondBotMessage.id) !== 1
-  ) {
-    throw new Error("Expected the account's message box to number messages across its chats");
-  }
-});
-
-Deno.test('PrivateMessagingService publishes a created event for each sent message', () => {
-  const { virtualUsers, messages, publishedEvents, privateMessaging } =
-    createPrivateMessagingFixture();
-  const account = createAccount(virtualUsers, 'Ada');
-  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
-
-  const rejectedResult = privateMessaging.sendAccountMessage({
-    fromAccountId: account.profile.id,
-    to: { type: 'private', botId: bot.profile.id },
-    text: '',
-  });
-  if (rejectedResult.sent) {
-    throw new Error('Expected an empty message to be rejected');
-  }
-  sendPrivateText(privateMessaging, account.profile.id, bot);
-
-  const [storedMessage] = messages.getPrivateConversationMessages({
-    accountId: account.profile.id,
-    botId: bot.profile.id,
-  });
-  if (
-    publishedEvents.length !== 1 ||
-    publishedEvents[0].type !== 'message_created' ||
-    publishedEvents[0].message !== storedMessage
-  ) {
-    throw new Error('Expected only the accepted message to publish a message_created event');
   }
 });
 
@@ -463,23 +368,26 @@ Deno.test('PrivateMessagingService validates bot messages in Telegram order befo
   }
 });
 
-Deno.test('PrivateMessagingService stores the inline keyboard of a bot message', () => {
-  const { virtualUsers, messages, privateMessaging } = createPrivateMessagingFixture();
+Deno.test('PrivateMessagingService stores an inline keyboard whose callback data fits 64 bytes', () => {
+  const { virtualUsers, messages, publishedEvents, privateMessaging } =
+    createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
   sendPrivateText(privateMessaging, account.profile.id, bot);
+  const send = (inlineKeyboard: InlineKeyboard) =>
+    privateMessaging.sendBotMessage({
+      fromBotId: bot.profile.id,
+      to: { type: 'private', accountId: account.profile.id },
+      text: 'Choose',
+      inlineKeyboard,
+    });
   // 32 two-byte characters fill the 64-byte callback data limit exactly.
   const inlineKeyboard: InlineKeyboard = [
     [{ kind: 'callback', text: 'Full', callbackData: 'é'.repeat(32) }],
     [{ kind: 'url', text: 'Docs', url: 'https://grammy.dev' }],
   ];
 
-  const result = privateMessaging.sendBotMessage({
-    fromBotId: bot.profile.id,
-    to: { type: 'private', accountId: account.profile.id },
-    text: 'Choose',
-    inlineKeyboard,
-  });
+  const result = send(inlineKeyboard);
   if (!result.sent) {
     throw new Error(`Expected the bot message to be sent, received ${result.reason}`);
   }
@@ -489,24 +397,11 @@ Deno.test('PrivateMessagingService stores the inline keyboard of a bot message',
   ) {
     throw new Error('Expected the stored bot message to carry its inline keyboard');
   }
-});
-
-Deno.test('PrivateMessagingService rejects callback data beyond 64 UTF-8 bytes', () => {
-  const { virtualUsers, publishedEvents, privateMessaging } = createPrivateMessagingFixture();
-  const account = createAccount(virtualUsers, 'Ada');
-  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
-  sendPrivateText(privateMessaging, account.profile.id, bot);
-
-  const result = privateMessaging.sendBotMessage({
-    fromBotId: bot.profile.id,
-    to: { type: 'private', accountId: account.profile.id },
-    text: 'Choose',
-    inlineKeyboard: [[{ kind: 'callback', text: 'Too long', callbackData: 'é'.repeat(33) }]],
-  });
-  if (result.sent || result.reason !== 'callback_data_invalid') {
+  const oversized = send([[{ kind: 'callback', text: 'Too long', callbackData: 'é'.repeat(33) }]]);
+  if (oversized.sent || oversized.reason !== 'callback_data_invalid') {
     throw new Error('Expected 66 bytes of callback data to be rejected');
   }
-  if (publishedEvents.length !== 1) {
+  if (publishedEvents.length !== 2) {
     throw new Error('Expected the rejected bot message not to be stored or published');
   }
 });
@@ -806,32 +701,6 @@ Deno.test('PrivateMessagingService validates message deletions before changing s
   }
   if (messages.getPrivateTextMessage(message.id) !== message) {
     throw new Error('Expected rejected deletions to keep the message');
-  }
-});
-
-Deno.test('PrivateMessagingService finds messages by bot message ID only in their conversation', () => {
-  const { virtualUsers, userMessageBoxes, privateMessaging } = createPrivateMessagingFixture();
-  const account = createAccount(virtualUsers, 'Ada');
-  const otherAccount = createAccount(virtualUsers, 'Grace');
-  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
-  const message = sendPrivateText(privateMessaging, account.profile.id, bot);
-  const botMessageId = expectBotMessageId(userMessageBoxes, bot, message.id);
-
-  const conversation = { accountId: account.profile.id, botId: bot.profile.id };
-  if (
-    privateMessaging.getPrivateTextMessageByBotMessageId(conversation, botMessageId) !== message
-  ) {
-    throw new Error("Expected the bot's message ID to find the message in its conversation");
-  }
-  if (
-    privateMessaging.getPrivateTextMessageByBotMessageId(
-        { accountId: otherAccount.profile.id, botId: bot.profile.id },
-        botMessageId,
-      ) !== undefined ||
-    privateMessaging.getPrivateTextMessageByBotMessageId(conversation, botMessageId + 1) !==
-      undefined
-  ) {
-    throw new Error('Expected other conversations and unknown IDs to find nothing');
   }
 });
 

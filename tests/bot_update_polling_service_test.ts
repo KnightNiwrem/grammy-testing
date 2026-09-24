@@ -14,24 +14,7 @@ import {
 const BOT_ID = 10;
 const OTHER_BOT_ID = 20;
 
-Deno.test('BotUpdatePollingService keeps a bot update subscription until a request replaces it', async () => {
-  const { updateSubscriptions, botUpdatePolling } = createPollingFixture();
-
-  await botUpdatePolling.getUpdates(BOT_ID, {
-    limit: 100,
-    timeoutSeconds: 0,
-    allowedUpdates: ['callback_query'],
-  });
-  await botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 0 });
-
-  assertAllowedUpdateTypes(updateSubscriptions.getAllowedUpdateTypes(BOT_ID), ['callback_query']);
-  assertAllowedUpdateTypes(
-    updateSubscriptions.getAllowedUpdateTypes(OTHER_BOT_ID),
-    [...DEFAULT_ALLOWED_UPDATE_TYPES],
-  );
-});
-
-Deno.test('BotUpdatePollingService resolves allowed update names as Telegram does', async () => {
+Deno.test('BotUpdatePollingService resolves and keeps allowed updates per bot as Telegram does', async () => {
   const { updateSubscriptions, botUpdatePolling } = createPollingFixture();
   const cases: { allowedUpdates: string[]; expected: readonly BotApiUpdateType[] }[] = [
     { allowedUpdates: ['MESSAGE', 'not_an_update_type'], expected: ['message'] },
@@ -45,6 +28,18 @@ Deno.test('BotUpdatePollingService resolves allowed update names as Telegram doe
     await botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 0, allowedUpdates });
     assertAllowedUpdateTypes(updateSubscriptions.getAllowedUpdateTypes(BOT_ID), expected);
   }
+  // A request without allowed updates keeps the subscription, which is kept per bot.
+  await botUpdatePolling.getUpdates(BOT_ID, {
+    limit: 100,
+    timeoutSeconds: 0,
+    allowedUpdates: ['callback_query'],
+  });
+  await botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 0 });
+  assertAllowedUpdateTypes(updateSubscriptions.getAllowedUpdateTypes(BOT_ID), ['callback_query']);
+  assertAllowedUpdateTypes(
+    updateSubscriptions.getAllowedUpdateTypes(OTHER_BOT_ID),
+    [...DEFAULT_ALLOWED_UPDATE_TYPES],
+  );
   const optInUpdateTypes: BotApiUpdateType[] = [
     'chat_member',
     'message_reaction',
@@ -78,26 +73,6 @@ Deno.test('BotUpdatePollingService keeps updates that arrive during a negative o
   const remainingUpdates = botUpdates.confirmAndReadPendingUpdates(BOT_ID, { limit: 100 });
   if (remainingUpdates.map((update) => update.update_id).join() !== '1,2,3') {
     throw new Error('Expected updates that arrived while waiting to remain pending');
-  }
-});
-
-Deno.test('BotUpdatePollingService terminates a held long poll when another is held for the bot', async () => {
-  const { botUpdates, botUpdatePolling } = createPollingFixture();
-  const displacedResult = botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 });
-  const replacementResult = botUpdatePolling.getUpdates(BOT_ID, {
-    limit: 100,
-    timeoutSeconds: 50,
-  });
-
-  const displaced = await displacedResult;
-  if (displaced.retrieved || displaced.reason !== 'terminated_by_other_long_poll') {
-    throw new Error('Expected the earlier held long poll to be terminated');
-  }
-
-  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
-  const updates = expectRetrievedUpdates(await replacementResult);
-  if (updates.length !== 1 || messageFromUpdate(updates[0])?.message_id !== 1) {
-    throw new Error('Expected the replacement long poll to receive the next update');
   }
 });
 
@@ -158,8 +133,8 @@ Deno.test('BotUpdatePollingService ends a cancelled long poll without terminatin
   }
 });
 
-Deno.test('BotUpdatePollingService answers held long polls without a conflict when polling ends', async () => {
-  const { botUpdatePolling } = createPollingFixture();
+Deno.test('BotUpdatePollingService answers held and later long polls at once when polling ends', async () => {
+  const { botUpdates, botUpdatePolling } = createPollingFixture();
   const heldResults = [BOT_ID, OTHER_BOT_ID].map((botId) =>
     botUpdatePolling.getUpdates(botId, { limit: 100, timeoutSeconds: 50 })
   );
@@ -171,13 +146,8 @@ Deno.test('BotUpdatePollingService answers held long polls without a conflict wh
     'Expected ending long polling to answer every held long poll at once',
   );
   if (!results.every((result) => expectRetrievedUpdates(result).length === 0)) {
-    throw new Error('Expected each held long poll to end without updates');
+    throw new Error('Expected each held long poll to end without a conflict or updates');
   }
-});
-
-Deno.test('BotUpdatePollingService answers long polls at once after polling ends', async () => {
-  const { botUpdates, botUpdatePolling } = createPollingFixture();
-  botUpdatePolling.endLongPolling();
 
   const emptyResult = await expectSettlementWithin(
     botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 }),

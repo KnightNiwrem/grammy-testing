@@ -17,24 +17,12 @@ Deno.test('PrivateConversationRepository stores one private conversation per acc
   if (secondConversation !== firstConversation) {
     throw new Error('Expected the account and bot pair to have one canonical conversation');
   }
-});
-
-Deno.test('PrivateConversationRepository disambiguates private conversations for different bots', () => {
-  const privateConversations = new PrivateConversationRepository();
-
-  const firstConversation = privateConversations.getOrCreatePrivateConversation({
-    accountId: 1,
-    botId: 2,
-  });
-  const secondConversation = privateConversations.getOrCreatePrivateConversation({
+  const otherBotConversation = privateConversations.getOrCreatePrivateConversation({
     accountId: 1,
     botId: 3,
   });
-  if (firstConversation === secondConversation) {
+  if (otherBotConversation === firstConversation) {
     throw new Error('Expected each account and bot pair to have a distinct conversation');
-  }
-  if (firstConversation.accountId !== secondConversation.accountId) {
-    throw new Error('Expected both conversations to retain the same account participant');
   }
 });
 

@@ -3,7 +3,7 @@ import { BotRepository } from '../src/repositories/bot.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 
-Deno.test('VirtualUserService creates accounts and bots in their shared user ID sequence', () => {
+Deno.test('VirtualUserService creates accounts and complete bots in one user ID sequence', () => {
   const { accounts, bots, virtualUsers } = createVirtualUserState();
 
   const accountResult = virtualUsers.createAccount({ first_name: 'Ada' });
@@ -14,9 +14,6 @@ Deno.test('VirtualUserService creates accounts and bots in their shared user ID 
   if (!accountResult.created || !botResult.created) {
     throw new Error('Expected account and bot creation to succeed');
   }
-  if (accountResult.account.profile.id !== 1 || botResult.bot.profile.id !== 2) {
-    throw new Error('Expected accounts and bots to share one user ID sequence');
-  }
   if (
     accounts.getById(accountResult.account.profile.id) !== accountResult.account ||
     bots.getById(botResult.bot.profile.id) !== botResult.bot ||
@@ -24,20 +21,8 @@ Deno.test('VirtualUserService creates accounts and bots in their shared user ID 
   ) {
     throw new Error('Expected created users to be stored in their respective repositories');
   }
-});
-
-Deno.test('VirtualUserService creates complete bot profiles and tokens', () => {
-  const { virtualUsers } = createVirtualUserState();
-
-  const result = virtualUsers.createBot({
-    first_name: 'Test Bot',
-    username: 'test_bot',
-  });
-  if (!result.created) {
-    throw new Error(`Expected bot creation to succeed, received ${result.reason}`);
-  }
-  const expectedProfile = {
-    id: 1,
+  const expectedBotProfile = {
+    id: 2,
     is_bot: true,
     first_name: 'Test Bot',
     username: 'test_bot',
@@ -51,10 +36,13 @@ Deno.test('VirtualUserService creates complete bot profiles and tokens', () => {
     can_manage_bots: false,
     supports_join_request_queries: false,
   };
-  if (JSON.stringify(result.bot.profile) !== JSON.stringify(expectedProfile)) {
-    throw new Error('Expected the bot profile to contain its identity and capability defaults');
+  if (
+    accountResult.account.profile.id !== 1 ||
+    JSON.stringify(botResult.bot.profile) !== JSON.stringify(expectedBotProfile)
+  ) {
+    throw new Error('Expected the next user ID and capability defaults in the bot profile');
   }
-  if (!result.bot.token.startsWith(`${result.bot.profile.id}:`)) {
+  if (!botResult.bot.token.startsWith(`${botResult.bot.profile.id}:`)) {
     throw new Error('Expected the bot token to be prefixed with its user ID');
   }
 });

@@ -40,35 +40,27 @@ Deno.test('SharedChatRepository rejects non-unique basic-group members without s
   }
 });
 
-Deno.test('SharedChatRepository registers a supergroup with its required owner', () => {
+Deno.test('SharedChatRepository registers supergroups and channels with their required owner', () => {
   const sharedChats = new SharedChatRepository();
   const supergroup = { kind: 'supergroup', id: -1_000_000_000_001, title: 'Test' } as const;
+  const channel = { kind: 'channel', id: -1_000_000_000_002, title: 'Test' } as const;
 
-  const result = sharedChats.registerSupergroup(supergroup, 1);
-  if (!result.registered) {
-    throw new Error(`Expected supergroup registration to succeed, received ${result.reason}`);
+  const results = [
+    sharedChats.registerSupergroup(supergroup, 1),
+    sharedChats.registerChannel(channel, 1),
+  ];
+  for (const result of results) {
+    if (!result.registered) {
+      throw new Error(`Expected registration to succeed, received ${result.reason}`);
+    }
   }
-  if (
-    sharedChats.getSharedChat(supergroup.id) !== supergroup ||
-    sharedChats.getChatMembership(supergroup.id, 1)?.status !== 'owner'
-  ) {
-    throw new Error('Expected the supergroup and its owner to be stored together');
-  }
-});
-
-Deno.test('SharedChatRepository registers a channel with its required owner', () => {
-  const sharedChats = new SharedChatRepository();
-  const channel = { kind: 'channel', id: -1_000_000_000_001, title: 'Test' } as const;
-
-  const result = sharedChats.registerChannel(channel, 1);
-  if (!result.registered) {
-    throw new Error(`Expected channel registration to succeed, received ${result.reason}`);
-  }
-  if (
-    sharedChats.getSharedChat(channel.id) !== channel ||
-    sharedChats.getChatMembership(channel.id, 1)?.status !== 'owner'
-  ) {
-    throw new Error('Expected the channel and its owner to be stored together');
+  for (const chat of [supergroup, channel]) {
+    if (
+      sharedChats.getSharedChat(chat.id) !== chat ||
+      sharedChats.getChatMembership(chat.id, 1)?.status !== 'owner'
+    ) {
+      throw new Error(`Expected the ${chat.kind} and its owner to be stored together`);
+    }
   }
 });
 
@@ -104,7 +96,7 @@ Deno.test('SharedChatRepository preserves an existing shared chat when its ID is
   }
 });
 
-Deno.test('SharedChatRepository adds a member to an existing shared chat', () => {
+Deno.test('SharedChatRepository adds a member once to an existing shared chat', () => {
   const sharedChats = new SharedChatRepository();
   const group = { kind: 'basic_group', id: -1, title: 'Test Group' } as const;
   const registration = sharedChats.registerBasicGroup(group, 1, []);
@@ -116,25 +108,18 @@ Deno.test('SharedChatRepository adds a member to an existing shared chat', () =>
   if (!addition.added) {
     throw new Error(`Expected member addition to succeed, received ${addition.reason}`);
   }
-  if (sharedChats.getChatMembership(group.id, 2)?.status !== 'member') {
-    throw new Error('Expected the added identity to have member status');
-  }
-});
-
-Deno.test('SharedChatRepository rejects member addition without changing existing state', () => {
-  const sharedChats = new SharedChatRepository();
-  const group = { kind: 'basic_group', id: -1, title: 'Test Group' } as const;
-  const registration = sharedChats.registerBasicGroup(group, 1, [2]);
-  if (!registration.registered) {
-    throw new Error('Expected group registration to succeed');
-  }
 
   const missingChat = sharedChats.addChatMember(-2, 3);
   assertMemberAdditionFailure(missingChat, 'chat_not_found');
-
   const duplicateMember = sharedChats.addChatMember(group.id, 2);
   assertMemberAdditionFailure(duplicateMember, 'member_already_present');
-  assertMembershipsPreservedAfterRejectedAdditions(sharedChats, group.id);
+  if (
+    sharedChats.getChatMembership(group.id, 1)?.status !== 'owner' ||
+    sharedChats.getChatMembership(group.id, 2)?.status !== 'member' ||
+    sharedChats.getChatMembership(group.id, 3) !== undefined
+  ) {
+    throw new Error('Expected the added member, and rejected additions to change nothing');
+  }
 });
 
 function assertMemberAdditionFailure(
@@ -143,18 +128,5 @@ function assertMemberAdditionFailure(
 ): void {
   if (result.added || result.reason !== expectedReason) {
     throw new Error(`Expected member addition to fail with ${expectedReason}`);
-  }
-}
-
-function assertMembershipsPreservedAfterRejectedAdditions(
-  sharedChats: SharedChatRepository,
-  chatId: number,
-): void {
-  if (
-    sharedChats.getChatMembership(chatId, 1)?.status !== 'owner' ||
-    sharedChats.getChatMembership(chatId, 2)?.status !== 'member' ||
-    sharedChats.getChatMembership(chatId, 3) !== undefined
-  ) {
-    throw new Error('Expected rejected additions to preserve existing memberships');
   }
 }
