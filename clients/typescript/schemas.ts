@@ -136,15 +136,26 @@ const inlineKeyboardMarkupSchema: z.ZodType<InlineKeyboardMarkup> = z.strictObje
   ).min(1),
 });
 
-export const privateTextMessageSchema: z.ZodType<PrivateTextMessage> = z.strictObject({
+const messageHeaderShape = {
   message_id: z.number().int().positive(),
   from: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
   chat: privateChatSchema,
   date: z.number().int().nonnegative(),
   edit_date: z.number().int().nonnegative().optional(),
+};
+
+const messageContentShape = {
   text: z.string(),
   entities: z.array(messageEntitySchema).min(1).optional(),
   reply_markup: inlineKeyboardMarkupSchema.optional(),
+  has_protected_content: z.literal(true).optional(),
+};
+
+/** Fields in the order the server sends them, with a reply between header and content. */
+export const privateTextMessageSchema: z.ZodType<PrivateTextMessage> = z.strictObject({
+  ...messageHeaderShape,
+  reply_to_message: z.strictObject({ ...messageHeaderShape, ...messageContentShape }).optional(),
+  ...messageContentShape,
 });
 
 export const sentMessageResponseSchema = z.strictObject({

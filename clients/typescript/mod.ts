@@ -30,6 +30,7 @@ export type {
   PrivateChat,
   PrivateMessageTarget,
   PrivateTextMessage,
+  RepliedPrivateTextMessage,
   UrlInlineKeyboardButton,
   VirtualAccountClient,
   VirtualAccountProfile,

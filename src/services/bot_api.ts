@@ -59,15 +59,28 @@ interface TextInvalidFailure {
   readonly textError: string;
 }
 
+/** The message of the chat that a sent message replies to, as `reply_parameters` specify it. */
+export interface ReplyTarget {
+  /** The message's ID in the bot's chat. */
+  readonly messageId: number;
+  /** Sends the message as no reply, rather than failing, when the target is not found. */
+  readonly allowSendingWithoutReply: boolean;
+}
+
 export interface SendMessageRequest extends SpecifiedFormattedText {
   /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
   readonly chatId: number;
+  /** Omitted for a message that replies to none. */
+  readonly replyTo?: ReplyTarget;
   readonly inlineKeyboard?: InlineKeyboard;
+  /** The Bot API `protect_content`; omitted for an unprotected message. */
+  readonly isContentProtected?: boolean;
 }
 
 export type SendMessageFailureReason =
   | 'message_text_empty'
   | 'chat_not_found'
+  | 'reply_message_not_found'
   | 'message_text_too_long'
   | 'callback_data_invalid';
 
@@ -183,6 +196,7 @@ type BotMessageSendingResult =
       | 'message_text_empty'
       | 'account_not_found'
       | 'conversation_not_started'
+      | 'reply_message_not_found'
       | 'message_text_too_long'
       | 'callback_data_invalid';
   }
@@ -208,7 +222,12 @@ interface BotMessaging {
     readonly to: BotPrivateChat;
     readonly text: string;
     readonly entities?: readonly TextEntity[];
+    readonly replyTo?: {
+      readonly botMessageId: number;
+      readonly allowSendingWithoutReply: boolean;
+    };
     readonly inlineKeyboard?: InlineKeyboard;
+    readonly isContentProtected?: boolean;
   }): BotMessageSendingResult;
   editBotMessageText(input: {
     readonly fromBotId: number;
@@ -440,17 +459,25 @@ export class BotApiService {
       : { read: false, reason: parsing.reason };
   }
 
-  /** Sends text to a private chat; other chat types are not supported yet. */
+  /**
+   * Sends text to a private chat, optionally as a reply to one of the chat's messages; other chat
+   * types are not supported yet.
+   */
   sendMessage(
     authenticatedBot: VirtualBotProfile,
-    { chatId, text, entities, inlineKeyboard }: SendMessageRequest,
+    { chatId, text, entities, replyTo, inlineKeyboard, isContentProtected }: SendMessageRequest,
   ): SendMessageResult {
     const result = this.#botMessages.sendBotMessage({
       fromBotId: authenticatedBot.id,
       to: { type: 'private', accountId: chatId },
       text,
       entities,
+      replyTo: replyTo === undefined ? undefined : {
+        botMessageId: replyTo.messageId,
+        allowSendingWithoutReply: replyTo.allowSendingWithoutReply,
+      },
       inlineKeyboard,
+      isContentProtected,
     });
     if (result.sent) {
       return {
@@ -463,6 +490,7 @@ export class BotApiService {
       case 'text_invalid':
         return result;
       case 'message_text_empty':
+      case 'reply_message_not_found':
       case 'message_text_too_long':
       case 'callback_data_invalid':
         return { sent: false, reason: result.reason };

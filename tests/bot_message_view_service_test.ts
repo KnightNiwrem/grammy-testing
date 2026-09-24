@@ -103,6 +103,105 @@ Deno.test('BotMessageViewService shows a bot message, then its edit date and key
   }
 });
 
+Deno.test('BotMessageViewService shows the current replied message until it is deleted', () => {
+  const { virtualUsers, messages, userMessageBoxes, botMessageViews } = createViewFixture();
+  const account = createAccount(virtualUsers);
+  const bot = createBot(virtualUsers);
+  const conversation = { accountId: account.profile.id, botId: bot.profile.id };
+  const question = messages.addPrivateTextMessage({
+    conversation,
+    authorRole: 'bot',
+    sentAtUnixSeconds: 1_700_000_000,
+    text: 'Your name?',
+    entities: [],
+  });
+  userMessageBoxes.assignMessageId(bot.profile.id, question.id);
+  const answer = messages.addPrivateTextMessage({
+    conversation,
+    authorRole: 'account',
+    sentAtUnixSeconds: 1_700_000_001,
+    text: 'Ada',
+    entities: [],
+    replyToMessageId: question.id,
+  });
+  userMessageBoxes.assignMessageId(bot.profile.id, answer.id);
+  const confirmation = messages.addPrivateTextMessage({
+    conversation,
+    authorRole: 'bot',
+    sentAtUnixSeconds: 1_700_000_002,
+    text: 'Saved',
+    entities: [],
+    replyToMessageId: answer.id,
+    isContentProtected: true,
+  });
+  userMessageBoxes.assignMessageId(bot.profile.id, confirmation.id);
+  messages.editPrivateTextMessage(question.id, {
+    text: 'Your first name?',
+    entities: [],
+    inlineKeyboard: undefined,
+    textEditedAtUnixSeconds: 1_700_000_003,
+  });
+  const botSender = {
+    id: bot.profile.id,
+    is_bot: true,
+    first_name: 'Test Bot',
+    username: 'test_bot',
+  };
+  const chat = { id: account.profile.id, type: 'private', first_name: 'Ada' };
+
+  const answerView = botMessageViews.viewPrivateTextMessageForBot(answer);
+  const confirmationView = botMessageViews.viewPrivateTextMessageForBot(confirmation);
+
+  const expectedAnswerView = {
+    message_id: 2,
+    from: account.profile,
+    chat,
+    date: 1_700_000_001,
+    reply_to_message: {
+      message_id: 1,
+      from: botSender,
+      chat,
+      date: 1_700_000_000,
+      edit_date: 1_700_000_003,
+      text: 'Your first name?',
+    },
+    text: 'Ada',
+  };
+  if (JSON.stringify(answerView) !== JSON.stringify(expectedAnswerView)) {
+    throw new Error(
+      `Expected the reply to show the edited question, received ${JSON.stringify(answerView)}`,
+    );
+  }
+  const expectedConfirmationView = {
+    message_id: 3,
+    from: botSender,
+    chat,
+    date: 1_700_000_002,
+    reply_to_message: {
+      message_id: 2,
+      from: account.profile,
+      chat,
+      date: 1_700_000_001,
+      text: 'Ada',
+    },
+    text: 'Saved',
+    has_protected_content: true,
+  };
+  if (JSON.stringify(confirmationView) !== JSON.stringify(expectedConfirmationView)) {
+    throw new Error(
+      `Expected a protected reply without a nested reply, received ${
+        JSON.stringify(confirmationView)
+      }`,
+    );
+  }
+
+  messages.deletePrivateTextMessage(question.id);
+  const answerViewAfterDeletion = botMessageViews.viewPrivateTextMessageForBot(answer);
+  if ('reply_to_message' in answerViewAfterDeletion) {
+    throw new Error('Expected a reply to a deleted message to omit reply_to_message');
+  }
+});
+
 Deno.test('BotMessageViewService shows a callback query with its message as the bot sees it', () => {
   const { virtualUsers, messages, userMessageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
@@ -171,7 +270,7 @@ function createViewFixture() {
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const messages = new MessageRepository();
   const userMessageBoxes = new UserMessageBoxRepository();
-  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes });
+  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes, messages });
   return { virtualUsers, messages, userMessageBoxes, botMessageViews };
 }
 

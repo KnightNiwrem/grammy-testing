@@ -1843,6 +1843,214 @@ Deno.test('sendChatAction accepts Telegram actions in started private chats', as
 });
 
 /** Returns what `pending` settles to, failing if it is still pending after `milliseconds`. */
+Deno.test('sendMessage replies to messages of the chat and accepts Telegram message options', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  await sendText('Question?');
+  const sendMessage = (parameters: Record<string, unknown>) =>
+    callBotApi(api, `${botApiPath}/sendMessage`, {
+      chat_id: accountId,
+      text: 'Answer',
+      ...parameters,
+    });
+  const repliedMessageIdOf = (body: unknown) => {
+    const replyToMessage = botApiResult(body)?.reply_to_message;
+    return typeof replyToMessage === 'object' && replyToMessage !== null
+      ? (replyToMessage as Record<string, unknown>).message_id
+      : undefined;
+  };
+
+  const reply = await sendMessage({
+    reply_parameters: { message_id: 1, chat_id: accountId },
+    protect_content: true,
+    disable_notification: true,
+    link_preview_options: { is_disabled: true },
+  });
+  const replyResult = botApiResult(reply.body);
+  if (
+    reply.status !== 200 || repliedMessageIdOf(reply.body) !== 1 ||
+    (replyResult?.reply_to_message as Record<string, unknown>).text !== 'Question?' ||
+    replyResult?.has_protected_content !== true || 'link_preview_options' in replyResult
+  ) {
+    throw new Error(
+      `Expected a protected reply to the question, received ${JSON.stringify(reply)}`,
+    );
+  }
+  const olderFormReply = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      chat_id: String(accountId),
+      text: 'Answer',
+      reply_to_message_id: '1',
+      disable_web_page_preview: 'true',
+    }),
+  });
+  if (repliedMessageIdOf(await olderFormReply.json()) !== 1) {
+    throw new Error('Expected reply_to_message_id to reply as Telegram still allows');
+  }
+  const replyParametersWithoutReply = await sendMessage({
+    reply_parameters: {},
+    reply_to_message_id: 1,
+  });
+  const replyToMissingMessageWithoutReply = await sendMessage({
+    reply_parameters: { message_id: 99, allow_sending_without_reply: true },
+  });
+  if (
+    replyParametersWithoutReply.status !== 200 ||
+    repliedMessageIdOf(replyParametersWithoutReply.body) !== undefined ||
+    replyToMissingMessageWithoutReply.status !== 200 ||
+    repliedMessageIdOf(replyToMissingMessageWithoutReply.body) !== undefined
+  ) {
+    throw new Error('Expected reply_parameters to override the older form and allow no reply');
+  }
+
+  const rejections: [Record<string, unknown>, string][] = [
+    [{ reply_parameters: { message_id: 99 } }, 'Bad Request: message to be replied not found'],
+    // The chat is checked before the replied message.
+    [
+      { chat_id: 999, reply_parameters: { message_id: 99 } },
+      'Bad Request: chat not found',
+    ],
+    [
+      { reply_parameters: { message_id: 1, chat_id: createdBot.bot.id } },
+      'Bad Request: replies to messages of other chats are not supported',
+    ],
+    [
+      { reply_parameters: { message_id: 1, quote: 'Question' } },
+      'Bad Request: invalid sendMessage parameters',
+    ],
+    [
+      { link_preview_options: { is_disabled: 'yes' } },
+      'Bad Request: invalid sendMessage parameters',
+    ],
+  ];
+  for (const [parameters, expectedDescription] of rejections) {
+    const { status, body } = await sendMessage(parameters);
+    if (status !== 400 || !isBadRequestResponse(body) || body.description !== expectedDescription) {
+      throw new Error(
+        `Expected ${JSON.stringify(parameters)} to fail with ${expectedDescription}, received ${
+          JSON.stringify(body)
+        }`,
+      );
+    }
+  }
+
+  const accountMessagesPath = `${sessionPath}/accounts/${accountId}/messages`;
+  const sendAccountReply = (replyToMessageId: number) =>
+    api.request(accountMessagesPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: { type: 'private', botId: createdBot.bot.id },
+        text: 'Thanks',
+        reply_to_message_id: replyToMessageId,
+      }),
+    });
+  // The replied message never shows its own reply.
+  const { reply_to_message: _, ...repliedBotMessage } = replyResult;
+  const accountReply = await sendAccountReply(2);
+  const accountReplyBody: unknown = await accountReply.json();
+  const missingReplyTarget = await sendAccountReply(99);
+  if (
+    accountReply.status !== 201 || !isSentMessageResponse(accountReplyBody) ||
+    JSON.stringify(accountReplyBody.message) !==
+      JSON.stringify({ ...accountReplyBody.message, reply_to_message: repliedBotMessage }) ||
+    missingReplyTarget.status !== 400
+  ) {
+    throw new Error("Expected the account to reply only to its chat's messages");
+  }
+  const updatesBody: unknown = await (await api.request(`${botApiPath}/getUpdates`)).json();
+  const updatedMessage = isGetUpdatesResponse(updatesBody)
+    ? updatesBody.result.at(-1)?.message
+    : undefined;
+  if (JSON.stringify(updatedMessage) !== JSON.stringify(accountReplyBody.message)) {
+    throw new Error('Expected the bot to receive the account reply with the replied message');
+  }
+});
+
+Deno.test('a grammY bot asks a question in a reply and reads the account reply to it', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const questionAsked = Promise.withResolvers<number>();
+  const greeted = Promise.withResolvers<void>();
+  grammyBot.command('start', async (context) => {
+    const question = await context.reply('What is your name?', {
+      reply_parameters: { message_id: context.msg.message_id },
+      link_preview_options: { is_disabled: true },
+    });
+    questionAsked.resolve(question.message_id);
+  });
+  grammyBot.on('message:text', async (context) => {
+    if (context.msg.reply_to_message?.message_id !== await questionAsked.promise) {
+      return;
+    }
+    await context.reply(`Nice to meet you, ${context.msg.text}!`, { protect_content: true });
+    greeted.resolve();
+  });
+  const polling = grammyBot.start();
+
+  try {
+    await sendText('/start');
+    // Polling ends only when stopped, so settling first means the bot failed.
+    const questionMessageId = await Promise.race([questionAsked.promise, polling]);
+    const answer = await api.request(
+      `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: { type: 'private', botId: createdBot.bot.id },
+          text: 'Ada',
+          reply_to_message_id: questionMessageId,
+        }),
+      },
+    );
+    if (answer.status !== 201) {
+      throw new Error(`Expected the account reply to be accepted, received ${answer.status}`);
+    }
+    await Promise.race([greeted.promise, polling]);
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+
+  const historyBody: unknown = await (await api.request(
+    `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/messages`,
+  )).json();
+  const history = isMessageHistoryResponse(historyBody)
+    ? historyBody.messages.map((message) => {
+      const { text, reply_to_message, has_protected_content } = message as
+        & TestPrivateTextMessage
+        & {
+          reply_to_message?: { text: string };
+          has_protected_content?: true;
+        };
+      return [text, reply_to_message?.text ?? null, has_protected_content ?? false];
+    })
+    : undefined;
+  if (
+    JSON.stringify(history) !==
+      JSON.stringify([
+        ['/start', null, false],
+        ['What is your name?', '/start', false],
+        ['Ada', 'What is your name?', false],
+        ['Nice to meet you, Ada!', null, true],
+      ])
+  ) {
+    throw new Error(
+      `Expected the question and answer as replies, received ${JSON.stringify(history)}`,
+    );
+  }
+});
+
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,

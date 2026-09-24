@@ -55,6 +55,8 @@ export interface PrivateMessageTarget {
 export interface AccountSendMessageInput {
   readonly to: PrivateMessageTarget;
   readonly text: string;
+  /** The ID of the chat's message to reply to, as message history shows it. */
+  readonly reply_to_message_id?: number;
 }
 
 export interface AccountMessageHistoryInput {
@@ -147,11 +149,18 @@ export interface PrivateTextMessage {
   readonly date: number;
   /** Present once the bot has edited the message's text. */
   readonly edit_date?: number;
+  /** The message this one replies to, unless it was deleted; it never shows its own reply. */
+  readonly reply_to_message?: RepliedPrivateTextMessage;
   readonly text: string;
   readonly entities?: readonly MessageEntity[];
   /** The inline keyboard a bot attached to its message. */
   readonly reply_markup?: InlineKeyboardMarkup;
+  /** Present when the bot protected its message from forwarding and saving. */
+  readonly has_protected_content?: true;
 }
+
+/** A message as a reply shows it, without its own reply. */
+export type RepliedPrivateTextMessage = Omit<PrivateTextMessage, 'reply_to_message'>;
 
 /** A bot command as an account's client lists it. */
 export interface BotCommand {

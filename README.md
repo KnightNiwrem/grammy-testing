@@ -10,15 +10,18 @@ history, and receiving account messages through the Bot API `getUpdates` method,
 ends the earlier request with a `409 Conflict`, so tests notice when two bot instances poll at once.
 Ending a session answers its bots' waiting long polls at once, without updates. Bots reply with the
 Bot API `sendMessage` method, which sends text to an account that has written to the bot, optionally
-with an inline keyboard of callback and URL buttons; reply keyboards are not supported yet. Text can
-be formatted with `parse_mode` (`HTML`, `MarkdownV2`, or legacy `Markdown`) or with `entities`,
-which the emulator reads, validates, and normalizes with Telegram's own rules and error messages, so
-a test catches markup that Telegram would reject, such as an unescaped `.` in MarkdownV2. As on
-Telegram, message text from either side is trimmed and cleaned of control characters. Replies appear
-in conversation history, and, as on Telegram, the bot receives no update for them. An account can
-press a callback button, which sends the bot a `callback_query` update; the bot answers with
-`answerCallbackQuery`, and the test reads the answer from the pressed callback query. A press can
-create the callback query already expired, to check how a bot handles a query it can no longer
+as a reply to a message of the chat, protected with `protect_content`, and with an inline keyboard
+of callback and URL buttons; reply keyboards are not supported yet. Link preview options and
+`disable_notification` are accepted and have no effect. Accounts can reply to messages too, and a
+reply shows the replied message as `reply_to_message`, as on Telegram. Text can be formatted with
+`parse_mode` (`HTML`, `MarkdownV2`, or legacy `Markdown`) or with `entities`, which the emulator
+reads, validates, and normalizes with Telegram's own rules and error messages, so a test catches
+markup that Telegram would reject, such as an unescaped `.` in MarkdownV2. As on Telegram, message
+text from either side is trimmed and cleaned of control characters. Bot messages appear in
+conversation history, and, as on Telegram, the bot receives no update for its own messages. An
+account can press a callback button, which sends the bot a `callback_query` update; the bot answers
+with `answerCallbackQuery`, and the test reads the answer from the pressed callback query. A press
+can create the callback query already expired, to check how a bot handles a query it can no longer
 answer, such as one that arrives after downtime. Bots edit their messages with `editMessageText` and
 `editMessageReplyMarkup`, and delete messages that either side wrote in their private chats with
 `deleteMessage` and `deleteMessages`; deleted messages leave the conversation history. With

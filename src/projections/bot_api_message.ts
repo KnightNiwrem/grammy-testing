@@ -5,6 +5,7 @@ import type {
   BotApiInlineKeyboardMarkup,
   BotApiMessageEntity,
   BotApiPrivateTextMessage,
+  BotApiRepliedPrivateTextMessage,
   BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
@@ -23,15 +24,18 @@ export interface PrivateTextMessageForBotProjectionInput {
   readonly observerMessageId: number;
   /** Every user the message's text mentions, by ID. */
   readonly mentionedUsers: ReadonlyMap<number, BotApiUser>;
+  /** The replied message as the observing bot sees it; omitted when there is none to show. */
+  readonly repliedMessage?: BotApiRepliedPrivateTextMessage;
 }
 
 /**
- * Projects a canonical private text message as seen by the bot of its conversation.
+ * Projects a canonical private text message as seen by the bot of its conversation, in the field
+ * order Telegram uses.
  *
  * The chat is always the account, whoever wrote the message; the sender follows the author.
  */
 export function projectPrivateTextMessageForBot(
-  { message, account, bot, observerMessageId, mentionedUsers }:
+  { message, account, bot, observerMessageId, mentionedUsers, repliedMessage }:
     PrivateTextMessageForBotProjectionInput,
 ): BotApiPrivateTextMessage {
   const { id, first_name, last_name, username } = account;
@@ -49,6 +53,7 @@ export function projectPrivateTextMessageForBot(
     ...(message.textEditedAtUnixSeconds === undefined
       ? {}
       : { edit_date: message.textEditedAtUnixSeconds }),
+    ...(repliedMessage === undefined ? {} : { reply_to_message: repliedMessage }),
     text: message.text,
     ...(message.entities.length === 0 ? {} : {
       entities: message.entities.map((entity) => projectTextEntity(entity, mentionedUsers)),
@@ -56,6 +61,7 @@ export function projectPrivateTextMessageForBot(
     ...(message.inlineKeyboard === undefined
       ? {}
       : { reply_markup: projectInlineKeyboardMarkup(message.inlineKeyboard) }),
+    ...(message.isContentProtected ? { has_protected_content: true as const } : {}),
   };
 }
 

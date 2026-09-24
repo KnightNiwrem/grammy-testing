@@ -59,12 +59,22 @@ export interface BotApiPrivateTextMessage {
   readonly date: number;
   /** Omitted for a message whose text was never edited. */
   readonly edit_date?: number;
+  /**
+   * The replied message, without its own reply; omitted when the message is no reply or the
+   * replied message was deleted.
+   */
+  readonly reply_to_message?: BotApiRepliedPrivateTextMessage;
   readonly text: string;
   /** Omitted when the text has no entities, as Telegram does. */
   readonly entities?: readonly BotApiMessageEntity[];
   /** Omitted when the message has no inline keyboard. */
   readonly reply_markup?: BotApiInlineKeyboardMarkup;
+  /** Present only for a message its sender protected from forwarding and saving. */
+  readonly has_protected_content?: true;
 }
+
+/** A message as a reply shows it: Telegram never nests the replied message's own reply. */
+export type BotApiRepliedPrivateTextMessage = Omit<BotApiPrivateTextMessage, 'reply_to_message'>;
 
 /** A bot command as the Bot API shows it. */
 export interface BotApiBotCommand {

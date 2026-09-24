@@ -12,7 +12,11 @@ export interface AddPrivateTextMessageInput {
   readonly sentAtUnixSeconds: number;
   readonly text: string;
   readonly entities: readonly TextEntity[];
+  /** The message of the same conversation this one replies to; omitted when it is no reply. */
+  readonly replyToMessageId?: CanonicalMessageId;
   readonly inlineKeyboard?: InlineKeyboard;
+  /** Omitted for a message its sender did not protect. */
+  readonly isContentProtected?: boolean;
 }
 
 /** The editable content of a private text message, replaced as a whole by an edit. */
@@ -37,9 +41,11 @@ export class MessageRepository {
       sentAtUnixSeconds: input.sentAtUnixSeconds,
       text: input.text,
       entities: copyEntities(input.entities),
+      ...(input.replyToMessageId === undefined ? {} : { replyToMessageId: input.replyToMessageId }),
       ...(input.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(input.inlineKeyboard) }),
+      isContentProtected: input.isContentProtected ?? false,
     };
     this.#privateMessagesById.set(message.id, message);
 
@@ -68,7 +74,15 @@ export class MessageRepository {
       throw new Error(`Private message ${messageId} does not exist`);
     }
 
-    const { id, kind, conversation, authorRole, sentAtUnixSeconds } = storedMessage;
+    const {
+      id,
+      kind,
+      conversation,
+      authorRole,
+      sentAtUnixSeconds,
+      replyToMessageId,
+      isContentProtected,
+    } = storedMessage;
     const editedMessage: PrivateTextMessage = {
       kind,
       id,
@@ -77,12 +91,14 @@ export class MessageRepository {
       sentAtUnixSeconds,
       text: edit.text,
       entities: copyEntities(edit.entities),
+      ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
       ...(edit.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
       ...(edit.textEditedAtUnixSeconds === undefined
         ? {}
         : { textEditedAtUnixSeconds: edit.textEditedAtUnixSeconds }),
+      isContentProtected,
     };
     this.#privateMessagesById.set(messageId, editedMessage);
     return editedMessage;

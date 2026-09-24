@@ -35,7 +35,7 @@ export function createEmulationSession(id: string): EmulationSession {
   const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
-  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes });
+  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes, messages });
   const botUpdateDelivery = new BotUpdateDeliveryService({
     botMessageViews,
     botUpdates,

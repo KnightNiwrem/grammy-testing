@@ -21,6 +21,11 @@ import {
   messageEntitiesParameter,
   readMessageEntitiesParameter,
 } from './message_entities_parameter.ts';
+import { linkPreviewOptionsParameter } from './link_preview_options_parameter.ts';
+import {
+  replyParametersParameter,
+  selectSpecifiedReplyTarget,
+} from './reply_parameters_parameter.ts';
 import { inlineKeyboardMarkupParameter } from './reply_markup_parameter.ts';
 import {
   booleanParameter,
@@ -49,8 +54,13 @@ const WEBHOOK_ALREADY_DELETED_DESCRIPTION = 'Webhook is already deleted';
 const MESSAGE_TEXT_EMPTY_DESCRIPTION = 'Bad Request: message text is empty';
 const CHAT_ID_EMPTY_DESCRIPTION = 'Bad Request: chat_id is empty';
 const CHAT_NOT_FOUND_DESCRIPTION = 'Bad Request: chat not found';
+const REPLY_MESSAGE_NOT_FOUND_DESCRIPTION = 'Bad Request: message to be replied not found';
 const MESSAGE_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: message is too long';
 const BUTTON_DATA_INVALID_DESCRIPTION = 'Bad Request: BUTTON_DATA_INVALID';
+
+/** The emulator's description for a reply to a message of another chat, which it does not support. */
+const CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION =
+  'Bad Request: replies to messages of other chats are not supported';
 
 /** Telegram's descriptions for message text or formatting it cannot read. */
 const FORMATTED_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: text is too long';
@@ -130,14 +140,32 @@ const deleteWebhookParametersSchema = z.strictObject({
   drop_pending_updates: booleanParameter().default(false),
 });
 
+/**
+ * Link preview parameters, which the emulator validates and ignores because it generates no link
+ * previews. `disable_web_page_preview` is the older form that Telegram still accepts.
+ */
+const linkPreviewParametersShape = {
+  link_preview_options: linkPreviewOptionsParameter().optional(),
+  disable_web_page_preview: booleanParameter().optional(),
+};
+
 // Telegram treats a missing parameter as empty text. It also accepts an `@username` chat_id,
 // which it resolves only for bots, supergroups, and channels; the emulator supports only private
-// chats, so it accepts only numeric chat IDs.
+// chats, so it accepts only numeric chat IDs. `reply_to_message_id` and
+// `allow_sending_without_reply` are the older form of `reply_parameters`, which Telegram still
+// accepts. The account's client does not model notifications, so `disable_notification` is
+// validated and ignored.
 const sendMessageParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   text: z.string().default(''),
   parse_mode: z.string().optional(),
   entities: messageEntitiesParameter().optional(),
+  ...linkPreviewParametersShape,
+  disable_notification: booleanParameter().optional(),
+  protect_content: booleanParameter().default(false),
+  reply_parameters: replyParametersParameter().optional(),
+  reply_to_message_id: integerParameter(z.int()).optional(),
+  allow_sending_without_reply: booleanParameter().default(false),
   reply_markup: inlineKeyboardMarkupParameter().optional(),
 });
 
@@ -149,6 +177,7 @@ const editMessageTextParametersSchema = z.strictObject({
   text: z.string().default(''),
   parse_mode: z.string().optional(),
   entities: messageEntitiesParameter().optional(),
+  ...linkPreviewParametersShape,
   reply_markup: inlineKeyboardMarkupParameter().optional(),
 });
 
@@ -363,8 +392,14 @@ function handleSendMessage(
   if (!parsedParameters.success) {
     return botApiError(context, 400, invalidParametersDescription);
   }
-  const { chat_id: chatId, text, parse_mode: parseMode, entities, reply_markup: inlineKeyboard } =
-    parsedParameters.data;
+  const {
+    chat_id: chatId,
+    text,
+    parse_mode: parseMode,
+    entities,
+    protect_content: isContentProtected,
+    reply_markup: inlineKeyboard,
+  } = parsedParameters.data;
   // Telegram reads the text and its formatting before it looks at the chat.
   const formattedTextReading = readSpecifiedFormattedText(
     context,
@@ -377,12 +412,26 @@ function handleSendMessage(
   if (chatId === undefined) {
     return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
   }
+  const replyTarget = selectSpecifiedReplyTarget(parsedParameters.data);
+  // Telegram can reply to a message of another chat, which the emulator does not support.
+  if (replyTarget?.chatId !== undefined && replyTarget.chatId !== chatId) {
+    return botApiError(context, 400, CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION);
+  }
 
   return sendMessageResponse(
     context,
     context.get('emulationSession').botApi.sendMessage(
       context.get('authenticatedBot'),
-      { chatId, ...formattedTextReading.formattedText, inlineKeyboard },
+      {
+        chatId,
+        ...formattedTextReading.formattedText,
+        replyTo: replyTarget === undefined ? undefined : {
+          messageId: replyTarget.messageId,
+          allowSendingWithoutReply: replyTarget.allowSendingWithoutReply,
+        },
+        inlineKeyboard,
+        isContentProtected,
+      },
     ),
   );
 }
@@ -398,6 +447,8 @@ function sendMessageResponse(context: BotApiRouteContext, result: SendMessageRes
       return botApiError(context, 400, badRequestDescription(result.textError));
     case 'chat_not_found':
       return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'reply_message_not_found':
+      return botApiError(context, 400, REPLY_MESSAGE_NOT_FOUND_DESCRIPTION);
     case 'message_text_too_long':
       return botApiError(context, 400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':

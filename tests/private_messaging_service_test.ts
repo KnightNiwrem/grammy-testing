@@ -9,6 +9,7 @@ import { UserMessageBoxRepository } from '../src/repositories/user_message_box.t
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import {
+  type BotMessageReplyTarget,
   type DeleteMessagesByBotFailureReason,
   type EditBotMessageTextFailureReason,
   PrivateMessagingService,
@@ -329,6 +330,7 @@ Deno.test('PrivateMessagingService validates bot messages in Telegram order befo
     fromBotId: number;
     accountId: number;
     text: string;
+    replyTo?: BotMessageReplyTarget;
     expectedReason: SendBotMessageFailureReason;
   }[] = [
     { fromBotId: 999, accountId: 999, text: '', expectedReason: 'bot_not_found' },
@@ -343,7 +345,15 @@ Deno.test('PrivateMessagingService validates bot messages in Telegram order befo
       fromBotId: bot.profile.id,
       accountId: strangerAccount.profile.id,
       text: tooLongText,
+      replyTo: { botMessageId: 1, allowSendingWithoutReply: false },
       expectedReason: 'conversation_not_started',
+    },
+    {
+      fromBotId: bot.profile.id,
+      accountId: account.profile.id,
+      text: tooLongText,
+      replyTo: { botMessageId: 1, allowSendingWithoutReply: false },
+      expectedReason: 'reply_message_not_found',
     },
     {
       fromBotId: bot.profile.id,
@@ -353,11 +363,12 @@ Deno.test('PrivateMessagingService validates bot messages in Telegram order befo
     },
   ];
 
-  for (const { fromBotId, accountId, text, expectedReason } of cases) {
+  for (const { fromBotId, accountId, text, replyTo, expectedReason } of cases) {
     const result = privateMessaging.sendBotMessage({
       fromBotId,
       to: { type: 'private', accountId },
       text,
+      replyTo,
     });
     if (result.sent || result.reason !== expectedReason) {
       throw new Error(`Expected the bot message to fail with ${expectedReason}`);
@@ -365,6 +376,82 @@ Deno.test('PrivateMessagingService validates bot messages in Telegram order befo
   }
   if (publishedEvents.length !== 0) {
     throw new Error('Expected rejected bot messages not to store or publish anything');
+  }
+});
+
+Deno.test('PrivateMessagingService stores replies only to messages of the same chat', () => {
+  const { virtualUsers, messages, publishedEvents, privateMessaging } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const otherAccount = createAccount(virtualUsers, 'Grace');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const otherChatMessage = sendPrivateText(privateMessaging, otherAccount.profile.id, bot);
+  const question = sendPrivateText(privateMessaging, account.profile.id, bot);
+  const otherChatMessageId = 1;
+  const questionId = 2;
+
+  const botReply = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    text: 'Hi',
+    replyTo: { botMessageId: questionId, allowSendingWithoutReply: false },
+    isContentProtected: true,
+  });
+  const accountReply = privateMessaging.sendAccountMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: 'Thanks',
+    replyToBotMessageId: 3,
+  });
+  if (
+    !botReply.sent || botReply.message.replyToMessageId !== question.id ||
+    !botReply.message.isContentProtected ||
+    !accountReply.sent || accountReply.message.replyToMessageId !== botReply.message.id ||
+    accountReply.message.isContentProtected
+  ) {
+    throw new Error('Expected both participants to reply to messages of their chat');
+  }
+
+  const eventCountBeforeRejections = publishedEvents.length;
+  const botReplyToOtherChat = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    text: 'Hi',
+    replyTo: { botMessageId: otherChatMessageId, allowSendingWithoutReply: false },
+  });
+  const accountReplyToMissingMessage = privateMessaging.sendAccountMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    text: 'Thanks',
+    replyToBotMessageId: 99,
+  });
+  if (
+    botReplyToOtherChat.sent || botReplyToOtherChat.reason !== 'reply_message_not_found' ||
+    accountReplyToMissingMessage.sent ||
+    accountReplyToMissingMessage.reason !== 'reply_message_not_found' ||
+    publishedEvents.length !== eventCountBeforeRejections
+  ) {
+    throw new Error('Expected replies to messages outside the chat to fail without a message');
+  }
+
+  privateMessaging.deleteMessagesByBot({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageIds: [questionId],
+  });
+  const replyToDeletedMessage = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    text: 'Still there?',
+    replyTo: { botMessageId: questionId, allowSendingWithoutReply: true },
+  });
+  if (!replyToDeletedMessage.sent || replyToDeletedMessage.message.replyToMessageId !== undefined) {
+    throw new Error(
+      'Expected allowSendingWithoutReply to send a reply to a deleted message as none',
+    );
+  }
+  if (messages.getPrivateTextMessage(otherChatMessage.id) !== otherChatMessage) {
+    throw new Error("Expected the other chat's message to be unaffected");
   }
 });
 
@@ -958,7 +1045,7 @@ function createPrivateMessagingFixture() {
   const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
-    botMessageViews: new BotMessageViewService({ accounts, bots, userMessageBoxes }),
+    botMessageViews: new BotMessageViewService({ accounts, bots, userMessageBoxes, messages }),
     botUpdates,
     updateSubscriptions: new BotUpdateSubscriptionRepository(),
   });

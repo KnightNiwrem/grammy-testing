@@ -75,8 +75,12 @@ export interface PrivateTextMessage {
   readonly sentAtUnixSeconds: number;
   readonly text: string;
   readonly entities: readonly TextEntity[];
+  /** The message of the same conversation this one replies to; omitted when it is no reply. */
+  readonly replyToMessageId?: CanonicalMessageId;
   /** Omitted when the message has no inline keyboard. Only bots attach inline keyboards. */
   readonly inlineKeyboard?: InlineKeyboard;
   /** When the text was last edited; omitted for a message whose text was never edited. */
   readonly textEditedAtUnixSeconds?: number;
+  /** Whether the sender protected the message from forwarding and saving. Only bots protect. */
+  readonly isContentProtected: boolean;
 }

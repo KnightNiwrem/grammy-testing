@@ -97,6 +97,8 @@ Deno.test('TypeScript client manages all currently implemented session resources
         chat_id: createdAccount.account.id,
         text: `<b>Hello</b> from the <a href="tg://user?id=${createdBot.bot.id}">bot</a>`,
         parse_mode: 'HTML',
+        reply_parameters: { message_id: sentCommand.message_id },
+        protect_content: true,
       }),
     },
   );
@@ -131,6 +133,19 @@ Deno.test('TypeScript client manages all currently implemented session resources
   ) {
     throw new Error('Expected the client to return the formatting of a bot message');
   }
+  const accountReply = await createdAccount.account.sendMessage({
+    to: { type: 'private', botId: createdBot.bot.id },
+    text: 'Thanks',
+    reply_to_message_id: history[2].message_id,
+  });
+  const { reply_to_message: _, ...repliedBotMessage } = history[2];
+  if (
+    history[2].reply_to_message?.message_id !== sentCommand.message_id ||
+    history[2].has_protected_content !== true ||
+    JSON.stringify(accountReply.reply_to_message) !== JSON.stringify(repliedBotMessage)
+  ) {
+    throw new Error('Expected the client to send and return replies and protected messages');
+  }
 
   const botApiPath = `/sessions/${session.id}/bot-api/bot${createdBot.token}`;
   const menuResponse = await api.request(`${botApiPath}/sendMessage`, {
@@ -145,11 +160,12 @@ Deno.test('TypeScript client manages all currently implemented session resources
   if (menuResponse.status !== 200) {
     throw new Error(`Expected the bot menu to be accepted, received ${menuResponse.status}`);
   }
-  const [, , , menu] = await createdAccount.account.getMessages({
+  const menu = (await createdAccount.account.getMessages({
     chat: { type: 'private', botId: createdBot.bot.id },
-  });
+  })).at(-1);
   if (
-    JSON.stringify(menu?.reply_markup) !==
+    menu === undefined ||
+    JSON.stringify(menu.reply_markup) !==
       JSON.stringify({ inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] })
   ) {
     throw new Error('Expected the client to return the inline keyboard of a bot message');

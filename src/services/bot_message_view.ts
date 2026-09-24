@@ -6,6 +6,7 @@ import {
 import type {
   BotApiCallbackQuery,
   BotApiPrivateTextMessage,
+  BotApiRepliedPrivateTextMessage,
   BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
@@ -25,10 +26,15 @@ interface MessageIdLookup {
   getMessageId(ownerId: number, canonicalMessageId: CanonicalMessageId): number | undefined;
 }
 
+interface PrivateMessageLookup {
+  getPrivateTextMessage(messageId: CanonicalMessageId): PrivateTextMessage | undefined;
+}
+
 interface BotMessageViewServiceDependencies {
   readonly accounts: AccountLookup;
   readonly bots: BotLookup;
   readonly userMessageBoxes: MessageIdLookup;
+  readonly messages: PrivateMessageLookup;
 }
 
 /**
@@ -42,39 +48,28 @@ export class BotMessageViewService {
   readonly #accounts: AccountLookup;
   readonly #bots: BotLookup;
   readonly #userMessageBoxes: MessageIdLookup;
+  readonly #messages: PrivateMessageLookup;
 
-  constructor({ accounts, bots, userMessageBoxes }: BotMessageViewServiceDependencies) {
+  constructor({ accounts, bots, userMessageBoxes, messages }: BotMessageViewServiceDependencies) {
     this.#accounts = accounts;
     this.#bots = bots;
     this.#userMessageBoxes = userMessageBoxes;
+    this.#messages = messages;
   }
 
   /**
-   * Returns a private text message as the bot of its conversation sees it. The message must be
-   * committed: its participants exist and it is numbered in the bot's message box.
+   * Returns a private text message as the bot of its conversation sees it, with the current state
+   * of the message it replies to unless that message was deleted. The message must be committed:
+   * its participants exist and it is numbered in the bot's message box.
    */
   viewPrivateTextMessageForBot(message: PrivateTextMessage): BotApiPrivateTextMessage {
-    const { accountId, botId: observingBotId } = message.conversation;
-    const account = this.#accounts.getById(accountId);
-    if (account === undefined) {
-      throw new Error(`Account ${accountId} of message ${message.id} does not exist`);
-    }
-    const bot = this.#bots.getById(observingBotId);
-    if (bot === undefined) {
-      throw new Error(`Bot ${observingBotId} of message ${message.id} does not exist`);
-    }
-    const observerMessageId = this.#userMessageBoxes.getMessageId(observingBotId, message.id);
-    if (observerMessageId === undefined) {
-      throw new Error(`Private message ${message.id} was not delivered to bot ${observingBotId}`);
-    }
-
-    return projectPrivateTextMessageForBot({
+    const repliedMessage = message.replyToMessageId === undefined
+      ? undefined
+      : this.#messages.getPrivateTextMessage(message.replyToMessageId);
+    return this.#viewPrivateTextMessage(
       message,
-      account: account.profile,
-      bot: bot.profile,
-      observerMessageId,
-      mentionedUsers: this.#findMentionedUsers(message),
-    });
+      repliedMessage === undefined ? undefined : this.#viewPrivateTextMessage(repliedMessage),
+    );
   }
 
   /**
@@ -95,6 +90,35 @@ export class BotMessageViewService {
       callbackQuery,
       account: account.profile,
       message: this.viewPrivateTextMessageForBot(message),
+    });
+  }
+
+  /** Projects a message with the given view of the message it replies to, if any. */
+  #viewPrivateTextMessage(
+    message: PrivateTextMessage,
+    repliedMessage?: BotApiRepliedPrivateTextMessage,
+  ): BotApiPrivateTextMessage {
+    const { accountId, botId: observingBotId } = message.conversation;
+    const account = this.#accounts.getById(accountId);
+    if (account === undefined) {
+      throw new Error(`Account ${accountId} of message ${message.id} does not exist`);
+    }
+    const bot = this.#bots.getById(observingBotId);
+    if (bot === undefined) {
+      throw new Error(`Bot ${observingBotId} of message ${message.id} does not exist`);
+    }
+    const observerMessageId = this.#userMessageBoxes.getMessageId(observingBotId, message.id);
+    if (observerMessageId === undefined) {
+      throw new Error(`Private message ${message.id} was not delivered to bot ${observingBotId}`);
+    }
+
+    return projectPrivateTextMessageForBot({
+      message,
+      account: account.profile,
+      bot: bot.profile,
+      observerMessageId,
+      mentionedUsers: this.#findMentionedUsers(message),
+      repliedMessage,
     });
   }
 

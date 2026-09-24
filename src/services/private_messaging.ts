@@ -42,13 +42,16 @@ export interface SendAccountMessageInput {
     readonly botId: number;
   };
   readonly text: string;
+  /** The ID, in the bot's message box, of the chat's message to reply to; omitted for no reply. */
+  readonly replyToBotMessageId?: number;
 }
 
 export type SendAccountMessageFailureReason =
   | 'account_not_found'
   | 'bot_not_found'
   | 'message_text_empty'
-  | 'message_text_too_long';
+  | 'message_text_too_long'
+  | 'reply_message_not_found';
 
 /**
  * Telegram rejected the text or its entities while normalizing them, for example because only
@@ -78,13 +81,25 @@ export interface BotPrivateChat {
   readonly accountId: number;
 }
 
+/** The message of the chat that a bot's message replies to. */
+export interface BotMessageReplyTarget {
+  /** The message's ID in the bot's message box. */
+  readonly botMessageId: number;
+  /** Sends the message as no reply, rather than failing, when the target is not found. */
+  readonly allowSendingWithoutReply: boolean;
+}
+
 export interface SendBotMessageInput {
   readonly fromBotId: number;
   readonly to: BotPrivateChat;
   readonly text: string;
   /** Formatting the bot specified, which Telegram validates and normalizes; omitted for none. */
   readonly entities?: readonly TextEntity[];
+  /** Omitted for a message that replies to none. */
+  readonly replyTo?: BotMessageReplyTarget;
   readonly inlineKeyboard?: InlineKeyboard;
+  /** Protects the message from forwarding and saving; omitted for an unprotected message. */
+  readonly isContentProtected?: boolean;
 }
 
 export type SendBotMessageFailureReason =
@@ -92,6 +107,7 @@ export type SendBotMessageFailureReason =
   | 'message_text_empty'
   | 'account_not_found'
   | 'conversation_not_started'
+  | 'reply_message_not_found'
   | 'message_text_too_long'
   | 'callback_data_invalid';
 
@@ -227,7 +243,9 @@ interface PrivateMessageStore {
     readonly sentAtUnixSeconds: number;
     readonly text: string;
     readonly entities: readonly TextEntity[];
+    readonly replyToMessageId?: CanonicalMessageId;
     readonly inlineKeyboard?: InlineKeyboard;
+    readonly isContentProtected?: boolean;
   }): PrivateTextMessage;
   getPrivateTextMessage(messageId: CanonicalMessageId): PrivateTextMessage | undefined;
   editPrivateTextMessage(messageId: CanonicalMessageId, edit: {
@@ -334,11 +352,18 @@ export class PrivateMessagingService {
     if (textFixing.formattedText.text.length > MAX_TEXT_MESSAGE_LENGTH) {
       return { sent: false, reason: 'message_text_too_long' };
     }
-
-    this.#privateConversations.getOrCreatePrivateConversation({
+    const conversation: PrivateConversationKey = {
       accountId: account.profile.id,
       botId: bot.profile.id,
-    });
+    };
+    const repliedMessage = input.replyToBotMessageId === undefined
+      ? undefined
+      : this.getPrivateTextMessageByBotMessageId(conversation, input.replyToBotMessageId);
+    if (input.replyToBotMessageId !== undefined && repliedMessage === undefined) {
+      return { sent: false, reason: 'reply_message_not_found' };
+    }
+
+    this.#privateConversations.getOrCreatePrivateConversation(conversation);
     return {
       sent: true,
       message: this.#storePrivateTextMessage({
@@ -346,6 +371,7 @@ export class PrivateMessagingService {
         bot,
         authorRole: 'account',
         formattedText: textFixing.formattedText,
+        replyToMessageId: repliedMessage?.id,
       }),
     };
   }
@@ -355,8 +381,8 @@ export class PrivateMessagingService {
    * conversation, so the account must have started one with the bot.
    *
    * Checks follow Telegram's order: the text is checked for emptiness before the recipient is
-   * resolved; it is then normalized with its entities, and the result is checked for length.
-   * Callback data is checked last.
+   * resolved, and the replied message is looked up after it; the text is then normalized with its
+   * entities, and the result is checked for length. Callback data is checked last.
    */
   sendBotMessage(input: SendBotMessageInput): SendBotMessageResult {
     const bot = this.#bots.getById(input.fromBotId);
@@ -377,6 +403,10 @@ export class PrivateMessagingService {
     if (conversation === undefined) {
       return { sent: false, reason: 'conversation_not_started' };
     }
+    const replyResolution = this.#resolveBotMessageReplyTarget(conversation, input.replyTo);
+    if (!replyResolution.resolved) {
+      return { sent: false, reason: 'reply_message_not_found' };
+    }
     const textFixing = this.#fixFormattedText(input.text, input.entities ?? []);
     if (!textFixing.fixed) {
       return { sent: false, reason: 'text_invalid', textError: textFixing.error };
@@ -395,7 +425,9 @@ export class PrivateMessagingService {
         bot,
         authorRole: 'bot',
         formattedText: textFixing.formattedText,
+        replyToMessageId: replyResolution.repliedMessage?.id,
         inlineKeyboard: input.inlineKeyboard,
+        isContentProtected: input.isContentProtected,
       }),
     };
   }
@@ -557,6 +589,29 @@ export class PrivateMessagingService {
     return { found: true, messages: this.#messages.getPrivateConversationMessages(input) };
   }
 
+  /**
+   * Finds the message a bot's message replies to. As on Telegram, a target that is not found,
+   * such as a deleted message, fails the send unless the bot allowed sending without a reply.
+   */
+  #resolveBotMessageReplyTarget(
+    conversation: PrivateConversationKey,
+    replyTo: BotMessageReplyTarget | undefined,
+  ):
+    | { readonly resolved: true; readonly repliedMessage?: PrivateTextMessage }
+    | { readonly resolved: false } {
+    if (replyTo === undefined) {
+      return { resolved: true };
+    }
+    const repliedMessage = this.getPrivateTextMessageByBotMessageId(
+      conversation,
+      replyTo.botMessageId,
+    );
+    if (repliedMessage !== undefined) {
+      return { resolved: true, repliedMessage };
+    }
+    return replyTo.allowSendingWithoutReply ? { resolved: true } : { resolved: false };
+  }
+
   /** Resolves the bot message an edit targets, which only the bot that sent it can edit. */
   #resolveEditableBotMessage(
     { fromBotId, chat, botMessageId }: EditBotMessageTarget,
@@ -626,12 +681,22 @@ export class PrivateMessagingService {
    * it in both participants' message boxes, and publishes its creation.
    */
   #storePrivateTextMessage(
-    { account, bot, authorRole, formattedText, inlineKeyboard }: {
+    {
+      account,
+      bot,
+      authorRole,
+      formattedText,
+      replyToMessageId,
+      inlineKeyboard,
+      isContentProtected,
+    }: {
       readonly account: VirtualAccount;
       readonly bot: VirtualBot;
       readonly authorRole: PrivateConversationRole;
       readonly formattedText: FormattedText;
+      readonly replyToMessageId?: CanonicalMessageId;
       readonly inlineKeyboard?: InlineKeyboard;
+      readonly isContentProtected?: boolean;
     },
   ): PrivateTextMessage {
     const storedMessage = this.#messages.addPrivateTextMessage({
@@ -640,7 +705,9 @@ export class PrivateMessagingService {
       sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
       text: formattedText.text,
       entities: formattedText.entities,
+      replyToMessageId,
       inlineKeyboard,
+      isContentProtected,
     });
     // Telegram numbers a private message in each participant's message box. Only the bot's
     // numbering is projected today; the account's keeps the stored model faithful to Telegram.

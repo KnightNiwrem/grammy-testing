@@ -180,7 +180,7 @@ function createDeliveryFixture() {
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
-    botMessageViews: new BotMessageViewService({ accounts, bots, userMessageBoxes }),
+    botMessageViews: new BotMessageViewService({ accounts, bots, userMessageBoxes, messages }),
     botUpdates,
     updateSubscriptions,
   });

@@ -38,6 +38,8 @@ const sendMessageRequestSchema = z.strictObject({
     botId: telegramUserIdSchema,
   }),
   text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH),
+  /** The replied message's ID as the bot sees it, which is how these routes show messages. */
+  reply_to_message_id: z.int().positive().optional(),
 });
 
 const pressCallbackButtonRequestSchema = z.strictObject({
@@ -104,9 +106,12 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     }
 
     const { privateMessaging, botMessageViews } = context.get('emulationSession');
+    const { to, text, reply_to_message_id: replyToBotMessageId } = parsedRequest.data;
     const result = privateMessaging.sendAccountMessage({
       fromAccountId: accountId.data,
-      ...parsedRequest.data,
+      to,
+      text,
+      replyToBotMessageId,
     });
     if (!result.sent) {
       return context.body(

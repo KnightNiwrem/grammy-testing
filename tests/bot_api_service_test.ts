@@ -59,6 +59,15 @@ Deno.test('BotApiService translates private messaging failures into Bot API reas
     ],
     // The text is checked before the chat.
     ['sendMessage', botApi.sendMessage(bot.profile, { chatId, text: '' }), 'message_text_empty'],
+    [
+      'sendMessage',
+      botApi.sendMessage(bot.profile, {
+        chatId: account.profile.id,
+        text: 'Hello',
+        replyTo: { messageId: 99, allowSendingWithoutReply: false },
+      }),
+      'reply_message_not_found',
+    ],
   ] as const;
   for (const [method, result, expectedReason] of cases) {
     if (!('reason' in result) || result.reason !== expectedReason) {
@@ -125,16 +134,17 @@ function createBotApiFixture() {
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const userMessageBoxes = new UserMessageBoxRepository();
+  const messages = new MessageRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
-  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes });
+  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes, messages });
   const events = new BotUpdateDeliveryService({ botMessageViews, botUpdates, updateSubscriptions });
   const privateConversations = new PrivateConversationRepository();
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
     privateConversations,
-    messages: new MessageRepository(),
+    messages,
     userMessageBoxes,
     events,
     currentUnixTimeSeconds: () => 1_700_000_000,
