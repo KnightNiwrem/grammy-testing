@@ -14,6 +14,7 @@ import type {
   AccountMessageHistoryInput,
   AccountReplyInterfaceInput,
   AccountSendMessageInput,
+  BotBlockInput,
   BotCommand,
   CallbackQuery,
   CreatedVirtualAccount,
@@ -131,6 +132,20 @@ function createVirtualAccountClient(
         body: input,
       });
       return response.message;
+    },
+    async blockBot(input: BotBlockInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'PUT',
+        url: `${accountUrl}/blocked-bots/${encodeURIComponent(input.botId)}`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+      });
+    },
+    async unblockBot(input: BotBlockInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'DELETE',
+        url: `${accountUrl}/blocked-bots/${encodeURIComponent(input.botId)}`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+      });
     },
     async getMessages(input: AccountMessageHistoryInput): Promise<readonly PrivateTextMessage[]> {
       const botId = encodeURIComponent(input.chat.botId);

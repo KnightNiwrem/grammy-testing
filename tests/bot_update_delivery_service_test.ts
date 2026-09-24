@@ -151,6 +151,13 @@ Deno.test('BotUpdateDeliveryService skips update types excluded by the bot subsc
 
   updateSubscriptions.setAllowedUpdateTypes(bot.profile.id, new Set(['callback_query']));
   botUpdateDelivery.publish({ type: 'message_created', message: accountMessage });
+  botUpdateDelivery.publish({
+    type: 'bot_block_changed',
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+    isBlocked: true,
+    changedAtUnixSeconds: 1_700_000_002,
+  });
   updateSubscriptions.setAllowedUpdateTypes(bot.profile.id, new Set(['message']));
   botUpdateDelivery.publish({
     type: 'callback_query_created',
@@ -167,6 +174,69 @@ Deno.test('BotUpdateDeliveryService skips update types excluded by the bot subsc
 
   if (botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 }).length !== 0) {
     throw new Error('Expected no update of a type the bot excluded');
+  }
+});
+
+Deno.test('BotUpdateDeliveryService reports a block and unblock as changes of the bot membership', () => {
+  const { virtualUsers, botUpdates, botUpdateDelivery } = createDeliveryFixture();
+  const account = createAccount(virtualUsers);
+  const bot = createBot(virtualUsers, 'test_bot');
+  const otherBot = createBot(virtualUsers, 'other_bot');
+  const blockChange = { accountId: account.profile.id, botId: bot.profile.id };
+
+  botUpdateDelivery.publish({
+    type: 'bot_block_changed',
+    ...blockChange,
+    isBlocked: true,
+    changedAtUnixSeconds: 1_700_000_000,
+  });
+  botUpdateDelivery.publish({
+    type: 'bot_block_changed',
+    ...blockChange,
+    isBlocked: false,
+    changedAtUnixSeconds: 1_700_000_009,
+  });
+
+  const botUser = {
+    id: bot.profile.id,
+    is_bot: true,
+    first_name: 'Test Bot',
+    username: 'test_bot',
+  };
+  const chat = { id: account.profile.id, type: 'private', first_name: 'Ada' };
+  const member = { user: botUser, status: 'member' };
+  const kicked = { user: botUser, status: 'kicked', until_date: 0 };
+  const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
+  if (
+    JSON.stringify(updates) !== JSON.stringify([
+      {
+        update_id: 1,
+        my_chat_member: {
+          chat,
+          from: account.profile,
+          date: 1_700_000_000,
+          old_chat_member: member,
+          new_chat_member: kicked,
+        },
+      },
+      {
+        update_id: 2,
+        my_chat_member: {
+          chat,
+          from: account.profile,
+          date: 1_700_000_009,
+          old_chat_member: kicked,
+          new_chat_member: member,
+        },
+      },
+    ])
+  ) {
+    throw new Error(
+      `Expected my_chat_member updates in Telegram form, received ${JSON.stringify(updates)}`,
+    );
+  }
+  if (botUpdates.confirmAndReadPendingUpdates(otherBot.profile.id, { limit: 100 }).length !== 0) {
+    throw new Error('Expected a block to reach only the blocked bot');
   }
 });
 

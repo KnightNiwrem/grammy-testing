@@ -1,5 +1,6 @@
 import type {
   BotApiCallbackQuery,
+  BotApiMyChatMemberUpdated,
   BotApiPrivateTextMessage,
   BotApiUpdate,
 } from '../types/bot_api.ts';
@@ -43,6 +44,13 @@ export class BotUpdateRepository {
     return this.#enqueueUpdate(
       botId,
       (update_id) => ({ update_id, callback_query: callbackQuery }),
+    );
+  }
+
+  enqueueMyChatMemberUpdate(botId: number, myChatMember: BotApiMyChatMemberUpdated): BotApiUpdate {
+    return this.#enqueueUpdate(
+      botId,
+      (update_id) => ({ update_id, my_chat_member: myChatMember }),
     );
   }
 

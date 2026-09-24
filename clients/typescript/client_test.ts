@@ -263,6 +263,22 @@ Deno.test('TypeScript client manages all currently implemented session resources
     throw new Error('Expected the client to read and press the reply keyboard');
   }
 
+  await createdAccount.account.blockBot({ botId: createdBot.bot.id });
+  const blockedReplyResponse = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: createdAccount.account.id, text: 'Hello?' }),
+  });
+  await createdAccount.account.unblockBot({ botId: createdBot.bot.id });
+  const unblockedReplyResponse = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: createdAccount.account.id, text: 'Hello again' }),
+  });
+  if (blockedReplyResponse.status !== 403 || unblockedReplyResponse.status !== 200) {
+    throw new Error('Expected the client to block and unblock the bot');
+  }
+
   await session.end();
 });
 

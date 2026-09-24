@@ -1,5 +1,6 @@
 import type { EmulationSession } from '../types/emulation_session.ts';
 import { AccountRepository } from '../repositories/account.ts';
+import { BlockedUserRepository } from '../repositories/blocked_user.ts';
 import { BotRepository } from '../repositories/bot.ts';
 import { BotCommandRepository } from '../repositories/bot_command.ts';
 import { BotUpdateRepository } from '../repositories/bot_update.ts';
@@ -11,6 +12,7 @@ import { SharedChatRepository } from '../repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../repositories/user_message_box.ts';
 import { BotApiService } from '../services/bot_api.ts';
+import { BotBlockingService } from '../services/bot_blocking.ts';
 import { BotCommandService } from '../services/bot_command.ts';
 import { BotMessageViewService } from '../services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
@@ -42,14 +44,24 @@ export function createEmulationSession(id: string): EmulationSession {
     updateSubscriptions,
   });
   const privateConversations = new PrivateConversationRepository();
+  const blockedUsers = new BlockedUserRepository();
+  const currentUnixTimeSeconds = () => Math.floor(Date.now() / 1_000);
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
     privateConversations,
     messages,
     userMessageBoxes,
+    blockedUsers,
     events: botUpdateDelivery,
-    currentUnixTimeSeconds: () => Math.floor(Date.now() / 1_000),
+    currentUnixTimeSeconds,
+  });
+  const botBlocking = new BotBlockingService({
+    accounts,
+    bots,
+    blockedUsers,
+    events: botUpdateDelivery,
+    currentUnixTimeSeconds,
   });
   const callbackQueries = new CallbackQueryService({
     accounts,
@@ -83,6 +95,7 @@ export function createEmulationSession(id: string): EmulationSession {
     virtualUsers,
     sharedChatAdministration,
     privateMessaging,
+    botBlocking,
     callbackQueries,
     botCommands,
     botMessageViews,

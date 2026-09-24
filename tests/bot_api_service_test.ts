@@ -1,4 +1,5 @@
 import { AccountRepository } from '../src/repositories/account.ts';
+import { BlockedUserRepository } from '../src/repositories/blocked_user.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotCommandRepository } from '../src/repositories/bot_command.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
@@ -140,12 +141,14 @@ function createBotApiFixture() {
   const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes, messages });
   const events = new BotUpdateDeliveryService({ botMessageViews, botUpdates, updateSubscriptions });
   const privateConversations = new PrivateConversationRepository();
+  const blockedUsers = new BlockedUserRepository();
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
     privateConversations,
     messages,
     userMessageBoxes,
+    blockedUsers,
     events,
     currentUnixTimeSeconds: () => 1_700_000_000,
   });

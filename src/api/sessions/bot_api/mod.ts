@@ -61,6 +61,9 @@ const REPLY_MESSAGE_NOT_FOUND_DESCRIPTION = 'Bad Request: message to be replied 
 const MESSAGE_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: message is too long';
 const BUTTON_DATA_INVALID_DESCRIPTION = 'Bad Request: BUTTON_DATA_INVALID';
 
+/** Telegram's description for a message or chat action to a user who blocked the bot. */
+const BOT_BLOCKED_DESCRIPTION = 'Forbidden: bot was blocked by the user';
+
 /** The emulator's description for a reply to a message of another chat, which it does not support. */
 const CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION =
   'Bad Request: replies to messages of other chats are not supported';
@@ -456,6 +459,8 @@ function sendMessageResponse(context: BotApiRouteContext, result: SendMessageRes
       return botApiError(context, 400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':
       return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
+    case 'bot_blocked':
+      return botApiError(context, 403, BOT_BLOCKED_DESCRIPTION);
     default: {
       const unhandledFailure: never = result;
       throw new Error(`Unhandled sendMessage failure: ${JSON.stringify(unhandledFailure)}`);
@@ -738,9 +743,19 @@ function handleSendChatAction(
     context.get('authenticatedBot'),
     { chatId, action },
   );
-  return result.sent
-    ? context.json({ ok: true as const, result: true as const })
-    : botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+  if (result.sent) {
+    return context.json({ ok: true as const, result: true as const });
+  }
+  switch (result.reason) {
+    case 'chat_not_found':
+      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'bot_blocked':
+      return botApiError(context, 403, BOT_BLOCKED_DESCRIPTION);
+    default: {
+      const unhandledReason: never = result.reason;
+      throw new Error(`Unhandled sendChatAction failure: ${unhandledReason}`);
+    }
+  }
 }
 
 function handleSetMyCommands(

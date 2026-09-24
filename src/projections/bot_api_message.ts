@@ -4,11 +4,15 @@ import type {
   BotApiInlineKeyboardButton,
   BotApiInlineKeyboardMarkup,
   BotApiMessageEntity,
+  BotApiMyChatMemberUpdated,
+  BotApiPrivateChat,
+  BotApiPrivateChatBotMember,
   BotApiPrivateTextMessage,
   BotApiRepliedPrivateTextMessage,
   BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
+import type { BotBlockChangedEvent } from '../types/chat_domain_event.ts';
 import type { InlineKeyboard, InlineKeyboardButton } from '../types/inline_keyboard.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
 import type { VirtualBotProfile } from '../types/virtual_bot.ts';
@@ -38,17 +42,10 @@ export function projectPrivateTextMessageForBot(
   { message, account, bot, observerMessageId, mentionedUsers, repliedMessage }:
     PrivateTextMessageForBotProjectionInput,
 ): BotApiPrivateTextMessage {
-  const { id, first_name, last_name, username } = account;
   return {
     message_id: observerMessageId,
     from: message.authorRole === 'account' ? account : projectBotAsUser(bot),
-    chat: {
-      id,
-      type: 'private',
-      first_name,
-      ...(last_name === undefined ? {} : { last_name }),
-      ...(username === undefined ? {} : { username }),
-    },
+    chat: projectPrivateChat(account),
     date: message.sentAtUnixSeconds,
     ...(message.textEditedAtUnixSeconds === undefined
       ? {}
@@ -86,6 +83,34 @@ export function projectCallbackQueryForBot(
   };
 }
 
+export interface BotBlockChangeForBotProjectionInput {
+  readonly event: BotBlockChangedEvent;
+  /** The account that blocked or unblocked the bot. */
+  readonly account: VirtualAccountProfile;
+  /** The bot whose membership in the private chat changed, which observes the change. */
+  readonly bot: VirtualBotProfile;
+}
+
+/**
+ * Projects a block or unblock as the blocked bot receives it: as TDLib reports Telegram's
+ * `updateBotStopped`, the bot's membership in the account's private chat changes between
+ * `member` and `kicked` forever, and the account made the change.
+ */
+export function projectBotBlockChangeForBot(
+  { event, account, bot }: BotBlockChangeForBotProjectionInput,
+): BotApiMyChatMemberUpdated {
+  const user = projectBotAsUser(bot);
+  const member: BotApiPrivateChatBotMember = { user, status: 'member' };
+  const kicked: BotApiPrivateChatBotMember = { user, status: 'kicked', until_date: 0 };
+  return {
+    chat: projectPrivateChat(account),
+    from: account,
+    date: event.changedAtUnixSeconds,
+    old_chat_member: event.isBlocked ? member : kicked,
+    new_chat_member: event.isBlocked ? kicked : member,
+  };
+}
+
 /** Shows a bot as messages show users, without the capabilities that only `getMe` reports. */
 export function projectBotAsUser(bot: VirtualBotProfile): BotApiBotUser {
   const { id, first_name, last_name, username } = bot;
@@ -95,6 +120,19 @@ export function projectBotAsUser(bot: VirtualBotProfile): BotApiBotUser {
     first_name,
     ...(last_name === undefined ? {} : { last_name }),
     username,
+  };
+}
+
+/** Shows the private chat with an account, as the bot at its other end sees it. */
+function projectPrivateChat(
+  { id, first_name, last_name, username }: VirtualAccountProfile,
+): BotApiPrivateChat {
+  return {
+    id,
+    type: 'private',
+    first_name,
+    ...(last_name === undefined ? {} : { last_name }),
+    ...(username === undefined ? {} : { username }),
   };
 }
 

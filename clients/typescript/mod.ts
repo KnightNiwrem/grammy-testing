@@ -12,6 +12,7 @@ export type {
   AccountMessageHistoryInput,
   AccountReplyInterfaceInput,
   AccountSendMessageInput,
+  BotBlockInput,
   BotCommand,
   CallbackInlineKeyboardButton,
   CallbackQuery,

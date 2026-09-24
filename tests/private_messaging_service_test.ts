@@ -1,4 +1,5 @@
 import { AccountRepository } from '../src/repositories/account.ts';
+import { BlockedUserRepository } from '../src/repositories/blocked_user.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
@@ -309,7 +310,8 @@ Deno.test('PrivateMessagingService stores a bot reply in the private conversatio
   }
   if (
     publishedEvents.length !== 2 ||
-    publishedEvents[1].message !== reply ||
+    JSON.stringify(publishedEvents[1]) !==
+      JSON.stringify({ type: 'message_created', message: reply }) ||
     botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 }).length !== 1
   ) {
     throw new Error('Expected the reply to be published without becoming an update for its bot');
@@ -1093,6 +1095,72 @@ Deno.test('PrivateMessagingService lets a bot show chat actions only in started 
   }
 });
 
+Deno.test('PrivateMessagingService refuses writing either way while the account blocks the bot', () => {
+  const { virtualUsers, userMessageBoxes, blockedUsers, publishedEvents, privateMessaging } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot);
+  blockedUsers.block(account.profile.id, bot.profile.id);
+  const publishedEventCount = publishedEvents.length;
+  const sendBotText = (text: string, replyToBotMessageId?: number) =>
+    privateMessaging.sendBotMessage({
+      fromBotId: bot.profile.id,
+      to: { type: 'private', accountId: account.profile.id },
+      text,
+      replyTo: replyToBotMessageId === undefined
+        ? undefined
+        : { botMessageId: replyToBotMessageId, allowSendingWithoutReply: false },
+    });
+
+  const cases = [
+    [
+      privateMessaging.sendAccountMessage({
+        fromAccountId: account.profile.id,
+        to: { type: 'private', botId: bot.profile.id },
+        text: 'Hello again',
+      }),
+      'bot_blocked',
+    ],
+    [sendBotText('Still there?'), 'bot_blocked'],
+    // Telegram's servers refuse the message only after every other check passed.
+    [sendBotText(''), 'message_text_empty'],
+    [sendBotText('Still there?', 99), 'reply_message_not_found'],
+    [
+      privateMessaging.sendBotChatAction({
+        fromBotId: bot.profile.id,
+        to: { type: 'private', accountId: account.profile.id },
+        action: 'typing',
+      }),
+      'bot_blocked',
+    ],
+  ] as const;
+  for (const [result, expectedReason] of cases) {
+    if (result.sent || result.reason !== expectedReason) {
+      throw new Error(`Expected ${expectedReason}, received ${JSON.stringify(result)}`);
+    }
+  }
+  if (publishedEvents.length !== publishedEventCount) {
+    throw new Error('Expected refused messages not to be stored or published');
+  }
+
+  const botEdit = privateMessaging.editBotMessageText({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageId: expectBotMessageId(userMessageBoxes, bot, botMessage.id),
+    text: 'Goodbye',
+  });
+  if (!botEdit.edited) {
+    throw new Error('Expected a block to leave existing messages editable');
+  }
+
+  blockedUsers.unblock(account.profile.id, bot.profile.id);
+  if (!sendBotText('Welcome back').sent) {
+    throw new Error('Expected the bot to write again once unblocked');
+  }
+});
+
 const COLOR_KEYBOARD: ReplyInterfaceMarkup = {
   kind: 'reply_keyboard',
   rows: [[{ text: 'Red' }, { text: 'Green' }]],
@@ -1152,12 +1220,14 @@ function createPrivateMessagingFixture() {
   });
   const publishedEvents: ChatDomainEvent[] = [];
   let currentUnixTimeSeconds = 1_700_000_000;
+  const blockedUsers = new BlockedUserRepository();
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
     privateConversations,
     messages,
     userMessageBoxes,
+    blockedUsers,
     events: {
       publish: (event) => {
         publishedEvents.push(event);
@@ -1175,6 +1245,7 @@ function createPrivateMessagingFixture() {
     messages,
     userMessageBoxes,
     botUpdates,
+    blockedUsers,
     publishedEvents,
     privateMessaging,
     advanceClockSeconds,

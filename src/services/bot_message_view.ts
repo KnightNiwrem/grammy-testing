@@ -1,15 +1,18 @@
 import {
   projectBotAsUser,
+  projectBotBlockChangeForBot,
   projectCallbackQueryForBot,
   projectPrivateTextMessageForBot,
 } from '../projections/bot_api_message.ts';
 import type {
   BotApiCallbackQuery,
+  BotApiMyChatMemberUpdated,
   BotApiPrivateTextMessage,
   BotApiRepliedPrivateTextMessage,
   BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
+import type { BotBlockChangedEvent } from '../types/chat_domain_event.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { CanonicalMessageId, PrivateTextMessage } from '../types/virtual_message.ts';
@@ -38,8 +41,8 @@ interface BotMessageViewServiceDependencies {
 }
 
 /**
- * Presents committed canonical messages, and callback queries on them, as the Bot API shows them
- * to an observing bot.
+ * Presents committed canonical messages, callback queries on them, and changes of a bot's
+ * membership in its private chats, as the Bot API shows them to an observing bot.
  *
  * It reads the participants' profiles and the observer's message numbering; it never creates
  * messages or decides whether sending one is permitted.
@@ -91,6 +94,19 @@ export class BotMessageViewService {
       account: account.profile,
       message: this.viewPrivateTextMessageForBot(message),
     });
+  }
+
+  /** Returns an account's block or unblock of a bot as the blocked bot receives it. */
+  viewBotBlockChangeForBot(event: BotBlockChangedEvent): BotApiMyChatMemberUpdated {
+    const account = this.#accounts.getById(event.accountId);
+    if (account === undefined) {
+      throw new Error(`Account ${event.accountId} that changed a bot block does not exist`);
+    }
+    const bot = this.#bots.getById(event.botId);
+    if (bot === undefined) {
+      throw new Error(`Bot ${event.botId} whose block changed does not exist`);
+    }
+    return projectBotBlockChangeForBot({ event, account: account.profile, bot: bot.profile });
   }
 
   /** Projects a message with the given view of the message it replies to, if any. */

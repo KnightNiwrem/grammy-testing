@@ -55,6 +55,7 @@ export interface SendAccountMessageInput {
 export type SendAccountMessageFailureReason =
   | 'account_not_found'
   | 'bot_not_found'
+  | 'bot_blocked'
   | 'message_text_empty'
   | 'message_text_too_long'
   | 'reply_message_not_found';
@@ -114,7 +115,8 @@ export type SendBotMessageFailureReason =
   | 'conversation_not_started'
   | 'reply_message_not_found'
   | 'message_text_too_long'
-  | 'callback_data_invalid';
+  | 'callback_data_invalid'
+  | 'bot_blocked';
 
 export type SendBotMessageResult =
   | {
@@ -210,7 +212,11 @@ export type SendBotChatActionResult =
   | { readonly sent: true }
   | {
     readonly sent: false;
-    readonly reason: 'bot_not_found' | 'account_not_found' | 'conversation_not_started';
+    readonly reason:
+      | 'bot_not_found'
+      | 'account_not_found'
+      | 'conversation_not_started'
+      | 'bot_blocked';
   };
 
 /** The message whose reply interface an account's client shows, with that interface. */
@@ -304,6 +310,10 @@ interface UserMessageBoxStore {
   getCanonicalMessageId(ownerId: number, messageId: number): CanonicalMessageId | undefined;
 }
 
+interface BlockedUserLookup {
+  isBlocked(accountId: number, userId: number): boolean;
+}
+
 interface ChatDomainEventSink {
   publish(event: ChatDomainEvent): void;
 }
@@ -314,6 +324,7 @@ interface PrivateMessagingServiceDependencies {
   readonly privateConversations: PrivateConversationStore;
   readonly messages: PrivateMessageStore;
   readonly userMessageBoxes: UserMessageBoxStore;
+  readonly blockedUsers: BlockedUserLookup;
   readonly events: ChatDomainEventSink;
   readonly currentUnixTimeSeconds: () => number;
 }
@@ -325,6 +336,9 @@ interface PrivateMessagingServiceDependencies {
  * chats. A bot's message can also change the reply interface the account's client shows, such as
  * a reply keyboard whose buttons the account presses.
  *
+ * While an account blocks a bot, neither can write to the other, as on Telegram, where the bot's
+ * sends fail and a client asks the user to unblock the bot before writing to it.
+ *
  * Results carry canonical messages; presenting them to an observer, such as through the Bot API,
  * is left to the caller.
  */
@@ -334,6 +348,7 @@ export class PrivateMessagingService {
   readonly #privateConversations: PrivateConversationStore;
   readonly #messages: PrivateMessageStore;
   readonly #userMessageBoxes: UserMessageBoxStore;
+  readonly #blockedUsers: BlockedUserLookup;
   readonly #events: ChatDomainEventSink;
   readonly #currentUnixTimeSeconds: () => number;
 
@@ -344,6 +359,7 @@ export class PrivateMessagingService {
       privateConversations,
       messages,
       userMessageBoxes,
+      blockedUsers,
       events,
       currentUnixTimeSeconds,
     }: PrivateMessagingServiceDependencies,
@@ -353,6 +369,7 @@ export class PrivateMessagingService {
     this.#privateConversations = privateConversations;
     this.#messages = messages;
     this.#userMessageBoxes = userMessageBoxes;
+    this.#blockedUsers = blockedUsers;
     this.#events = events;
     this.#currentUnixTimeSeconds = currentUnixTimeSeconds;
   }
@@ -381,6 +398,9 @@ export class PrivateMessagingService {
     const bot = this.#bots.getById(input.to.botId);
     if (bot === undefined) {
       return { sent: false, reason: 'bot_not_found' };
+    }
+    if (this.#blockedUsers.isBlocked(account.profile.id, bot.profile.id)) {
+      return { sent: false, reason: 'bot_blocked' };
     }
     if (input.text.length === 0) {
       return { sent: false, reason: 'message_text_empty' };
@@ -422,7 +442,9 @@ export class PrivateMessagingService {
    *
    * Checks follow Telegram's order: the text is checked for emptiness before the recipient is
    * resolved, and the replied message is looked up after it; the text is then normalized with its
-   * entities, and the result is checked for length. Callback data is checked last.
+   * entities, and the result is checked for length. Callback data is checked next. A block by the
+   * account is checked last, as Telegram's servers refuse the message only after the Bot API
+   * server has checked everything it can.
    */
   sendBotMessage(input: SendBotMessageInput): SendBotMessageResult {
     const bot = this.#bots.getById(input.fromBotId);
@@ -456,6 +478,9 @@ export class PrivateMessagingService {
     }
     if (input.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(input.inlineKeyboard)) {
       return { sent: false, reason: 'callback_data_invalid' };
+    }
+    if (this.#blockedUsers.isBlocked(account.profile.id, bot.profile.id)) {
+      return { sent: false, reason: 'bot_blocked' };
     }
 
     return {
@@ -576,8 +601,8 @@ export class PrivateMessagingService {
 
   /**
    * Shows a chat action, such as typing, from a bot to an account. As for messages, the account
-   * must have started a conversation with the bot. Telegram shows the action in the account's
-   * client for a few seconds; the emulator only checks that the bot may send it.
+   * must have started a conversation with the bot and not block it. Telegram shows the action in
+   * the account's client for a few seconds; the emulator only checks that the bot may send it.
    */
   sendBotChatAction({ fromBotId, to }: SendBotChatActionInput): SendBotChatActionResult {
     if (this.#bots.getById(fromBotId) === undefined) {
@@ -590,8 +615,11 @@ export class PrivateMessagingService {
       accountId: to.accountId,
       botId: fromBotId,
     });
-    return conversation === undefined
-      ? { sent: false, reason: 'conversation_not_started' }
+    if (conversation === undefined) {
+      return { sent: false, reason: 'conversation_not_started' };
+    }
+    return this.#blockedUsers.isBlocked(to.accountId, fromBotId)
+      ? { sent: false, reason: 'bot_blocked' }
       : { sent: true };
   }
 

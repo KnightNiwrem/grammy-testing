@@ -92,6 +92,21 @@ export interface BotApiCallbackQuery {
   readonly data: string;
 }
 
+/** The bot's membership in a private chat: `kicked` while the account blocks the bot. */
+export type BotApiPrivateChatBotMember =
+  | { readonly user: BotApiBotUser; readonly status: 'member' }
+  | { readonly user: BotApiBotUser; readonly status: 'kicked'; readonly until_date: 0 };
+
+/** A change of the bot's own membership in a chat, in the field order Telegram uses. */
+export interface BotApiMyChatMemberUpdated {
+  readonly chat: BotApiPrivateChat;
+  /** The user who changed the membership: in a private chat, the account at its other end. */
+  readonly from: VirtualAccountProfile;
+  readonly date: number;
+  readonly old_chat_member: BotApiPrivateChatBotMember;
+  readonly new_chat_member: BotApiPrivateChatBotMember;
+}
+
 export interface BotApiMessageUpdate {
   readonly update_id: number;
   readonly message: BotApiPrivateTextMessage;
@@ -102,7 +117,15 @@ export interface BotApiCallbackQueryUpdate {
   readonly callback_query: BotApiCallbackQuery;
 }
 
-export type BotApiUpdate = BotApiMessageUpdate | BotApiCallbackQueryUpdate;
+export interface BotApiMyChatMemberUpdate {
+  readonly update_id: number;
+  readonly my_chat_member: BotApiMyChatMemberUpdated;
+}
+
+export type BotApiUpdate =
+  | BotApiMessageUpdate
+  | BotApiCallbackQueryUpdate
+  | BotApiMyChatMemberUpdate;
 
 /**
  * Every update type name the official Bot API server recognizes in `allowed_updates`, including

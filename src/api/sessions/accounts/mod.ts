@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import type { BotCommand } from '../../../types/bot_command.ts';
 import type { CallbackQuery } from '../../../types/callback_query.ts';
+import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { ReplyInterface } from '../../../types/reply_interface.ts';
 import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from '../../../types/telegram_identity.ts';
 import { MAX_TEXT_MESSAGE_LENGTH } from '../../../types/virtual_message.ts';
@@ -15,6 +16,7 @@ const ACCOUNT_MESSAGE_COLLECTION_PATH = `/:${ACCOUNT_ID_PARAMETER}/messages` as 
 const PRIVATE_CONVERSATION_PATH =
   `/:${ACCOUNT_ID_PARAMETER}/conversations/private/:${BOT_ID_PARAMETER}` as const;
 const PRIVATE_MESSAGE_HISTORY_PATH = `${PRIVATE_CONVERSATION_PATH}/messages` as const;
+const BLOCKED_BOT_PATH = `/:${ACCOUNT_ID_PARAMETER}/blocked-bots/:${BOT_ID_PARAMETER}` as const;
 const PRIVATE_CHAT_COMMANDS_PATH = `${PRIVATE_CONVERSATION_PATH}/commands` as const;
 const PRIVATE_CHAT_REPLY_INTERFACE_PATH = `${PRIVATE_CONVERSATION_PATH}/reply-interface` as const;
 const REPLY_KEYBOARD_PRESS_COLLECTION_PATH =
@@ -126,10 +128,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       replyToBotMessageId,
     });
     if (!result.sent) {
-      return context.body(
-        null,
-        result.reason === 'account_not_found' || result.reason === 'bot_not_found' ? 404 : 400,
-      );
+      return context.body(null, accountMessageFailureStatus(result.reason));
     }
 
     return context.json(
@@ -161,6 +160,38 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
         botMessageViews.viewPrivateTextMessageForBot(message)
       ),
     });
+  });
+
+  accountRoutes.put(BLOCKED_BOT_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
+    if (!accountId.success || !botId.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').botBlocking.blockBot({
+      accountId: accountId.data,
+      botId: botId.data,
+    });
+    return context.body(null, result.applied ? 204 : 404);
+  });
+
+  accountRoutes.delete(BLOCKED_BOT_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
+    if (!accountId.success || !botId.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').botBlocking.unblockBot({
+      accountId: accountId.data,
+      botId: botId.data,
+    });
+    return context.body(null, result.applied ? 204 : 404);
   });
 
   accountRoutes.get(PRIVATE_CHAT_COMMANDS_PATH, (context) => {
@@ -234,10 +265,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       text: parsedRequest.data.text,
     });
     if (!result.sent) {
-      return context.body(
-        null,
-        result.reason === 'account_not_found' || result.reason === 'bot_not_found' ? 404 : 400,
-      );
+      return context.body(null, accountMessageFailureStatus(result.reason));
     }
     return context.json(
       { message: botMessageViews.viewPrivateTextMessageForBot(result.message) },
@@ -304,6 +332,25 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   return accountRoutes;
+}
+
+/** Why an account's message, sent directly or by pressing a reply keyboard button, failed. */
+type AccountMessageFailureReason = Extract<
+  ReturnType<EmulationSession['privateMessaging']['pressReplyKeyboardButton']>,
+  { readonly sent: false }
+>['reason'];
+
+/** A missing participant is not found, and a block conflicts with writing to the bot. */
+function accountMessageFailureStatus(reason: AccountMessageFailureReason): 400 | 404 | 409 {
+  switch (reason) {
+    case 'account_not_found':
+    case 'bot_not_found':
+      return 404;
+    case 'bot_blocked':
+      return 409;
+    default:
+      return 400;
+  }
 }
 
 /** Shows a command as the account's client lists it. */

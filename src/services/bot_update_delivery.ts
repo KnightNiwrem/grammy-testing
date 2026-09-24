@@ -1,10 +1,15 @@
 import type {
   BotApiCallbackQuery,
+  BotApiMyChatMemberUpdated,
   BotApiPrivateTextMessage,
   BotApiUpdateType,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
-import type { CallbackQueryCreatedEvent, ChatDomainEvent } from '../types/chat_domain_event.ts';
+import type {
+  BotBlockChangedEvent,
+  CallbackQueryCreatedEvent,
+  ChatDomainEvent,
+} from '../types/chat_domain_event.ts';
 import type { PrivateTextMessage } from '../types/virtual_message.ts';
 
 interface BotMessageViews {
@@ -13,11 +18,13 @@ interface BotMessageViews {
     callbackQuery: CallbackQuery,
     message: PrivateTextMessage,
   ): BotApiCallbackQuery;
+  viewBotBlockChangeForBot(event: BotBlockChangedEvent): BotApiMyChatMemberUpdated;
 }
 
 interface BotUpdateMailboxes {
   enqueueMessageUpdate(botId: number, message: BotApiPrivateTextMessage): void;
   enqueueCallbackQueryUpdate(botId: number, callbackQuery: BotApiCallbackQuery): void;
+  enqueueMyChatMemberUpdate(botId: number, myChatMember: BotApiMyChatMemberUpdated): void;
 }
 
 interface BotUpdateSubscriptionLookup {
@@ -59,6 +66,9 @@ export class BotUpdateDeliveryService {
       case 'callback_query_created':
         this.#deliverCallbackQuery(event);
         return;
+      case 'bot_block_changed':
+        this.#deliverBotBlockChange(event);
+        return;
       default: {
         const unhandledEvent: never = event;
         throw new Error(`Unhandled chat domain event: ${JSON.stringify(unhandledEvent)}`);
@@ -92,6 +102,18 @@ export class BotUpdateDeliveryService {
     this.#botUpdates.enqueueCallbackQueryUpdate(
       observingBotId,
       this.#botMessageViews.viewCallbackQueryForBot(callbackQuery, message),
+    );
+  }
+
+  /** A block or unblock is observed only by the bot whose membership in the chat changed. */
+  #deliverBotBlockChange(event: BotBlockChangedEvent): void {
+    if (!this.#isSubscribed(event.botId, 'my_chat_member')) {
+      return;
+    }
+
+    this.#botUpdates.enqueueMyChatMemberUpdate(
+      event.botId,
+      this.#botMessageViews.viewBotBlockChangeForBot(event),
     );
   }
 

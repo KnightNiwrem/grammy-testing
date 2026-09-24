@@ -83,7 +83,8 @@ export type SendMessageFailureReason =
   | 'chat_not_found'
   | 'reply_message_not_found'
   | 'message_text_too_long'
-  | 'callback_data_invalid';
+  | 'callback_data_invalid'
+  | 'bot_blocked';
 
 export type SendMessageResult =
   | { readonly sent: true; readonly message: BotApiPrivateTextMessage }
@@ -141,7 +142,7 @@ export interface SendChatActionRequest {
 
 export type SendChatActionResult =
   | { readonly sent: true }
-  | { readonly sent: false; readonly reason: 'chat_not_found' };
+  | { readonly sent: false; readonly reason: 'chat_not_found' | 'bot_blocked' };
 
 export type DeleteMessageRequest = MessageTarget;
 
@@ -199,7 +200,8 @@ type BotMessageSendingResult =
       | 'conversation_not_started'
       | 'reply_message_not_found'
       | 'message_text_too_long'
-      | 'callback_data_invalid';
+      | 'callback_data_invalid'
+      | 'bot_blocked';
   }
   | ({ readonly sent: false } & TextInvalidFailure);
 
@@ -257,7 +259,11 @@ interface BotMessaging {
     | { readonly sent: true }
     | {
       readonly sent: false;
-      readonly reason: 'bot_not_found' | 'account_not_found' | 'conversation_not_started';
+      readonly reason:
+        | 'bot_not_found'
+        | 'account_not_found'
+        | 'conversation_not_started'
+        | 'bot_blocked';
     };
   deleteMessagesByBot(input: {
     readonly fromBotId: number;
@@ -496,6 +502,7 @@ export class BotApiService {
       case 'reply_message_not_found':
       case 'message_text_too_long':
       case 'callback_data_invalid':
+      case 'bot_blocked':
         return { sent: false, reason: result.reason };
       // A bot can address a user only after the user has written to it. Telegram reports any
       // other user, like an unknown chat, as not found.
@@ -525,6 +532,8 @@ export class BotApiService {
       return result;
     }
     switch (result.reason) {
+      case 'bot_blocked':
+        return { sent: false, reason: result.reason };
       // As for sending, a chat the bot cannot address is not found.
       case 'account_not_found':
       case 'conversation_not_started':

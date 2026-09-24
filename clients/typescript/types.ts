@@ -59,6 +59,10 @@ export interface AccountSendMessageInput {
   readonly reply_to_message_id?: number;
 }
 
+export interface BotBlockInput {
+  readonly botId: number;
+}
+
 export interface AccountMessageHistoryInput {
   readonly chat: PrivateMessageTarget;
 }
@@ -234,6 +238,18 @@ export interface CallbackQuery {
 export interface VirtualAccountClient extends VirtualAccountProfile {
   /** Sends a message as this virtual Telegram account. */
   sendMessage(input: AccountSendMessageInput): Promise<PrivateTextMessage>;
+  /**
+   * Blocks a bot, which Telegram calls stopping it. The bot receives a `my_chat_member` update
+   * showing it as `kicked`, its messages to this account fail with `403 Forbidden: bot was
+   * blocked by the user`, and this account cannot write to it until it unblocks the bot. Blocking
+   * a blocked bot has no effect.
+   */
+  blockBot(input: BotBlockInput): Promise<void>;
+  /**
+   * Unblocks a bot, which receives a `my_chat_member` update showing it as a `member` again.
+   * Unblocking a bot that is not blocked has no effect.
+   */
+  unblockBot(input: BotBlockInput): Promise<void>;
   /** Returns messages written by either participant of a private conversation, oldest first. */
   getMessages(input: AccountMessageHistoryInput): Promise<readonly PrivateTextMessage[]>;
   /**
@@ -269,7 +285,7 @@ export interface CreatedVirtualAccount {
   readonly account: VirtualAccountClient;
 }
 
-export type HttpMethod = 'DELETE' | 'GET' | 'POST';
+export type HttpMethod = 'DELETE' | 'GET' | 'POST' | 'PUT';
 
 export interface RequestDetails {
   readonly method: HttpMethod;

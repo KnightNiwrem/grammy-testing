@@ -15,5 +15,18 @@ export interface CallbackQueryCreatedEvent {
   readonly message: PrivateTextMessage;
 }
 
+/** An account blocked a bot, which Telegram calls stopping it, or unblocked it. */
+export interface BotBlockChangedEvent {
+  readonly type: 'bot_block_changed';
+  readonly accountId: number;
+  readonly botId: number;
+  /** Whether the account blocks the bot after the change. */
+  readonly isBlocked: boolean;
+  readonly changedAtUnixSeconds: number;
+}
+
 /** A state change produced by a chat command, published in the order it happened. */
-export type ChatDomainEvent = MessageCreatedEvent | CallbackQueryCreatedEvent;
+export type ChatDomainEvent =
+  | MessageCreatedEvent
+  | CallbackQueryCreatedEvent
+  | BotBlockChangedEvent;

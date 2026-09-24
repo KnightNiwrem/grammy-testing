@@ -1,4 +1,5 @@
 import { AccountRepository } from '../src/repositories/account.ts';
+import { BlockedUserRepository } from '../src/repositories/blocked_user.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
@@ -281,6 +282,7 @@ function createCallbackQueryFixture() {
     privateConversations,
     messages: new MessageRepository(),
     userMessageBoxes,
+    blockedUsers: new BlockedUserRepository(),
     events,
     currentUnixTimeSeconds: () => 1_700_000_000,
   });

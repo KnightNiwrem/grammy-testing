@@ -177,6 +177,8 @@ paths:
             the private chat.
         '404':
           description: The session, sending account, or target bot does not exist.
+        '409':
+          description: The account blocks the target bot and must unblock it before writing to it.
   /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/messages:
     description: Stored messages in a private conversation between an account and bot.
     parameters:
@@ -199,6 +201,45 @@ paths:
                 $ref: '#/components/schemas/MessageHistory'
         '400':
           description: An account or bot path identifier is invalid.
+        '404':
+          description: The session, account, or bot does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/blocked-bots/{botId}:
+    description: >-
+      A bot on the account's block list. Telegram calls blocking a bot stopping it. While the
+      account blocks the bot, the bot's messages and chat actions to the account fail with `403
+      Forbidden: bot was blocked by the user`, and the account cannot write to the bot. Existing
+      messages stay editable and deletable.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/BotId'
+    put:
+      operationId: blockBot
+      summary: Block a bot as the account
+      description: >-
+        Unless the bot's allowed_updates subscription excludes my_chat_member updates, the bot
+        receives a my_chat_member update in which its membership in the account's private chat
+        changes from `member` to `kicked`. The account need not have written to the bot. Blocking
+        a blocked bot has no effect.
+      responses:
+        '204':
+          description: The account blocks the bot.
+        '400':
+          description: A path identifier is invalid.
+        '404':
+          description: The session, account, or bot does not exist.
+    delete:
+      operationId: unblockBot
+      summary: Unblock a bot as the account
+      description: >-
+        Unless the bot's allowed_updates subscription excludes my_chat_member updates, the bot
+        receives a my_chat_member update in which its membership changes from `kicked` back to
+        `member`. Unblocking a bot that is not blocked has no effect.
+      responses:
+        '204':
+          description: The account does not block the bot.
+        '400':
+          description: A path identifier is invalid.
         '404':
           description: The session, account, or bot does not exist.
   /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/commands:
@@ -286,6 +327,8 @@ paths:
             text.
         '404':
           description: The session, account, or bot does not exist.
+        '409':
+          description: The account blocks the bot and must unblock it before writing to it.
   /sessions/{sessionId}/accounts/{accountId}/callback-queries:
     description: Callback queries an account created by pressing callback buttons.
     parameters:
@@ -557,6 +600,14 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '401':
           description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            The account blocks the bot (`Forbidden: bot was blocked by the user`), which, as on
+            Telegram, is checked after every check that answers 400.
           content:
             application/json:
               schema:
@@ -890,6 +941,13 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '401':
           description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            The account blocks the bot (`Forbidden: bot was blocked by the user`).
           content:
             application/json:
               schema:
@@ -1518,6 +1576,73 @@ components:
           minimum: 1
         message:
           $ref: '#/components/schemas/PrivateTextMessage'
+    MyChatMemberUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - update_id
+        - my_chat_member
+      properties:
+        update_id:
+          type: integer
+          minimum: 1
+        my_chat_member:
+          $ref: '#/components/schemas/PrivateChatMemberUpdated'
+    PrivateChatMemberUpdated:
+      type: object
+      additionalProperties: false
+      description: >-
+        A change of the bot's membership in an account's private chat: `member` becomes `kicked`
+        when the account blocks the bot, and `kicked` becomes `member` when it unblocks the bot.
+      required:
+        - chat
+        - from
+        - date
+        - old_chat_member
+        - new_chat_member
+      properties:
+        chat:
+          $ref: '#/components/schemas/PrivateChat'
+        from:
+          $ref: '#/components/schemas/Account'
+          description: The account that blocked or unblocked the bot.
+        date:
+          type: integer
+          minimum: 0
+          description: Unix timestamp of the change.
+        old_chat_member:
+          $ref: '#/components/schemas/PrivateChatBotMember'
+        new_chat_member:
+          $ref: '#/components/schemas/PrivateChatBotMember'
+    PrivateChatBotMember:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - user
+            - status
+          properties:
+            user:
+              $ref: '#/components/schemas/MessageSenderBot'
+            status:
+              type: string
+              const: member
+        - type: object
+          additionalProperties: false
+          description: The bot while the account blocks it, which Telegram shows as banned forever.
+          required:
+            - user
+            - status
+            - until_date
+          properties:
+            user:
+              $ref: '#/components/schemas/MessageSenderBot'
+            status:
+              type: string
+              const: kicked
+            until_date:
+              type: integer
+              const: 0
     CallbackQueryUpdate:
       type: object
       additionalProperties: false
@@ -2246,6 +2371,7 @@ components:
             oneOf:
               - $ref: '#/components/schemas/MessageUpdate'
               - $ref: '#/components/schemas/CallbackQueryUpdate'
+              - $ref: '#/components/schemas/MyChatMemberUpdate'
     GetMeResponse:
       type: object
       additionalProperties: false

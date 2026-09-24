@@ -2261,6 +2261,182 @@ Deno.test('a grammY bot runs a menu on a reply keyboard and asks with a forced r
   }
 });
 
+Deno.test('an account blocks a bot, which receives my_chat_member updates and Telegram 403s', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  const accountPath = `${sessionPath}/accounts/${accountId}`;
+  const blockedBotPath = `${accountPath}/blocked-bots/${createdBot.bot.id}`;
+  await sendText('/start');
+  const keyboardReply = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Menu',
+    reply_markup: { keyboard: [['Help']] },
+  });
+  if (keyboardReply.status !== 200) {
+    throw new Error(`Expected the menu to be sent, received ${keyboardReply.status}`);
+  }
+
+  for (const _ of [1, 2]) {
+    const blockResponse = await api.request(blockedBotPath, { method: 'PUT' });
+    if (blockResponse.status !== 204) {
+      throw new Error(`Expected blocking to succeed, received ${blockResponse.status}`);
+    }
+  }
+  const blockedDescription = {
+    ok: false,
+    error_code: 403,
+    description: 'Forbidden: bot was blocked by the user',
+  };
+  for (
+    const [method, parameters] of [
+      ['sendMessage', { chat_id: accountId, text: 'Still there?' }],
+      ['sendChatAction', { chat_id: accountId, action: 'typing' }],
+    ] as const
+  ) {
+    const { status, body } = await callBotApi(api, `${botApiPath}/${method}`, parameters);
+    if (status !== 403 || JSON.stringify(body) !== JSON.stringify(blockedDescription)) {
+      throw new Error(`Expected ${method} to be forbidden, received ${JSON.stringify(body)}`);
+    }
+  }
+  const accountWrites = [
+    await api.request(`${accountPath}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: { type: 'private', botId: createdBot.bot.id }, text: 'Hi' }),
+    }),
+    await api.request(`${accountPath}/reply-keyboard-presses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat: { type: 'private', botId: createdBot.bot.id }, text: 'Help' }),
+    }),
+  ];
+  if (accountWrites.some((response) => response.status !== 409)) {
+    throw new Error(
+      `Expected the account to write only after unblocking, received ${
+        accountWrites.map((response) => response.status)
+      }`,
+    );
+  }
+
+  for (const _ of [1, 2]) {
+    const unblockResponse = await api.request(blockedBotPath, { method: 'DELETE' });
+    if (unblockResponse.status !== 204) {
+      throw new Error(`Expected unblocking to succeed, received ${unblockResponse.status}`);
+    }
+  }
+  const welcomeBack = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Welcome back',
+  });
+  if (welcomeBack.status !== 200) {
+    throw new Error(`Expected the bot to write once unblocked, received ${welcomeBack.status}`);
+  }
+
+  const { body: updatesBody } = await callBotApi(api, `${botApiPath}/getUpdates`, {});
+  const updates = (updatesBody as { result: Array<Record<string, unknown>> }).result;
+  const botUser = {
+    id: createdBot.bot.id,
+    is_bot: true,
+    first_name: 'Test Bot',
+    username: 'test_bot',
+  };
+  const memberChanges = updates.slice(1).map(({ my_chat_member }) => {
+    const { chat, from, old_chat_member, new_chat_member } = my_chat_member as Record<
+      string,
+      Record<string, unknown>
+    >;
+    return [chat.id, from.id, old_chat_member, new_chat_member];
+  });
+  const member = { user: botUser, status: 'member' };
+  const kicked = { user: botUser, status: 'kicked', until_date: 0 };
+  if (
+    updates.length !== 3 ||
+    JSON.stringify(memberChanges) !== JSON.stringify([
+        [accountId, accountId, member, kicked],
+        [accountId, accountId, kicked, member],
+      ])
+  ) {
+    throw new Error(`Expected one update per block change, received ${JSON.stringify(updates)}`);
+  }
+
+  const invalidRequests = [
+    [`${accountPath}/blocked-bots/${MAX_TELEGRAM_USER_ID}`, 'PUT', 404],
+    [
+      `${sessionPath}/accounts/${MAX_TELEGRAM_USER_ID}/blocked-bots/${createdBot.bot.id}`,
+      'PUT',
+      404,
+    ],
+    [`${accountPath}/blocked-bots/${accountId}`, 'DELETE', 404],
+    [`${accountPath}/blocked-bots/bot`, 'PUT', 400],
+  ] as const;
+  for (const [path, method, expectedStatus] of invalidRequests) {
+    const response = await api.request(path, { method });
+    if (response.status !== expectedStatus) {
+      throw new Error(
+        `Expected ${method} ${path} to answer ${expectedStatus}, received ${response.status}`,
+      );
+    }
+  }
+});
+
+Deno.test('a grammY bot forgets a user who blocks it', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountPath = `${sessionPath}/accounts/${createdAccount.account.id}`;
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const subscribers = new Set<number>();
+  const handled = {
+    subscription: Promise.withResolvers<void>(),
+    block: Promise.withResolvers<void>(),
+  };
+  grammyBot.command('subscribe', async (context) => {
+    subscribers.add(context.chat.id);
+    await context.reply('Subscribed');
+    handled.subscription.resolve();
+  });
+  grammyBot.on('my_chat_member', (context) => {
+    if (context.myChatMember.new_chat_member.status === 'kicked') {
+      subscribers.delete(context.chat.id);
+      handled.block.resolve();
+    }
+  });
+  const polling = grammyBot.start();
+
+  let broadcastError: unknown;
+  try {
+    await sendText('/subscribe');
+    // Polling ends only when stopped, so settling first means the bot failed.
+    await Promise.race([handled.subscription.promise, polling]);
+
+    await api.request(`${accountPath}/blocked-bots/${createdBot.bot.id}`, { method: 'PUT' });
+    try {
+      await grammyBot.api.sendMessage(createdAccount.account.id, 'News');
+    } catch (error) {
+      broadcastError = error;
+    }
+    await Promise.race([handled.block.promise, polling]);
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+
+  if (
+    !(broadcastError instanceof GrammyError) || broadcastError.error_code !== 403 ||
+    broadcastError.description !== 'Forbidden: bot was blocked by the user'
+  ) {
+    throw new Error(`Expected a GrammyError 403, received ${String(broadcastError)}`);
+  }
+  if (subscribers.size !== 0) {
+    throw new Error('Expected the bot to forget the user who blocked it');
+  }
+});
+
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,
