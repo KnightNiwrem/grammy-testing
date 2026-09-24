@@ -102,6 +102,11 @@ export class BotApiService {
   readonly #botMessages: BotMessageSender;
   /** Aborting a bot's controller terminates the long poll it holds. */
   readonly #heldLongPollsByBotId = new Map<number, AbortController>();
+  /**
+   * Aborted when long polling ends. Kept apart from the held long poll controllers so that the end
+   * of polling is never reported as a conflict with another long poll.
+   */
+  readonly #longPollingEnd = new AbortController();
 
   constructor({ bots, botUpdates, updateSubscriptions, botMessages }: BotApiServiceDependencies) {
     this.#bots = bots;
@@ -121,7 +126,8 @@ export class BotApiService {
    *
    * A request that finds no updates and has a timeout is held until an update arrives. Like
    * Telegram, a bot has at most one held request: holding a new one terminates the previous one.
-   * Requests answered immediately never terminate a held one.
+   * Requests answered immediately never terminate a held one. Once long polling has ended, no
+   * request is held.
    */
   async getUpdates(
     authenticatedBot: VirtualBotProfile,
@@ -142,17 +148,22 @@ export class BotApiService {
       offset,
     );
     const updates = this.#botUpdates.readPendingUpdates(botId, { firstUnconfirmedUpdateId, limit });
-    if (updates.length > 0 || timeoutSeconds === 0 || signal?.aborted === true) {
+    if (
+      updates.length > 0 || timeoutSeconds === 0 || signal?.aborted === true ||
+      this.#longPollingEnd.signal.aborted
+    ) {
       return { retrieved: true, updates };
     }
 
     const heldLongPoll = this.#holdLongPoll(botId);
+    const waitEndingSignals = [heldLongPoll.signal, this.#longPollingEnd.signal];
+    if (signal !== undefined) {
+      waitEndingSignals.push(signal);
+    }
     try {
       await this.#botUpdates.waitForUpdate(botId, {
         timeoutSeconds,
-        signal: signal === undefined
-          ? heldLongPoll.signal
-          : AbortSignal.any([signal, heldLongPoll.signal]),
+        signal: AbortSignal.any(waitEndingSignals),
       });
     } finally {
       if (this.#heldLongPollsByBotId.get(botId) === heldLongPoll) {
@@ -167,6 +178,14 @@ export class BotApiService {
       retrieved: true,
       updates: this.#botUpdates.readPendingUpdates(botId, { firstUnconfirmedUpdateId, limit }),
     };
+  }
+
+  /**
+   * Answers every held long poll with the updates it can read, as its timeout would, and stops
+   * holding later ones. Other methods keep working.
+   */
+  endLongPolling(): void {
+    this.#longPollingEnd.abort();
   }
 
   /**

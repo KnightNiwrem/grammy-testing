@@ -54,8 +54,15 @@ export class SessionLifecycleService {
     );
   }
 
+  /** Unregisters the session before ending it, so no new request can reach an ended session. */
   endSession(sessionId: string): boolean {
-    return this.#sessionRepository.deleteById(sessionId);
+    const session = this.#sessionRepository.getById(sessionId);
+    if (session === undefined || !this.#sessionRepository.deleteById(sessionId)) {
+      return false;
+    }
+
+    session.end();
+    return true;
   }
 
   getSessionById(sessionId: string): EmulationSession | undefined {

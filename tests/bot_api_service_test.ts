@@ -204,6 +204,48 @@ Deno.test('BotApiService ends a cancelled long poll without terminating it', asy
   }
 });
 
+Deno.test('BotApiService answers held long polls without a conflict when polling ends', async () => {
+  const { virtualUsers, botApi } = createBotApiFixture();
+  const firstBot = createBot(virtualUsers, 'first_bot');
+  const secondBot = createBot(virtualUsers, 'second_bot');
+  const heldResults = [firstBot, secondBot].map((bot) =>
+    botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 50 })
+  );
+
+  botApi.endLongPolling();
+  const results = await expectSettlementWithin(
+    Promise.all(heldResults),
+    1_000,
+    'Expected ending long polling to answer every held long poll at once',
+  );
+  if (!results.every((result) => expectRetrievedUpdates(result).length === 0)) {
+    throw new Error('Expected each held long poll to end without updates');
+  }
+});
+
+Deno.test('BotApiService answers long polls at once after polling ends', async () => {
+  const { virtualUsers, botUpdates, botApi } = createBotApiFixture();
+  const bot = createBot(virtualUsers, 'test_bot');
+  botApi.endLongPolling();
+
+  const emptyResult = await expectSettlementWithin(
+    botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 50 }),
+    1_000,
+    'Expected a long poll after polling ended not to be held',
+  );
+  if (expectRetrievedUpdates(emptyResult).length !== 0) {
+    throw new Error('Expected the unheld long poll to find no updates');
+  }
+
+  botUpdates.enqueueMessageUpdate(bot.profile.id, createPrivateTextMessage(1));
+  const pendingUpdates = expectRetrievedUpdates(
+    await botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 50 }),
+  );
+  if (pendingUpdates.length !== 1) {
+    throw new Error('Expected pending updates to remain readable after polling ended');
+  }
+});
+
 Deno.test('BotApiService deleteWebhook discards pending updates only when asked', async () => {
   const { virtualUsers, botUpdates, botApi } = createBotApiFixture();
   const bot = createBot(virtualUsers, 'test_bot');
@@ -306,6 +348,23 @@ function expectRetrievedUpdates(result: GetUpdatesResult): readonly BotApiUpdate
     throw new Error(`Expected getUpdates to retrieve updates, received ${result.reason}`);
   }
   return result.updates;
+}
+
+/** Returns what `pending` settles to, failing if it is still pending after `milliseconds`. */
+async function expectSettlementWithin<T>(
+  pending: Promise<T>,
+  milliseconds: number,
+  failureMessage: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(failureMessage)), milliseconds);
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function assertAllowedUpdateTypes(

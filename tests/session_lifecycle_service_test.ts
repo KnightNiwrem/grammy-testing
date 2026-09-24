@@ -40,6 +40,31 @@ Deno.test('SessionLifecycleService creates, retrieves, and ends an active sessio
   }
 });
 
+Deno.test('SessionLifecycleService ends a session once, after it can no longer be found', () => {
+  const sessionIdsFoundWhileEnding: (string | undefined)[] = [];
+  const sessionLifecycle: SessionLifecycleService = new SessionLifecycleService({
+    sessionRepository: new SessionRepository(),
+    createEmulationSession: (sessionId) => ({
+      ...createEmulationSession(sessionId),
+      end: () => {
+        sessionIdsFoundWhileEnding.push(sessionLifecycle.getSessionById(sessionId)?.id);
+      },
+    }),
+    generateSessionId: () => 'ending-session',
+  });
+  const session = sessionLifecycle.createSession();
+
+  if (!sessionLifecycle.endSession(session.id)) {
+    throw new Error('Expected the active session to end');
+  }
+  if (sessionLifecycle.endSession(session.id)) {
+    throw new Error('Expected an ended session not to end again');
+  }
+  if (sessionIdsFoundWhileEnding.length !== 1 || sessionIdsFoundWhileEnding[0] !== undefined) {
+    throw new Error('Expected the session to end exactly once, after it was unregistered');
+  }
+});
+
 Deno.test('SessionLifecycleService rejects a factory result with the wrong ID', () => {
   const sessionLifecycle = new SessionLifecycleService({
     sessionRepository: new SessionRepository(),

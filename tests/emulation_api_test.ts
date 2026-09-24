@@ -48,6 +48,39 @@ Deno.test('DELETE /sessions/:sessionId ends an active session', async () => {
   }
 });
 
+Deno.test('DELETE /sessions/:sessionId answers the long polls its bots hold', async () => {
+  const { api, sessionPath, botApiPath } = await createPrivateConversationFixture();
+  const heldPoll = api.request(`${botApiPath}/getUpdates`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ timeout: 50 }),
+  });
+
+  const deleteResponse = await api.request(sessionPath, { method: 'DELETE' });
+  if (deleteResponse.status !== 204) {
+    throw new Error(`Expected status 204, received ${deleteResponse.status}`);
+  }
+  const heldPollResponse = await expectSettlementWithin(
+    Promise.resolve(heldPoll),
+    1_000,
+    'Expected ending the session to answer its held long poll at once',
+  );
+  const heldPollBody: unknown = await heldPollResponse.json();
+  if (
+    heldPollResponse.status !== 200 || !isGetUpdatesResponse(heldPollBody) ||
+    heldPollBody.result.length !== 0
+  ) {
+    throw new Error(
+      `Expected the held long poll to end without updates, received ${heldPollResponse.status}`,
+    );
+  }
+
+  const laterPollResponse = await api.request(`${botApiPath}/getUpdates`);
+  if (laterPollResponse.status !== 404) {
+    throw new Error(`Expected the ended session to be gone, received ${laterPollResponse.status}`);
+  }
+});
+
 Deno.test('POST /sessions/:sessionId/bots creates a virtual bot', async () => {
   const api = createEmulationApi({
     sessionLifecycle: createSessionLifecycleService(),
@@ -930,6 +963,23 @@ Deno.test('private message routes validate participants and request bodies', asy
 });
 
 /** Creates a session holding a bot and an account that can message it. */
+/** Returns what `pending` settles to, failing if it is still pending after `milliseconds`. */
+async function expectSettlementWithin<T>(
+  pending: Promise<T>,
+  milliseconds: number,
+  failureMessage: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(failureMessage)), milliseconds);
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function createPrivateConversationFixture() {
   const api = createEmulationApi({
     sessionLifecycle: createSessionLifecycleService(),

@@ -47,5 +47,5 @@ export function createEmulationSession(id: string): EmulationSession {
     botMessages: chatInteractions,
   });
 
-  return { id, virtualUsers, chatInteractions, botApi };
+  return { id, virtualUsers, chatInteractions, botApi, end: () => botApi.endLongPolling() };
 }

@@ -58,7 +58,9 @@ paths:
     delete:
       operationId: deleteSession
       summary: End an isolated test session
-      description: Discards the session and all virtual entities and state that it owns.
+      description: >-
+        Discards the session and all virtual entities and state that it owns. Long polls that its bots
+        hold are answered at once without updates.
       responses:
         '204':
           description: The test session and all of its state were discarded.

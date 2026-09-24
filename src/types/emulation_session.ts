@@ -12,4 +12,9 @@ export interface EmulationSession {
   readonly virtualUsers: VirtualUserService;
   readonly chatInteractions: ChatInteractionService;
   readonly botApi: BotApiService;
+  /**
+   * Stops the session from keeping requests waiting: held long polls are answered and later ones
+   * are not held. Requests that are already running complete against the session's state.
+   */
+  end(): void;
 }
