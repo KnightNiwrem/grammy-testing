@@ -263,6 +263,18 @@ Deno.test('TypeScript client manages all currently implemented session resources
     throw new Error('Expected the client to read and press the reply keyboard');
   }
 
+  const editedMessage = await createdAccount.account.editMessage({
+    chat,
+    message_id: pressedButtonMessage.message_id,
+    text: 'Blue',
+  });
+  if (
+    editedMessage.message_id !== pressedButtonMessage.message_id ||
+    editedMessage.text !== 'Blue' || editedMessage.edit_date === undefined
+  ) {
+    throw new Error('Expected the client to edit an account message');
+  }
+
   await createdAccount.account.blockBot({ botId: createdBot.bot.id });
   const blockedReplyResponse = await api.request(`${botApiPath}/sendMessage`, {
     method: 'POST',

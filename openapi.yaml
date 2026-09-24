@@ -203,6 +203,39 @@ paths:
           description: An account or bot path identifier is invalid.
         '404':
           description: The session, account, or bot does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/messages/{messageId}:
+    description: One message of a private conversation, addressed by its ID as the bot sees it.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/BotId'
+      - $ref: '#/components/parameters/MessageId'
+    patch:
+      operationId: editAccountMessage
+      summary: Edit the text of a message the account sent
+      description: >-
+        Replaces the text of the account's message, normalized as when sending it, and dates the
+        edit. Unless the bot's allowed_updates subscription excludes edited_message updates, the
+        bot receives an edited_message update carrying the edited message.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditAccountMessageRequest'
+      responses:
+        '200':
+          description: The message was edited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentMessage'
+        '400':
+          description: >-
+            The request or text is invalid, the bot wrote the message, or the normalized text is
+            the message's current text.
+        '404':
+          description: The session, account, bot, or message of their private chat does not exist.
   /sessions/{sessionId}/accounts/{accountId}/blocked-bots/{botId}:
     description: >-
       A bot on the account's block list. Telegram calls blocking a bot stopping it. While the
@@ -1358,8 +1391,8 @@ components:
           type: integer
           minimum: 0
           description: >-
-            Unix timestamp of the last edit of the text, omitted if the text was never edited.
-            Replacing only the inline keyboard does not change it.
+            Unix timestamp of the last edit of the text by its author, omitted if the text was
+            never edited. Replacing only the inline keyboard does not change it.
         reply_to_message:
           $ref: '#/components/schemas/PrivateTextMessage'
           description: >-
@@ -1576,6 +1609,20 @@ components:
           minimum: 1
         message:
           $ref: '#/components/schemas/PrivateTextMessage'
+    EditedMessageUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - update_id
+        - edited_message
+      properties:
+        update_id:
+          type: integer
+          minimum: 1
+        edited_message:
+          $ref: '#/components/schemas/PrivateTextMessage'
+          description: >-
+            An account's message as its edit left it. A bot receives no update for its own edits.
     MyChatMemberUpdate:
       type: object
       additionalProperties: false
@@ -1943,6 +1990,19 @@ components:
             The ID of the bot message the client shows a reply interface to, as the bot sees it.
         input_field_placeholder:
           type: string
+    EditAccountMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: >-
+            The new plain text, normalized as when sending a message. It must differ from the
+            message's current text after normalization.
     PressReplyKeyboardButtonRequest:
       type: object
       additionalProperties: false
@@ -2370,6 +2430,7 @@ components:
           items:
             oneOf:
               - $ref: '#/components/schemas/MessageUpdate'
+              - $ref: '#/components/schemas/EditedMessageUpdate'
               - $ref: '#/components/schemas/CallbackQueryUpdate'
               - $ref: '#/components/schemas/MyChatMemberUpdate'
     GetMeResponse:
@@ -2443,6 +2504,16 @@ components:
       description: Server-assigned Telegram user identifier for a virtual account.
       schema:
         $ref: '#/components/schemas/TelegramUserId'
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      description: >-
+        ID of a message of the private conversation, as the conversation's bot and message
+        history see it.
+      schema:
+        type: integer
+        minimum: 1
     CallbackQueryId:
       name: callbackQueryId
       in: path

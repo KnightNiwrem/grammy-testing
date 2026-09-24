@@ -112,6 +112,11 @@ export interface BotApiMessageUpdate {
   readonly message: BotApiPrivateTextMessage;
 }
 
+export interface BotApiEditedMessageUpdate {
+  readonly update_id: number;
+  readonly edited_message: BotApiPrivateTextMessage;
+}
+
 export interface BotApiCallbackQueryUpdate {
   readonly update_id: number;
   readonly callback_query: BotApiCallbackQuery;
@@ -124,6 +129,7 @@ export interface BotApiMyChatMemberUpdate {
 
 export type BotApiUpdate =
   | BotApiMessageUpdate
+  | BotApiEditedMessageUpdate
   | BotApiCallbackQueryUpdate
   | BotApiMyChatMemberUpdate;
 

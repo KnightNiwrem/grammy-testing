@@ -16,18 +16,19 @@ reply. A test reads the reply keyboard or forced reply the account's client show
 Telegram's rules for replacing and removing it, and presses a reply keyboard button to send its
 text. Link preview options and `disable_notification` are accepted and have no effect. Accounts can
 reply to messages too, and a reply shows the replied message as `reply_to_message`, as on Telegram.
-An account can block a bot and unblock it, which sends the bot a `my_chat_member` update each time.
-While the account blocks the bot, the account cannot write to it, and the bot's messages and chat
-actions to the account fail with error 403, `Forbidden: bot was blocked by the user`. Text can be
-formatted with `parse_mode` (`HTML`, `MarkdownV2`, or legacy `Markdown`) or with `entities`, which
-the emulator reads, validates, and normalizes with Telegram's own rules and error messages, so a
-test catches markup that Telegram would reject, such as an unescaped `.` in MarkdownV2. As on
-Telegram, message text from either side is trimmed and cleaned of control characters. Bot messages
-appear in conversation history, and, as on Telegram, the bot receives no update for its own
-messages. An account can press a callback button, which sends the bot a `callback_query` update; the
-bot answers with `answerCallbackQuery`, and the test reads the answer from the pressed callback
-query. A press can create the callback query already expired, to check how a bot handles a query it
-can no longer answer, such as one that arrives after downtime. Bots edit their messages with
+An account can edit the text of its messages, which sends the bot an `edited_message` update. It can
+also block a bot and unblock it, which sends the bot a `my_chat_member` update each time. While the
+account blocks the bot, the account cannot write to it, and the bot's messages and chat actions to
+the account fail with error 403, `Forbidden: bot was blocked by the user`. Text can be formatted
+with `parse_mode` (`HTML`, `MarkdownV2`, or legacy `Markdown`) or with `entities`, which the
+emulator reads, validates, and normalizes with Telegram's own rules and error messages, so a test
+catches markup that Telegram would reject, such as an unescaped `.` in MarkdownV2. As on Telegram,
+message text from either side is trimmed and cleaned of control characters. Bot messages appear in
+conversation history, and, as on Telegram, the bot receives no update for its own messages or edits.
+An account can press a callback button, which sends the bot a `callback_query` update; the bot
+answers with `answerCallbackQuery`, and the test reads the answer from the pressed callback query. A
+press can create the callback query already expired, to check how a bot handles a query it can no
+longer answer, such as one that arrives after downtime. Bots edit their messages with
 `editMessageText` and `editMessageReplyMarkup`, and delete messages that either side wrote in their
 private chats with `deleteMessage` and `deleteMessages`; deleted messages leave the conversation
 history. With `deleteWebhook` and `getMe` also implemented, a grammY bot can run with `bot.start()`
@@ -94,6 +95,13 @@ try {
       text: replyInterface.keyboard[0][0].text,
     });
   }
+
+  // Edit the account's first message, which sends the bot an edited_message update.
+  await account.editMessage({
+    chat: { type: 'private', botId: bot.id },
+    message_id: incomingMessage.message_id,
+    text: 'Hello again!',
+  });
 
   // Block the bot. It receives a my_chat_member update, and its messages to the account fail
   // with 403 until the account unblocks it.

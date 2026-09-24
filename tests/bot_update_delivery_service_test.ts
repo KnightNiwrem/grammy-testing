@@ -151,6 +151,7 @@ Deno.test('BotUpdateDeliveryService skips update types excluded by the bot subsc
 
   updateSubscriptions.setAllowedUpdateTypes(bot.profile.id, new Set(['callback_query']));
   botUpdateDelivery.publish({ type: 'message_created', message: accountMessage });
+  botUpdateDelivery.publish({ type: 'message_edited', message: accountMessage });
   botUpdateDelivery.publish({
     type: 'bot_block_changed',
     accountId: account.profile.id,
@@ -174,6 +175,59 @@ Deno.test('BotUpdateDeliveryService skips update types excluded by the bot subsc
 
   if (botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 }).length !== 0) {
     throw new Error('Expected no update of a type the bot excluded');
+  }
+});
+
+Deno.test('BotUpdateDeliveryService delivers an account edit, but not its own, to the bot', () => {
+  const { virtualUsers, messages, userMessageBoxes, botUpdates, botUpdateDelivery } =
+    createDeliveryFixture();
+  const account = createAccount(virtualUsers);
+  const bot = createBot(virtualUsers, 'test_bot');
+  const conversation = { accountId: account.profile.id, botId: bot.profile.id };
+  const accountMessage = messages.addPrivateTextMessage({
+    conversation,
+    authorRole: 'account',
+    sentAtUnixSeconds: 1_700_000_000,
+    text: 'Hello',
+    entities: [],
+  });
+  const botMessage = messages.addPrivateTextMessage({
+    conversation,
+    authorRole: 'bot',
+    sentAtUnixSeconds: 1_700_000_001,
+    text: 'Hi',
+    entities: [],
+  });
+  userMessageBoxes.assignMessageId(bot.profile.id, accountMessage.id);
+  userMessageBoxes.assignMessageId(bot.profile.id, botMessage.id);
+  const edit = { entities: [], inlineKeyboard: undefined, textEditedAtUnixSeconds: 1_700_000_005 };
+
+  botUpdateDelivery.publish({
+    type: 'message_edited',
+    message: messages.editPrivateTextMessage(botMessage.id, { ...edit, text: 'Hi there' }),
+  });
+  botUpdateDelivery.publish({
+    type: 'message_edited',
+    message: messages.editPrivateTextMessage(accountMessage.id, { ...edit, text: 'Hello!' }),
+  });
+
+  const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
+  if (
+    JSON.stringify(updates) !== JSON.stringify([{
+      update_id: 1,
+      edited_message: {
+        message_id: 1,
+        from: account.profile,
+        chat: { id: account.profile.id, type: 'private', first_name: 'Ada' },
+        date: 1_700_000_000,
+        edit_date: 1_700_000_005,
+        text: 'Hello!',
+      },
+    }])
+  ) {
+    throw new Error(
+      `Expected only the account edit as an update, received ${JSON.stringify(updates)}`,
+    );
   }
 });
 

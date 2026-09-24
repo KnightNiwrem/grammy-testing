@@ -59,6 +59,14 @@ export interface AccountSendMessageInput {
   readonly reply_to_message_id?: number;
 }
 
+export interface AccountEditMessageInput {
+  readonly chat: PrivateMessageTarget;
+  /** The ID of the account's message to edit, as message history shows it. */
+  readonly message_id: number;
+  /** The new text, which must differ from the message's current text. */
+  readonly text: string;
+}
+
 export interface BotBlockInput {
   readonly botId: number;
 }
@@ -151,7 +159,7 @@ export interface PrivateTextMessage {
   readonly from: VirtualAccountProfile | MessageSenderBot;
   readonly chat: PrivateChat;
   readonly date: number;
-  /** Present once the bot has edited the message's text. */
+  /** Present once the message's author has edited its text. */
   readonly edit_date?: number;
   /** The message this one replies to, unless it was deleted; it never shows its own reply. */
   readonly reply_to_message?: RepliedPrivateTextMessage;
@@ -239,6 +247,11 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
   /** Sends a message as this virtual Telegram account. */
   sendMessage(input: AccountSendMessageInput): Promise<PrivateTextMessage>;
   /**
+   * Edits the text of a message this account sent, which sends the bot an `edited_message`
+   * update. Returns the edited message.
+   */
+  editMessage(input: AccountEditMessageInput): Promise<PrivateTextMessage>;
+  /**
    * Blocks a bot, which Telegram calls stopping it. The bot receives a `my_chat_member` update
    * showing it as `kicked`, its messages to this account fail with `403 Forbidden: bot was
    * blocked by the user`, and this account cannot write to it until it unblocks the bot. Blocking
@@ -285,7 +298,7 @@ export interface CreatedVirtualAccount {
   readonly account: VirtualAccountClient;
 }
 
-export type HttpMethod = 'DELETE' | 'GET' | 'POST' | 'PUT';
+export type HttpMethod = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
 
 export interface RequestDetails {
   readonly method: HttpMethod;

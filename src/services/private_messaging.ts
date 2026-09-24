@@ -165,7 +165,7 @@ export type EditBotMessageTextFailureReason =
   | 'message_text_empty'
   | 'message_text_too_long';
 
-export type EditBotMessageResult<FailureReason extends string> =
+export type PrivateMessageEditResult<FailureReason extends string> =
   | {
     readonly edited: true;
     readonly message: PrivateTextMessage;
@@ -176,7 +176,31 @@ export type EditBotMessageResult<FailureReason extends string> =
   };
 
 export type EditBotMessageTextResult =
-  | EditBotMessageResult<EditBotMessageTextFailureReason>
+  | PrivateMessageEditResult<EditBotMessageTextFailureReason>
+  | ({ readonly edited: false } & TextInvalidFailure);
+
+export interface EditAccountMessageInput {
+  readonly fromAccountId: number;
+  readonly chat: {
+    readonly type: 'private';
+    readonly botId: number;
+  };
+  /** The message's ID in the bot's message box. */
+  readonly botMessageId: number;
+  readonly text: string;
+}
+
+export type EditAccountMessageFailureReason =
+  | 'account_not_found'
+  | 'bot_not_found'
+  | 'message_not_found'
+  | 'message_not_editable'
+  | 'message_text_empty'
+  | 'message_text_too_long'
+  | 'message_not_modified';
+
+export type EditAccountMessageResult =
+  | PrivateMessageEditResult<EditAccountMessageFailureReason>
   | ({ readonly edited: false } & TextInvalidFailure);
 
 export interface DeleteMessagesByBotInput {
@@ -334,7 +358,7 @@ interface PrivateMessagingServiceDependencies {
  * commits each accepted message: stored, numbered for both participants, then published. Bots can
  * attach inline keyboards to their messages, edit them afterward, and delete messages of their
  * chats. A bot's message can also change the reply interface the account's client shows, such as
- * a reply keyboard whose buttons the account presses.
+ * a reply keyboard whose buttons the account presses. An account edits the text of its messages.
  *
  * While an account blocks a bot, neither can write to the other, as on Telegram, where the bot's
  * sends fail and a client asks the user to unblock the bot before writing to it.
@@ -542,7 +566,7 @@ export class PrivateMessagingService {
    */
   editBotMessageInlineKeyboard(
     input: EditBotMessageInlineKeyboardInput,
-  ): EditBotMessageResult<EditBotMessageInlineKeyboardFailureReason> {
+  ): PrivateMessageEditResult<EditBotMessageInlineKeyboardFailureReason> {
     if (this.#bots.getById(input.fromBotId) === undefined) {
       return { edited: false, reason: 'bot_not_found' };
     }
@@ -558,6 +582,53 @@ export class PrivateMessagingService {
       inlineKeyboard: input.inlineKeyboard,
       textEditedAtUnixSeconds: message.textEditedAtUnixSeconds,
     });
+  }
+
+  /**
+   * Replaces the text of a message the account wrote to the bot, which, unlike a bot's own edit,
+   * sends the bot an `edited_message` update. As when sending, the text is normalized as a
+   * Telegram client does, which marks bot commands again.
+   */
+  editAccountMessage(input: EditAccountMessageInput): EditAccountMessageResult {
+    if (this.#accounts.getById(input.fromAccountId) === undefined) {
+      return { edited: false, reason: 'account_not_found' };
+    }
+    if (this.#bots.getById(input.chat.botId) === undefined) {
+      return { edited: false, reason: 'bot_not_found' };
+    }
+    const message = this.getPrivateTextMessageByBotMessageId(
+      { accountId: input.fromAccountId, botId: input.chat.botId },
+      input.botMessageId,
+    );
+    if (message === undefined) {
+      return { edited: false, reason: 'message_not_found' };
+    }
+    if (message.authorRole !== 'account') {
+      return { edited: false, reason: 'message_not_editable' };
+    }
+    if (input.text.length === 0) {
+      return { edited: false, reason: 'message_text_empty' };
+    }
+    const textFixing = this.#fixFormattedText(input.text, []);
+    if (!textFixing.fixed) {
+      return { edited: false, reason: 'text_invalid', textError: textFixing.error };
+    }
+    const { formattedText } = textFixing;
+    if (formattedText.text.length > MAX_TEXT_MESSAGE_LENGTH) {
+      return { edited: false, reason: 'message_text_too_long' };
+    }
+    if (isSameFormattedText(formattedText, message)) {
+      return { edited: false, reason: 'message_not_modified' };
+    }
+
+    const editedMessage = this.#messages.editPrivateTextMessage(message.id, {
+      text: formattedText.text,
+      entities: formattedText.entities,
+      inlineKeyboard: message.inlineKeyboard,
+      textEditedAtUnixSeconds: this.#currentUnixTimeSeconds(),
+    });
+    this.#events.publish({ type: 'message_edited', message: editedMessage });
+    return { edited: true, message: editedMessage };
   }
 
   /**
@@ -775,7 +846,9 @@ export class PrivateMessagingService {
     return { resolved: true, message };
   }
 
-  /** Validates and stores a bot's edit of its message, which must change the message. */
+  /**
+   * Validates, stores, and publishes a bot's edit of its message, which must change the message.
+   */
   #editBotMessage(
     message: PrivateTextMessage,
     edit: {
@@ -784,7 +857,7 @@ export class PrivateMessagingService {
       readonly inlineKeyboard: InlineKeyboard | undefined;
       readonly textEditedAtUnixSeconds: number | undefined;
     },
-  ): EditBotMessageResult<'callback_data_invalid' | 'message_not_modified'> {
+  ): PrivateMessageEditResult<'callback_data_invalid' | 'message_not_modified'> {
     if (edit.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(edit.inlineKeyboard)) {
       return { edited: false, reason: 'callback_data_invalid' };
     }
@@ -795,7 +868,9 @@ export class PrivateMessagingService {
       return { edited: false, reason: 'message_not_modified' };
     }
 
-    return { edited: true, message: this.#messages.editPrivateTextMessage(message.id, edit) };
+    const editedMessage = this.#messages.editPrivateTextMessage(message.id, edit);
+    this.#events.publish({ type: 'message_edited', message: editedMessage });
+    return { edited: true, message: editedMessage };
   }
 
   /**

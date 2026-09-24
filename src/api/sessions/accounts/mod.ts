@@ -16,6 +16,8 @@ const ACCOUNT_MESSAGE_COLLECTION_PATH = `/:${ACCOUNT_ID_PARAMETER}/messages` as 
 const PRIVATE_CONVERSATION_PATH =
   `/:${ACCOUNT_ID_PARAMETER}/conversations/private/:${BOT_ID_PARAMETER}` as const;
 const PRIVATE_MESSAGE_HISTORY_PATH = `${PRIVATE_CONVERSATION_PATH}/messages` as const;
+const MESSAGE_ID_PARAMETER = 'messageId';
+const PRIVATE_MESSAGE_PATH = `${PRIVATE_MESSAGE_HISTORY_PATH}/:${MESSAGE_ID_PARAMETER}` as const;
 const BLOCKED_BOT_PATH = `/:${ACCOUNT_ID_PARAMETER}/blocked-bots/:${BOT_ID_PARAMETER}` as const;
 const PRIVATE_CHAT_COMMANDS_PATH = `${PRIVATE_CONVERSATION_PATH}/commands` as const;
 const PRIVATE_CHAT_REPLY_INTERFACE_PATH = `${PRIVATE_CONVERSATION_PATH}/reply-interface` as const;
@@ -30,6 +32,8 @@ const telegramUserIdSchema = z.number().int()
   .min(MIN_TELEGRAM_USER_ID)
   .max(MAX_TELEGRAM_USER_ID);
 const telegramUserIdPathParameterSchema = z.coerce.number().pipe(telegramUserIdSchema);
+/** A message's ID as the bot sees it, which is how these routes show messages. */
+const messageIdPathParameterSchema = z.coerce.number().pipe(z.int().positive());
 
 const createAccountRequestSchema = z.strictObject({
   first_name: z.string().min(1),
@@ -46,6 +50,10 @@ const sendMessageRequestSchema = z.strictObject({
   text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH),
   /** The replied message's ID as the bot sees it, which is how these routes show messages. */
   reply_to_message_id: z.int().positive().optional(),
+});
+
+const editMessageRequestSchema = z.strictObject({
+  text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH),
 });
 
 const pressReplyKeyboardButtonRequestSchema = z.strictObject({
@@ -160,6 +168,44 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
         botMessageViews.viewPrivateTextMessageForBot(message)
       ),
     });
+  });
+
+  accountRoutes.patch(PRIVATE_MESSAGE_PATH, async (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
+    const messageId = messageIdPathParameterSchema.safeParse(
+      context.req.param(MESSAGE_ID_PARAMETER),
+    );
+    if (!accountId.success || !botId.success || !messageId.success) {
+      return context.body(null, 400);
+    }
+
+    let requestBody: unknown;
+    try {
+      requestBody = await context.req.json();
+    } catch {
+      return context.body(null, 400);
+    }
+    const parsedRequest = editMessageRequestSchema.safeParse(requestBody);
+    if (!parsedRequest.success) {
+      return context.body(null, 400);
+    }
+
+    const { privateMessaging, botMessageViews } = context.get('emulationSession');
+    const result = privateMessaging.editAccountMessage({
+      fromAccountId: accountId.data,
+      chat: { type: 'private', botId: botId.data },
+      botMessageId: messageId.data,
+      text: parsedRequest.data.text,
+    });
+    if (!result.edited) {
+      const isNotFound = result.reason === 'account_not_found' ||
+        result.reason === 'bot_not_found' || result.reason === 'message_not_found';
+      return context.body(null, isNotFound ? 404 : 400);
+    }
+    return context.json({ message: botMessageViews.viewPrivateTextMessageForBot(result.message) });
   });
 
   accountRoutes.put(BLOCKED_BOT_PATH, (context) => {

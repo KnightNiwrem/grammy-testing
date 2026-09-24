@@ -7,6 +7,13 @@ export interface MessageCreatedEvent {
   readonly message: PrivateTextMessage;
 }
 
+/** The author of a stored message changed its text. */
+export interface MessageEditedEvent {
+  readonly type: 'message_edited';
+  /** The message as the edit left it. */
+  readonly message: PrivateTextMessage;
+}
+
 /** An account pressed a callback button on a message from the bot. */
 export interface CallbackQueryCreatedEvent {
   readonly type: 'callback_query_created';
@@ -28,5 +35,6 @@ export interface BotBlockChangedEvent {
 /** A state change produced by a chat command, published in the order it happened. */
 export type ChatDomainEvent =
   | MessageCreatedEvent
+  | MessageEditedEvent
   | CallbackQueryCreatedEvent
   | BotBlockChangedEvent;

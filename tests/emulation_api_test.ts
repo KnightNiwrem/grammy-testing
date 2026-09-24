@@ -2380,7 +2380,73 @@ Deno.test('an account blocks a bot, which receives my_chat_member updates and Te
   }
 });
 
-Deno.test('a grammY bot forgets a user who blocks it', async () => {
+Deno.test('PATCH on an account message edits it and sends the bot an edited_message update', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const historyPath =
+    `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/messages`;
+  const editMessage = (messageId: number | string, body: unknown) =>
+    api.request(`${historyPath}/${messageId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  await sendText('Hello');
+  const botReply = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: createdAccount.account.id,
+    text: 'Hi',
+  });
+  const botMessageId = botApiResult(botReply.body)?.message_id;
+
+  const response = await editMessage(1, { text: 'Hello /help' });
+  const responseBody: unknown = await response.json();
+  if (response.status !== 200 || !isSentMessageResponse(responseBody)) {
+    throw new Error(`Expected the edit to succeed, received ${response.status}`);
+  }
+  const editedMessage = responseBody.message as TestPrivateTextMessage & { edit_date?: number };
+  if (
+    editedMessage.message_id !== 1 || editedMessage.text !== 'Hello /help' ||
+    editedMessage.edit_date === undefined ||
+    JSON.stringify(editedMessage.entities) !==
+      JSON.stringify([{ type: 'bot_command', offset: 6, length: 5 }])
+  ) {
+    throw new Error(`Expected the edited message, received ${JSON.stringify(editedMessage)}`);
+  }
+
+  const { body: updatesBody } = await callBotApi(api, `${botApiPath}/getUpdates`, {});
+  const updates = (updatesBody as { result: Array<Record<string, unknown>> }).result;
+  if (
+    updates.length !== 2 || JSON.stringify(updates[1]) !==
+      JSON.stringify({
+        update_id: updates[0].update_id as number + 1,
+        edited_message: editedMessage,
+      })
+  ) {
+    throw new Error(`Expected an edited_message update, received ${JSON.stringify(updates)}`);
+  }
+
+  const invalidEdits = [
+    [1, { text: 'Hello /help' }, 400],
+    [1, { text: '' }, 400],
+    [1, { text: 'Hi', entities: [] }, 400],
+    [botMessageId as number, { text: 'Changed' }, 400],
+    [99, { text: 'Changed' }, 404],
+    [0, { text: 'Changed' }, 400],
+    ['first', { text: 'Changed' }, 400],
+  ] as const;
+  for (const [messageId, body, expectedStatus] of invalidEdits) {
+    const invalidResponse = await editMessage(messageId, body);
+    if (invalidResponse.status !== expectedStatus) {
+      throw new Error(
+        `Expected editing ${messageId} with ${
+          JSON.stringify(body)
+        } to answer ${expectedStatus}, received ${invalidResponse.status}`,
+      );
+    }
+  }
+});
+
+Deno.test('a grammY bot answers an edited message and forgets a user who blocks it', async () => {
   const { api, sessionPath, createdBot, createdAccount, sendText } =
     await createPrivateConversationFixture();
   const accountPath = `${sessionPath}/accounts/${createdAccount.account.id}`;
@@ -2393,12 +2459,17 @@ Deno.test('a grammY bot forgets a user who blocks it', async () => {
   const subscribers = new Set<number>();
   const handled = {
     subscription: Promise.withResolvers<void>(),
+    edit: Promise.withResolvers<void>(),
     block: Promise.withResolvers<void>(),
   };
   grammyBot.command('subscribe', async (context) => {
     subscribers.add(context.chat.id);
     await context.reply('Subscribed');
     handled.subscription.resolve();
+  });
+  grammyBot.on('edited_message:text', async (context) => {
+    await context.reply(`You changed it to: ${context.editedMessage.text}`);
+    handled.edit.resolve();
   });
   grammyBot.on('my_chat_member', (context) => {
     if (context.myChatMember.new_chat_member.status === 'kicked') {
@@ -2413,6 +2484,24 @@ Deno.test('a grammY bot forgets a user who blocks it', async () => {
     await sendText('/subscribe');
     // Polling ends only when stopped, so settling first means the bot failed.
     await Promise.race([handled.subscription.promise, polling]);
+    const helloResponse = await api.request(`${accountPath}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: { type: 'private', botId: createdBot.bot.id }, text: 'Hello' }),
+    });
+    const helloBody: unknown = await helloResponse.json();
+    if (!isSentMessageResponse(helloBody)) {
+      throw new Error(`Expected "Hello" to be sent, received ${helloResponse.status}`);
+    }
+    await api.request(
+      `${accountPath}/conversations/private/${createdBot.bot.id}/messages/${helloBody.message.message_id}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello there' }),
+      },
+    );
+    await Promise.race([handled.edit.promise, polling]);
 
     await api.request(`${accountPath}/blocked-bots/${createdBot.bot.id}`, { method: 'PUT' });
     try {
@@ -2434,6 +2523,20 @@ Deno.test('a grammY bot forgets a user who blocks it', async () => {
   }
   if (subscribers.size !== 0) {
     throw new Error('Expected the bot to forget the user who blocked it');
+  }
+  const historyBody: unknown = await (await api.request(
+    `${accountPath}/conversations/private/${createdBot.bot.id}/messages`,
+  )).json();
+  if (
+    !isMessageHistoryResponse(historyBody) ||
+    JSON.stringify(historyBody.messages.map(({ text }) => text)) !== JSON.stringify([
+        '/subscribe',
+        'Subscribed',
+        'Hello there',
+        'You changed it to: Hello there',
+      ])
+  ) {
+    throw new Error('Expected history to hold the edited message and the reply to the edit');
   }
 });
 

@@ -9,6 +9,7 @@ export {
 } from './telegram_emulation_client.ts';
 export type {
   AccountBotCommandsInput,
+  AccountEditMessageInput,
   AccountMessageHistoryInput,
   AccountReplyInterfaceInput,
   AccountSendMessageInput,

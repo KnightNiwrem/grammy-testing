@@ -23,6 +23,7 @@ interface BotMessageViews {
 
 interface BotUpdateMailboxes {
   enqueueMessageUpdate(botId: number, message: BotApiPrivateTextMessage): void;
+  enqueueEditedMessageUpdate(botId: number, editedMessage: BotApiPrivateTextMessage): void;
   enqueueCallbackQueryUpdate(botId: number, callbackQuery: BotApiCallbackQuery): void;
   enqueueMyChatMemberUpdate(botId: number, myChatMember: BotApiMyChatMemberUpdated): void;
 }
@@ -63,6 +64,9 @@ export class BotUpdateDeliveryService {
       case 'message_created':
         this.#deliverPrivateTextMessage(event.message);
         return;
+      case 'message_edited':
+        this.#deliverPrivateTextMessageEdit(event.message);
+        return;
       case 'callback_query_created':
         this.#deliverCallbackQuery(event);
         return;
@@ -87,6 +91,22 @@ export class BotUpdateDeliveryService {
     }
 
     this.#botUpdates.enqueueMessageUpdate(
+      observingBotId,
+      this.#botMessageViews.viewPrivateTextMessageForBot(message),
+    );
+  }
+
+  /**
+   * An edit of a private message is observed only by the bot of its conversation, which, as on
+   * Telegram, receives no update for an edit of its own message.
+   */
+  #deliverPrivateTextMessageEdit(message: PrivateTextMessage): void {
+    const observingBotId = message.conversation.botId;
+    if (message.authorRole === 'bot' || !this.#isSubscribed(observingBotId, 'edited_message')) {
+      return;
+    }
+
+    this.#botUpdates.enqueueEditedMessageUpdate(
       observingBotId,
       this.#botMessageViews.viewPrivateTextMessageForBot(message),
     );

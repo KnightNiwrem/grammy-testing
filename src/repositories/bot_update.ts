@@ -40,6 +40,13 @@ export class BotUpdateRepository {
     return this.#enqueueUpdate(botId, (update_id) => ({ update_id, message }));
   }
 
+  enqueueEditedMessageUpdate(botId: number, editedMessage: BotApiPrivateTextMessage): BotApiUpdate {
+    return this.#enqueueUpdate(
+      botId,
+      (update_id) => ({ update_id, edited_message: editedMessage }),
+    );
+  }
+
   enqueueCallbackQueryUpdate(botId: number, callbackQuery: BotApiCallbackQuery): BotApiUpdate {
     return this.#enqueueUpdate(
       botId,

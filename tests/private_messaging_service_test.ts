@@ -650,8 +650,11 @@ Deno.test('PrivateMessagingService edits the text and keyboard of a bot message'
   ) {
     throw new Error('Expected an unchanged text to keep its edit date while the keyboard goes');
   }
-  if (publishedEvents.length !== 2) {
-    throw new Error('Expected edits not to publish chat events');
+  if (
+    JSON.stringify(publishedEvents.slice(2).map(({ type }) => type)) !==
+      JSON.stringify(['message_edited', 'message_edited', 'message_edited'])
+  ) {
+    throw new Error('Expected each edit to publish the edited message');
   }
 });
 
@@ -1095,12 +1098,137 @@ Deno.test('PrivateMessagingService lets a bot show chat actions only in started 
   }
 });
 
+Deno.test('PrivateMessagingService edits the text of an account message and publishes the edit', () => {
+  const {
+    virtualUsers,
+    userMessageBoxes,
+    botUpdates,
+    publishedEvents,
+    privateMessaging,
+    advanceClockSeconds,
+  } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const accountMessage = sendPrivateText(privateMessaging, account.profile.id, bot);
+  const botMessageId = expectBotMessageId(userMessageBoxes, bot, accountMessage.id);
+  advanceClockSeconds(5);
+
+  const result = privateMessaging.editAccountMessage({
+    fromAccountId: account.profile.id,
+    chat: { type: 'private', botId: bot.profile.id },
+    botMessageId,
+    text: '  Hello /help  ',
+  });
+  if (!result.edited) {
+    throw new Error(`Expected the edit to succeed, received ${result.reason}`);
+  }
+  if (
+    result.message.id !== accountMessage.id ||
+    result.message.sentAtUnixSeconds !== 1_700_000_000 ||
+    result.message.textEditedAtUnixSeconds !== 1_700_000_005 ||
+    result.message.text !== 'Hello /help' ||
+    JSON.stringify(result.message.entities) !==
+      JSON.stringify([{ type: 'bot_command', offset: 6, length: 5 }])
+  ) {
+    throw new Error('Expected a dated edit whose text is normalized as when sending');
+  }
+  if (
+    JSON.stringify(publishedEvents.at(-1)) !==
+      JSON.stringify({ type: 'message_edited', message: result.message })
+  ) {
+    throw new Error('Expected the edit to be published');
+  }
+  const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
+  const lastUpdate = updates.at(-1);
+  if (
+    updates.length !== 2 || lastUpdate === undefined || !('edited_message' in lastUpdate) ||
+    lastUpdate.edited_message.message_id !== botMessageId ||
+    lastUpdate.edited_message.edit_date !== 1_700_000_005 ||
+    lastUpdate.edited_message.text !== 'Hello /help'
+  ) {
+    throw new Error(`Expected an edited_message update, received ${JSON.stringify(updates)}`);
+  }
+});
+
+Deno.test('PrivateMessagingService validates account message edits before changing state', () => {
+  const { virtualUsers, userMessageBoxes, messages, publishedEvents, privateMessaging } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const otherAccount = createAccount(virtualUsers, 'Grace');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const accountMessage = sendPrivateText(privateMessaging, account.profile.id, bot);
+  const otherChatMessage = sendPrivateText(privateMessaging, otherAccount.profile.id, bot);
+  const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot);
+  const accountMessageId = expectBotMessageId(userMessageBoxes, bot, accountMessage.id);
+  const editAccountMessage = (
+    { fromAccountId = account.profile.id, botId = bot.profile.id, botMessageId, text = 'Edited' }: {
+      fromAccountId?: number;
+      botId?: number;
+      botMessageId: number;
+      text?: string;
+    },
+  ) =>
+    privateMessaging.editAccountMessage({
+      fromAccountId,
+      chat: { type: 'private', botId },
+      botMessageId,
+      text,
+    });
+  const publishedEventCount = publishedEvents.length;
+
+  const cases = [
+    [
+      editAccountMessage({ fromAccountId: 999, botMessageId: accountMessageId }),
+      'account_not_found',
+    ],
+    [editAccountMessage({ botId: 999, botMessageId: accountMessageId }), 'bot_not_found'],
+    [editAccountMessage({ botMessageId: 99 }), 'message_not_found'],
+    [
+      editAccountMessage({
+        botMessageId: expectBotMessageId(userMessageBoxes, bot, otherChatMessage.id),
+      }),
+      'message_not_found',
+    ],
+    [
+      editAccountMessage({
+        botMessageId: expectBotMessageId(userMessageBoxes, bot, botMessage.id),
+      }),
+      'message_not_editable',
+    ],
+    [editAccountMessage({ botMessageId: accountMessageId, text: '' }), 'message_text_empty'],
+    [editAccountMessage({ botMessageId: accountMessageId, text: '   ' }), 'text_invalid'],
+    [
+      editAccountMessage({
+        botMessageId: accountMessageId,
+        text: 'x'.repeat(MAX_TEXT_MESSAGE_LENGTH + 1),
+      }),
+      'message_text_too_long',
+    ],
+    // Surrounding whitespace is trimmed, so this text is the stored one.
+    [
+      editAccountMessage({ botMessageId: accountMessageId, text: ' Hello ' }),
+      'message_not_modified',
+    ],
+  ] as const;
+  for (const [result, expectedReason] of cases) {
+    if (result.edited || result.reason !== expectedReason) {
+      throw new Error(`Expected ${expectedReason}, received ${JSON.stringify(result)}`);
+    }
+  }
+  if (
+    messages.getPrivateTextMessage(accountMessage.id) !== accountMessage ||
+    publishedEvents.length !== publishedEventCount
+  ) {
+    throw new Error('Expected rejected edits to leave the message unchanged and unpublished');
+  }
+});
+
 Deno.test('PrivateMessagingService refuses writing either way while the account blocks the bot', () => {
   const { virtualUsers, userMessageBoxes, blockedUsers, publishedEvents, privateMessaging } =
     createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
-  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const accountMessage = sendPrivateText(privateMessaging, account.profile.id, bot);
   const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot);
   blockedUsers.block(account.profile.id, bot.profile.id);
   const publishedEventCount = publishedEvents.length;
@@ -1151,7 +1279,13 @@ Deno.test('PrivateMessagingService refuses writing either way while the account 
     botMessageId: expectBotMessageId(userMessageBoxes, bot, botMessage.id),
     text: 'Goodbye',
   });
-  if (!botEdit.edited) {
+  const accountEdit = privateMessaging.editAccountMessage({
+    fromAccountId: account.profile.id,
+    chat: { type: 'private', botId: bot.profile.id },
+    botMessageId: expectBotMessageId(userMessageBoxes, bot, accountMessage.id),
+    text: 'Bye',
+  });
+  if (!botEdit.edited || !accountEdit.edited) {
     throw new Error('Expected a block to leave existing messages editable');
   }
 

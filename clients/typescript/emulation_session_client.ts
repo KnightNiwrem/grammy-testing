@@ -11,6 +11,7 @@ import {
 } from './schemas.ts';
 import type {
   AccountBotCommandsInput,
+  AccountEditMessageInput,
   AccountMessageHistoryInput,
   AccountReplyInterfaceInput,
   AccountSendMessageInput,
@@ -130,6 +131,18 @@ function createVirtualAccountClient(
         expectedStatus: HTTP_STATUS_CREATED,
         responseSchema: sentMessageResponseSchema,
         body: input,
+      });
+      return response.message;
+    },
+    async editMessage(input: AccountEditMessageInput): Promise<PrivateTextMessage> {
+      const botId = encodeURIComponent(input.chat.botId);
+      const messageId = encodeURIComponent(input.message_id);
+      const response = await requestJson(fetchImplementation, {
+        method: 'PATCH',
+        url: `${accountUrl}/conversations/private/${botId}/messages/${messageId}`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: sentMessageResponseSchema,
+        body: { text: input.text },
       });
       return response.message;
     },
