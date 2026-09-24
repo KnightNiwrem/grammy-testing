@@ -393,10 +393,12 @@ paths:
           description: No active test session has the supplied identifier.
   /sessions/{sessionId}/bot-api/bot{token}/sendMessage:
     description: >-
-      Telegram Bot API method for sending a text message. The emulator supports plain text sent to
-      a private chat with an account that has written to the bot, optionally with an inline
-      keyboard of callback and URL buttons; formatting and reply parameters are not supported yet.
-      As on Telegram, the bot receives no update for its own message.
+      Telegram Bot API method for sending a text message. The emulator supports text sent to a
+      private chat with an account that has written to the bot, formatted with `parse_mode` or
+      `entities` and optionally with an inline keyboard of callback and URL buttons; reply
+      parameters and other options are not supported yet. As on Telegram, the text and its
+      entities are normalized before the message is stored, and the bot receives no update for its
+      own message.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -412,9 +414,19 @@ paths:
           application/x-www-form-urlencoded:
             schema:
               $ref: '#/components/schemas/SendMessageRequest'
+            encoding:
+              entities:
+                contentType: application/json
+              reply_markup:
+                contentType: application/json
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/SendMessageRequest'
+            encoding:
+              entities:
+                contentType: application/json
+              reply_markup:
+                contentType: application/json
       responses:
         '200':
           description: The message was stored in the private conversation.
@@ -425,11 +437,17 @@ paths:
         '400':
           description: >-
             The request cannot be decoded or has unsupported parameters, or Telegram would reject
-            it: the text is empty (`Bad Request: message text is empty`) or longer than 4096
-            characters (`Bad Request: message is too long`), `chat_id` is missing (`Bad Request:
-            chat_id is empty`), the chat is not a private chat with an account that has written
-            to the bot (`Bad Request: chat not found`), or a button's callback data exceeds 64
-            bytes (`Bad Request: BUTTON_DATA_INVALID`).
+            it, checking in this order: the text is empty (`Bad Request: message text is empty`);
+            the text or its formatting cannot be read (for example `Bad Request: unsupported
+            parse_mode`, `Bad Request: can't parse entities: …`, or `Bad Request: can't parse
+            MessageEntity: …`); `chat_id` is missing (`Bad Request: chat_id is empty`); the chat is
+            not a private chat with an account that has written to the bot (`Bad Request: chat not
+            found`); the text and its entities cannot be normalized (for example `Bad Request: text
+            must be non-empty`, `Bad Request: entity URL '…' is invalid: …`, or `Bad Request: user
+            not found`); the normalized text is longer than 4096 characters (`Bad Request: message
+            is too long`); or a button's callback data exceeds 64 bytes (`Bad Request:
+            BUTTON_DATA_INVALID`). Date and time entities are not supported (`Bad Request:
+            date_time entities are not supported`).
           content:
             application/json:
               schema:
@@ -445,10 +463,10 @@ paths:
   /sessions/{sessionId}/bot-api/bot{token}/editMessageText:
     description: >-
       Telegram Bot API method for editing the text of a message the bot sent to a private chat.
-      As on Telegram, the edited message keeps only the inline keyboard given in `reply_markup`,
-      and the bot receives no update for its own edit. The edit date changes only when the text
-      does. Messages sent through inline mode, which `inline_message_id` identifies, are not
-      supported.
+      As on Telegram, the text is formatted and normalized as by `sendMessage`, the edited message
+      keeps only the inline keyboard given in `reply_markup`, and the bot receives no update for
+      its own edit. The edit date changes only when the text or its entities do. Messages sent
+      through inline mode, which `inline_message_id` identifies, are not supported.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -465,12 +483,16 @@ paths:
             schema:
               $ref: '#/components/schemas/EditMessageTextRequest'
             encoding:
+              entities:
+                contentType: application/json
               reply_markup:
                 contentType: application/json
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/EditMessageTextRequest'
             encoding:
+              entities:
+                contentType: application/json
               reply_markup:
                 contentType: application/json
       responses:
@@ -484,16 +506,18 @@ paths:
           description: >-
             The request cannot be decoded or has unsupported parameters, or Telegram would reject
             it, checking in this order: the text is empty (`Bad Request: message text is empty`);
-            neither `chat_id` nor a positive `message_id` is given (`Bad Request: message
-            identifier is not specified`); `chat_id` is missing (`Bad Request: chat_id is empty`);
-            the chat is not a private chat with an account that has written to the bot (`Bad
-            Request: chat not found`); the chat has no message with that ID (`Bad Request: message
-            to edit not found`); the account wrote the message (`Bad Request: message can't be
-            edited`); the text is longer than 4096 characters (`Bad Request: message is too
-            long`); a button's callback data exceeds 64 bytes (`Bad Request:
-            BUTTON_DATA_INVALID`); or the text and keyboard are unchanged (`Bad Request: message
-            is not modified: specified new message content and reply markup are exactly the same
-            as a current content and reply markup of the message`).
+            the text or its formatting cannot be read, as for `sendMessage`; neither `chat_id` nor
+            a positive `message_id` is given (`Bad Request: message identifier is not specified`);
+            `chat_id` is missing (`Bad Request: chat_id is empty`); the chat is not a private chat
+            with an account that has written to the bot (`Bad Request: chat not found`); the chat
+            has no message with that ID (`Bad Request: message to edit not found`); the account
+            wrote the message (`Bad Request: message can't be edited`); the text and its entities
+            cannot be normalized, as for `sendMessage`; the normalized text is longer than 4096
+            characters (`Bad Request: message is too long`); a button's callback data exceeds 64
+            bytes (`Bad Request: BUTTON_DATA_INVALID`); or the text, entities, and keyboard are
+            unchanged (`Bad Request: message is not modified: specified new message content and
+            reply markup are exactly the same as a current content and reply markup of the
+            message`).
           content:
             application/json:
               schema:
@@ -874,6 +898,10 @@ components:
           type: string
           minLength: 1
           maxLength: 4096
+          description: >-
+            Plain text, normalized as a Telegram client does: control characters become spaces,
+            carriage returns are removed, and leading and trailing whitespace is trimmed. Text with
+            no visible characters is rejected.
     PrivateChat:
       type: object
       additionalProperties: false
@@ -933,9 +961,10 @@ components:
           type: array
           minItems: 1
           description: >-
-            Entities marked in the text, omitted when there are none. As Telegram does in private
-            chats with bots, the emulator marks bot commands in text written by either participant;
-            other entity types are not detected.
+            Entities marked in the text, omitted when there are none: formatting the bot applied,
+            and bot commands, which, as Telegram does in private chats with bots, the emulator
+            marks in text written by either participant. Other entity types Telegram detects, such
+            as URLs and mentions, are not detected.
           items:
             $ref: '#/components/schemas/MessageEntity'
         reply_markup:
@@ -1013,6 +1042,9 @@ components:
     MessageEntity:
       type: object
       additionalProperties: false
+      description: >-
+        A marked span of message text. Formatting that overlaps other entities is split so that
+        entities nest properly, as on Telegram.
       required:
         - type
         - offset
@@ -1020,7 +1052,20 @@ components:
       properties:
         type:
           type: string
-          const: bot_command
+          enum:
+            - bot_command
+            - bold
+            - italic
+            - underline
+            - strikethrough
+            - spoiler
+            - code
+            - pre
+            - text_link
+            - text_mention
+            - custom_emoji
+            - blockquote
+            - expandable_blockquote
         offset:
           type: integer
           minimum: 0
@@ -1029,6 +1074,61 @@ components:
           type: integer
           minimum: 1
           description: Length of the entity in UTF-16 code units.
+        language:
+          type: string
+          description: For `pre`, the programming language of the code, when one is given.
+        url:
+          type: string
+          description: For `text_link`, the link as Telegram normalized it.
+        user:
+          description: For `text_mention`, the mentioned user.
+          oneOf:
+            - $ref: '#/components/schemas/Account'
+            - $ref: '#/components/schemas/MessageSenderBot'
+        custom_emoji_id:
+          type: string
+          description: For `custom_emoji`, the custom emoji's identifier.
+    MessageEntityParameter:
+      type: object
+      additionalProperties: false
+      description: >-
+        An entity a bot specifies, as a Bot API `MessageEntity`. Types that Telegram detects by
+        itself (`mention`, `hashtag`, `cashtag`, `bot_command`, `url`, `email`, `phone_number`,
+        and `bank_card_number`) are accepted and ignored, so entities of a received message can be
+        sent back. `date_time` entities are not supported. Telegram reads numbers written as
+        strings; the emulator rejects them.
+      required:
+        - type
+        - offset
+        - length
+      properties:
+        type:
+          type: string
+        offset:
+          type: integer
+        length:
+          type: integer
+        language:
+          type: string
+        url:
+          type: string
+          description: For `text_link`; a `tg://user?id=` link makes a text mention.
+        user:
+          type: object
+          description: For `text_mention`; only its `id` is read, and it must be a session user.
+          required:
+            - id
+          properties:
+            id:
+              type: integer
+        custom_emoji_id:
+          type: string
+    ParseMode:
+      type: string
+      description: >-
+        Markup to read the text as, matched case-insensitively: `HTML`, `MarkdownV2`, or the
+        legacy `Markdown`, parsed as Telegram does. `none` or omitting it leaves the text as it is.
+        Date and time markup (`<tg-time>` or a `tg://time` link) is not supported.
     SentMessage:
       type: object
       additionalProperties: false
@@ -1173,10 +1273,18 @@ components:
         text:
           type: string
           minLength: 1
-          maxLength: 4096
           description: >-
-            Plain text, stored as sent. Telegram also removes leading and trailing whitespace; the
-            emulator does not yet.
+            Message text, at most 32768 bytes before formatting is applied and 4096 characters
+            after. As on Telegram, control characters become spaces, carriage returns are removed,
+            and leading and trailing whitespace is trimmed, but leading whitespace only up to the
+            first entity.
+        parse_mode:
+          $ref: '#/components/schemas/ParseMode'
+        entities:
+          type: array
+          description: Entities marking the text; ignored when `parse_mode` formats it.
+          items:
+            $ref: '#/components/schemas/MessageEntityParameter'
         reply_markup:
           $ref: '#/components/schemas/InlineKeyboardMarkup'
           description: >-
@@ -1199,7 +1307,14 @@ components:
         text:
           type: string
           minLength: 1
-          maxLength: 4096
+          description: New message text, read and normalized as by `sendMessage`.
+        parse_mode:
+          $ref: '#/components/schemas/ParseMode'
+        entities:
+          type: array
+          description: Entities marking the text; ignored when `parse_mode` formats it.
+          items:
+            $ref: '#/components/schemas/MessageEntityParameter'
         reply_markup:
           $ref: '#/components/schemas/InlineKeyboardMarkup'
           description: Keyboard the edited message shows; omitting it removes the keyboard.

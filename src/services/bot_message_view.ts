@@ -1,8 +1,13 @@
 import {
+  projectBotAsUser,
   projectCallbackQueryForBot,
   projectPrivateTextMessageForBot,
 } from '../projections/bot_api_message.ts';
-import type { BotApiCallbackQuery, BotApiPrivateTextMessage } from '../types/bot_api.ts';
+import type {
+  BotApiCallbackQuery,
+  BotApiPrivateTextMessage,
+  BotApiUser,
+} from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
@@ -68,6 +73,7 @@ export class BotMessageViewService {
       account: account.profile,
       bot: bot.profile,
       observerMessageId,
+      mentionedUsers: this.#findMentionedUsers(message),
     });
   }
 
@@ -90,5 +96,24 @@ export class BotMessageViewService {
       account: account.profile,
       message: this.viewPrivateTextMessageForBot(message),
     });
+  }
+
+  /** Looks up the users a message mentions, which sending the message verified exist. */
+  #findMentionedUsers(message: PrivateTextMessage): ReadonlyMap<number, BotApiUser> {
+    const mentionedUsers = new Map<number, BotApiUser>();
+    for (const entity of message.entities) {
+      if (entity.type !== 'text_mention') {
+        continue;
+      }
+      const account = this.#accounts.getById(entity.userId);
+      const bot = account === undefined ? this.#bots.getById(entity.userId) : undefined;
+      const user = account?.profile ??
+        (bot === undefined ? undefined : projectBotAsUser(bot.profile));
+      if (user === undefined) {
+        throw new Error(`User ${entity.userId} mentioned in message ${message.id} does not exist`);
+      }
+      mentionedUsers.set(entity.userId, user);
+    }
+    return mentionedUsers;
   }
 }

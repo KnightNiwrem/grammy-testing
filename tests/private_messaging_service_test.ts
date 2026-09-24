@@ -18,7 +18,11 @@ import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { BotApiPrivateTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
 import type { InlineKeyboard } from '../src/types/inline_keyboard.ts';
-import { MAX_TEXT_MESSAGE_LENGTH, type PrivateTextMessage } from '../src/types/virtual_message.ts';
+import {
+  MAX_TEXT_MESSAGE_LENGTH,
+  type PrivateTextMessage,
+  type TextEntity,
+} from '../src/types/virtual_message.ts';
 import type { VirtualBot } from '../src/types/virtual_bot.ts';
 
 Deno.test('PrivateMessagingService activates a private conversation for known participants', () => {
@@ -828,6 +832,183 @@ Deno.test('PrivateMessagingService finds messages by bot message ID only in thei
       undefined
   ) {
     throw new Error('Expected other conversations and unknown IDs to find nothing');
+  }
+});
+
+Deno.test('PrivateMessagingService normalizes bot text and entities as Telegram does', () => {
+  const { virtualUsers, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+
+  const result = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    text: '\n Hi Ada, see\tsite /help  \r\n',
+    entities: [
+      { type: 'text_mention', offset: 5, length: 3, userId: account.profile.id },
+      { type: 'text_link', offset: 14, length: 4, url: 'Example.com' },
+      { type: 'bold', offset: 2, length: 20 },
+    ],
+  });
+  if (!result.sent) {
+    throw new Error(
+      `Expected the formatted message to be sent, received ${JSON.stringify(result)}`,
+    );
+  }
+  // Whitespace is trimmed from both ends, the tab becomes a space, and formatting splits around the
+  // mention, the link, and the detected command.
+  const expectedEntities = [
+    { type: 'bold', offset: 0, length: 3 },
+    { type: 'text_mention', offset: 3, length: 3, userId: account.profile.id },
+    { type: 'bold', offset: 3, length: 3 },
+    { type: 'bold', offset: 6, length: 6 },
+    { type: 'text_link', offset: 12, length: 4, url: 'http://example.com/' },
+    { type: 'bold', offset: 12, length: 4 },
+    { type: 'bold', offset: 16, length: 1 },
+    { type: 'bot_command', offset: 17, length: 5 },
+    { type: 'bold', offset: 17, length: 3 },
+  ];
+  if (
+    result.message.text !== 'Hi Ada, see site /help' ||
+    JSON.stringify(result.message.entities) !== JSON.stringify(expectedEntities)
+  ) {
+    throw new Error(
+      `Expected normalized text and entities, received ${JSON.stringify(result.message)}`,
+    );
+  }
+});
+
+Deno.test('PrivateMessagingService rejects bot text Telegram cannot normalize after the chat check', () => {
+  const { virtualUsers, publishedEvents, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const strangerAccount = createAccount(virtualUsers, 'Grace');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const send = (accountId: number, text: string, entities: readonly TextEntity[] = []) =>
+    privateMessaging.sendBotMessage({
+      fromBotId: bot.profile.id,
+      to: { type: 'private', accountId },
+      text,
+      entities,
+    });
+  const unknownUserMention: TextEntity = {
+    type: 'text_mention',
+    offset: 0,
+    length: 1,
+    userId: 999,
+  };
+
+  const unstartedChatResult = send(strangerAccount.profile.id, ' ', [unknownUserMention]);
+  if (unstartedChatResult.sent || unstartedChatResult.reason !== 'conversation_not_started') {
+    throw new Error('Expected the chat to be checked before the text is normalized');
+  }
+  const cases: ReadonlyArray<readonly [string, readonly TextEntity[], string]> = [
+    [' \n\u200b ', [], 'Text must be non-empty'],
+    ['x', [unknownUserMention], 'User not found'],
+    [
+      'x',
+      [{ type: 'text_link', offset: 0, length: 1, url: 'localhost' }],
+      "Entity URL 'localhost' is invalid: Wrong HTTP URL",
+    ],
+    [
+      'x',
+      [{ type: 'bold', offset: 0, length: 2 }],
+      'Entity beginning at UTF-16 offset 0 ends after the end of the text at UTF-16 offset 2',
+    ],
+  ];
+  for (const [text, entities, expectedError] of cases) {
+    const result = send(account.profile.id, text, entities);
+    if (result.sent || result.reason !== 'text_invalid' || result.textError !== expectedError) {
+      throw new Error(
+        `Expected ${JSON.stringify(text)} to fail with ${expectedError}, received ${
+          JSON.stringify(result)
+        }`,
+      );
+    }
+  }
+
+  // Length counts the normalized text, so trailing whitespace does not make text too long.
+  const longResult = send(account.profile.id, `${'x'.repeat(MAX_TEXT_MESSAGE_LENGTH)}  `);
+  if (!longResult.sent) {
+    throw new Error(
+      `Expected trimmed text at the length limit to be sent, received ${
+        JSON.stringify(longResult)
+      }`,
+    );
+  }
+  if (publishedEvents.length !== 2) {
+    throw new Error('Expected rejected bot messages not to be stored or published');
+  }
+});
+
+Deno.test('PrivateMessagingService normalizes account text as a Telegram client does', () => {
+  const { virtualUsers, publishedEvents, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const send = (text: string) =>
+    privateMessaging.sendAccountMessage({
+      fromAccountId: account.profile.id,
+      to: { type: 'private', botId: bot.profile.id },
+      text,
+    });
+
+  const result = send('  /start\r\n');
+  if (
+    !result.sent || result.message.text !== '/start' ||
+    JSON.stringify(result.message.entities) !==
+      JSON.stringify([{ type: 'bot_command', offset: 0, length: 6 }])
+  ) {
+    throw new Error(`Expected trimmed text with its command, received ${JSON.stringify(result)}`);
+  }
+  const blankResult = send(' \n ');
+  if (
+    blankResult.sent || blankResult.reason !== 'text_invalid' ||
+    blankResult.textError !== 'Text must be non-empty' || publishedEvents.length !== 1
+  ) {
+    throw new Error(`Expected blank text to be rejected, received ${JSON.stringify(blankResult)}`);
+  }
+});
+
+Deno.test('PrivateMessagingService treats changed entities as an edit of the text', () => {
+  const { virtualUsers, userMessageBoxes, privateMessaging, advanceClockSeconds } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot);
+  const botMessageId = expectBotMessageId(userMessageBoxes, bot, botMessage.id);
+  const editText = (entities: readonly TextEntity[]) =>
+    privateMessaging.editBotMessageText({
+      fromBotId: bot.profile.id,
+      chat: { type: 'private', accountId: account.profile.id },
+      botMessageId,
+      text: botMessage.text,
+      entities,
+    });
+  advanceClockSeconds(5);
+
+  const boldEdit = editText([{ type: 'bold', offset: 0, length: 8 }]);
+  if (
+    !boldEdit.edited || boldEdit.message.textEditedAtUnixSeconds !== 1_700_000_005 ||
+    JSON.stringify(boldEdit.message.entities) !==
+      JSON.stringify([{ type: 'bold', offset: 0, length: 8 }])
+  ) {
+    throw new Error(
+      `Expected formatting alone to be a dated edit, received ${JSON.stringify(boldEdit)}`,
+    );
+  }
+  const repeatedEdit = editText([{ type: 'bold', offset: 0, length: 4 }, {
+    type: 'bold',
+    offset: 4,
+    length: 4,
+  }]);
+  if (repeatedEdit.edited || repeatedEdit.reason !== 'message_not_modified') {
+    throw new Error(
+      `Expected formatting that normalizes to the same entities to be no edit, received ${
+        JSON.stringify(repeatedEdit)
+      }`,
+    );
   }
 });
 

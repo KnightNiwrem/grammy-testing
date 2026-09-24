@@ -122,7 +122,7 @@ export class MessageRepository {
 }
 
 function copyEntities(entities: readonly TextEntity[]): readonly TextEntity[] {
-  return entities.map((entity) => ({ ...entity }));
+  return entities.map((entity): TextEntity => ({ ...entity }));
 }
 
 function copyInlineKeyboard(inlineKeyboard: InlineKeyboard): InlineKeyboard {

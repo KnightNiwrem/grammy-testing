@@ -1,4 +1,9 @@
-import { findBotCommandEntities } from '../text_entities/bot_command.ts';
+import {
+  fixFormattedText,
+  type FormattedText,
+  type FormattedTextFixing,
+} from '../text_entities/formatted_text.ts';
+import { areTextEntitiesEqual } from '../text_entities/text_entity_equality.ts';
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import { type InlineKeyboard, MAX_CALLBACK_DATA_BYTES } from '../types/inline_keyboard.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
@@ -44,15 +49,27 @@ export type SendAccountMessageFailureReason =
   | 'message_text_empty'
   | 'message_text_too_long';
 
+/**
+ * Telegram rejected the text or its entities while normalizing them, for example because only
+ * whitespace remains or an entity ends past the text. `textError` is TDLib's own description.
+ */
+export interface TextInvalidFailure {
+  readonly reason: 'text_invalid';
+  readonly textError: string;
+}
+
 export type SendAccountMessageResult =
   | {
     readonly sent: true;
     readonly message: PrivateTextMessage;
   }
-  | {
-    readonly sent: false;
-    readonly reason: SendAccountMessageFailureReason;
-  };
+  | (
+    & { readonly sent: false }
+    & (
+      | { readonly reason: SendAccountMessageFailureReason }
+      | TextInvalidFailure
+    )
+  );
 
 /** A bot's private chat, identified by the account at its other end. */
 export interface BotPrivateChat {
@@ -64,6 +81,8 @@ export interface SendBotMessageInput {
   readonly fromBotId: number;
   readonly to: BotPrivateChat;
   readonly text: string;
+  /** Formatting the bot specified, which Telegram validates and normalizes; omitted for none. */
+  readonly entities?: readonly TextEntity[];
   readonly inlineKeyboard?: InlineKeyboard;
 }
 
@@ -80,10 +99,13 @@ export type SendBotMessageResult =
     readonly sent: true;
     readonly message: PrivateTextMessage;
   }
-  | {
-    readonly sent: false;
-    readonly reason: SendBotMessageFailureReason;
-  };
+  | (
+    & { readonly sent: false }
+    & (
+      | { readonly reason: SendBotMessageFailureReason }
+      | TextInvalidFailure
+    )
+  );
 
 interface EditBotMessageTarget {
   readonly fromBotId: number;
@@ -94,6 +116,8 @@ interface EditBotMessageTarget {
 
 export interface EditBotMessageTextInput extends EditBotMessageTarget {
   readonly text: string;
+  /** Formatting the bot specified, which Telegram validates and normalizes; omitted for none. */
+  readonly entities?: readonly TextEntity[];
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
 }
@@ -126,6 +150,10 @@ export type EditBotMessageResult<FailureReason extends string> =
     readonly edited: false;
     readonly reason: FailureReason;
   };
+
+export type EditBotMessageTextResult =
+  | EditBotMessageResult<EditBotMessageTextFailureReason>
+  | ({ readonly edited: false } & TextInvalidFailure);
 
 export interface DeleteMessagesByBotInput {
   readonly fromBotId: number;
@@ -285,7 +313,11 @@ export class PrivateMessagingService {
     if (input.text.length === 0) {
       return { sent: false, reason: 'message_text_empty' };
     }
-    if (input.text.length > MAX_TEXT_MESSAGE_LENGTH) {
+    const textFixing = this.#fixFormattedText(input.text, []);
+    if (!textFixing.fixed) {
+      return { sent: false, reason: 'text_invalid', textError: textFixing.error };
+    }
+    if (textFixing.formattedText.text.length > MAX_TEXT_MESSAGE_LENGTH) {
       return { sent: false, reason: 'message_text_too_long' };
     }
 
@@ -299,7 +331,7 @@ export class PrivateMessagingService {
         account,
         bot,
         authorRole: 'account',
-        text: input.text,
+        formattedText: textFixing.formattedText,
       }),
     };
   }
@@ -309,7 +341,8 @@ export class PrivateMessagingService {
    * conversation, so the account must have started one with the bot.
    *
    * Checks follow Telegram's order: the text is checked for emptiness before the recipient is
-   * resolved, and for length and callback data afterward.
+   * resolved; it is then normalized with its entities, and the result is checked for length.
+   * Callback data is checked last.
    */
   sendBotMessage(input: SendBotMessageInput): SendBotMessageResult {
     const bot = this.#bots.getById(input.fromBotId);
@@ -330,7 +363,11 @@ export class PrivateMessagingService {
     if (conversation === undefined) {
       return { sent: false, reason: 'conversation_not_started' };
     }
-    if (input.text.length > MAX_TEXT_MESSAGE_LENGTH) {
+    const textFixing = this.#fixFormattedText(input.text, input.entities ?? []);
+    if (!textFixing.fixed) {
+      return { sent: false, reason: 'text_invalid', textError: textFixing.error };
+    }
+    if (textFixing.formattedText.text.length > MAX_TEXT_MESSAGE_LENGTH) {
       return { sent: false, reason: 'message_text_too_long' };
     }
     if (input.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(input.inlineKeyboard)) {
@@ -343,22 +380,20 @@ export class PrivateMessagingService {
         account,
         bot,
         authorRole: 'bot',
-        text: input.text,
+        formattedText: textFixing.formattedText,
         inlineKeyboard: input.inlineKeyboard,
       }),
     };
   }
 
   /**
-   * Replaces the text and inline keyboard of a message the bot sent. Only a changed text dates the
-   * edit. As on Telegram, the bot receives no update for its own edit.
+   * Replaces the text, entities, and inline keyboard of a message the bot sent. Only changed text
+   * or entities date the edit. As on Telegram, the bot receives no update for its own edit.
    *
    * Checks follow Telegram's order: the text is checked for emptiness before the message is
-   * resolved, and for length afterward.
+   * resolved; it is then normalized with its entities, and the result is checked for length.
    */
-  editBotMessageText(
-    input: EditBotMessageTextInput,
-  ): EditBotMessageResult<EditBotMessageTextFailureReason> {
+  editBotMessageText(input: EditBotMessageTextInput): EditBotMessageTextResult {
     if (this.#bots.getById(input.fromBotId) === undefined) {
       return { edited: false, reason: 'bot_not_found' };
     }
@@ -369,16 +404,21 @@ export class PrivateMessagingService {
     if (!resolution.resolved) {
       return { edited: false, reason: resolution.reason };
     }
-    if (input.text.length > MAX_TEXT_MESSAGE_LENGTH) {
+    const textFixing = this.#fixFormattedText(input.text, input.entities ?? []);
+    if (!textFixing.fixed) {
+      return { edited: false, reason: 'text_invalid', textError: textFixing.error };
+    }
+    const { formattedText } = textFixing;
+    if (formattedText.text.length > MAX_TEXT_MESSAGE_LENGTH) {
       return { edited: false, reason: 'message_text_too_long' };
     }
 
     const { message } = resolution;
     return this.#editBotMessage(message, {
-      text: input.text,
-      entities: findBotCommandEntities(input.text),
+      text: formattedText.text,
+      entities: formattedText.entities,
       inlineKeyboard: input.inlineKeyboard,
-      textEditedAtUnixSeconds: input.text === message.text
+      textEditedAtUnixSeconds: isSameFormattedText(formattedText, message)
         ? message.textEditedAtUnixSeconds
         : this.#currentUnixTimeSeconds(),
     });
@@ -525,9 +565,8 @@ export class PrivateMessagingService {
     if (edit.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(edit.inlineKeyboard)) {
       return { edited: false, reason: 'callback_data_invalid' };
     }
-    // Entities follow from the text, so comparing the text compares them too.
     if (
-      edit.text === message.text &&
+      isSameFormattedText(edit, message) &&
       areInlineKeyboardsEqual(edit.inlineKeyboard, message.inlineKeyboard)
     ) {
       return { edited: false, reason: 'message_not_modified' };
@@ -537,15 +576,26 @@ export class PrivateMessagingService {
   }
 
   /**
-   * Stores validated text written by one participant of an existing private conversation, numbers
+   * Normalizes text and the entities its sender specified as Telegram does, which also marks bot
+   * commands. A text mention may name any user of the session.
+   */
+  #fixFormattedText(text: string, entities: readonly TextEntity[]): FormattedTextFixing {
+    return fixFormattedText(text, entities, {
+      isMentionableUser: (userId) =>
+        this.#accounts.getById(userId) !== undefined || this.#bots.getById(userId) !== undefined,
+    });
+  }
+
+  /**
+   * Stores normalized text written by one participant of an existing private conversation, numbers
    * it in both participants' message boxes, and publishes its creation.
    */
   #storePrivateTextMessage(
-    { account, bot, authorRole, text, inlineKeyboard }: {
+    { account, bot, authorRole, formattedText, inlineKeyboard }: {
       readonly account: VirtualAccount;
       readonly bot: VirtualBot;
       readonly authorRole: PrivateConversationRole;
-      readonly text: string;
+      readonly formattedText: FormattedText;
       readonly inlineKeyboard?: InlineKeyboard;
     },
   ): PrivateTextMessage {
@@ -553,10 +603,8 @@ export class PrivateMessagingService {
       conversation: { accountId: account.profile.id, botId: bot.profile.id },
       authorRole,
       sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
-      text,
-      // Telegram marks bot commands in text sent in private chats with bots, which every private
-      // conversation here is, whichever participant writes it. Other entity types are not detected.
-      entities: findBotCommandEntities(text),
+      text: formattedText.text,
+      entities: formattedText.entities,
       inlineKeyboard,
     });
     // Telegram numbers a private message in each participant's message box. Only the bot's
@@ -579,6 +627,10 @@ function hasOnlyValidCallbackData(inlineKeyboard: InlineKeyboard): boolean {
       utf8Encoder.encode(button.callbackData).length <= MAX_CALLBACK_DATA_BYTES
     )
   );
+}
+
+function isSameFormattedText(first: FormattedText, second: FormattedText): boolean {
+  return first.text === second.text && areTextEntitiesEqual(first.entities, second.entities);
 }
 
 function areInlineKeyboardsEqual(

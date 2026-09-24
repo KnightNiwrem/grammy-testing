@@ -93,7 +93,11 @@ Deno.test('TypeScript client manages all currently implemented session resources
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: createdAccount.account.id, text: 'Hello from the bot' }),
+      body: JSON.stringify({
+        chat_id: createdAccount.account.id,
+        text: `<b>Hello</b> from the <a href="tg://user?id=${createdBot.bot.id}">bot</a>`,
+        parse_mode: 'HTML',
+      }),
     },
   );
   if (replyResponse.status !== 200) {
@@ -112,6 +116,20 @@ Deno.test('TypeScript client manages all currently implemented session resources
     history[2].text !== 'Hello from the bot'
   ) {
     throw new Error("Expected the account-bound client to retrieve both participants' messages");
+  }
+  const mentionedBot = {
+    id: createdBot.bot.id,
+    is_bot: true,
+    first_name: 'Test Bot',
+    username: 'test_bot',
+  };
+  if (
+    JSON.stringify(history[2].entities) !== JSON.stringify([
+      { type: 'bold', offset: 0, length: 5 },
+      { type: 'text_mention', offset: 15, length: 3, user: mentionedBot },
+    ])
+  ) {
+    throw new Error('Expected the client to return the formatting of a bot message');
   }
 
   const botApiPath = `/sessions/${session.id}/bot-api/bot${createdBot.token}`;

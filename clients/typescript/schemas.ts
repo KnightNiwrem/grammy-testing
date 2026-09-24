@@ -6,7 +6,9 @@ import type {
   CreatedVirtualBot,
   EmulationSession,
   InlineKeyboardMarkup,
+  MessageEntity,
   MessageSenderBot,
+  PlainMessageEntityType,
   PrivateTextMessage,
   VirtualAccountProfile,
   VirtualBotProfile,
@@ -83,11 +85,45 @@ const privateChatSchema = z.strictObject({
   username: z.string().optional(),
 });
 
-const messageEntitySchema = z.strictObject({
-  type: z.literal('bot_command'),
+const messageEntitySpanShape = {
   offset: z.number().int().nonnegative(),
   length: z.number().int().positive(),
-});
+};
+
+const messageEntitySchema: z.ZodType<MessageEntity> = z.union([
+  z.strictObject({
+    type: z.enum(
+      [
+        'bot_command',
+        'bold',
+        'italic',
+        'underline',
+        'strikethrough',
+        'spoiler',
+        'code',
+        'blockquote',
+        'expandable_blockquote',
+      ] satisfies PlainMessageEntityType[],
+    ),
+    ...messageEntitySpanShape,
+  }),
+  z.strictObject({
+    type: z.literal('pre'),
+    ...messageEntitySpanShape,
+    language: z.string().min(1).optional(),
+  }),
+  z.strictObject({ type: z.literal('text_link'), ...messageEntitySpanShape, url: z.string() }),
+  z.strictObject({
+    type: z.literal('text_mention'),
+    ...messageEntitySpanShape,
+    user: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
+  }),
+  z.strictObject({
+    type: z.literal('custom_emoji'),
+    ...messageEntitySpanShape,
+    custom_emoji_id: z.string().regex(/^-?\d+$/),
+  }),
+]);
 
 const inlineKeyboardMarkupSchema: z.ZodType<InlineKeyboardMarkup> = z.strictObject({
   inline_keyboard: z.array(

@@ -3,13 +3,15 @@ import type {
   BotApiCallbackQuery,
   BotApiInlineKeyboardButton,
   BotApiInlineKeyboardMarkup,
+  BotApiMessageEntity,
   BotApiPrivateTextMessage,
+  BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
 import type { InlineKeyboard, InlineKeyboardButton } from '../types/inline_keyboard.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
 import type { VirtualBotProfile } from '../types/virtual_bot.ts';
-import type { PrivateTextMessage } from '../types/virtual_message.ts';
+import type { PrivateTextMessage, TextEntity } from '../types/virtual_message.ts';
 
 export interface PrivateTextMessageForBotProjectionInput {
   readonly message: PrivateTextMessage;
@@ -19,6 +21,8 @@ export interface PrivateTextMessageForBotProjectionInput {
   readonly bot: VirtualBotProfile;
   /** The message's ID in the observing bot's message box. */
   readonly observerMessageId: number;
+  /** Every user the message's text mentions, by ID. */
+  readonly mentionedUsers: ReadonlyMap<number, BotApiUser>;
 }
 
 /**
@@ -27,12 +31,13 @@ export interface PrivateTextMessageForBotProjectionInput {
  * The chat is always the account, whoever wrote the message; the sender follows the author.
  */
 export function projectPrivateTextMessageForBot(
-  { message, account, bot, observerMessageId }: PrivateTextMessageForBotProjectionInput,
+  { message, account, bot, observerMessageId, mentionedUsers }:
+    PrivateTextMessageForBotProjectionInput,
 ): BotApiPrivateTextMessage {
   const { id, first_name, last_name, username } = account;
   return {
     message_id: observerMessageId,
-    from: message.authorRole === 'account' ? account : projectBotAsMessageSender(bot),
+    from: message.authorRole === 'account' ? account : projectBotAsUser(bot),
     chat: {
       id,
       type: 'private',
@@ -46,7 +51,7 @@ export function projectPrivateTextMessageForBot(
       : { edit_date: message.textEditedAtUnixSeconds }),
     text: message.text,
     ...(message.entities.length === 0 ? {} : {
-      entities: message.entities.map(({ type, offset, length }) => ({ type, offset, length })),
+      entities: message.entities.map((entity) => projectTextEntity(entity, mentionedUsers)),
     }),
     ...(message.inlineKeyboard === undefined
       ? {}
@@ -75,7 +80,8 @@ export function projectCallbackQueryForBot(
   };
 }
 
-function projectBotAsMessageSender(bot: VirtualBotProfile): BotApiBotUser {
+/** Shows a bot as messages show users, without the capabilities that only `getMe` reports. */
+export function projectBotAsUser(bot: VirtualBotProfile): BotApiBotUser {
   const { id, first_name, last_name, username } = bot;
   return {
     id,
@@ -84,6 +90,32 @@ function projectBotAsMessageSender(bot: VirtualBotProfile): BotApiBotUser {
     ...(last_name === undefined ? {} : { last_name }),
     username,
   };
+}
+
+function projectTextEntity(
+  entity: TextEntity,
+  mentionedUsers: ReadonlyMap<number, BotApiUser>,
+): BotApiMessageEntity {
+  const { offset, length } = entity;
+  switch (entity.type) {
+    case 'pre':
+      return entity.language === undefined
+        ? { type: 'pre', offset, length }
+        : { type: 'pre', offset, length, language: entity.language };
+    case 'text_link':
+      return { type: 'text_link', offset, length, url: entity.url };
+    case 'text_mention': {
+      const user = mentionedUsers.get(entity.userId);
+      if (user === undefined) {
+        throw new Error(`Mentioned user ${entity.userId} was not provided`);
+      }
+      return { type: 'text_mention', offset, length, user };
+    }
+    case 'custom_emoji':
+      return { type: 'custom_emoji', offset, length, custom_emoji_id: entity.customEmojiId };
+    default:
+      return { type: entity.type, offset, length };
+  }
 }
 
 function projectInlineKeyboardMarkup(inlineKeyboard: InlineKeyboard): BotApiInlineKeyboardMarkup {

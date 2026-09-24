@@ -810,7 +810,7 @@ Deno.test('sendMessage replies only in private chats the account has started', a
     'Bad Request: message is too long',
   );
   await expectBadRequest({ chat_id: '@ada', text: 'Hello' });
-  await expectBadRequest({ chat_id: accountId, text: 'Hello', parse_mode: 'HTML' });
+  await expectBadRequest({ chat_id: accountId, text: 'Hello', message_effect_id: '1' });
 
   const updatesResponse = await api.request(`${botApiPath}/getUpdates`);
   const updatesBody: unknown = await updatesResponse.json();
@@ -930,7 +930,7 @@ Deno.test('sendMessage attaches an inline keyboard from every request encoding',
   )).json();
   if (
     !isMessageHistoryResponse(historyBody) ||
-    JSON.stringify((historyBody.messages[1] as Record<string, unknown>).reply_markup) !==
+    JSON.stringify(historyBody.messages[1].reply_markup) !==
       expectedMarkup
   ) {
     throw new Error('Expected history to show the inline keyboard');
@@ -1406,7 +1406,7 @@ Deno.test('a grammY bot answers an inline keyboard press and edits its message',
       : undefined;
     if (
       menuMessage?.text !== 'Chosen: no' ||
-      (menuMessage as Record<string, unknown>).reply_markup !== undefined
+      menuMessage.reply_markup !== undefined
     ) {
       throw new Error(
         `Expected the edited menu without buttons, received ${JSON.stringify(menuMessage)}`,
@@ -1709,6 +1709,227 @@ Deno.test('private message routes validate participants and request bodies', asy
 
 /** Creates a session holding a bot and an account that can message it. */
 /** Returns what `pending` settles to, failing if it is still pending after `milliseconds`. */
+Deno.test('sendMessage and editMessageText format text from parse_mode or entities', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  await sendText('Hi');
+  const expectBadRequest = async (
+    methodName: string,
+    parameters: Record<string, unknown>,
+    expectedDescription: string,
+  ) => {
+    const { status, body } = await callBotApi(api, `${botApiPath}/${methodName}`, parameters);
+    if (status !== 400 || !isBadRequestResponse(body) || body.description !== expectedDescription) {
+      throw new Error(
+        `Expected ${methodName} ${
+          JSON.stringify(parameters)
+        } to fail with ${expectedDescription}, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  };
+
+  const htmlResponse = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text:
+      `<b>Hello</b>, <a href="tg://user?id=${accountId}">Ada</a>! <a href="grammy.dev">Docs</a>\n<pre><code class="language-ts">bot.start();</code></pre>`,
+    parse_mode: 'HTML',
+  });
+  const htmlMessage = botApiResult(htmlResponse.body);
+  const expectedHtmlEntities = [
+    { type: 'bold', offset: 0, length: 5 },
+    { type: 'text_mention', offset: 7, length: 3, user: createdAccount.account },
+    { type: 'text_link', offset: 12, length: 4, url: 'http://grammy.dev/' },
+    { type: 'pre', offset: 17, length: 12, language: 'ts' },
+  ];
+  if (
+    htmlMessage?.text !== 'Hello, Ada! Docs\nbot.start();' ||
+    JSON.stringify(htmlMessage.entities) !== JSON.stringify(expectedHtmlEntities)
+  ) {
+    throw new Error(
+      `Expected the HTML to be parsed, received ${JSON.stringify(htmlResponse.body)}`,
+    );
+  }
+
+  // A form-encoded request sends entities as JSON text; types Telegram detects itself are ignored.
+  const entitiesResponse = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      chat_id: String(accountId),
+      text: 'Tap /start now',
+      entities: JSON.stringify([
+        { type: 'italic', offset: 9, length: 3 },
+        { type: 'bot_command', offset: 0, length: 3 },
+      ]),
+    }),
+  });
+  const entitiesMessage = botApiResult(await entitiesResponse.json());
+  if (
+    JSON.stringify(entitiesMessage?.entities) !== JSON.stringify([
+      { type: 'bot_command', offset: 4, length: 6 },
+      { type: 'italic', offset: 9, length: 1 },
+      { type: 'italic', offset: 10, length: 2 },
+    ])
+  ) {
+    throw new Error(
+      `Expected specified and detected entities, received ${JSON.stringify(entitiesMessage)}`,
+    );
+  }
+
+  const markdownV2Error =
+    "Bad Request: can't parse entities: Character '.' is reserved and must be escaped with the preceding '\\'";
+  // Telegram parses markup before it looks at the chat, but validates entities after it.
+  await expectBadRequest('sendMessage', {
+    chat_id: 999,
+    text: 'Version 1.0',
+    parse_mode: 'MarkdownV2',
+  }, markdownV2Error);
+  await expectBadRequest('sendMessage', {
+    chat_id: 999,
+    text: 'x',
+    entities: [{ type: 'text_link', offset: 0, length: 1, url: 'localhost' }],
+  }, 'Bad Request: chat not found');
+  await expectBadRequest('sendMessage', {
+    chat_id: accountId,
+    text: 'x',
+    entities: [{ type: 'text_link', offset: 0, length: 1, url: 'localhost' }],
+  }, "Bad Request: entity URL 'localhost' is invalid: Wrong HTTP URL");
+  await expectBadRequest('sendMessage', {
+    chat_id: accountId,
+    text: '*unclosed',
+    parse_mode: 'markdown',
+  }, "Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 0");
+  await expectBadRequest('sendMessage', {
+    chat_id: accountId,
+    text: 'Hi',
+    parse_mode: 'XML',
+  }, 'Bad Request: unsupported parse_mode');
+  await expectBadRequest('sendMessage', {
+    chat_id: accountId,
+    text: 'Hi',
+    entities: [{ type: 'shiny', offset: 0, length: 2 }],
+  }, "Bad Request: can't parse MessageEntity: Unsupported type specified");
+  await expectBadRequest('sendMessage', {
+    chat_id: accountId,
+    text: 'Hi',
+    entities: [{ type: 'bold', offset: '0', length: 2 }],
+  }, 'Bad Request: invalid sendMessage parameters');
+  await expectBadRequest('sendMessage', {
+    chat_id: accountId,
+    text: 'Hi',
+    entities: [{ type: 'text_mention', offset: 0, length: 2, user: { id: 999 } }],
+  }, 'Bad Request: user not found');
+  await expectBadRequest('sendMessage', {
+    chat_id: accountId,
+    text: '<tg-time unix="1700000000">now</tg-time>',
+    parse_mode: 'HTML',
+  }, 'Bad Request: date_time entities are not supported');
+  await expectBadRequest(
+    'sendMessage',
+    { chat_id: accountId, text: ' \n ' },
+    'Bad Request: text must be non-empty',
+  );
+
+  const plainResponse = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Plain *text*',
+    parse_mode: 'none',
+  });
+  const plainMessage = botApiResult(plainResponse.body);
+  if (plainMessage?.text !== 'Plain *text*' || typeof plainMessage.message_id !== 'number') {
+    throw new Error(
+      `Expected parse_mode none to keep the text, received ${JSON.stringify(plainResponse.body)}`,
+    );
+  }
+  const editParameters = {
+    chat_id: accountId,
+    message_id: plainMessage.message_id,
+    text: 'Plain *text*',
+    parse_mode: 'MarkdownV2',
+  };
+  const editResponse = await callBotApi(api, `${botApiPath}/editMessageText`, editParameters);
+  const editedMessage = botApiResult(editResponse.body);
+  if (
+    editedMessage?.text !== 'Plain text' ||
+    JSON.stringify(editedMessage.entities) !==
+      JSON.stringify([{ type: 'bold', offset: 6, length: 4 }]) ||
+    typeof editedMessage.edit_date !== 'number'
+  ) {
+    throw new Error(
+      `Expected the edit to apply formatting, received ${JSON.stringify(editResponse.body)}`,
+    );
+  }
+  await expectBadRequest(
+    'editMessageText',
+    editParameters,
+    'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message',
+  );
+
+  const historyBody: unknown = await (await api.request(
+    `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/messages`,
+  )).json();
+  const storedEdit = isMessageHistoryResponse(historyBody)
+    ? historyBody.messages.find((message) => message.message_id === plainMessage.message_id)
+    : undefined;
+  if (JSON.stringify(storedEdit?.entities) !== JSON.stringify(editedMessage.entities)) {
+    throw new Error(
+      `Expected history to show the formatted edit, received ${JSON.stringify(historyBody)}`,
+    );
+  }
+});
+
+Deno.test('a grammY bot replies with HTML and receives Telegram errors for bad MarkdownV2', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const markdownV2Failure = Promise.withResolvers<unknown>();
+  grammyBot.command('start', async (context) => {
+    await context.reply(`<b>Welcome</b>, ${context.from?.first_name}!`, { parse_mode: 'HTML' });
+    try {
+      await context.reply('Version 2.0 is out!', { parse_mode: 'MarkdownV2' });
+      markdownV2Failure.resolve(undefined);
+    } catch (error) {
+      markdownV2Failure.resolve(error);
+    }
+  });
+  const polling = grammyBot.start();
+
+  try {
+    await sendText('/start');
+    // Polling ends only when stopped, so settling first means startup failed.
+    const failure = await Promise.race([markdownV2Failure.promise, polling.then(() => undefined)]);
+    if (
+      !(failure instanceof GrammyError) || failure.error_code !== 400 ||
+      failure.description !==
+        "Bad Request: can't parse entities: Character '.' is reserved and must be escaped with the preceding '\\'"
+    ) {
+      throw new Error(`Expected grammY to report the MarkdownV2 error, received ${failure}`);
+    }
+
+    const historyBody: unknown = await (await api.request(
+      `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/messages`,
+    )).json();
+    const reply = isMessageHistoryResponse(historyBody) ? historyBody.messages.at(-1) : undefined;
+    if (
+      reply?.text !== 'Welcome, Ada!' ||
+      JSON.stringify(reply.entities) !== JSON.stringify([{ type: 'bold', offset: 0, length: 7 }])
+    ) {
+      throw new Error(
+        `Expected the formatted welcome as the last message, received ${JSON.stringify(reply)}`,
+      );
+    }
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+});
+
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,
@@ -1918,13 +2139,7 @@ function isTerminatedByOtherLongPollResponse(value: unknown): value is {
 }
 
 function isSentMessageResponse(value: unknown): value is {
-  message: {
-    message_id: number;
-    from: { id: number };
-    chat: { id: number; type: string };
-    date: number;
-    text: string;
-  };
+  message: TestPrivateTextMessage;
 } {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -1934,13 +2149,7 @@ function isSentMessageResponse(value: unknown): value is {
 }
 
 function isMessageHistoryResponse(value: unknown): value is {
-  messages: Array<{
-    message_id: number;
-    from: { id: number };
-    chat: { id: number; type: string };
-    date: number;
-    text: string;
-  }>;
+  messages: Array<TestPrivateTextMessage>;
 } {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -1953,13 +2162,7 @@ function isGetUpdatesResponse(value: unknown): value is {
   ok: true;
   result: Array<{
     update_id: number;
-    message: {
-      message_id: number;
-      from: { id: number };
-      chat: { id: number; type: string };
-      date: number;
-      text: string;
-    };
+    message: TestPrivateTextMessage;
   }>;
 } {
   if (typeof value !== 'object' || value === null) {
@@ -1975,13 +2178,20 @@ function isGetUpdatesResponse(value: unknown): value is {
   });
 }
 
-function isPrivateTextMessage(value: unknown): value is {
+/** The parts of a Bot API message these tests check. */
+interface TestPrivateTextMessage {
   message_id: number;
   from: { id: number };
   chat: { id: number; type: string };
   date: number;
   text: string;
-} {
+  /** Left unchecked; tests compare it as a whole. */
+  entities?: unknown;
+  /** Left unchecked; tests compare it as a whole. */
+  reply_markup?: unknown;
+}
+
+function isPrivateTextMessage(value: unknown): value is TestPrivateTextMessage {
   if (typeof value !== 'object' || value === null) {
     return false;
   }

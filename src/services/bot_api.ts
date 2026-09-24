@@ -1,18 +1,65 @@
+import { isParseMode, parseMarkup } from '../text_entities/parse_mode.ts';
 import type { BotApiPrivateTextMessage } from '../types/bot_api.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
-import type { PrivateTextMessage } from '../types/virtual_message.ts';
+import type { PrivateTextMessage, TextEntity } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
 
 export interface DeleteWebhookRequest {
   readonly dropPendingUpdates: boolean;
 }
 
-export interface SendMessageRequest {
+/** The most UTF-8 bytes of text the Bot API reads before applying its formatting. */
+const MAX_FORMATTED_TEXT_BYTES = 1 << 15;
+
+/** A parse mode that leaves text as it is, as omitting it does. */
+const NO_PARSE_MODE = 'none';
+
+/** Formatted text as a bot specified it: entities from `entities` or from parsed markup. */
+export interface SpecifiedFormattedText {
+  readonly text: string;
+  /**
+   * Validated and normalized as Telegram does before the message is stored; omitted for plain
+   * text.
+   */
+  readonly entities?: readonly TextEntity[];
+}
+
+export interface ReadFormattedTextRequest {
+  /** Nonempty message text, which may be written in markup. */
+  readonly text: string;
+  /** The `parse_mode` parameter, matched case-insensitively. */
+  readonly parseMode?: string;
+  /** The `entities` parameter, which a parse mode overrides. */
+  readonly entities: readonly TextEntity[];
+}
+
+export type ReadFormattedTextFailureReason =
+  | 'text_too_long'
+  | 'parse_mode_unsupported'
+  | 'text_encoding_invalid'
+  | 'date_time_unsupported';
+
+export type ReadFormattedTextResult =
+  | { readonly read: true; readonly formattedText: SpecifiedFormattedText }
+  | { readonly read: false; readonly reason: ReadFormattedTextFailureReason }
+  | {
+    readonly read: false;
+    readonly reason: 'markup_invalid';
+    /** TDLib's description of the markup error. */
+    readonly markupError: string;
+  };
+
+/** Telegram rejected the text or its entities; `textError` is TDLib's own description. */
+interface TextInvalidFailure {
+  readonly reason: 'text_invalid';
+  readonly textError: string;
+}
+
+export interface SendMessageRequest extends SpecifiedFormattedText {
   /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
   readonly chatId: number;
-  readonly text: string;
   readonly inlineKeyboard?: InlineKeyboard;
 }
 
@@ -24,7 +71,13 @@ export type SendMessageFailureReason =
 
 export type SendMessageResult =
   | { readonly sent: true; readonly message: BotApiPrivateTextMessage }
-  | { readonly sent: false; readonly reason: SendMessageFailureReason };
+  | (
+    & { readonly sent: false }
+    & (
+      | { readonly reason: SendMessageFailureReason }
+      | TextInvalidFailure
+    )
+  );
 
 /** A message of one of the bot's chats, as Bot API methods address it. */
 interface MessageTarget {
@@ -34,8 +87,7 @@ interface MessageTarget {
   readonly messageId: number;
 }
 
-export interface EditMessageTextRequest extends MessageTarget {
-  readonly text: string;
+export interface EditMessageTextRequest extends MessageTarget, SpecifiedFormattedText {
   /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
   readonly inlineKeyboard?: InlineKeyboard;
 }
@@ -60,6 +112,10 @@ export type EditMessageTextFailureReason =
 export type EditMessageResult<FailureReason extends string> =
   | { readonly edited: true; readonly message: BotApiPrivateTextMessage }
   | { readonly edited: false; readonly reason: FailureReason };
+
+export type EditMessageTextResult =
+  | EditMessageResult<EditMessageTextFailureReason>
+  | ({ readonly edited: false } & TextInvalidFailure);
 
 export type DeleteMessageRequest = MessageTarget;
 
@@ -117,7 +173,8 @@ type BotMessageSendingResult =
       | 'conversation_not_started'
       | 'message_text_too_long'
       | 'callback_data_invalid';
-  };
+  }
+  | ({ readonly sent: false } & TextInvalidFailure);
 
 /** Why an edit of either kind can fail, apart from failures about the text. */
 type BotMessageEditFailureReason =
@@ -138,6 +195,7 @@ interface BotMessaging {
     readonly fromBotId: number;
     readonly to: BotPrivateChat;
     readonly text: string;
+    readonly entities?: readonly TextEntity[];
     readonly inlineKeyboard?: InlineKeyboard;
   }): BotMessageSendingResult;
   editBotMessageText(input: {
@@ -145,10 +203,13 @@ interface BotMessaging {
     readonly chat: BotPrivateChat;
     readonly botMessageId: number;
     readonly text: string;
+    readonly entities?: readonly TextEntity[];
     readonly inlineKeyboard?: InlineKeyboard;
-  }): BotMessageEditingResult<
-    BotMessageEditFailureReason | 'message_text_empty' | 'message_text_too_long'
-  >;
+  }):
+    | BotMessageEditingResult<
+      BotMessageEditFailureReason | 'message_text_empty' | 'message_text_too_long'
+    >
+    | ({ readonly edited: false } & TextInvalidFailure);
   editBotMessageInlineKeyboard(input: {
     readonly fromBotId: number;
     readonly chat: BotPrivateChat;
@@ -244,15 +305,50 @@ export class BotApiService {
     }
   }
 
+  /**
+   * Reads message text with its `parse_mode` or `entities`, as the official Bot API server's
+   * `Client::get_formatted_text` does before it looks at the chat: a parse mode other than `none`
+   * turns markup into entities and overrides `entities`. The result still has to pass the checks
+   * that sending or editing applies.
+   *
+   * Date and time entities, which Telegram's markup can produce, are not supported.
+   */
+  readFormattedText(
+    { text, parseMode, entities }: ReadFormattedTextRequest,
+  ): ReadFormattedTextResult {
+    if (new TextEncoder().encode(text).length > MAX_FORMATTED_TEXT_BYTES) {
+      return { read: false, reason: 'text_too_long' };
+    }
+    const parseModeName = parseMode?.toLowerCase() ?? '';
+    if (parseModeName.length === 0 || parseModeName === NO_PARSE_MODE) {
+      return { read: true, formattedText: { text, entities } };
+    }
+    if (!isParseMode(parseModeName)) {
+      return { read: false, reason: 'parse_mode_unsupported' };
+    }
+    if (!text.isWellFormed()) {
+      return { read: false, reason: 'text_encoding_invalid' };
+    }
+
+    const parsing = parseMarkup(text, parseModeName);
+    if (parsing.parsed) {
+      return { read: true, formattedText: { text: parsing.text, entities: parsing.entities } };
+    }
+    return parsing.reason === 'markup_invalid'
+      ? { read: false, reason: 'markup_invalid', markupError: parsing.error }
+      : { read: false, reason: parsing.reason };
+  }
+
   /** Sends text to a private chat; other chat types are not supported yet. */
   sendMessage(
     authenticatedBot: VirtualBotProfile,
-    { chatId, text, inlineKeyboard }: SendMessageRequest,
+    { chatId, text, entities, inlineKeyboard }: SendMessageRequest,
   ): SendMessageResult {
     const result = this.#botMessages.sendBotMessage({
       fromBotId: authenticatedBot.id,
       to: { type: 'private', accountId: chatId },
       text,
+      entities,
       inlineKeyboard,
     });
     if (result.sent) {
@@ -263,6 +359,8 @@ export class BotApiService {
     }
 
     switch (result.reason) {
+      case 'text_invalid':
+        return result;
       case 'message_text_empty':
       case 'message_text_too_long':
       case 'callback_data_invalid':
@@ -275,22 +373,25 @@ export class BotApiService {
       case 'bot_not_found':
         throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
       default: {
-        const unhandledReason: never = result.reason;
-        throw new Error(`Unhandled bot message failure: ${unhandledReason}`);
+        const unhandledFailure: never = result;
+        throw new Error(`Unhandled bot message failure: ${JSON.stringify(unhandledFailure)}`);
       }
     }
   }
 
-  /** Replaces the text and inline keyboard of a message the bot sent to a private chat. */
+  /**
+   * Replaces the text, entities, and inline keyboard of a message the bot sent to a private chat.
+   */
   editMessageText(
     authenticatedBot: VirtualBotProfile,
-    { chatId, messageId, text, inlineKeyboard }: EditMessageTextRequest,
-  ): EditMessageResult<EditMessageTextFailureReason> {
+    { chatId, messageId, text, entities, inlineKeyboard }: EditMessageTextRequest,
+  ): EditMessageTextResult {
     const result = this.#botMessages.editBotMessageText({
       fromBotId: authenticatedBot.id,
       chat: { type: 'private', accountId: chatId },
       botMessageId: messageId,
       text,
+      entities,
       inlineKeyboard,
     });
     if (result.edited) {
@@ -298,6 +399,8 @@ export class BotApiService {
     }
 
     switch (result.reason) {
+      case 'text_invalid':
+        return result;
       case 'message_text_empty':
       case 'message_text_too_long':
         return { edited: false, reason: result.reason };

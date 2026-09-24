@@ -291,7 +291,8 @@
       {
         "from": "bot-api-service",
         "allow": [
-          "domain"
+          "domain",
+          "text-entity-detection"
         ],
         "allowTypeOnly": [
           "update-polling"

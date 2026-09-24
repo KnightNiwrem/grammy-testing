@@ -9,23 +9,28 @@ history, and receiving account messages through the Bot API `getUpdates` method,
 `allowed_updates` subscription. As on Telegram, a bot has at most one waiting long poll: a newer one
 ends the earlier request with a `409 Conflict`, so tests notice when two bot instances poll at once.
 Ending a session answers its bots' waiting long polls at once, without updates. Bots reply with the
-Bot API `sendMessage` method, which sends plain text to an account that has written to the bot,
-optionally with an inline keyboard of callback and URL buttons; formatting and reply keyboards are
-not supported yet. Replies appear in conversation history, and, as on Telegram, the bot receives no
-update for them. An account can press a callback button, which sends the bot a `callback_query`
-update; the bot answers with `answerCallbackQuery`, and the test reads the answer from the pressed
-callback query. A press can create the callback query already expired, to check how a bot handles a
-query it can no longer answer, such as one that arrives after downtime. Bots edit their messages
-with `editMessageText` and `editMessageReplyMarkup`, and delete messages that either side wrote in
-their private chats with `deleteMessage` and `deleteMessages`; deleted messages leave the
-conversation history. With `deleteWebhook` and `getMe` also implemented, a grammY bot can run with
-`bot.start()` and stop with `bot.stop()`. As Telegram does in private chats with bots, the emulator
-marks bot commands such as `/start` with `bot_command` entities, so framework command handlers match
-them; other entity types are not detected yet. Bot API requests follow Telegram's conventions: GET
-or POST, case-insensitive method names, and parameters in the query string or a JSON, URL-encoded,
-or multipart body. Bot API failures, including calls to methods the emulator does not implement,
-return Telegram-shaped JSON errors that clients report as API errors. The session creation response
-identifies its Bot API root. Other routes described in `openapi.yaml` are not implemented yet.
+Bot API `sendMessage` method, which sends text to an account that has written to the bot, optionally
+with an inline keyboard of callback and URL buttons; reply keyboards are not supported yet. Text can
+be formatted with `parse_mode` (`HTML`, `MarkdownV2`, or legacy `Markdown`) or with `entities`,
+which the emulator reads, validates, and normalizes with Telegram's own rules and error messages, so
+a test catches markup that Telegram would reject, such as an unescaped `.` in MarkdownV2. As on
+Telegram, message text from either side is trimmed and cleaned of control characters. Replies appear
+in conversation history, and, as on Telegram, the bot receives no update for them. An account can
+press a callback button, which sends the bot a `callback_query` update; the bot answers with
+`answerCallbackQuery`, and the test reads the answer from the pressed callback query. A press can
+create the callback query already expired, to check how a bot handles a query it can no longer
+answer, such as one that arrives after downtime. Bots edit their messages with `editMessageText` and
+`editMessageReplyMarkup`, and delete messages that either side wrote in their private chats with
+`deleteMessage` and `deleteMessages`; deleted messages leave the conversation history. With
+`deleteWebhook` and `getMe` also implemented, a grammY bot can run with `bot.start()` and stop with
+`bot.stop()`. As Telegram does in private chats with bots, the emulator marks bot commands such as
+`/start` with `bot_command` entities, so framework command handlers match them; other entity types
+that Telegram detects, such as URLs and mentions, are not detected yet, and date and time entities
+are not supported. Bot API requests follow Telegram's conventions: GET or POST, case-insensitive
+method names, and parameters in the query string or a JSON, URL-encoded, or multipart body. Bot API
+failures, including calls to methods the emulator does not implement, return Telegram-shaped JSON
+errors that clients report as API errors. The session creation response identifies its Bot API root.
+Other routes described in `openapi.yaml` are not implemented yet.
 
 ## TypeScript client
 

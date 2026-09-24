@@ -11,16 +11,60 @@ export const MAX_TEXT_MESSAGE_LENGTH = 4_096;
  */
 export type CanonicalMessageId = string;
 
-/**
- * A marked span of message text.
- *
- * Offsets and lengths count UTF-16 code units, as Telegram's message entities do.
- */
-export interface TextEntity {
-  readonly type: 'bot_command';
+/** A span of message text. Offsets and lengths count UTF-16 code units, as Telegram's do. */
+interface TextSpan {
   readonly offset: number;
   readonly length: number;
 }
+
+/** Entity types that carry nothing beyond their span. */
+export type PlainTextEntityType =
+  | 'bot_command'
+  | 'bold'
+  | 'italic'
+  | 'underline'
+  | 'strikethrough'
+  | 'spoiler'
+  | 'code'
+  | 'blockquote'
+  | 'expandable_blockquote';
+
+export interface PlainTextEntity extends TextSpan {
+  readonly type: PlainTextEntityType;
+}
+
+/** Preformatted text, optionally naming the programming language of its code. */
+export interface PreTextEntity extends TextSpan {
+  readonly type: 'pre';
+  /** Omitted for a block without a language. */
+  readonly language?: string;
+}
+
+export interface TextLinkEntity extends TextSpan {
+  readonly type: 'text_link';
+  /** The link as Telegram normalized it. */
+  readonly url: string;
+}
+
+/** A mention of a user by ID, for users without a username. */
+export interface TextMentionEntity extends TextSpan {
+  readonly type: 'text_mention';
+  readonly userId: number;
+}
+
+export interface CustomEmojiEntity extends TextSpan {
+  readonly type: 'custom_emoji';
+  /** Telegram's decimal text form of the custom emoji's 64-bit identifier. */
+  readonly customEmojiId: string;
+}
+
+/** A marked span of message text: formatting, a link, or a detected bot command. */
+export type TextEntity =
+  | PlainTextEntity
+  | PreTextEntity
+  | TextLinkEntity
+  | TextMentionEntity
+  | CustomEmojiEntity;
 
 /** Canonical text stored in a private conversation, written by either participant. */
 export interface PrivateTextMessage {

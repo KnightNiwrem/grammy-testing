@@ -6,6 +6,11 @@ import { MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH } from '../../../types/callback_q
 import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { VirtualBotProfile } from '../../../types/virtual_bot.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
+import {
+  DATE_TIME_UNSUPPORTED_DESCRIPTION,
+  messageEntitiesParameter,
+  readMessageEntitiesParameter,
+} from './message_entities_parameter.ts';
 import { inlineKeyboardMarkupParameter } from './reply_markup_parameter.ts';
 import {
   booleanParameter,
@@ -36,6 +41,11 @@ const CHAT_ID_EMPTY_DESCRIPTION = 'Bad Request: chat_id is empty';
 const CHAT_NOT_FOUND_DESCRIPTION = 'Bad Request: chat not found';
 const MESSAGE_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: message is too long';
 const BUTTON_DATA_INVALID_DESCRIPTION = 'Bad Request: BUTTON_DATA_INVALID';
+
+/** Telegram's descriptions for message text or formatting it cannot read. */
+const FORMATTED_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: text is too long';
+const PARSE_MODE_UNSUPPORTED_DESCRIPTION = 'Bad Request: unsupported parse_mode';
+const TEXT_ENCODING_INVALID_DESCRIPTION = 'Bad Request: text must be encoded in UTF-8';
 
 /** Telegram's descriptions for rejected message edits. */
 const MESSAGE_IDENTIFIER_NOT_SPECIFIED_DESCRIPTION =
@@ -78,6 +88,8 @@ const deleteWebhookParametersSchema = z.strictObject({
 const sendMessageParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   text: z.string().default(''),
+  parse_mode: z.string().optional(),
+  entities: messageEntitiesParameter().optional(),
   reply_markup: inlineKeyboardMarkupParameter().optional(),
 });
 
@@ -87,6 +99,8 @@ const editMessageTextParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   message_id: integerParameter(z.int()).optional(),
   text: z.string().default(''),
+  parse_mode: z.string().optional(),
+  entities: messageEntitiesParameter().optional(),
   reply_markup: inlineKeyboardMarkupParameter().optional(),
 });
 
@@ -140,6 +154,15 @@ type BotApiRouteContext = Context<BotApiRouteContextTypes>;
 
 /** The outcome of either edit method; editMessageReplyMarkup fails for a subset of the reasons. */
 type MessageEditResult = ReturnType<EmulationSession['botApi']['editMessageText']>;
+
+type SendMessageResult = ReturnType<EmulationSession['botApi']['sendMessage']>;
+
+type FormattedTextReadingResult = ReturnType<EmulationSession['botApi']['readFormattedText']>;
+
+/** Message text with the entities its bot specified, or the error response for reading it. */
+type SpecifiedFormattedTextReading =
+  | Extract<FormattedTextReadingResult, { readonly read: true }>
+  | { readonly read: false; readonly response: Response };
 
 type BotApiMethodHandler = (
   context: BotApiRouteContext,
@@ -257,30 +280,44 @@ function handleSendMessage(
   context: BotApiRouteContext,
   parameters: BotApiRequestParameters,
 ): Response {
+  const invalidParametersDescription = 'Bad Request: invalid sendMessage parameters';
   const parsedParameters = sendMessageParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid sendMessage parameters');
+    return botApiError(context, 400, invalidParametersDescription);
   }
-  const { chat_id: chatId, text, reply_markup: inlineKeyboard } = parsedParameters.data;
+  const { chat_id: chatId, text, parse_mode: parseMode, entities, reply_markup: inlineKeyboard } =
+    parsedParameters.data;
+  // Telegram reads the text and its formatting before it looks at the chat.
+  const formattedTextReading = readSpecifiedFormattedText(
+    context,
+    { text, parseMode, entities },
+    invalidParametersDescription,
+  );
+  if (!formattedTextReading.read) {
+    return formattedTextReading.response;
+  }
   if (chatId === undefined) {
-    // Telegram checks the text before it looks at the chat.
-    return botApiError(
-      context,
-      400,
-      text.length === 0 ? MESSAGE_TEXT_EMPTY_DESCRIPTION : CHAT_ID_EMPTY_DESCRIPTION,
-    );
+    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
   }
 
-  const result = context.get('emulationSession').botApi.sendMessage(
-    context.get('authenticatedBot'),
-    { chatId, text, inlineKeyboard },
+  return sendMessageResponse(
+    context,
+    context.get('emulationSession').botApi.sendMessage(
+      context.get('authenticatedBot'),
+      { chatId, ...formattedTextReading.formattedText, inlineKeyboard },
+    ),
   );
+}
+
+function sendMessageResponse(context: BotApiRouteContext, result: SendMessageResult): Response {
   if (result.sent) {
     return context.json({ ok: true as const, result: result.message });
   }
   switch (result.reason) {
     case 'message_text_empty':
       return botApiError(context, 400, MESSAGE_TEXT_EMPTY_DESCRIPTION);
+    case 'text_invalid':
+      return botApiError(context, 400, badRequestDescription(result.textError));
     case 'chat_not_found':
       return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'message_text_too_long':
@@ -288,8 +325,8 @@ function handleSendMessage(
     case 'callback_data_invalid':
       return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
     default: {
-      const unhandledReason: never = result.reason;
-      throw new Error(`Unhandled sendMessage failure: ${unhandledReason}`);
+      const unhandledFailure: never = result;
+      throw new Error(`Unhandled sendMessage failure: ${JSON.stringify(unhandledFailure)}`);
     }
   }
 }
@@ -298,19 +335,30 @@ function handleEditMessageText(
   context: BotApiRouteContext,
   parameters: BotApiRequestParameters,
 ): Response {
+  const invalidParametersDescription = 'Bad Request: invalid editMessageText parameters';
   const parsedParameters = editMessageTextParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid editMessageText parameters');
+    return botApiError(context, 400, invalidParametersDescription);
   }
-  const { chat_id: chatId, message_id: messageId, text, reply_markup: inlineKeyboard } =
-    parsedParameters.data;
+  const {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: parseMode,
+    entities,
+    reply_markup: inlineKeyboard,
+  } = parsedParameters.data;
+  // Telegram reads the text and its formatting before it looks for the message.
+  const formattedTextReading = readSpecifiedFormattedText(
+    context,
+    { text, parseMode, entities },
+    invalidParametersDescription,
+  );
+  if (!formattedTextReading.read) {
+    return formattedTextReading.response;
+  }
   if (chatId === undefined) {
-    // Telegram checks the text before it looks for the message.
-    return botApiError(
-      context,
-      400,
-      text.length === 0 ? MESSAGE_TEXT_EMPTY_DESCRIPTION : missingChatIdDescription(messageId),
-    );
+    return botApiError(context, 400, missingChatIdDescription(messageId));
   }
 
   return editMessageResponse(
@@ -318,7 +366,7 @@ function handleEditMessageText(
     context.get('emulationSession').botApi.editMessageText(context.get('authenticatedBot'), {
       chatId,
       messageId: messageIdOrNone(messageId),
-      text,
+      ...formattedTextReading.formattedText,
       inlineKeyboard,
     }),
   );
@@ -348,6 +396,63 @@ function handleEditMessageReplyMarkup(
 }
 
 /**
+ * Reads nonempty message text with its `parse_mode` or `entities`, answering Telegram's error for
+ * text or formatting it cannot read.
+ *
+ * Entities are decoded even alongside a parse mode, which makes Telegram ignore them, so malformed
+ * entities are rejected in either case to surface the bot's mistake in tests.
+ */
+function readSpecifiedFormattedText(
+  context: BotApiRouteContext,
+  { text, parseMode, entities }: {
+    readonly text: string;
+    readonly parseMode: string | undefined;
+    readonly entities: readonly unknown[] | undefined;
+  },
+  invalidParametersDescription: string,
+): SpecifiedFormattedTextReading {
+  const failure = (description: string): SpecifiedFormattedTextReading => ({
+    read: false,
+    response: botApiError(context, 400, description),
+  });
+  if (text.length === 0) {
+    return failure(MESSAGE_TEXT_EMPTY_DESCRIPTION);
+  }
+  const entitiesReading = readMessageEntitiesParameter(
+    entities ?? [],
+    invalidParametersDescription,
+  );
+  if (!entitiesReading.read) {
+    return failure(entitiesReading.description);
+  }
+
+  const result = context.get('emulationSession').botApi.readFormattedText({
+    text,
+    parseMode,
+    entities: entitiesReading.entities,
+  });
+  if (result.read) {
+    return result;
+  }
+  switch (result.reason) {
+    case 'text_too_long':
+      return failure(FORMATTED_TEXT_TOO_LONG_DESCRIPTION);
+    case 'parse_mode_unsupported':
+      return failure(PARSE_MODE_UNSUPPORTED_DESCRIPTION);
+    case 'text_encoding_invalid':
+      return failure(TEXT_ENCODING_INVALID_DESCRIPTION);
+    case 'date_time_unsupported':
+      return failure(DATE_TIME_UNSUPPORTED_DESCRIPTION);
+    case 'markup_invalid':
+      return failure(`Bad Request: can't parse entities: ${result.markupError}`);
+    default: {
+      const unhandledFailure: never = result;
+      throw new Error(`Unhandled text reading failure: ${JSON.stringify(unhandledFailure)}`);
+    }
+  }
+}
+
+/**
  * Without `chat_id`, Telegram takes an edit without a positive `message_id` to address an inline
  * message, whose missing `inline_message_id` it reports as an unspecified message identifier.
  */
@@ -368,6 +473,8 @@ function editMessageResponse(context: BotApiRouteContext, result: MessageEditRes
   switch (result.reason) {
     case 'message_text_empty':
       return botApiError(context, 400, MESSAGE_TEXT_EMPTY_DESCRIPTION);
+    case 'text_invalid':
+      return botApiError(context, 400, badRequestDescription(result.textError));
     case 'chat_not_found':
       return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'message_not_found':
@@ -381,8 +488,8 @@ function editMessageResponse(context: BotApiRouteContext, result: MessageEditRes
     case 'message_not_modified':
       return botApiError(context, 400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
     default: {
-      const unhandledReason: never = result.reason;
-      throw new Error(`Unhandled message edit failure: ${unhandledReason}`);
+      const unhandledFailure: never = result;
+      throw new Error(`Unhandled message edit failure: ${JSON.stringify(unhandledFailure)}`);
     }
   }
 }
@@ -475,6 +582,19 @@ function handleAnswerCallbackQuery(
     return botApiError(context, 400, QUERY_ID_INVALID_DESCRIPTION);
   }
   return context.json({ ok: true as const, result: true as const });
+}
+
+/**
+ * Words a TDLib error message as the Bot API server's `fail_query_with_error` does for a bad
+ * request: prefixed, with its first letter lowercased unless it begins an error code or acronym.
+ */
+function badRequestDescription(tdlibErrorMessage: string): string {
+  const secondCharacter = tdlibErrorMessage[1] ?? '';
+  const keepsCase = secondCharacter === '_' || /[A-Z]/.test(secondCharacter);
+  const message = keepsCase
+    ? tdlibErrorMessage
+    : tdlibErrorMessage.charAt(0).toLowerCase() + tdlibErrorMessage.slice(1);
+  return `Bad Request: ${message}`;
 }
 
 /** Telegram's error body, whose `error_code` repeats the HTTP status. */

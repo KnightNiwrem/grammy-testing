@@ -1,4 +1,5 @@
 import type { VirtualAccountProfile } from './virtual_account.ts';
+import type { PlainTextEntityType } from './virtual_message.ts';
 
 export interface BotApiPrivateChat {
   readonly id: number;
@@ -8,14 +9,7 @@ export interface BotApiPrivateChat {
   readonly username?: string;
 }
 
-/** Offsets and lengths count UTF-16 code units. */
-export interface BotApiMessageEntity {
-  readonly type: 'bot_command';
-  readonly offset: number;
-  readonly length: number;
-}
-
-/** A bot as a message sender, without the capabilities that only `getMe` reports. */
+/** A bot as a message shows it, without the capabilities that only `getMe` reports. */
 export interface BotApiBotUser {
   readonly id: number;
   readonly is_bot: true;
@@ -24,7 +18,21 @@ export interface BotApiBotUser {
   readonly username: string;
 }
 
-export type BotApiMessageSender = VirtualAccountProfile | BotApiBotUser;
+/** A user as a message shows it: its sender or a user it mentions. */
+export type BotApiUser = VirtualAccountProfile | BotApiBotUser;
+
+/** Offsets and lengths count UTF-16 code units. */
+interface BotApiTextSpan {
+  readonly offset: number;
+  readonly length: number;
+}
+
+export type BotApiMessageEntity =
+  | (BotApiTextSpan & { readonly type: PlainTextEntityType })
+  | (BotApiTextSpan & { readonly type: 'pre'; readonly language?: string })
+  | (BotApiTextSpan & { readonly type: 'text_link'; readonly url: string })
+  | (BotApiTextSpan & { readonly type: 'text_mention'; readonly user: BotApiUser })
+  | (BotApiTextSpan & { readonly type: 'custom_emoji'; readonly custom_emoji_id: string });
 
 export interface BotApiCallbackInlineKeyboardButton {
   readonly text: string;
@@ -46,7 +54,7 @@ export interface BotApiInlineKeyboardMarkup {
 
 export interface BotApiPrivateTextMessage {
   readonly message_id: number;
-  readonly from: BotApiMessageSender;
+  readonly from: BotApiUser;
   readonly chat: BotApiPrivateChat;
   readonly date: number;
   /** Omitted for a message whose text was never edited. */

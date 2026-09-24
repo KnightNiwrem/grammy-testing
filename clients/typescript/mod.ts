@@ -23,6 +23,7 @@ export type {
   InlineKeyboardMarkup,
   MessageEntity,
   MessageSenderBot,
+  PlainMessageEntityType,
   PressCallbackButtonInput,
   PrivateChat,
   PrivateMessageTarget,

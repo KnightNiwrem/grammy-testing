@@ -306,6 +306,56 @@ Deno.test('BotApiService answers callback queries once, as the bot that received
   }
 });
 
+Deno.test('BotApiService reads text with its parse mode or entities', () => {
+  const { botApi } = createBotApiFixture();
+  const bold = { type: 'bold', offset: 0, length: 2 } as const;
+  const read = (text: string, parseMode?: string) =>
+    botApi.readFormattedText({ text, parseMode, entities: [bold] });
+
+  // Without a parse mode, or with `none`, the specified entities stand.
+  for (const parseMode of [undefined, '', 'None']) {
+    const result = read('*a*', parseMode);
+    if (
+      !result.read || result.formattedText.text !== '*a*' ||
+      JSON.stringify(result.formattedText.entities) !== JSON.stringify([bold])
+    ) {
+      throw new Error(
+        `Expected parse mode ${parseMode} to keep the entities, received ${JSON.stringify(result)}`,
+      );
+    }
+  }
+  // A parse mode, matched case-insensitively, overrides them.
+  const markdownResult = read('_a_', 'MARKDOWNV2');
+  if (
+    !markdownResult.read || markdownResult.formattedText.text !== 'a' ||
+    JSON.stringify(markdownResult.formattedText.entities) !==
+      JSON.stringify([{ type: 'italic', offset: 0, length: 1 }])
+  ) {
+    throw new Error(`Expected the markup to be parsed, received ${JSON.stringify(markdownResult)}`);
+  }
+
+  const failures: ReadonlyArray<readonly [ReturnType<typeof read>, string]> = [
+    [read('x'.repeat(2 ** 15 + 1), 'HTML'), 'text_too_long'],
+    [read('x'.repeat(2 ** 15 + 1)), 'text_too_long'],
+    [read('a', 'XML'), 'parse_mode_unsupported'],
+    [read('\ud800', 'HTML'), 'text_encoding_invalid'],
+    [read('<tg-time unix="1">now</tg-time>', 'html'), 'date_time_unsupported'],
+    [read('<b>', 'HTML'), 'markup_invalid'],
+  ];
+  for (const [result, expectedReason] of failures) {
+    if (result.read || result.reason !== expectedReason) {
+      throw new Error(`Expected ${expectedReason}, received ${JSON.stringify(result)}`);
+    }
+  }
+  const markupFailure = read('<b>', 'HTML');
+  if (
+    markupFailure.read || markupFailure.reason !== 'markup_invalid' ||
+    markupFailure.markupError !== 'Can\'t find end tag corresponding to start tag "b"'
+  ) {
+    throw new Error(`Expected TDLib's markup error, received ${JSON.stringify(markupFailure)}`);
+  }
+});
+
 function expectSentMessage(result: SendMessageResult): BotApiPrivateTextMessage {
   if (!result.sent) {
     throw new Error(`Expected sendMessage to succeed, received ${result.reason}`);

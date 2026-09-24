@@ -83,11 +83,33 @@ export interface PrivateChat {
 }
 
 /** Offsets and lengths count UTF-16 code units. */
-export interface MessageEntity {
-  readonly type: 'bot_command';
+interface MessageEntitySpan {
   readonly offset: number;
   readonly length: number;
 }
+
+/** Entity types that carry nothing beyond their span. */
+export type PlainMessageEntityType =
+  | 'bot_command'
+  | 'bold'
+  | 'italic'
+  | 'underline'
+  | 'strikethrough'
+  | 'spoiler'
+  | 'code'
+  | 'blockquote'
+  | 'expandable_blockquote';
+
+/** A bot command the emulator detected, or formatting a bot applied to its message. */
+export type MessageEntity =
+  | (MessageEntitySpan & { readonly type: PlainMessageEntityType })
+  | (MessageEntitySpan & { readonly type: 'pre'; readonly language?: string })
+  | (MessageEntitySpan & { readonly type: 'text_link'; readonly url: string })
+  | (MessageEntitySpan & {
+    readonly type: 'text_mention';
+    readonly user: VirtualAccountProfile | MessageSenderBot;
+  })
+  | (MessageEntitySpan & { readonly type: 'custom_emoji'; readonly custom_emoji_id: string });
 
 /** A bot as a message sender, without the capabilities that only getMe reports. */
 export interface MessageSenderBot {
