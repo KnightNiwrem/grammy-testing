@@ -4,13 +4,15 @@ import { BotRepository } from '../src/repositories/bot.ts';
 import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
+import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
-import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
+import { MessageBoxRepository } from '../src/repositories/message_box.ts';
 import {
   CallbackQueryService,
   type PressCallbackButtonFailureReason,
 } from '../src/services/callback_query.ts';
 import { PrivateMessagingService } from '../src/services/private_messaging.ts';
+import { SupergroupMessagingService } from '../src/services/supergroup_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
 
@@ -21,7 +23,7 @@ Deno.test('CallbackQueryService publishes a callback query for a pressed button'
   const result = callbackQueries.pressCallbackButton({
     fromAccountId: chat.account.profile.id,
     chat: { type: 'private', botId: chat.bot.profile.id },
-    botMessageId: chat.botMessageId,
+    messageId: chat.botMessageId,
     callbackData: 'no',
     expired: false,
   });
@@ -52,6 +54,70 @@ Deno.test('CallbackQueryService publishes a callback query for a pressed button'
   }
 });
 
+Deno.test('CallbackQueryService presses buttons on bot messages in a supergroup for members', () => {
+  const { virtualUsers, sharedChats, supergroupMessaging, callbackQueries, chat } =
+    createCallbackQueryFixture();
+  const stranger = createAccount(virtualUsers, 'Grace');
+  const supergroup = {
+    kind: 'supergroup',
+    id: -1_000_000_000_001,
+    title: 'Team',
+    chatInstance: '-42',
+  } as const;
+  sharedChats.registerSupergroup(supergroup, chat.account.profile.id);
+  sharedChats.addChatMember(supergroup.id, chat.bot.profile.id);
+  const accountMessage = supergroupMessaging.sendAccountMessage({
+    fromAccountId: chat.account.profile.id,
+    chatId: supergroup.id,
+    text: 'Hello',
+  });
+  const botMessage = supergroupMessaging.sendBotMessage({
+    fromBotId: chat.bot.profile.id,
+    chatId: supergroup.id,
+    text: 'Vote',
+    inlineKeyboard: [[{ kind: 'callback', text: 'Yes', callbackData: 'yes' }]],
+  });
+  if (!accountMessage.sent || !botMessage.sent) {
+    throw new Error('Expected the supergroup messages to be sent');
+  }
+  const press = (fromAccountId: number, chatId: number, messageId: number) =>
+    callbackQueries.pressCallbackButton({
+      fromAccountId,
+      chat: { type: 'supergroup', chatId },
+      messageId,
+      callbackData: 'yes',
+      expired: false,
+    });
+
+  const failures = [
+    press(chat.account.profile.id, -1_000_000_009_999, 2),
+    press(stranger.profile.id, supergroup.id, 2),
+    press(chat.account.profile.id, supergroup.id, 99),
+    press(chat.account.profile.id, supergroup.id, 1),
+  ].map((result) => result.pressed ? 'pressed' : result.reason);
+  if (
+    JSON.stringify(failures) !==
+      JSON.stringify([
+        'chat_not_found',
+        'not_a_member',
+        'message_not_found',
+        'callback_button_not_found',
+      ])
+  ) {
+    throw new Error(`Expected supergroup press checks, received ${JSON.stringify(failures)}`);
+  }
+
+  const result = press(chat.account.profile.id, supergroup.id, 2);
+  if (
+    !result.pressed || result.callbackQuery.botId !== chat.bot.profile.id ||
+    result.callbackQuery.accountId !== chat.account.profile.id ||
+    result.callbackQuery.messageId !== botMessage.message.id ||
+    result.callbackQuery.chatInstance !== supergroup.chatInstance
+  ) {
+    throw new Error("Expected a query for the message's bot with the supergroup's chat instance");
+  }
+});
+
 Deno.test('CallbackQueryService validates button presses before changing state', () => {
   const { virtualUsers, publishedEvents, callbackQueries, chat } = createCallbackQueryFixture();
   const strangerAccount = createAccount(virtualUsers, 'Grace');
@@ -59,59 +125,59 @@ Deno.test('CallbackQueryService validates button presses before changing state',
   const cases: {
     fromAccountId: number;
     botId: number;
-    botMessageId: number;
+    messageId: number;
     callbackData: string;
     expectedReason: PressCallbackButtonFailureReason;
   }[] = [
     {
       fromAccountId: 999,
       botId: chat.bot.profile.id,
-      botMessageId: chat.botMessageId,
+      messageId: chat.botMessageId,
       callbackData: 'yes',
       expectedReason: 'account_not_found',
     },
     {
       fromAccountId: chat.account.profile.id,
       botId: 999,
-      botMessageId: chat.botMessageId,
+      messageId: chat.botMessageId,
       callbackData: 'yes',
       expectedReason: 'bot_not_found',
     },
     {
       fromAccountId: strangerAccount.profile.id,
       botId: chat.bot.profile.id,
-      botMessageId: chat.botMessageId,
+      messageId: chat.botMessageId,
       callbackData: 'yes',
       expectedReason: 'message_not_found',
     },
     {
       fromAccountId: chat.account.profile.id,
       botId: chat.bot.profile.id,
-      botMessageId: 999,
+      messageId: 999,
       callbackData: 'yes',
       expectedReason: 'message_not_found',
     },
     {
       fromAccountId: chat.account.profile.id,
       botId: chat.bot.profile.id,
-      botMessageId: chat.botMessageId,
+      messageId: chat.botMessageId,
       callbackData: 'maybe',
       expectedReason: 'callback_button_not_found',
     },
     {
       fromAccountId: chat.account.profile.id,
       botId: chat.bot.profile.id,
-      botMessageId: chat.accountMessageId,
+      messageId: chat.accountMessageId,
       callbackData: 'yes',
       expectedReason: 'callback_button_not_found',
     },
   ];
 
-  for (const { fromAccountId, botId, botMessageId, callbackData, expectedReason } of cases) {
+  for (const { fromAccountId, botId, messageId, callbackData, expectedReason } of cases) {
     const result = callbackQueries.pressCallbackButton({
       fromAccountId,
       chat: { type: 'private', botId },
-      botMessageId,
+      messageId,
       callbackData,
       expired: false,
     });
@@ -130,7 +196,7 @@ Deno.test('CallbackQueryService lets only the receiving bot answer, and only onc
   const pressResult = callbackQueries.pressCallbackButton({
     fromAccountId: chat.account.profile.id,
     chat: { type: 'private', botId: chat.bot.profile.id },
-    botMessageId: chat.botMessageId,
+    messageId: chat.botMessageId,
     callbackData: 'yes',
     expired: false,
   });
@@ -179,7 +245,7 @@ Deno.test('CallbackQueryService records an empty answer text as no notification'
   const pressResult = callbackQueries.pressCallbackButton({
     fromAccountId: chat.account.profile.id,
     chat: { type: 'private', botId: chat.bot.profile.id },
-    botMessageId: chat.botMessageId,
+    messageId: chat.botMessageId,
     callbackData: 'yes',
     expired: false,
   });
@@ -208,7 +274,7 @@ Deno.test('CallbackQueryService shows callback queries only to the account that 
   const pressResult = callbackQueries.pressCallbackButton({
     fromAccountId: chat.account.profile.id,
     chat: { type: 'private', botId: chat.bot.profile.id },
-    botMessageId: chat.botMessageId,
+    messageId: chat.botMessageId,
     callbackData: 'yes',
     expired: false,
   });
@@ -241,7 +307,7 @@ Deno.test('CallbackQueryService delivers a query created expired that cannot be 
   const pressResult = callbackQueries.pressCallbackButton({
     fromAccountId: chat.account.profile.id,
     chat: { type: 'private', botId: chat.bot.profile.id },
-    botMessageId: chat.botMessageId,
+    messageId: chat.botMessageId,
     callbackData: 'yes',
     expired: true,
   });
@@ -273,16 +339,27 @@ function createCallbackQueryFixture() {
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const privateConversations = new PrivateConversationRepository();
-  const userMessageBoxes = new UserMessageBoxRepository();
+  const messages = new MessageRepository();
+  const messageBoxes = new MessageBoxRepository();
+  const sharedChats = new SharedChatRepository();
   const publishedEvents: ChatDomainEvent[] = [];
   const events = { publish: (event: ChatDomainEvent) => publishedEvents.push(event) };
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
     privateConversations,
-    messages: new MessageRepository(),
-    userMessageBoxes,
+    messages,
+    messageBoxes,
     blockedUsers: new BlockedUserRepository(),
+    events,
+    currentUnixTimeSeconds: () => 1_700_000_000,
+  });
+  const supergroupMessaging = new SupergroupMessagingService({
+    accounts,
+    bots,
+    sharedChats,
+    messages,
+    messageBoxes,
     events,
     currentUnixTimeSeconds: () => 1_700_000_000,
   });
@@ -291,6 +368,8 @@ function createCallbackQueryFixture() {
     bots,
     privateConversations,
     privateMessages: privateMessaging,
+    sharedChats,
+    supergroupMessages: supergroupMessaging,
     callbackQueries: new CallbackQueryRepository(),
     events,
   });
@@ -315,8 +394,8 @@ function createCallbackQueryFixture() {
   if (!accountMessage.sent || !botMessage.sent) {
     throw new Error('Expected the fixture conversation to be created');
   }
-  const accountMessageId = userMessageBoxes.getMessageId(bot.profile.id, accountMessage.message.id);
-  const botMessageId = userMessageBoxes.getMessageId(bot.profile.id, botMessage.message.id);
+  const accountMessageId = messageBoxes.getMessageId(bot.profile.id, accountMessage.message.id);
+  const botMessageId = messageBoxes.getMessageId(bot.profile.id, botMessage.message.id);
   if (accountMessageId === undefined || botMessageId === undefined) {
     throw new Error("Expected the fixture messages in the bot's message box");
   }
@@ -324,6 +403,8 @@ function createCallbackQueryFixture() {
   return {
     virtualUsers,
     privateConversations,
+    sharedChats,
+    supergroupMessaging,
     publishedEvents,
     callbackQueries,
     chat: { account, bot, botMessage: botMessage.message, botMessageId, accountMessageId },

@@ -10,7 +10,7 @@ import { MessageRepository } from '../repositories/message.ts';
 import { PrivateConversationRepository } from '../repositories/private_conversation.ts';
 import { SharedChatRepository } from '../repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../repositories/telegram_identity.ts';
-import { UserMessageBoxRepository } from '../repositories/user_message_box.ts';
+import { MessageBoxRepository } from '../repositories/message_box.ts';
 import { BotApiService } from '../services/bot_api.ts';
 import { BotBlockingService } from '../services/bot_blocking.ts';
 import { BotCommandService } from '../services/bot_command.ts';
@@ -20,6 +20,7 @@ import { BotUpdatePollingService } from '../services/bot_update_polling.ts';
 import { CallbackQueryService } from '../services/callback_query.ts';
 import { PrivateMessagingService } from '../services/private_messaging.ts';
 import { SharedChatAdministrationService } from '../services/shared_chat_administration.ts';
+import { SupergroupMessagingService } from '../services/supergroup_messaging.ts';
 import { VirtualUserService } from '../services/virtual_user.ts';
 
 export function createEmulationSession(id: string): EmulationSession {
@@ -27,32 +28,53 @@ export function createEmulationSession(id: string): EmulationSession {
   const accounts = new AccountRepository();
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
-  const sharedChatAdministration = new SharedChatAdministrationService({
-    identities,
-    accounts,
-    bots,
-    sharedChats: new SharedChatRepository(),
-  });
+  const sharedChats = new SharedChatRepository();
   const messages = new MessageRepository();
-  const userMessageBoxes = new UserMessageBoxRepository();
+  const messageBoxes = new MessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
-  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes, messages });
+  const botMessageViews = new BotMessageViewService({
+    accounts,
+    bots,
+    sharedChats,
+    messageBoxes,
+    messages,
+  });
   const botUpdateDelivery = new BotUpdateDeliveryService({
     botMessageViews,
     botUpdates,
     updateSubscriptions,
+    bots,
+    sharedChats,
+    messages,
+  });
+  const currentUnixTimeSeconds = () => Math.floor(Date.now() / 1_000);
+  const sharedChatAdministration = new SharedChatAdministrationService({
+    identities,
+    accounts,
+    bots,
+    sharedChats,
+    events: botUpdateDelivery,
+    currentUnixTimeSeconds,
   });
   const privateConversations = new PrivateConversationRepository();
   const blockedUsers = new BlockedUserRepository();
-  const currentUnixTimeSeconds = () => Math.floor(Date.now() / 1_000);
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
     privateConversations,
     messages,
-    userMessageBoxes,
+    messageBoxes,
     blockedUsers,
+    events: botUpdateDelivery,
+    currentUnixTimeSeconds,
+  });
+  const supergroupMessaging = new SupergroupMessagingService({
+    accounts,
+    bots,
+    sharedChats,
+    messages,
+    messageBoxes,
     events: botUpdateDelivery,
     currentUnixTimeSeconds,
   });
@@ -68,6 +90,8 @@ export function createEmulationSession(id: string): EmulationSession {
     bots,
     privateConversations,
     privateMessages: privateMessaging,
+    sharedChats,
+    supergroupMessages: supergroupMessaging,
     callbackQueries: new CallbackQueryRepository(),
     events: botUpdateDelivery,
   });
@@ -85,6 +109,7 @@ export function createEmulationSession(id: string): EmulationSession {
     updatePolling: botUpdatePolling,
     pendingUpdates: botUpdates,
     botMessages: privateMessaging,
+    supergroupBotMessages: supergroupMessaging,
     botMessageViews,
     callbackQueries,
     botCommands,
@@ -95,6 +120,7 @@ export function createEmulationSession(id: string): EmulationSession {
     virtualUsers,
     sharedChatAdministration,
     privateMessaging,
+    supergroupMessaging,
     botBlocking,
     callbackQueries,
     botCommands,

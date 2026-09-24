@@ -42,7 +42,12 @@ Deno.test('SharedChatRepository rejects non-unique basic-group members without s
 
 Deno.test('SharedChatRepository registers supergroups and channels with their required owner', () => {
   const sharedChats = new SharedChatRepository();
-  const supergroup = { kind: 'supergroup', id: -1_000_000_000_001, title: 'Test' } as const;
+  const supergroup = {
+    kind: 'supergroup',
+    id: -1_000_000_000_001,
+    title: 'Test',
+    chatInstance: '-42',
+  } as const;
   const channel = { kind: 'channel', id: -1_000_000_000_002, title: 'Test' } as const;
 
   const results = [

@@ -12,6 +12,7 @@ import {
   type SupergroupCreationResult,
 } from '../src/services/shared_chat_administration.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
+import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
 import type { ChatMembership } from '../src/types/chat_membership.ts';
 import type { BasicGroup, Channel, Supergroup } from '../src/types/virtual_chat.ts';
 
@@ -151,7 +152,7 @@ Deno.test('SharedChatAdministrationService validates owners before reserving sha
 });
 
 Deno.test('SharedChatAdministrationService adds permitted members to shared chats', () => {
-  const { virtualUsers, sharedChats, sharedChatAdministration } =
+  const { virtualUsers, sharedChats, publishedEvents, sharedChatAdministration } =
     createSharedChatAdministrationFixture();
   const owner = createAccount(virtualUsers, 'Ada');
   const account = createAccount(virtualUsers, 'Grace');
@@ -198,10 +199,30 @@ Deno.test('SharedChatAdministrationService adds permitted members to shared chat
     sharedChats.getChatMembership(channel.id, account.profile.id)?.status,
     'member',
   );
+  const additions = [
+    { chat: basicGroup, memberId: bot.profile.id },
+    { chat: supergroup, memberId: bot.profile.id },
+    { chat: channel, memberId: account.profile.id },
+  ];
+  const expectedEvents = additions.map(({ chat, memberId }) => ({
+    type: 'chat_member_added',
+    chat,
+    actorAccountId: owner.profile.id,
+    memberId,
+    addedAtUnixSeconds: 1_700_000_000,
+  }));
+  if (JSON.stringify(publishedEvents) !== JSON.stringify(expectedEvents)) {
+    throw new Error(
+      `Expected each addition to be published, received ${JSON.stringify(publishedEvents)}`,
+    );
+  }
+  if (!/^-?\d+$/.test(supergroup.chatInstance)) {
+    throw new Error('Expected the supergroup to have a chat instance');
+  }
 });
 
 Deno.test('SharedChatAdministrationService validates member additions before changing chat state', () => {
-  const { virtualUsers, sharedChats, sharedChatAdministration } =
+  const { virtualUsers, sharedChats, publishedEvents, sharedChatAdministration } =
     createSharedChatAdministrationFixture();
   const owner = createAccount(virtualUsers, 'Ada');
   const existingMember = createAccount(virtualUsers, 'Grace');
@@ -271,6 +292,9 @@ Deno.test('SharedChatAdministrationService validates member additions before cha
     sharedChats.getChatMembership(channel.id, bot.profile.id) !== undefined
   ) {
     throw new Error('Expected rejected member additions not to change chat memberships');
+  }
+  if (publishedEvents.length !== 1) {
+    throw new Error('Expected only the accepted member addition to be published');
   }
 });
 
@@ -386,13 +410,16 @@ function createSharedChatAdministrationFixture() {
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const sharedChats = new SharedChatRepository();
+  const publishedEvents: ChatDomainEvent[] = [];
   const sharedChatAdministration = new SharedChatAdministrationService({
     identities,
     accounts,
     bots,
     sharedChats,
+    events: { publish: (event) => publishedEvents.push(event) },
+    currentUnixTimeSeconds: () => 1_700_000_000,
   });
-  return { identities, virtualUsers, sharedChats, sharedChatAdministration };
+  return { identities, virtualUsers, sharedChats, publishedEvents, sharedChatAdministration };
 }
 
 function createAccount(virtualUsers: VirtualUserService, firstName: string) {

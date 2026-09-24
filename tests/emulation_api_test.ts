@@ -2540,6 +2540,425 @@ Deno.test('a grammY bot answers an edited message and forgets a user who blocks 
   }
 });
 
+Deno.test('an account creates a supergroup and adds a bot, which receives my_chat_member', async () => {
+  const { api, sessionPath, owner, member, bot, readerBot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  if (
+    supergroup.type !== 'supergroup' || supergroup.title !== 'Team' ||
+    supergroup.id > -1_000_000_000_000
+  ) {
+    throw new Error(`Expected a created supergroup, received ${JSON.stringify(supergroup)}`);
+  }
+
+  const { body } = await callBotApi(api, `${bot.botApiPath}/getUpdates`, {});
+  const updates = (body as { result: Array<Record<string, unknown>> }).result;
+  const botUser = {
+    id: bot.bot.id,
+    is_bot: true,
+    first_name: bot.bot.first_name,
+    username: bot.bot.username,
+  };
+  const expectedChatMemberUpdate = {
+    chat: { id: supergroup.id, title: 'Team', type: 'supergroup' },
+    from: owner,
+    old_chat_member: { user: botUser, status: 'left' },
+    new_chat_member: { user: botUser, status: 'member' },
+  };
+  const myChatMember = updates[0]?.my_chat_member as Record<string, unknown> | undefined;
+  const { date, ...myChatMemberWithoutDate } = myChatMember ?? {};
+  if (
+    updates.length !== 1 || typeof date !== 'number' ||
+    JSON.stringify(myChatMemberWithoutDate) !== JSON.stringify(expectedChatMemberUpdate)
+  ) {
+    throw new Error(`Expected one my_chat_member update, received ${JSON.stringify(updates)}`);
+  }
+
+  const membersPath =
+    `${sessionPath}/accounts/${owner.id}/conversations/supergroup/${supergroup.id}/members`;
+  const additionStatuses = await Promise.all([
+    api.request(`${membersPath}/${bot.bot.id}`, { method: 'PUT' }),
+    api.request(
+      `${sessionPath}/accounts/${member.id}/conversations/supergroup/${supergroup.id}/members/${owner.id}`,
+      { method: 'PUT' },
+    ),
+    api.request(`${membersPath}/999`, { method: 'PUT' }),
+    api.request(
+      `${sessionPath}/accounts/${owner.id}/conversations/supergroup/-1000000009999/members/${bot.bot.id}`,
+      { method: 'PUT' },
+    ),
+    api.request(
+      `${sessionPath}/accounts/${owner.id}/conversations/supergroup/-5/members/${bot.bot.id}`,
+      { method: 'PUT' },
+    ),
+  ]).then((responses) => responses.map((response) => response.status));
+  if (JSON.stringify(additionStatuses) !== JSON.stringify([204, 403, 404, 404, 400])) {
+    throw new Error(`Expected membership checks, received ${additionStatuses.join()}`);
+  }
+  const repeatedAddition = await callBotApi(api, `${bot.botApiPath}/getUpdates`, {
+    offset: (updates[0].update_id as number) + 1,
+  });
+  if ((repeatedAddition.body as { result: unknown[] }).result.length !== 0) {
+    throw new Error('Expected adding a member again to send no update');
+  }
+
+  const creationFailures = await Promise.all([
+    api.request(`${sessionPath}/accounts/999/supergroups`, jsonRequest('POST', { title: 'X' })),
+    api.request(`${sessionPath}/accounts/${owner.id}/supergroups`, jsonRequest('POST', {})),
+    api.request(
+      `${sessionPath}/accounts/${owner.id}/supergroups`,
+      jsonRequest('POST', { title: '' }),
+    ),
+  ]).then((responses) => responses.map((response) => response.status));
+  if (JSON.stringify(creationFailures) !== JSON.stringify([404, 400, 400])) {
+    throw new Error(`Expected supergroup creation checks, received ${creationFailures.join()}`);
+  }
+
+  const readerUpdates = await callBotApi(api, `${readerBot.botApiPath}/getUpdates`, {});
+  const readerUpdate = (readerUpdates.body as { result: Array<Record<string, unknown>> }).result;
+  if (readerUpdate.length !== 1 || readerUpdate[0].my_chat_member === undefined) {
+    throw new Error(`Expected the second bot to learn it joined, received ${readerUpdate.length}`);
+  }
+  if (supergroupPath(owner.id) === supergroupPath(member.id)) {
+    throw new Error('Expected each account to address the supergroup from its own path');
+  }
+});
+
+Deno.test('bots in privacy mode receive only supergroup messages addressed to them', async () => {
+  const { api, owner, member, bot, readerBot, supergroup, sendSupergroupText } =
+    await createSupergroupFixture();
+  const { body: joinBody } = await callBotApi(api, `${bot.botApiPath}/getUpdates`, {});
+  const joinUpdates = (joinBody as { result: Array<{ update_id: number }> }).result;
+  const { body: readerJoinBody } = await callBotApi(api, `${readerBot.botApiPath}/getUpdates`, {});
+  const readerJoinUpdates = (readerJoinBody as { result: Array<{ update_id: number }> }).result;
+
+  const texts = [
+    [owner.id, 'Hello team'],
+    [member.id, '/start'],
+    [member.id, '/help@other_bot'],
+    [member.id, '/help@Test_Bot now'],
+    [member.id, 'Ask @test_bot about it'],
+    [member.id, 'Mail me at me@test_bot.example'],
+    [member.id, 'Run /start later'],
+  ] as const;
+  for (const [accountId, text] of texts) {
+    await sendSupergroupText(accountId, text);
+  }
+  const botQuestion = await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+    chat_id: supergroup.id,
+    text: 'Anyone?',
+  });
+  const botQuestionId = botApiResult(botQuestion.body)?.message_id as number;
+  await sendSupergroupText(member.id, 'Me!', botQuestionId);
+  await sendSupergroupText(owner.id, 'Replying to Ada', 1);
+
+  const receivedTexts = async (botApiPath: string, afterUpdateId: number) => {
+    const { body } = await callBotApi(api, `${botApiPath}/getUpdates`, {
+      offset: afterUpdateId + 1,
+    });
+    return (body as { result: Array<{ message?: { text: string } }> }).result.map((update) =>
+      update.message?.text
+    );
+  };
+  const privacyModeTexts = await receivedTexts(bot.botApiPath, joinUpdates[0].update_id);
+  const readerTexts = await receivedTexts(readerBot.botApiPath, readerJoinUpdates[0].update_id);
+  const expectedPrivacyModeTexts = [
+    '/start',
+    '/help@Test_Bot now',
+    'Ask @test_bot about it',
+    'Me!',
+  ];
+  if (JSON.stringify(privacyModeTexts) !== JSON.stringify(expectedPrivacyModeTexts)) {
+    throw new Error(
+      `Expected only addressed messages, received ${JSON.stringify(privacyModeTexts)}`,
+    );
+  }
+  const expectedReaderTexts = [...texts.map(([, text]) => text), 'Me!', 'Replying to Ada'];
+  if (JSON.stringify(readerTexts) !== JSON.stringify(expectedReaderTexts)) {
+    throw new Error(
+      `Expected every account message and no bot message, received ${JSON.stringify(readerTexts)}`,
+    );
+  }
+});
+
+Deno.test('supergroup members see the same message IDs and replies', async () => {
+  const { api, sessionPath, owner, member, bot, supergroup, supergroupPath, sendSupergroupText } =
+    await createSupergroupFixture();
+  const question = await sendSupergroupText(owner.id, '/poll');
+  const answer = await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+    chat_id: supergroup.id,
+    text: 'Which day?',
+    reply_parameters: { message_id: question.message_id },
+  });
+  const answerMessage = botApiResult(answer.body);
+  const reply = await sendSupergroupText(member.id, 'Friday', answerMessage?.message_id as number);
+
+  const expectedChat = { id: supergroup.id, title: 'Team', type: 'supergroup' };
+  if (
+    question.message_id !== 1 || answerMessage?.message_id !== 2 || reply.message_id !== 3 ||
+    JSON.stringify(answerMessage.chat) !== JSON.stringify(expectedChat) ||
+    JSON.stringify((answerMessage.reply_to_message as Record<string, unknown>)?.text) !==
+      JSON.stringify('/poll') ||
+    JSON.stringify(
+        (reply as unknown as Record<string, Record<string, unknown>>)
+          .reply_to_message?.from,
+      ) !==
+      JSON.stringify({
+        id: bot.bot.id,
+        is_bot: true,
+        first_name: bot.bot.first_name,
+        username: bot.bot.username,
+      })
+  ) {
+    throw new Error(`Expected one numbering and replies, received ${JSON.stringify(reply)}`);
+  }
+
+  const histories = await Promise.all([owner.id, member.id].map(async (accountId) => {
+    const response = await api.request(`${supergroupPath(accountId)}/messages`);
+    return await response.json() as { messages: Array<{ message_id: number; text: string }> };
+  }));
+  if (
+    JSON.stringify(histories[0]) !== JSON.stringify(histories[1]) ||
+    JSON.stringify(histories[0].messages.map(({ message_id, text }) => [message_id, text])) !==
+      JSON.stringify([[1, '/poll'], [2, 'Which day?'], [3, 'Friday']])
+  ) {
+    throw new Error(
+      `Expected both members to see one history, received ${JSON.stringify(histories)}`,
+    );
+  }
+
+  const stranger = await createAccount(api, sessionPath, 'Grace');
+  const strangerStatuses = await Promise.all([
+    api.request(`${supergroupPath(stranger.id)}/messages`),
+    api.request(
+      `${sessionPath}/accounts/${stranger.id}/messages`,
+      jsonRequest('POST', { to: { type: 'supergroup', chatId: supergroup.id }, text: 'Hi' }),
+    ),
+    api.request(
+      `${sessionPath}/accounts/${owner.id}/messages`,
+      jsonRequest('POST', { to: { type: 'supergroup', chatId: -1_000_000_009_999 }, text: 'Hi' }),
+    ),
+    api.request(
+      `${sessionPath}/accounts/${owner.id}/messages`,
+      jsonRequest('POST', {
+        to: { type: 'supergroup', chatId: supergroup.id },
+        text: 'Hi',
+        reply_to_message_id: 99,
+      }),
+    ),
+  ]).then((responses) => responses.map((response) => response.status));
+  if (JSON.stringify(strangerStatuses) !== JSON.stringify([403, 403, 404, 400])) {
+    throw new Error(`Expected member checks, received ${strangerStatuses.join()}`);
+  }
+});
+
+Deno.test('Bot API methods follow Telegram checks in supergroups', async () => {
+  const { api, sessionPath, owner, bot, supergroup, supergroupPath, sendSupergroupText } =
+    await createSupergroupFixture();
+  const accountMessage = await sendSupergroupText(owner.id, 'Hello');
+  const botMessage = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+      chat_id: supergroup.id,
+      text: 'Menu',
+      reply_markup: { inline_keyboard: [[{ text: 'Go', callback_data: 'go' }]] },
+    })).body,
+  );
+  const botMessageId = botMessage?.message_id as number;
+  const outsider = await createBot(api, sessionPath, 'outsider_bot');
+
+  const expectFailure = async (
+    botApiPath: string,
+    method: string,
+    parameters: Record<string, unknown>,
+    description: string,
+  ) => {
+    const { body } = await callBotApi(api, `${botApiPath}/${method}`, parameters);
+    if (!isBadRequestResponse(body) || body.description !== description) {
+      throw new Error(
+        `Expected ${method} to fail with "${description}", received ${JSON.stringify(body)}`,
+      );
+    }
+  };
+  await expectFailure(outsider.botApiPath, 'sendMessage', {
+    chat_id: supergroup.id,
+    text: 'Hi',
+  }, 'Bad Request: chat not found');
+  await expectFailure(outsider.botApiPath, 'sendChatAction', {
+    chat_id: supergroup.id,
+    action: 'typing',
+  }, 'Bad Request: chat not found');
+  await expectFailure(
+    bot.botApiPath,
+    'sendMessage',
+    {
+      chat_id: supergroup.id,
+      text: 'Pick one',
+      reply_markup: { keyboard: [[{ text: 'A' }]] },
+    },
+    'Bad Request: reply keyboards, keyboard removals, and forced replies are not supported in groups',
+  );
+  await expectFailure(bot.botApiPath, 'sendMessage', {
+    chat_id: supergroup.id,
+    text: 'Hi',
+    reply_parameters: { message_id: 99 },
+  }, 'Bad Request: message to be replied not found');
+  await expectFailure(bot.botApiPath, 'editMessageText', {
+    chat_id: supergroup.id,
+    message_id: accountMessage.message_id,
+    text: 'Changed',
+  }, "Bad Request: message can't be edited");
+  await expectFailure(
+    bot.botApiPath,
+    'editMessageReplyMarkup',
+    {
+      chat_id: supergroup.id,
+      message_id: botMessageId,
+      reply_markup: { inline_keyboard: [[{ text: 'Go', callback_data: 'go' }]] },
+    },
+    'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message',
+  );
+  await expectFailure(bot.botApiPath, 'deleteMessage', {
+    chat_id: supergroup.id,
+    message_id: accountMessage.message_id,
+  }, "Bad Request: message can't be deleted");
+  await expectFailure(bot.botApiPath, 'deleteMessages', {
+    chat_id: supergroup.id,
+    message_ids: [botMessageId, accountMessage.message_id],
+  }, "Bad Request: message can't be deleted");
+
+  const edited = await callBotApi(api, `${bot.botApiPath}/editMessageText`, {
+    chat_id: supergroup.id,
+    message_id: botMessageId,
+    text: '<b>Menu</b>',
+    parse_mode: 'HTML',
+  });
+  const editedMessage = botApiResult(edited.body);
+  if (
+    editedMessage?.message_id !== botMessageId || typeof editedMessage.edit_date !== 'number' ||
+    editedMessage.reply_markup !== undefined ||
+    JSON.stringify(editedMessage.entities) !==
+      JSON.stringify([{ type: 'bold', offset: 0, length: 4 }])
+  ) {
+    throw new Error(
+      `Expected the bot's own message to be edited, received ${JSON.stringify(edited)}`,
+    );
+  }
+  const chatAction = await callBotApi(api, `${bot.botApiPath}/sendChatAction`, {
+    chat_id: supergroup.id,
+    action: 'typing',
+  });
+  const deletion = await callBotApi(api, `${bot.botApiPath}/deleteMessages`, {
+    chat_id: supergroup.id,
+    message_ids: [botMessageId, 99],
+  });
+  const successBody = JSON.stringify({ ok: true, result: true });
+  if (
+    JSON.stringify(chatAction.body) !== successBody || JSON.stringify(deletion.body) !== successBody
+  ) {
+    throw new Error('Expected a chat action and the deletion of its own message to succeed');
+  }
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: Array<{ text: string }>;
+  };
+  if (JSON.stringify(history.messages.map(({ text }) => text)) !== JSON.stringify(['Hello'])) {
+    throw new Error(
+      `Expected only the account message to remain, received ${JSON.stringify(history)}`,
+    );
+  }
+});
+
+Deno.test('a grammY bot runs a vote with an inline keyboard in a supergroup', async () => {
+  const { api, sessionPath, owner, member, bot, supergroup, supergroupPath, sendSupergroupText } =
+    await createSupergroupFixture();
+  const grammyBot = new Bot(bot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const votes = new Map<number, string>();
+  const handled = {
+    joined: Promise.withResolvers<void>(),
+    vote: Promise.withResolvers<void>(),
+    press: Promise.withResolvers<void>(),
+    edit: Promise.withResolvers<void>(),
+  };
+  const chatTypes: string[] = [];
+  grammyBot.on('my_chat_member', (context) => {
+    chatTypes.push(context.chat.type);
+    handled.joined.resolve();
+  });
+  grammyBot.command('vote', async (context) => {
+    chatTypes.push(context.chat.type);
+    await context.reply(`Vote on: ${context.match}`, {
+      reply_markup: new InlineKeyboard().text('Yes', 'yes').text('No', 'no'),
+    });
+    handled.vote.resolve();
+  });
+  grammyBot.callbackQuery(['yes', 'no'], async (context) => {
+    votes.set(context.from.id, context.callbackQuery.data);
+    await context.answerCallbackQuery({ text: `Voted ${context.callbackQuery.data}` });
+    await context.editMessageText(`Votes: ${votes.size}`);
+    handled.press.resolve();
+  });
+  grammyBot.on('edited_message:text', (context) => {
+    chatTypes.push(`edited ${context.editedMessage.text}`);
+    handled.edit.resolve();
+  });
+  const polling = grammyBot.start();
+
+  let pressedQuery: Record<string, unknown> | undefined;
+  try {
+    await Promise.race([handled.joined.promise, polling]);
+    const command = await sendSupergroupText(member.id, '/vote@test_bot Pizza');
+    await Promise.race([handled.vote.promise, polling]);
+    const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+      messages: Array<{ message_id: number; text: string }>;
+    };
+    const voteMessage = history.messages.at(-1);
+    const pressResponse = await api.request(
+      `${sessionPath}/accounts/${owner.id}/callback-queries`,
+      jsonRequest('POST', {
+        chat: { type: 'supergroup', chatId: supergroup.id },
+        message_id: voteMessage?.message_id,
+        callback_data: 'yes',
+      }),
+    );
+    pressedQuery = (await pressResponse.json() as { callback_query: Record<string, unknown> })
+      .callback_query;
+    await Promise.race([handled.press.promise, polling]);
+    await api.request(
+      `${supergroupPath(member.id)}/messages/${command.message_id}`,
+      jsonRequest('PATCH', { text: '/vote@test_bot Pasta' }),
+    );
+    await Promise.race([handled.edit.promise, polling]);
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+
+  const answered = await (await api.request(
+    `${sessionPath}/accounts/${owner.id}/callback-queries/${pressedQuery?.id}`,
+  )).json() as { callback_query: { answer: unknown } };
+  if (
+    JSON.stringify(answered.callback_query.answer) !==
+      JSON.stringify({ text: 'Voted yes', show_alert: false, cache_time: 0 })
+  ) {
+    throw new Error(`Expected the voter to see the answer, received ${JSON.stringify(answered)}`);
+  }
+  const history = await (await api.request(`${supergroupPath(member.id)}/messages`)).json() as {
+    messages: Array<{ text: string; reply_markup?: unknown }>;
+  };
+  if (
+    JSON.stringify(history.messages.map(({ text }) => text)) !==
+      JSON.stringify(['/vote@test_bot Pasta', 'Votes: 1']) ||
+    history.messages[1].reply_markup !== undefined ||
+    JSON.stringify(chatTypes) !==
+      JSON.stringify(['supergroup', 'supergroup', 'edited /vote@test_bot Pasta'])
+  ) {
+    throw new Error(`Expected the vote to run in the group, received ${JSON.stringify(history)}`);
+  }
+});
+
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,
@@ -2608,6 +3027,114 @@ async function createPrivateConversationFixture() {
     createdAccount,
     sendText,
   };
+}
+
+/**
+ * Creates a session with a supergroup that its owner, Ada, created, and to which Ada added Grace,
+ * a bot in privacy mode, and a bot that reads all group messages.
+ */
+async function createSupergroupFixture() {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const createSessionResponse = await api.request('/sessions', { method: 'POST' });
+  const sessionPath = createSessionResponse.headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const owner = await createAccount(api, sessionPath, 'Ada');
+  const member = await createAccount(api, sessionPath, 'Grace');
+  const bot = await createBot(api, sessionPath, 'test_bot');
+  const readerBot = await createBot(api, sessionPath, 'reader_bot', {
+    can_read_all_group_messages: true,
+  });
+
+  const createResponse = await api.request(
+    `${sessionPath}/accounts/${owner.id}/supergroups`,
+    jsonRequest('POST', { title: 'Team' }),
+  );
+  if (createResponse.status !== 201) {
+    throw new Error(`Expected the supergroup to be created, received ${createResponse.status}`);
+  }
+  const { supergroup } = await createResponse.json() as {
+    supergroup: { id: number; type: string; title: string };
+  };
+  const supergroupPath = (accountId: number) =>
+    `${sessionPath}/accounts/${accountId}/conversations/supergroup/${supergroup.id}`;
+  for (const userId of [member.id, bot.bot.id, readerBot.bot.id]) {
+    const response = await api.request(`${supergroupPath(owner.id)}/members/${userId}`, {
+      method: 'PUT',
+    });
+    if (response.status !== 204) {
+      throw new Error(`Expected member ${userId} to be added, received ${response.status}`);
+    }
+  }
+
+  const sendSupergroupText = async (accountId: number, text: string, replyToMessageId?: number) => {
+    const response = await api.request(
+      `${sessionPath}/accounts/${accountId}/messages`,
+      jsonRequest('POST', {
+        to: { type: 'supergroup', chatId: supergroup.id },
+        text,
+        ...(replyToMessageId === undefined ? {} : { reply_to_message_id: replyToMessageId }),
+      }),
+    );
+    const body: unknown = await response.json();
+    if (response.status !== 201 || !isSentMessageResponse(body)) {
+      throw new Error(`Expected "${text}" to be accepted, received ${response.status}`);
+    }
+    return body.message;
+  };
+
+  return {
+    api,
+    sessionPath,
+    owner,
+    member,
+    bot,
+    readerBot,
+    supergroup,
+    supergroupPath,
+    sendSupergroupText,
+  };
+}
+
+async function createAccount(
+  api: ReturnType<typeof createEmulationApi>,
+  sessionPath: string,
+  firstName: string,
+) {
+  const response = await api.request(
+    `${sessionPath}/accounts`,
+    jsonRequest('POST', { first_name: firstName }),
+  );
+  const body: unknown = await response.json();
+  if (!isCreatedAccountResponse(body)) {
+    throw new Error(`Expected account ${firstName} to be created, received ${response.status}`);
+  }
+  return body.account;
+}
+
+async function createBot(
+  api: ReturnType<typeof createEmulationApi>,
+  sessionPath: string,
+  username: string,
+  options: { can_read_all_group_messages?: boolean } = {},
+) {
+  const response = await api.request(
+    `${sessionPath}/bots`,
+    jsonRequest('POST', { first_name: 'Test Bot', username, ...options }),
+  );
+  const body: unknown = await response.json();
+  if (!isCreatedBotResponse(body)) {
+    throw new Error(`Expected bot ${username} to be created, received ${response.status}`);
+  }
+  return { ...body, botApiPath: `${sessionPath}/bot-api/bot${body.token}` };
+}
+
+function jsonRequest(method: 'PATCH' | 'POST', body: unknown): RequestInit {
+  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
 function isSessionResponse(value: unknown): value is { id: string; botApiRoot: string } {

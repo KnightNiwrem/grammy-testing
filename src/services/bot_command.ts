@@ -101,8 +101,8 @@ const LANGUAGE_CODE_PATTERN = /^(?:[a-z]{2})?$/;
  * `deleteMyCommands` manage them, and resolves the list an account's client shows in its private
  * chat with the bot.
  *
- * Chat scopes can address only private chats the account has started with the bot, as elsewhere
- * in the emulator; group chats are not available to bots yet.
+ * Chat scopes can address only private chats the account has started with the bot; they cannot
+ * address supergroups yet.
  */
 export class BotCommandService {
   readonly #accounts: AccountLookup;

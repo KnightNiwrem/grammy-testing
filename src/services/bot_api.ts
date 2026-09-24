@@ -1,12 +1,21 @@
 import { isParseMode, parseMarkup } from '../text_entities/parse_mode.ts';
-import type { BotApiBotCommand, BotApiPrivateTextMessage } from '../types/bot_api.ts';
+import type {
+  BotApiBotCommand,
+  BotApiPrivateTextMessage,
+  BotApiSupergroupTextMessage,
+  BotApiTextMessage,
+} from '../types/bot_api.ts';
 import type { BotCommand, BotCommandLanguageCode, BotCommandScope } from '../types/bot_command.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { ChatAction } from '../types/virtual_chat.ts';
-import type { PrivateTextMessage, TextEntity } from '../types/virtual_message.ts';
+import type {
+  PrivateTextMessage,
+  SupergroupTextMessage,
+  TextEntity,
+} from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
 
 export interface DeleteWebhookRequest {
@@ -70,7 +79,10 @@ export interface ReplyTarget {
 
 /** The request's reply markup is an inline keyboard or a change of the reply interface. */
 export type SendMessageRequest = SpecifiedFormattedText & BotMessageReplyMarkup & {
-  /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
+  /**
+   * The Bot API `chat_id`: for a private chat, the other user's ID, which is positive; for a
+   * supergroup, its negative chat ID.
+   */
   readonly chatId: number;
   /** Omitted for a message that replies to none. */
   readonly replyTo?: ReplyTarget;
@@ -84,10 +96,11 @@ export type SendMessageFailureReason =
   | 'reply_message_not_found'
   | 'message_text_too_long'
   | 'callback_data_invalid'
-  | 'bot_blocked';
+  | 'bot_blocked'
+  | 'reply_interface_unsupported_in_groups';
 
 export type SendMessageResult =
-  | { readonly sent: true; readonly message: BotApiPrivateTextMessage }
+  | { readonly sent: true; readonly message: BotApiTextMessage }
   | (
     & { readonly sent: false }
     & (
@@ -98,7 +111,7 @@ export type SendMessageResult =
 
 /** A message of one of the bot's chats, as Bot API methods address it. */
 interface MessageTarget {
-  /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
+  /** The Bot API `chat_id`, as `SendMessageRequest` describes it. */
   readonly chatId: number;
   /** The message's ID in the bot's chat. */
   readonly messageId: number;
@@ -127,7 +140,7 @@ export type EditMessageTextFailureReason =
   | 'message_text_too_long';
 
 export type EditMessageResult<FailureReason extends string> =
-  | { readonly edited: true; readonly message: BotApiPrivateTextMessage }
+  | { readonly edited: true; readonly message: BotApiTextMessage }
   | { readonly edited: false; readonly reason: FailureReason };
 
 export type EditMessageTextResult =
@@ -135,7 +148,7 @@ export type EditMessageTextResult =
   | ({ readonly edited: false } & TextInvalidFailure);
 
 export interface SendChatActionRequest {
-  /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
+  /** The Bot API `chat_id`, as `SendMessageRequest` describes it. */
   readonly chatId: number;
   readonly action: ChatAction;
 }
@@ -148,10 +161,13 @@ export type DeleteMessageRequest = MessageTarget;
 
 export type DeleteMessageResult =
   | { readonly deleted: true }
-  | { readonly deleted: false; readonly reason: 'chat_not_found' | 'message_not_found' };
+  | {
+    readonly deleted: false;
+    readonly reason: 'chat_not_found' | 'message_not_found' | 'message_not_deletable';
+  };
 
 export interface DeleteMessagesRequest {
-  /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
+  /** The Bot API `chat_id`, as `SendMessageRequest` describes it. */
   readonly chatId: number;
   /** The messages' IDs in the bot's chat. */
   readonly messageIds: readonly number[];
@@ -159,7 +175,7 @@ export interface DeleteMessagesRequest {
 
 export type DeleteMessagesResult =
   | { readonly deleted: true }
-  | { readonly deleted: false; readonly reason: 'chat_not_found' };
+  | { readonly deleted: false; readonly reason: 'chat_not_found' | 'message_not_deletable' };
 
 export interface AnswerCallbackQueryRequest {
   readonly callbackQueryId: CallbackQueryId;
@@ -277,6 +293,78 @@ interface BotMessaging {
     };
 }
 
+type SupergroupBotMessageEditingResult<FailureReason extends string> =
+  | { readonly edited: true; readonly message: SupergroupTextMessage }
+  | { readonly edited: false; readonly reason: FailureReason };
+
+/** Why an edit of either kind can fail in a supergroup, apart from failures about the text. */
+type SupergroupBotMessageEditFailureReason =
+  | 'bot_not_found'
+  | 'chat_not_found'
+  | 'message_not_found'
+  | 'message_not_editable'
+  | 'callback_data_invalid'
+  | 'message_not_modified';
+
+interface SupergroupBotMessaging {
+  sendBotMessage(input: {
+    readonly fromBotId: number;
+    readonly chatId: number;
+    readonly text: string;
+    readonly entities?: readonly TextEntity[];
+    readonly inlineKeyboard?: InlineKeyboard;
+    readonly replyTo?: { readonly messageId: number; readonly allowSendingWithoutReply: boolean };
+    readonly isContentProtected?: boolean;
+  }):
+    | { readonly sent: true; readonly message: SupergroupTextMessage }
+    | {
+      readonly sent: false;
+      readonly reason:
+        | 'bot_not_found'
+        | 'message_text_empty'
+        | 'chat_not_found'
+        | 'reply_message_not_found'
+        | 'message_text_too_long'
+        | 'callback_data_invalid';
+    }
+    | ({ readonly sent: false } & TextInvalidFailure);
+  editBotMessageText(input: {
+    readonly fromBotId: number;
+    readonly chatId: number;
+    readonly messageId: number;
+    readonly text: string;
+    readonly entities?: readonly TextEntity[];
+    readonly inlineKeyboard?: InlineKeyboard;
+  }):
+    | SupergroupBotMessageEditingResult<
+      SupergroupBotMessageEditFailureReason | 'message_text_empty' | 'message_text_too_long'
+    >
+    | ({ readonly edited: false } & TextInvalidFailure);
+  editBotMessageInlineKeyboard(input: {
+    readonly fromBotId: number;
+    readonly chatId: number;
+    readonly messageId: number;
+    readonly inlineKeyboard?: InlineKeyboard;
+  }): SupergroupBotMessageEditingResult<SupergroupBotMessageEditFailureReason>;
+  sendBotChatAction(input: {
+    readonly fromBotId: number;
+    readonly chatId: number;
+    readonly action: ChatAction;
+  }):
+    | { readonly sent: true }
+    | { readonly sent: false; readonly reason: 'bot_not_found' | 'chat_not_found' };
+  deleteMessagesByBot(input: {
+    readonly fromBotId: number;
+    readonly chatId: number;
+    readonly messageIds: readonly number[];
+  }):
+    | { readonly deleted: true; readonly deletedMessageCount: number }
+    | {
+      readonly deleted: false;
+      readonly reason: 'bot_not_found' | 'chat_not_found' | 'message_not_deletable';
+    };
+}
+
 /** A command list of the bot, addressed as the command methods address it. */
 export interface MyCommandsTarget {
   readonly scope: BotCommandScope;
@@ -358,6 +446,7 @@ interface CallbackQueryAnswering {
 
 interface BotMessageViews {
   viewPrivateTextMessageForBot(message: PrivateTextMessage): BotApiPrivateTextMessage;
+  viewSupergroupTextMessage(message: SupergroupTextMessage): BotApiSupergroupTextMessage;
 }
 
 interface BotApiServiceDependencies {
@@ -365,6 +454,7 @@ interface BotApiServiceDependencies {
   readonly updatePolling: BotUpdatePolling;
   readonly pendingUpdates: PendingBotUpdates;
   readonly botMessages: BotMessaging;
+  readonly supergroupBotMessages: SupergroupBotMessaging;
   readonly botMessageViews: BotMessageViews;
   readonly callbackQueries: CallbackQueryAnswering;
   readonly botCommands: BotCommandLists;
@@ -383,6 +473,7 @@ export class BotApiService {
   readonly #updatePolling: BotUpdatePolling;
   readonly #pendingUpdates: PendingBotUpdates;
   readonly #botMessages: BotMessaging;
+  readonly #supergroupBotMessages: SupergroupBotMessaging;
   readonly #botMessageViews: BotMessageViews;
   readonly #callbackQueries: CallbackQueryAnswering;
   readonly #botCommands: BotCommandLists;
@@ -393,6 +484,7 @@ export class BotApiService {
       updatePolling,
       pendingUpdates,
       botMessages,
+      supergroupBotMessages,
       botMessageViews,
       callbackQueries,
       botCommands,
@@ -402,6 +494,7 @@ export class BotApiService {
     this.#updatePolling = updatePolling;
     this.#pendingUpdates = pendingUpdates;
     this.#botMessages = botMessages;
+    this.#supergroupBotMessages = supergroupBotMessages;
     this.#botMessageViews = botMessageViews;
     this.#callbackQueries = callbackQueries;
     this.#botCommands = botCommands;
@@ -468,11 +561,18 @@ export class BotApiService {
   }
 
   /**
-   * Sends text to a private chat, optionally as a reply to one of the chat's messages and with an
-   * inline keyboard or a change of the account's reply interface; other chat types are not
-   * supported yet.
+   * Sends text to a private chat or a supergroup, optionally as a reply to one of the chat's
+   * messages and with an inline keyboard. A message to a private chat can instead change the
+   * account's reply interface. Telegram also shows a reply interface to chosen members of a group,
+   * which the emulator does not support.
    */
-  sendMessage(
+  sendMessage(authenticatedBot: VirtualBotProfile, request: SendMessageRequest): SendMessageResult {
+    return isUserId(request.chatId)
+      ? this.#sendPrivateMessage(authenticatedBot, request)
+      : this.#sendSupergroupMessage(authenticatedBot, request);
+  }
+
+  #sendPrivateMessage(
     authenticatedBot: VirtualBotProfile,
     { chatId, text, entities, replyTo, isContentProtected, ...replyMarkup }: SendMessageRequest,
   ): SendMessageResult {
@@ -518,11 +618,64 @@ export class BotApiService {
     }
   }
 
-  /** Shows a chat action, such as typing, in a private chat; other chat types are not supported. */
+  #sendSupergroupMessage(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, text, entities, replyTo, isContentProtected, inlineKeyboard, replyInterfaceMarkup }:
+      SendMessageRequest,
+  ): SendMessageResult {
+    if (replyInterfaceMarkup !== undefined) {
+      return { sent: false, reason: 'reply_interface_unsupported_in_groups' };
+    }
+    const result = this.#supergroupBotMessages.sendBotMessage({
+      fromBotId: authenticatedBot.id,
+      chatId,
+      text,
+      entities,
+      inlineKeyboard,
+      replyTo,
+      isContentProtected,
+    });
+    if (result.sent) {
+      return {
+        sent: true,
+        message: this.#botMessageViews.viewSupergroupTextMessage(result.message),
+      };
+    }
+
+    switch (result.reason) {
+      case 'text_invalid':
+        return result;
+      case 'message_text_empty':
+      case 'chat_not_found':
+      case 'reply_message_not_found':
+      case 'message_text_too_long':
+      case 'callback_data_invalid':
+        return { sent: false, reason: result.reason };
+      case 'bot_not_found':
+        throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+      default: {
+        const unhandledFailure: never = result;
+        throw new Error(`Unhandled bot message failure: ${JSON.stringify(unhandledFailure)}`);
+      }
+    }
+  }
+
+  /** Shows a chat action, such as typing, in a private chat or a supergroup. */
   sendChatAction(
     authenticatedBot: VirtualBotProfile,
     { chatId, action }: SendChatActionRequest,
   ): SendChatActionResult {
+    if (!isUserId(chatId)) {
+      const supergroupResult = this.#supergroupBotMessages.sendBotChatAction({
+        fromBotId: authenticatedBot.id,
+        chatId,
+        action,
+      });
+      if (!supergroupResult.sent && supergroupResult.reason === 'bot_not_found') {
+        throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+      }
+      return supergroupResult.sent ? supergroupResult : { sent: false, reason: 'chat_not_found' };
+    }
     const result = this.#botMessages.sendBotChatAction({
       fromBotId: authenticatedBot.id,
       to: { type: 'private', accountId: chatId },
@@ -547,23 +700,30 @@ export class BotApiService {
     }
   }
 
-  /**
-   * Replaces the text, entities, and inline keyboard of a message the bot sent to a private chat.
-   */
+  /** Replaces the text, entities, and inline keyboard of a message the bot sent. */
   editMessageText(
     authenticatedBot: VirtualBotProfile,
     { chatId, messageId, text, entities, inlineKeyboard }: EditMessageTextRequest,
   ): EditMessageTextResult {
-    const result = this.#botMessages.editBotMessageText({
-      fromBotId: authenticatedBot.id,
-      chat: { type: 'private', accountId: chatId },
-      botMessageId: messageId,
-      text,
-      entities,
-      inlineKeyboard,
-    });
+    const result = isUserId(chatId)
+      ? this.#presentPrivateEdit(this.#botMessages.editBotMessageText({
+        fromBotId: authenticatedBot.id,
+        chat: { type: 'private', accountId: chatId },
+        botMessageId: messageId,
+        text,
+        entities,
+        inlineKeyboard,
+      }))
+      : this.#presentSupergroupEdit(this.#supergroupBotMessages.editBotMessageText({
+        fromBotId: authenticatedBot.id,
+        chatId,
+        messageId,
+        text,
+        entities,
+        inlineKeyboard,
+      }));
     if (result.edited) {
-      return this.#presentEditedMessage(result.message);
+      return result;
     }
 
     switch (result.reason) {
@@ -580,26 +740,34 @@ export class BotApiService {
     }
   }
 
-  /** Replaces the inline keyboard of a message the bot sent to a private chat. */
+  /** Replaces the inline keyboard of a message the bot sent. */
   editMessageReplyMarkup(
     authenticatedBot: VirtualBotProfile,
     { chatId, messageId, inlineKeyboard }: EditMessageReplyMarkupRequest,
   ): EditMessageResult<EditMessageReplyMarkupFailureReason> {
-    const result = this.#botMessages.editBotMessageInlineKeyboard({
-      fromBotId: authenticatedBot.id,
-      chat: { type: 'private', accountId: chatId },
-      botMessageId: messageId,
-      inlineKeyboard,
-    });
+    const result = isUserId(chatId)
+      ? this.#presentPrivateEdit(this.#botMessages.editBotMessageInlineKeyboard({
+        fromBotId: authenticatedBot.id,
+        chat: { type: 'private', accountId: chatId },
+        botMessageId: messageId,
+        inlineKeyboard,
+      }))
+      : this.#presentSupergroupEdit(this.#supergroupBotMessages.editBotMessageInlineKeyboard({
+        fromBotId: authenticatedBot.id,
+        chatId,
+        messageId,
+        inlineKeyboard,
+      }));
     if (result.edited) {
-      return this.#presentEditedMessage(result.message);
+      return result;
     }
     return { edited: false, reason: toEditMessageFailureReason(authenticatedBot, result.reason) };
   }
 
   /**
-   * Deletes a message of a private chat, which either participant may have written. Unlike
-   * `deleteMessages`, it fails when the ID identifies no message of the chat, as on Telegram.
+   * Deletes a message of a chat: in a private chat, a message of either participant; in a
+   * supergroup, one of the bot's own messages. Unlike `deleteMessages`, it fails when the ID
+   * identifies no message of the chat, as on Telegram.
    */
   deleteMessage(
     authenticatedBot: VirtualBotProfile,
@@ -615,8 +783,8 @@ export class BotApiService {
   }
 
   /**
-   * Deletes messages of a private chat. As on Telegram, IDs that identify no message of the chat
-   * are skipped.
+   * Deletes messages of a chat, as `deleteMessage` does. As on Telegram, IDs that identify no
+   * message of the chat are skipped.
    */
   deleteMessages(
     authenticatedBot: VirtualBotProfile,
@@ -705,17 +873,26 @@ export class BotApiService {
     messageIds: readonly number[],
   ):
     | { readonly deleted: true; readonly deletedMessageCount: number }
-    | { readonly deleted: false; readonly reason: 'chat_not_found' } {
-    const result = this.#botMessages.deleteMessagesByBot({
-      fromBotId: authenticatedBot.id,
-      chat: { type: 'private', accountId: chatId },
-      botMessageIds: messageIds,
-    });
+    | { readonly deleted: false; readonly reason: 'chat_not_found' | 'message_not_deletable' } {
+    const result = isUserId(chatId)
+      ? this.#botMessages.deleteMessagesByBot({
+        fromBotId: authenticatedBot.id,
+        chat: { type: 'private', accountId: chatId },
+        botMessageIds: messageIds,
+      })
+      : this.#supergroupBotMessages.deleteMessagesByBot({
+        fromBotId: authenticatedBot.id,
+        chatId,
+        messageIds,
+      });
     if (result.deleted) {
       return result;
     }
 
     switch (result.reason) {
+      case 'chat_not_found':
+      case 'message_not_deletable':
+        return { deleted: false, reason: result.reason };
       // As for sending, a chat the bot cannot address is not found.
       case 'account_not_found':
       case 'conversation_not_started':
@@ -723,17 +900,40 @@ export class BotApiService {
       case 'bot_not_found':
         throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
       default: {
-        const unhandledReason: never = result.reason;
-        throw new Error(`Unhandled bot message deletion failure: ${unhandledReason}`);
+        const unhandledFailure: never = result;
+        throw new Error(
+          `Unhandled bot message deletion failure: ${JSON.stringify(unhandledFailure)}`,
+        );
       }
     }
   }
 
-  #presentEditedMessage(
-    message: PrivateTextMessage,
-  ): { readonly edited: true; readonly message: BotApiPrivateTextMessage } {
-    return { edited: true, message: this.#botMessageViews.viewPrivateTextMessageForBot(message) };
+  #presentPrivateEdit<Failure extends { readonly edited: false }>(
+    result: { readonly edited: true; readonly message: PrivateTextMessage } | Failure,
+  ): { readonly edited: true; readonly message: BotApiTextMessage } | Failure {
+    return result.edited
+      ? {
+        edited: true,
+        message: this.#botMessageViews.viewPrivateTextMessageForBot(result.message),
+      }
+      : result;
   }
+
+  #presentSupergroupEdit<Failure extends { readonly edited: false }>(
+    result: { readonly edited: true; readonly message: SupergroupTextMessage } | Failure,
+  ): { readonly edited: true; readonly message: BotApiTextMessage } | Failure {
+    return result.edited
+      ? { edited: true, message: this.#botMessageViews.viewSupergroupTextMessage(result.message) }
+      : result;
+  }
+}
+
+/**
+ * Whether a Bot API `chat_id` identifies a user, whose private chat it addresses. Telegram's user
+ * IDs are positive, and the IDs of groups and channels negative.
+ */
+function isUserId(chatId: number): boolean {
+  return chatId > 0;
 }
 
 /** Shows a command as the Bot API does, with `is_ephemeral` only when set. */
@@ -744,9 +944,10 @@ function projectBotCommand({ command, description, isEphemeral }: BotCommand): B
 /** Translates the edit failures shared by both edit methods into Bot API failures. */
 function toEditMessageFailureReason(
   authenticatedBot: VirtualBotProfile,
-  reason: BotMessageEditFailureReason,
+  reason: BotMessageEditFailureReason | SupergroupBotMessageEditFailureReason,
 ): EditMessageReplyMarkupFailureReason {
   switch (reason) {
+    case 'chat_not_found':
     case 'message_not_found':
     case 'message_not_editable':
     case 'callback_data_invalid':

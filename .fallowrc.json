@@ -57,9 +57,9 @@
         ]
       },
       {
-        "name": "user-message-box-repository",
+        "name": "message-box-repository",
         "patterns": [
-          "src/repositories/user_message_box.ts"
+          "src/repositories/message_box.ts"
         ]
       },
       {
@@ -127,6 +127,8 @@
         "patterns": [
           "src/services/callback_query.ts",
           "src/services/private_messaging.ts",
+          "src/services/supergroup_messaging.ts",
+          "src/services/message_content.ts",
           "src/services/shared_chat_administration.ts",
           "src/services/virtual_user.ts",
           "src/services/bot_command.ts",
@@ -215,7 +217,7 @@
         ]
       },
       {
-        "from": "user-message-box-repository",
+        "from": "message-box-repository",
         "allow": [
           "domain"
         ]
@@ -342,7 +344,7 @@
           "private-conversation-repository",
           "shared-chat-repository",
           "message-repository",
-          "user-message-box-repository",
+          "message-box-repository",
           "bot-update-repository",
           "bot-update-subscription-repository",
           "callback-query-repository",

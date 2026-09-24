@@ -4,10 +4,17 @@ import type {
   SharedChatRegistrationResult,
 } from '../repositories/shared_chat.ts';
 import type { IdentityReservationResult } from '../repositories/telegram_identity.ts';
+import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { ChatMembership } from '../types/chat_membership.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
-import type { BasicGroup, Channel, SharedChat, Supergroup } from '../types/virtual_chat.ts';
+import {
+  type BasicGroup,
+  type Channel,
+  createChatInstance,
+  type SharedChat,
+  type Supergroup,
+} from '../types/virtual_chat.ts';
 
 export interface CreateBasicGroupInput {
   readonly title: string;
@@ -138,27 +145,41 @@ type SharedChatStore =
   & OwnerOnlySharedChatStore
   & ChatMembershipStore;
 
+interface ChatDomainEventSink {
+  publish(event: ChatDomainEvent): void;
+}
+
 interface SharedChatAdministrationServiceDependencies {
   readonly identities: SharedChatIdentityReservationStore;
   readonly accounts: AccountLookup;
   readonly bots: BotLookup;
   readonly sharedChats: SharedChatStore;
+  readonly events: ChatDomainEventSink;
+  readonly currentUnixTimeSeconds: () => number;
 }
 
-/** Establishes and changes who takes part in basic groups, supergroups, and channels. */
+/**
+ * Establishes and changes who takes part in basic groups, supergroups, and channels. Each added
+ * member is published, so that a bot learns that it joined a chat.
+ */
 export class SharedChatAdministrationService {
   readonly #identities: SharedChatIdentityReservationStore;
   readonly #accounts: AccountLookup;
   readonly #bots: BotLookup;
   readonly #sharedChats: SharedChatStore;
+  readonly #events: ChatDomainEventSink;
+  readonly #currentUnixTimeSeconds: () => number;
 
   constructor(
-    { identities, accounts, bots, sharedChats }: SharedChatAdministrationServiceDependencies,
+    { identities, accounts, bots, sharedChats, events, currentUnixTimeSeconds }:
+      SharedChatAdministrationServiceDependencies,
   ) {
     this.#identities = identities;
     this.#accounts = accounts;
     this.#bots = bots;
     this.#sharedChats = sharedChats;
+    this.#events = events;
+    this.#currentUnixTimeSeconds = currentUnixTimeSeconds;
   }
 
   createBasicGroup(input: CreateBasicGroupInput): BasicGroupCreationResult {
@@ -202,6 +223,7 @@ export class SharedChatAdministrationService {
       id: supergroupId,
       title: input.title,
       description: input.description,
+      chatInstance: createChatInstance(),
     };
     const registration = this.#sharedChats.registerSupergroup(supergroup, input.creatorAccountId);
     if (!registration.registered) {
@@ -260,7 +282,17 @@ export class SharedChatAdministrationService {
       return { added: false, reason: 'bot_not_permitted_in_channel' };
     }
 
-    return this.#sharedChats.addChatMember(input.chatId, input.memberId);
+    const addition = this.#sharedChats.addChatMember(input.chatId, input.memberId);
+    if (addition.added) {
+      this.#events.publish({
+        type: 'chat_member_added',
+        chat,
+        actorAccountId: input.actorAccountId,
+        memberId: input.memberId,
+        addedAtUnixSeconds: this.#currentUnixTimeSeconds(),
+      });
+    }
+    return addition;
   }
 
   #validateBasicGroupParticipants(

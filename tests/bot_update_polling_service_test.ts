@@ -6,6 +6,7 @@ import {
 } from '../src/services/bot_update_polling.ts';
 import {
   type BotApiPrivateTextMessage,
+  type BotApiTextMessage,
   type BotApiUpdate,
   type BotApiUpdateType,
   DEFAULT_ALLOWED_UPDATE_TYPES,
@@ -222,6 +223,6 @@ function assertAllowedUpdateTypes(
   }
 }
 
-function messageFromUpdate(update: BotApiUpdate | undefined): BotApiPrivateTextMessage | undefined {
+function messageFromUpdate(update: BotApiUpdate | undefined): BotApiTextMessage | undefined {
   return update !== undefined && 'message' in update ? update.message : undefined;
 }

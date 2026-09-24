@@ -5,8 +5,9 @@ import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
+import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
-import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
+import { MessageBoxRepository } from '../src/repositories/message_box.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import {
@@ -17,7 +18,7 @@ import {
   type SendBotMessageFailureReason,
 } from '../src/services/private_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
-import type { BotApiPrivateTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
+import type { BotApiTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
 import type { InlineKeyboard } from '../src/types/inline_keyboard.ts';
 import type { ReplyInterfaceMarkup } from '../src/types/reply_interface.ts';
@@ -163,7 +164,7 @@ Deno.test('PrivateMessagingService sends, stores, and publishes private account 
 });
 
 Deno.test("PrivateMessagingService numbers private messages in each user's message box", () => {
-  const { virtualUsers, userMessageBoxes, botUpdates, privateMessaging } =
+  const { virtualUsers, messageBoxes, botUpdates, privateMessaging } =
     createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const otherAccount = createAccount(virtualUsers, 'Grace');
@@ -177,7 +178,7 @@ Deno.test("PrivateMessagingService numbers private messages in each user's messa
     sendPrivateText(privateMessaging, account.profile.id, firstBot),
   ];
   const messageIdsIn = (ownerId: number) =>
-    sentMessages.map((message) => userMessageBoxes.getMessageId(ownerId, message.id) ?? '-').join();
+    sentMessages.map((message) => messageBoxes.getMessageId(ownerId, message.id) ?? '-').join();
 
   // Each user numbers the messages of all its private chats in one sequence.
   if (
@@ -255,7 +256,7 @@ Deno.test('PrivateMessagingService stores a bot reply in the private conversatio
   const {
     virtualUsers,
     messages,
-    userMessageBoxes,
+    messageBoxes,
     botUpdates,
     publishedEvents,
     privateMessaging,
@@ -285,8 +286,8 @@ Deno.test('PrivateMessagingService stores a bot reply in the private conversatio
     throw new Error("Expected the result to carry the bot's canonical reply with its entities");
   }
   if (
-    userMessageBoxes.getMessageId(account.profile.id, reply.id) !== 2 ||
-    userMessageBoxes.getMessageId(bot.profile.id, reply.id) !== 2
+    messageBoxes.getMessageId(account.profile.id, reply.id) !== 2 ||
+    messageBoxes.getMessageId(bot.profile.id, reply.id) !== 2
   ) {
     throw new Error("Expected the reply to be numbered in both participants' message boxes");
   }
@@ -459,7 +460,7 @@ Deno.test('PrivateMessagingService stores replies only to messages of the same c
 });
 
 Deno.test('PrivateMessagingService shows the reply interface the latest bot message set', () => {
-  const { virtualUsers, userMessageBoxes, privateMessaging } = createPrivateMessagingFixture();
+  const { virtualUsers, messageBoxes, privateMessaging } = createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
   const chat = { accountId: account.profile.id, botId: bot.profile.id };
@@ -527,7 +528,7 @@ Deno.test('PrivateMessagingService shows the reply interface the latest bot mess
   privateMessaging.deleteMessagesByBot({
     fromBotId: bot.profile.id,
     chat: { type: 'private', accountId: account.profile.id },
-    botMessageIds: [expectBotMessageId(userMessageBoxes, bot, replacedKeyboardMessage.id)],
+    botMessageIds: [expectBotMessageId(messageBoxes, bot, replacedKeyboardMessage.id)],
   });
   if (shownReplyInterface() !== undefined) {
     throw new Error("Expected deleting the keyboard's message to clear it");
@@ -589,13 +590,13 @@ Deno.test('PrivateMessagingService stores an inline keyboard whose callback data
 });
 
 Deno.test('PrivateMessagingService edits the text and keyboard of a bot message', () => {
-  const { virtualUsers, userMessageBoxes, publishedEvents, privateMessaging, advanceClockSeconds } =
+  const { virtualUsers, messageBoxes, publishedEvents, privateMessaging, advanceClockSeconds } =
     createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
   sendPrivateText(privateMessaging, account.profile.id, bot);
   const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot, YES_NO_KEYBOARD);
-  const botMessageId = expectBotMessageId(userMessageBoxes, bot, botMessage.id);
+  const botMessageId = expectBotMessageId(messageBoxes, bot, botMessage.id);
   advanceClockSeconds(5);
 
   const textEdit = privateMessaging.editBotMessageText({
@@ -659,7 +660,7 @@ Deno.test('PrivateMessagingService edits the text and keyboard of a bot message'
 });
 
 Deno.test('PrivateMessagingService validates bot message edits in Telegram order', () => {
-  const { virtualUsers, userMessageBoxes, messages, privateMessaging } =
+  const { virtualUsers, messageBoxes, messages, privateMessaging } =
     createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const strangerAccount = createAccount(virtualUsers, 'Grace');
@@ -668,9 +669,9 @@ Deno.test('PrivateMessagingService validates bot message edits in Telegram order
   const accountMessage = sendPrivateText(privateMessaging, account.profile.id, bot);
   const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot, YES_NO_KEYBOARD);
   const otherChatMessage = sendPrivateText(privateMessaging, otherAccount.profile.id, bot);
-  const accountMessageId = expectBotMessageId(userMessageBoxes, bot, accountMessage.id);
-  const botMessageId = expectBotMessageId(userMessageBoxes, bot, botMessage.id);
-  const otherChatMessageId = expectBotMessageId(userMessageBoxes, bot, otherChatMessage.id);
+  const accountMessageId = expectBotMessageId(messageBoxes, bot, accountMessage.id);
+  const botMessageId = expectBotMessageId(messageBoxes, bot, botMessage.id);
+  const otherChatMessageId = expectBotMessageId(messageBoxes, bot, otherChatMessage.id);
   const tooLongText = 'x'.repeat(MAX_TEXT_MESSAGE_LENGTH + 1);
   const invalidKeyboard: InlineKeyboard = [
     [{ kind: 'callback', text: 'Too long', callbackData: 'x'.repeat(65) }],
@@ -788,7 +789,7 @@ Deno.test('PrivateMessagingService validates bot message edits in Telegram order
 });
 
 Deno.test('PrivateMessagingService lets a bot delete messages of its private chat', () => {
-  const { virtualUsers, userMessageBoxes, messages, publishedEvents, privateMessaging } =
+  const { virtualUsers, messageBoxes, messages, publishedEvents, privateMessaging } =
     createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const otherAccount = createAccount(virtualUsers, 'Grace');
@@ -797,9 +798,9 @@ Deno.test('PrivateMessagingService lets a bot delete messages of its private cha
   const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot, YES_NO_KEYBOARD);
   const keptMessage = sendBotMessage(privateMessaging, account.profile.id, bot);
   const otherChatMessage = sendPrivateText(privateMessaging, otherAccount.profile.id, bot);
-  const accountMessageId = expectBotMessageId(userMessageBoxes, bot, accountMessage.id);
-  const botMessageId = expectBotMessageId(userMessageBoxes, bot, botMessage.id);
-  const otherChatMessageId = expectBotMessageId(userMessageBoxes, bot, otherChatMessage.id);
+  const accountMessageId = expectBotMessageId(messageBoxes, bot, accountMessage.id);
+  const botMessageId = expectBotMessageId(messageBoxes, bot, botMessage.id);
+  const otherChatMessageId = expectBotMessageId(messageBoxes, bot, otherChatMessage.id);
   const publishedEventCount = publishedEvents.length;
 
   const deletion = privateMessaging.deleteMessagesByBot({
@@ -845,21 +846,21 @@ Deno.test('PrivateMessagingService lets a bot delete messages of its private cha
   }
   const nextMessage = sendPrivateText(privateMessaging, account.profile.id, bot);
   if (
-    expectBotMessageId(userMessageBoxes, bot, nextMessage.id) !== otherChatMessageId + 1 ||
-    expectBotMessageId(userMessageBoxes, bot, botMessage.id) !== botMessageId
+    expectBotMessageId(messageBoxes, bot, nextMessage.id) !== otherChatMessageId + 1 ||
+    expectBotMessageId(messageBoxes, bot, botMessage.id) !== botMessageId
   ) {
     throw new Error('Expected deleted messages to keep their IDs, which are never reused');
   }
 });
 
 Deno.test('PrivateMessagingService validates message deletions before changing state', () => {
-  const { virtualUsers, userMessageBoxes, messages, privateMessaging } =
+  const { virtualUsers, messageBoxes, messages, privateMessaging } =
     createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const strangerAccount = createAccount(virtualUsers, 'Grace');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
   const message = sendPrivateText(privateMessaging, account.profile.id, bot);
-  const botMessageId = expectBotMessageId(userMessageBoxes, bot, message.id);
+  const botMessageId = expectBotMessageId(messageBoxes, bot, message.id);
   const cases: {
     fromBotId: number;
     accountId: number;
@@ -1025,13 +1026,13 @@ Deno.test('PrivateMessagingService normalizes account text as a Telegram client 
 });
 
 Deno.test('PrivateMessagingService treats changed entities as an edit of the text', () => {
-  const { virtualUsers, userMessageBoxes, privateMessaging, advanceClockSeconds } =
+  const { virtualUsers, messageBoxes, privateMessaging, advanceClockSeconds } =
     createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
   sendPrivateText(privateMessaging, account.profile.id, bot);
   const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot);
-  const botMessageId = expectBotMessageId(userMessageBoxes, bot, botMessage.id);
+  const botMessageId = expectBotMessageId(messageBoxes, bot, botMessage.id);
   const editText = (entities: readonly TextEntity[]) =>
     privateMessaging.editBotMessageText({
       fromBotId: bot.profile.id,
@@ -1101,7 +1102,7 @@ Deno.test('PrivateMessagingService lets a bot show chat actions only in started 
 Deno.test('PrivateMessagingService edits the text of an account message and publishes the edit', () => {
   const {
     virtualUsers,
-    userMessageBoxes,
+    messageBoxes,
     botUpdates,
     publishedEvents,
     privateMessaging,
@@ -1110,7 +1111,7 @@ Deno.test('PrivateMessagingService edits the text of an account message and publ
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
   const accountMessage = sendPrivateText(privateMessaging, account.profile.id, bot);
-  const botMessageId = expectBotMessageId(userMessageBoxes, bot, accountMessage.id);
+  const botMessageId = expectBotMessageId(messageBoxes, bot, accountMessage.id);
   advanceClockSeconds(5);
 
   const result = privateMessaging.editAccountMessage({
@@ -1151,7 +1152,7 @@ Deno.test('PrivateMessagingService edits the text of an account message and publ
 });
 
 Deno.test('PrivateMessagingService validates account message edits before changing state', () => {
-  const { virtualUsers, userMessageBoxes, messages, publishedEvents, privateMessaging } =
+  const { virtualUsers, messageBoxes, messages, publishedEvents, privateMessaging } =
     createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const otherAccount = createAccount(virtualUsers, 'Grace');
@@ -1159,7 +1160,7 @@ Deno.test('PrivateMessagingService validates account message edits before changi
   const accountMessage = sendPrivateText(privateMessaging, account.profile.id, bot);
   const otherChatMessage = sendPrivateText(privateMessaging, otherAccount.profile.id, bot);
   const botMessage = sendBotMessage(privateMessaging, account.profile.id, bot);
-  const accountMessageId = expectBotMessageId(userMessageBoxes, bot, accountMessage.id);
+  const accountMessageId = expectBotMessageId(messageBoxes, bot, accountMessage.id);
   const editAccountMessage = (
     { fromAccountId = account.profile.id, botId = bot.profile.id, botMessageId, text = 'Edited' }: {
       fromAccountId?: number;
@@ -1185,13 +1186,13 @@ Deno.test('PrivateMessagingService validates account message edits before changi
     [editAccountMessage({ botMessageId: 99 }), 'message_not_found'],
     [
       editAccountMessage({
-        botMessageId: expectBotMessageId(userMessageBoxes, bot, otherChatMessage.id),
+        botMessageId: expectBotMessageId(messageBoxes, bot, otherChatMessage.id),
       }),
       'message_not_found',
     ],
     [
       editAccountMessage({
-        botMessageId: expectBotMessageId(userMessageBoxes, bot, botMessage.id),
+        botMessageId: expectBotMessageId(messageBoxes, bot, botMessage.id),
       }),
       'message_not_editable',
     ],
@@ -1224,7 +1225,7 @@ Deno.test('PrivateMessagingService validates account message edits before changi
 });
 
 Deno.test('PrivateMessagingService refuses writing either way while the account blocks the bot', () => {
-  const { virtualUsers, userMessageBoxes, blockedUsers, publishedEvents, privateMessaging } =
+  const { virtualUsers, messageBoxes, blockedUsers, publishedEvents, privateMessaging } =
     createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
@@ -1276,13 +1277,13 @@ Deno.test('PrivateMessagingService refuses writing either way while the account 
   const botEdit = privateMessaging.editBotMessageText({
     fromBotId: bot.profile.id,
     chat: { type: 'private', accountId: account.profile.id },
-    botMessageId: expectBotMessageId(userMessageBoxes, bot, botMessage.id),
+    botMessageId: expectBotMessageId(messageBoxes, bot, botMessage.id),
     text: 'Goodbye',
   });
   const accountEdit = privateMessaging.editAccountMessage({
     fromAccountId: account.profile.id,
     chat: { type: 'private', botId: bot.profile.id },
-    botMessageId: expectBotMessageId(userMessageBoxes, bot, accountMessage.id),
+    botMessageId: expectBotMessageId(messageBoxes, bot, accountMessage.id),
     text: 'Bye',
   });
   if (!botEdit.edited || !accountEdit.edited) {
@@ -1327,11 +1328,11 @@ function sendBotMessage(
 }
 
 function expectBotMessageId(
-  userMessageBoxes: UserMessageBoxRepository,
+  messageBoxes: MessageBoxRepository,
   bot: VirtualBot,
   canonicalMessageId: string,
 ): number {
-  const botMessageId = userMessageBoxes.getMessageId(bot.profile.id, canonicalMessageId);
+  const botMessageId = messageBoxes.getMessageId(bot.profile.id, canonicalMessageId);
   if (botMessageId === undefined) {
     throw new Error(`Expected message ${canonicalMessageId} in the bot's message box`);
   }
@@ -1345,12 +1346,22 @@ function createPrivateMessagingFixture() {
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const privateConversations = new PrivateConversationRepository();
   const messages = new MessageRepository();
-  const userMessageBoxes = new UserMessageBoxRepository();
+  const messageBoxes = new MessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
+  const sharedChats = new SharedChatRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
-    botMessageViews: new BotMessageViewService({ accounts, bots, userMessageBoxes, messages }),
+    botMessageViews: new BotMessageViewService({
+      accounts,
+      bots,
+      sharedChats,
+      messageBoxes,
+      messages,
+    }),
     botUpdates,
     updateSubscriptions: new BotUpdateSubscriptionRepository(),
+    bots,
+    sharedChats,
+    messages,
   });
   const publishedEvents: ChatDomainEvent[] = [];
   let currentUnixTimeSeconds = 1_700_000_000;
@@ -1360,7 +1371,7 @@ function createPrivateMessagingFixture() {
     bots,
     privateConversations,
     messages,
-    userMessageBoxes,
+    messageBoxes,
     blockedUsers,
     events: {
       publish: (event) => {
@@ -1377,7 +1388,7 @@ function createPrivateMessagingFixture() {
     virtualUsers,
     privateConversations,
     messages,
-    userMessageBoxes,
+    messageBoxes,
     botUpdates,
     blockedUsers,
     publishedEvents,
@@ -1418,6 +1429,6 @@ function createBot(virtualUsers: VirtualUserService, firstName: string, username
   return result.bot;
 }
 
-function messageFromUpdate(update: BotApiUpdate | undefined): BotApiPrivateTextMessage | undefined {
+function messageFromUpdate(update: BotApiUpdate | undefined): BotApiTextMessage | undefined {
   return update !== undefined && 'message' in update ? update.message : undefined;
 }

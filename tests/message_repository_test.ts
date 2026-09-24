@@ -183,3 +183,36 @@ Deno.test('MessageRepository deletes a message from the store and its conversati
     throw new Error('Expected deleting a message that is not stored to throw');
   }
 });
+
+Deno.test('MessageRepository stores, edits, and deletes supergroup messages by chat', () => {
+  const messages = new MessageRepository();
+  const add = (chatId: number, text: string) =>
+    messages.addSupergroupTextMessage({
+      chatId,
+      author: { kind: 'account', accountId: 1 },
+      sentAtUnixSeconds: 1_700_000_000,
+      text,
+      entities: [],
+    });
+  const first = add(-1_000_000_000_001, 'first');
+  add(-1_000_000_000_002, 'unrelated');
+  const second = add(-1_000_000_000_001, 'second');
+
+  const edited = messages.editSupergroupTextMessage(first.id, {
+    text: 'edited',
+    entities: [],
+    inlineKeyboard: undefined,
+    textEditedAtUnixSeconds: 1_700_000_001,
+  });
+  messages.deleteSupergroupTextMessage(second.id);
+
+  const history = messages.getSupergroupMessages(-1_000_000_000_001);
+  if (
+    history.length !== 1 || history[0] !== edited || edited.id !== first.id ||
+    edited.textEditedAtUnixSeconds !== 1_700_000_001 || !first.author ||
+    messages.getSupergroupTextMessage(second.id) !== undefined ||
+    messages.getPrivateTextMessage(first.id) !== undefined
+  ) {
+    throw new Error('Expected the supergroup history to hold only its edited remaining message');
+  }
+});

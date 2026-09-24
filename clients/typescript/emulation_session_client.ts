@@ -1,13 +1,18 @@
+import type { z } from 'zod';
+
 import { HTTP_STATUS_CREATED, HTTP_STATUS_NO_CONTENT, HTTP_STATUS_OK } from './constants.ts';
 import {
   botCommandsResponseSchema,
   callbackQueryResponseSchema,
+  createdSupergroupResponseSchema,
   createdVirtualAccountSchema,
   createdVirtualBotSchema,
   getMeResponseSchema,
   messageHistoryResponseSchema,
   replyInterfaceResponseSchema,
   sentMessageResponseSchema,
+  sentSupergroupMessageResponseSchema,
+  supergroupMessageHistoryResponseSchema,
 } from './schemas.ts';
 import type {
   AccountBotCommandsInput,
@@ -15,18 +20,23 @@ import type {
   AccountMessageHistoryInput,
   AccountReplyInterfaceInput,
   AccountSendMessageInput,
+  AddChatMemberInput,
   BotBlockInput,
   BotCommand,
   CallbackQuery,
   CreatedVirtualAccount,
   CreatedVirtualBot,
+  CreateSupergroupInput,
   CreateVirtualAccountInput,
   CreateVirtualBotInput,
   EmulationSession,
+  MessageTarget,
   PressCallbackButtonInput,
   PressReplyKeyboardButtonInput,
   PrivateTextMessage,
   ReplyInterface,
+  Supergroup,
+  TextMessageIn,
   VirtualAccountClient,
   VirtualAccountProfile,
   VirtualBotProfile,
@@ -124,27 +134,49 @@ function createVirtualAccountClient(
 ): VirtualAccountClient {
   return Object.freeze({
     ...profile,
-    async sendMessage(input: AccountSendMessageInput): Promise<PrivateTextMessage> {
+    async sendMessage<Target extends MessageTarget>(
+      input: AccountSendMessageInput<Target>,
+    ): Promise<TextMessageIn<Target>> {
       const response = await requestJson(fetchImplementation, {
         method: 'POST',
         url: `${accountUrl}/messages`,
         expectedStatus: HTTP_STATUS_CREATED,
-        responseSchema: sentMessageResponseSchema,
+        responseSchema: messageResponseSchemasFor(input.to).sent,
         body: input,
       });
       return response.message;
     },
-    async editMessage(input: AccountEditMessageInput): Promise<PrivateTextMessage> {
-      const botId = encodeURIComponent(input.chat.botId);
+    async editMessage<Target extends MessageTarget>(
+      input: AccountEditMessageInput<Target>,
+    ): Promise<TextMessageIn<Target>> {
       const messageId = encodeURIComponent(input.message_id);
       const response = await requestJson(fetchImplementation, {
         method: 'PATCH',
-        url: `${accountUrl}/conversations/private/${botId}/messages/${messageId}`,
+        url: `${conversationUrl(accountUrl, input.chat)}/messages/${messageId}`,
         expectedStatus: HTTP_STATUS_OK,
-        responseSchema: sentMessageResponseSchema,
+        responseSchema: messageResponseSchemasFor(input.chat).sent,
         body: { text: input.text },
       });
       return response.message;
+    },
+    async createSupergroup(input: CreateSupergroupInput): Promise<Supergroup> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'POST',
+        url: `${accountUrl}/supergroups`,
+        expectedStatus: HTTP_STATUS_CREATED,
+        responseSchema: createdSupergroupResponseSchema,
+        body: input,
+      });
+      return response.supergroup;
+    },
+    async addChatMember(input: AddChatMemberInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'PUT',
+        url: `${conversationUrl(accountUrl, input.chat)}/members/${
+          encodeURIComponent(input.userId)
+        }`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+      });
     },
     async blockBot(input: BotBlockInput): Promise<void> {
       await requestEmptyResponse(fetchImplementation, {
@@ -160,13 +192,14 @@ function createVirtualAccountClient(
         expectedStatus: HTTP_STATUS_NO_CONTENT,
       });
     },
-    async getMessages(input: AccountMessageHistoryInput): Promise<readonly PrivateTextMessage[]> {
-      const botId = encodeURIComponent(input.chat.botId);
+    async getMessages<Target extends MessageTarget>(
+      input: AccountMessageHistoryInput<Target>,
+    ): Promise<readonly TextMessageIn<Target>[]> {
       const response = await requestJson(fetchImplementation, {
         method: 'GET',
-        url: `${accountUrl}/conversations/private/${botId}/messages`,
+        url: `${conversationUrl(accountUrl, input.chat)}/messages`,
         expectedStatus: HTTP_STATUS_OK,
-        responseSchema: messageHistoryResponseSchema,
+        responseSchema: messageResponseSchemasFor(input.chat).history,
       });
       return response.messages;
     },
@@ -222,6 +255,32 @@ function createVirtualAccountClient(
       return response.message;
     },
   });
+}
+
+/** The account's view of a chat, under which its messages and members are addressed. */
+function conversationUrl(accountUrl: string, chat: MessageTarget): string {
+  return chat.type === 'private'
+    ? `${accountUrl}/conversations/private/${encodeURIComponent(chat.botId)}`
+    : `${accountUrl}/conversations/supergroup/${encodeURIComponent(chat.chatId)}`;
+}
+
+interface MessageResponseSchemas<Target extends MessageTarget> {
+  readonly sent: z.ZodType<{ readonly message: TextMessageIn<Target> }>;
+  readonly history: z.ZodType<{ readonly messages: readonly TextMessageIn<Target>[] }>;
+}
+
+/**
+ * Selects the response schemas for a chat's messages. TypeScript cannot relate the checked chat
+ * type to the generic target, so the result is asserted; each schema validates the response at
+ * run time as the messages of exactly that chat type.
+ */
+function messageResponseSchemasFor<Target extends MessageTarget>(
+  target: Target,
+): MessageResponseSchemas<Target> {
+  const schemas: MessageResponseSchemas<MessageTarget> = target.type === 'supergroup'
+    ? { sent: sentSupergroupMessageResponseSchema, history: supergroupMessageHistoryResponseSchema }
+    : { sent: sentMessageResponseSchema, history: messageHistoryResponseSchema };
+  return schemas as MessageResponseSchemas<Target>;
 }
 
 function validateBotToken(botToken: string): void {

@@ -294,6 +294,85 @@ Deno.test('TypeScript client manages all currently implemented session resources
   await session.end();
 });
 
+Deno.test('TypeScript client runs supergroups with members, messages, and buttons', async () => {
+  const publicOrigin = 'http://emulator.example:9000';
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin,
+  });
+  const client = new TelegramEmulationClient(publicOrigin, {
+    fetch: createInProcessFetch(api.fetch),
+  });
+  const session = await client.createSession();
+  const { token, bot } = await session.createBot({
+    first_name: 'Test Bot',
+    username: 'test_bot',
+    can_read_all_group_messages: true,
+  });
+  const { account: owner } = await session.createAccount({ first_name: 'Ada' });
+  const { account: member } = await session.createAccount({ first_name: 'Grace' });
+
+  const supergroup = await owner.createSupergroup({ title: 'Team', description: 'Our team' });
+  const chat = { type: 'supergroup', chatId: supergroup.id } as const;
+  await owner.addChatMember({ chat, userId: member.id });
+  await owner.addChatMember({ chat, userId: bot.id });
+  await owner.addChatMember({ chat, userId: bot.id });
+  if (
+    !bot.can_read_all_group_messages || supergroup.type !== 'supergroup' ||
+    supergroup.title !== 'Team' || supergroup.description !== 'Our team'
+  ) {
+    throw new Error('Expected the client to create a reading bot and a supergroup');
+  }
+
+  const greeting = await member.sendMessage({ to: chat, text: 'Hello team' });
+  const botApiPath = `/sessions/${session.id}/bot-api/bot${token}`;
+  const menuResponse = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: supergroup.id,
+      text: 'Continue?',
+      reply_parameters: { message_id: greeting.message_id },
+      reply_markup: { inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] },
+    }),
+  });
+  if (menuResponse.status !== 200) {
+    throw new Error(`Expected the bot to write to the supergroup, received ${menuResponse.status}`);
+  }
+  const edited = await member.editMessage({
+    chat,
+    message_id: greeting.message_id,
+    text: 'Hello everyone',
+  });
+  const history = await owner.getMessages({ chat });
+  const callbackQuery = await owner.pressCallbackButton({
+    chat,
+    message_id: history[1].message_id,
+    callback_data: 'yes',
+  });
+  if (
+    greeting.chat.title !== 'Team' || edited.edit_date === undefined ||
+    JSON.stringify(history.map(({ message_id, text }) => [message_id, text])) !==
+      JSON.stringify([[1, 'Hello everyone'], [2, 'Continue?']]) ||
+    history[1].reply_to_message?.text !== 'Hello everyone' ||
+    callbackQuery.status !== 'awaiting_answer'
+  ) {
+    throw new Error('Expected the client to exchange messages and press buttons in the supergroup');
+  }
+
+  const { account: stranger } = await session.createAccount({ first_name: 'Linus' });
+  try {
+    await stranger.getMessages({ chat });
+  } catch (error) {
+    if (error instanceof EmulationClientError && error.status === 403) {
+      await session.end();
+      return;
+    }
+    throw error;
+  }
+  throw new Error('Expected a non-member to be refused the supergroup history');
+});
+
 Deno.test('TypeScript client reports HTTP failures with request details', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({

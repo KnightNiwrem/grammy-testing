@@ -9,6 +9,22 @@ export interface BotApiPrivateChat {
   readonly username?: string;
 }
 
+/** A basic group, which the Bot API calls a group. */
+export interface BotApiBasicGroupChat {
+  readonly id: number;
+  readonly title: string;
+  readonly type: 'group';
+}
+
+export interface BotApiSupergroupChat {
+  readonly id: number;
+  readonly title: string;
+  readonly type: 'supergroup';
+}
+
+/** A chat of several members that a bot can join. */
+export type BotApiGroupChat = BotApiBasicGroupChat | BotApiSupergroupChat;
+
 /** A bot as a message shows it, without the capabilities that only `getMe` reports. */
 export interface BotApiBotUser {
   readonly id: number;
@@ -52,10 +68,11 @@ export interface BotApiInlineKeyboardMarkup {
   readonly inline_keyboard: readonly (readonly BotApiInlineKeyboardButton[])[];
 }
 
-export interface BotApiPrivateTextMessage {
+/** A text message in a chat of the given type, in the field order Telegram uses. */
+interface BotApiTextMessageInChat<Chat> {
   readonly message_id: number;
   readonly from: BotApiUser;
-  readonly chat: BotApiPrivateChat;
+  readonly chat: Chat;
   readonly date: number;
   /** Omitted for a message whose text was never edited. */
   readonly edit_date?: number;
@@ -63,7 +80,7 @@ export interface BotApiPrivateTextMessage {
    * The replied message, without its own reply; omitted when the message is no reply or the
    * replied message was deleted.
    */
-  readonly reply_to_message?: BotApiRepliedPrivateTextMessage;
+  readonly reply_to_message?: Omit<BotApiTextMessageInChat<Chat>, 'reply_to_message'>;
   readonly text: string;
   /** Omitted when the text has no entities, as Telegram does. */
   readonly entities?: readonly BotApiMessageEntity[];
@@ -73,8 +90,20 @@ export interface BotApiPrivateTextMessage {
   readonly has_protected_content?: true;
 }
 
+export type BotApiPrivateTextMessage = BotApiTextMessageInChat<BotApiPrivateChat>;
+
+export type BotApiSupergroupTextMessage = BotApiTextMessageInChat<BotApiSupergroupChat>;
+
+export type BotApiTextMessage = BotApiPrivateTextMessage | BotApiSupergroupTextMessage;
+
 /** A message as a reply shows it: Telegram never nests the replied message's own reply. */
 export type BotApiRepliedPrivateTextMessage = Omit<BotApiPrivateTextMessage, 'reply_to_message'>;
+
+/** A message as a reply shows it: Telegram never nests the replied message's own reply. */
+export type BotApiRepliedSupergroupTextMessage = Omit<
+  BotApiSupergroupTextMessage,
+  'reply_to_message'
+>;
 
 /** A bot command as the Bot API shows it. */
 export interface BotApiBotCommand {
@@ -87,7 +116,7 @@ export interface BotApiBotCommand {
 export interface BotApiCallbackQuery {
   readonly id: string;
   readonly from: VirtualAccountProfile;
-  readonly message: BotApiPrivateTextMessage;
+  readonly message: BotApiTextMessage;
   readonly chat_instance: string;
   readonly data: string;
 }
@@ -97,24 +126,36 @@ export type BotApiPrivateChatBotMember =
   | { readonly user: BotApiBotUser; readonly status: 'member' }
   | { readonly user: BotApiBotUser; readonly status: 'kicked'; readonly until_date: 0 };
 
+/** The bot's membership in a group: `left` before it joins. */
+export type BotApiGroupChatBotMember =
+  | { readonly user: BotApiBotUser; readonly status: 'left' }
+  | { readonly user: BotApiBotUser; readonly status: 'member' };
+
 /** A change of the bot's own membership in a chat, in the field order Telegram uses. */
-export interface BotApiMyChatMemberUpdated {
-  readonly chat: BotApiPrivateChat;
-  /** The user who changed the membership: in a private chat, the account at its other end. */
+interface BotApiMyChatMemberUpdatedInChat<Chat, ChatMember> {
+  readonly chat: Chat;
+  /**
+   * The user who changed the membership: in a private chat, the account at its other end; in a
+   * group, the account that added the bot.
+   */
   readonly from: VirtualAccountProfile;
   readonly date: number;
-  readonly old_chat_member: BotApiPrivateChatBotMember;
-  readonly new_chat_member: BotApiPrivateChatBotMember;
+  readonly old_chat_member: ChatMember;
+  readonly new_chat_member: ChatMember;
 }
+
+export type BotApiMyChatMemberUpdated =
+  | BotApiMyChatMemberUpdatedInChat<BotApiPrivateChat, BotApiPrivateChatBotMember>
+  | BotApiMyChatMemberUpdatedInChat<BotApiGroupChat, BotApiGroupChatBotMember>;
 
 export interface BotApiMessageUpdate {
   readonly update_id: number;
-  readonly message: BotApiPrivateTextMessage;
+  readonly message: BotApiTextMessage;
 }
 
 export interface BotApiEditedMessageUpdate {
   readonly update_id: number;
-  readonly edited_message: BotApiPrivateTextMessage;
+  readonly edited_message: BotApiTextMessage;
 }
 
 export interface BotApiCallbackQueryUpdate {

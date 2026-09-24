@@ -3,11 +3,11 @@ import type {
   CallbackQueryAnswer,
   CallbackQueryId,
 } from '../types/callback_query.ts';
-import type { PrivateConversationKey } from '../types/virtual_chat.ts';
 import type { CanonicalMessageId } from '../types/virtual_message.ts';
 
 export interface AddCallbackQueryInput {
-  readonly conversation: PrivateConversationKey;
+  readonly accountId: number;
+  readonly botId: number;
   readonly messageId: CanonicalMessageId;
   readonly chatInstance: string;
   readonly callbackData: string;
@@ -23,7 +23,8 @@ export class CallbackQueryRepository {
   addCallbackQuery(input: AddCallbackQueryInput): CallbackQuery {
     const callbackQuery: CallbackQuery = {
       id: String(this.#nextCallbackQueryNumber++),
-      conversation: { ...input.conversation },
+      accountId: input.accountId,
+      botId: input.botId,
       messageId: input.messageId,
       chatInstance: input.chatInstance,
       callbackData: input.callbackData,

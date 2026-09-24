@@ -25,7 +25,13 @@ export type AccountCreationResult =
     readonly reason: IdentityReservationFailureReason;
   };
 
-export type CreateVirtualBotInput = Pick<VirtualBotProfile, 'first_name' | 'username'>;
+/**
+ * A bot's profile as its owner sets it up with BotFather. `can_read_all_group_messages` turns off
+ * the bot's privacy mode in groups; it defaults to `false`, as for a new Telegram bot.
+ */
+export type CreateVirtualBotInput =
+  & Pick<VirtualBotProfile, 'first_name' | 'username'>
+  & Partial<Pick<VirtualBotProfile, 'can_read_all_group_messages'>>;
 
 export type BotCreationResult =
   | {
@@ -110,7 +116,7 @@ export class VirtualUserService {
       first_name: input.first_name,
       username: input.username,
       can_join_groups: true,
-      can_read_all_group_messages: false,
+      can_read_all_group_messages: input.can_read_all_group_messages ?? false,
       supports_inline_queries: false,
       can_connect_to_business: false,
       has_main_web_app: false,

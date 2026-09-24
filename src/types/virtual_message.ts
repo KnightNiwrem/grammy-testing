@@ -90,3 +90,30 @@ export interface PrivateTextMessage {
   /** Whether the sender protected the message from forwarding and saving. Only bots protect. */
   readonly isContentProtected: boolean;
 }
+
+/** The member of a supergroup who wrote a message there: an account or a bot. */
+export type SupergroupMessageAuthor =
+  | { readonly kind: 'account'; readonly accountId: number }
+  | { readonly kind: 'bot'; readonly botId: number };
+
+/** Canonical text stored in a supergroup, written by one of its members. */
+export interface SupergroupTextMessage {
+  readonly kind: 'supergroup_text';
+  readonly id: CanonicalMessageId;
+  readonly chatId: number;
+  readonly author: SupergroupMessageAuthor;
+  readonly sentAtUnixSeconds: number;
+  readonly text: string;
+  readonly entities: readonly TextEntity[];
+  /** The message of the same supergroup this one replies to; omitted when it is no reply. */
+  readonly replyToMessageId?: CanonicalMessageId;
+  /** Omitted when the message has no inline keyboard. Only bots attach inline keyboards. */
+  readonly inlineKeyboard?: InlineKeyboard;
+  /** When the text was last edited; omitted for a message whose text was never edited. */
+  readonly textEditedAtUnixSeconds?: number;
+  /** Whether the sender protected the message from forwarding and saving. Only bots protect. */
+  readonly isContentProtected: boolean;
+}
+
+/** Canonical text of any chat the emulator supports. */
+export type TextMessage = PrivateTextMessage | SupergroupTextMessage;

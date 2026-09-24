@@ -1,7 +1,8 @@
 import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
 
 const CALLBACK_QUERY_INPUT = {
-  conversation: { accountId: 1, botId: 2 },
+  accountId: 1,
+  botId: 2,
   messageId: 'message',
   chatInstance: '-42',
   callbackData: 'yes',

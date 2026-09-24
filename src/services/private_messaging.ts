@@ -1,11 +1,6 @@
-import {
-  fixFormattedText,
-  type FormattedText,
-  type FormattedTextFixing,
-} from '../text_entities/formatted_text.ts';
-import { areTextEntitiesEqual } from '../text_entities/text_entity_equality.ts';
+import type { FormattedText } from '../text_entities/formatted_text.ts';
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
-import { type InlineKeyboard, MAX_CALLBACK_DATA_BYTES } from '../types/inline_keyboard.ts';
+import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type {
   BotMessageReplyMarkup,
   ReplyInterface,
@@ -22,10 +17,17 @@ import type {
 } from '../types/virtual_chat.ts';
 import {
   type CanonicalMessageId,
-  MAX_TEXT_MESSAGE_LENGTH,
   type PrivateTextMessage,
   type TextEntity,
 } from '../types/virtual_message.ts';
+import {
+  checkBotMessageEdit,
+  hasOnlyValidCallbackData,
+  isSameFormattedText,
+  type MessageTextNormalization,
+  normalizeMessageText,
+  type TextInvalidFailure,
+} from './message_content.ts';
 
 export type PrivateConversationActivationFailureReason =
   | 'account_not_found'
@@ -59,15 +61,6 @@ export type SendAccountMessageFailureReason =
   | 'message_text_empty'
   | 'message_text_too_long'
   | 'reply_message_not_found';
-
-/**
- * Telegram rejected the text or its entities while normalizing them, for example because only
- * whitespace remains or an entity ends past the text. `textError` is TDLib's own description.
- */
-export interface TextInvalidFailure {
-  readonly reason: 'text_invalid';
-  readonly textError: string;
-}
 
 export type SendAccountMessageResult =
   | {
@@ -329,7 +322,7 @@ interface PrivateMessageStore {
   ): readonly PrivateTextMessage[];
 }
 
-interface UserMessageBoxStore {
+interface MessageBoxStore {
   assignMessageId(ownerId: number, canonicalMessageId: CanonicalMessageId): number;
   getCanonicalMessageId(ownerId: number, messageId: number): CanonicalMessageId | undefined;
 }
@@ -347,7 +340,7 @@ interface PrivateMessagingServiceDependencies {
   readonly bots: BotLookup;
   readonly privateConversations: PrivateConversationStore;
   readonly messages: PrivateMessageStore;
-  readonly userMessageBoxes: UserMessageBoxStore;
+  readonly messageBoxes: MessageBoxStore;
   readonly blockedUsers: BlockedUserLookup;
   readonly events: ChatDomainEventSink;
   readonly currentUnixTimeSeconds: () => number;
@@ -371,7 +364,7 @@ export class PrivateMessagingService {
   readonly #bots: BotLookup;
   readonly #privateConversations: PrivateConversationStore;
   readonly #messages: PrivateMessageStore;
-  readonly #userMessageBoxes: UserMessageBoxStore;
+  readonly #messageBoxes: MessageBoxStore;
   readonly #blockedUsers: BlockedUserLookup;
   readonly #events: ChatDomainEventSink;
   readonly #currentUnixTimeSeconds: () => number;
@@ -382,7 +375,7 @@ export class PrivateMessagingService {
       bots,
       privateConversations,
       messages,
-      userMessageBoxes,
+      messageBoxes,
       blockedUsers,
       events,
       currentUnixTimeSeconds,
@@ -392,7 +385,7 @@ export class PrivateMessagingService {
     this.#bots = bots;
     this.#privateConversations = privateConversations;
     this.#messages = messages;
-    this.#userMessageBoxes = userMessageBoxes;
+    this.#messageBoxes = messageBoxes;
     this.#blockedUsers = blockedUsers;
     this.#events = events;
     this.#currentUnixTimeSeconds = currentUnixTimeSeconds;
@@ -429,12 +422,9 @@ export class PrivateMessagingService {
     if (input.text.length === 0) {
       return { sent: false, reason: 'message_text_empty' };
     }
-    const textFixing = this.#fixFormattedText(input.text, []);
-    if (!textFixing.fixed) {
-      return { sent: false, reason: 'text_invalid', textError: textFixing.error };
-    }
-    if (textFixing.formattedText.text.length > MAX_TEXT_MESSAGE_LENGTH) {
-      return { sent: false, reason: 'message_text_too_long' };
+    const textNormalization = this.#normalizeText(input.text, []);
+    if (!textNormalization.normalized) {
+      return { sent: false, ...textNormalization.failure };
     }
     const conversation: PrivateConversationKey = {
       accountId: account.profile.id,
@@ -454,7 +444,7 @@ export class PrivateMessagingService {
         account,
         bot,
         authorRole: 'account',
-        formattedText: textFixing.formattedText,
+        formattedText: textNormalization.formattedText,
         replyToMessageId: repliedMessage?.id,
       }),
     };
@@ -493,12 +483,9 @@ export class PrivateMessagingService {
     if (!replyResolution.resolved) {
       return { sent: false, reason: 'reply_message_not_found' };
     }
-    const textFixing = this.#fixFormattedText(input.text, input.entities ?? []);
-    if (!textFixing.fixed) {
-      return { sent: false, reason: 'text_invalid', textError: textFixing.error };
-    }
-    if (textFixing.formattedText.text.length > MAX_TEXT_MESSAGE_LENGTH) {
-      return { sent: false, reason: 'message_text_too_long' };
+    const textNormalization = this.#normalizeText(input.text, input.entities ?? []);
+    if (!textNormalization.normalized) {
+      return { sent: false, ...textNormalization.failure };
     }
     if (input.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(input.inlineKeyboard)) {
       return { sent: false, reason: 'callback_data_invalid' };
@@ -513,7 +500,7 @@ export class PrivateMessagingService {
         account,
         bot,
         authorRole: 'bot',
-        formattedText: textFixing.formattedText,
+        formattedText: textNormalization.formattedText,
         replyToMessageId: replyResolution.repliedMessage?.id,
         inlineKeyboard: input.inlineKeyboard,
         replyInterfaceMarkup: input.replyInterfaceMarkup,
@@ -540,14 +527,11 @@ export class PrivateMessagingService {
     if (!resolution.resolved) {
       return { edited: false, reason: resolution.reason };
     }
-    const textFixing = this.#fixFormattedText(input.text, input.entities ?? []);
-    if (!textFixing.fixed) {
-      return { edited: false, reason: 'text_invalid', textError: textFixing.error };
+    const textNormalization = this.#normalizeText(input.text, input.entities ?? []);
+    if (!textNormalization.normalized) {
+      return { edited: false, ...textNormalization.failure };
     }
-    const { formattedText } = textFixing;
-    if (formattedText.text.length > MAX_TEXT_MESSAGE_LENGTH) {
-      return { edited: false, reason: 'message_text_too_long' };
-    }
+    const { formattedText } = textNormalization;
 
     const { message } = resolution;
     return this.#editBotMessage(message, {
@@ -609,14 +593,11 @@ export class PrivateMessagingService {
     if (input.text.length === 0) {
       return { edited: false, reason: 'message_text_empty' };
     }
-    const textFixing = this.#fixFormattedText(input.text, []);
-    if (!textFixing.fixed) {
-      return { edited: false, reason: 'text_invalid', textError: textFixing.error };
+    const textNormalization = this.#normalizeText(input.text, []);
+    if (!textNormalization.normalized) {
+      return { edited: false, ...textNormalization.failure };
     }
-    const { formattedText } = textFixing;
-    if (formattedText.text.length > MAX_TEXT_MESSAGE_LENGTH) {
-      return { edited: false, reason: 'message_text_too_long' };
-    }
+    const { formattedText } = textNormalization;
     if (isSameFormattedText(formattedText, message)) {
       return { edited: false, reason: 'message_not_modified' };
     }
@@ -702,7 +683,7 @@ export class PrivateMessagingService {
     conversation: PrivateConversationKey,
     botMessageId: number,
   ): PrivateTextMessage | undefined {
-    const canonicalMessageId = this.#userMessageBoxes.getCanonicalMessageId(
+    const canonicalMessageId = this.#messageBoxes.getCanonicalMessageId(
       conversation.botId,
       botMessageId,
     );
@@ -858,14 +839,9 @@ export class PrivateMessagingService {
       readonly textEditedAtUnixSeconds: number | undefined;
     },
   ): PrivateMessageEditResult<'callback_data_invalid' | 'message_not_modified'> {
-    if (edit.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(edit.inlineKeyboard)) {
-      return { edited: false, reason: 'callback_data_invalid' };
-    }
-    if (
-      isSameFormattedText(edit, message) &&
-      areInlineKeyboardsEqual(edit.inlineKeyboard, message.inlineKeyboard)
-    ) {
-      return { edited: false, reason: 'message_not_modified' };
+    const editFailure = checkBotMessageEdit(message, edit);
+    if (editFailure !== undefined) {
+      return { edited: false, reason: editFailure };
     }
 
     const editedMessage = this.#messages.editPrivateTextMessage(message.id, edit);
@@ -874,11 +850,11 @@ export class PrivateMessagingService {
   }
 
   /**
-   * Normalizes text and the entities its sender specified as Telegram does, which also marks bot
-   * commands. A text mention may name any user of the session.
+   * Normalizes text and the entities its sender specified as Telegram does, and checks its length.
+   * A text mention may name any user of the session.
    */
-  #fixFormattedText(text: string, entities: readonly TextEntity[]): FormattedTextFixing {
-    return fixFormattedText(text, entities, {
+  #normalizeText(text: string, entities: readonly TextEntity[]): MessageTextNormalization {
+    return normalizeMessageText(text, entities, {
       isMentionableUser: (userId) =>
         this.#accounts.getById(userId) !== undefined || this.#bots.getById(userId) !== undefined,
     });
@@ -929,8 +905,8 @@ export class PrivateMessagingService {
     });
     // Telegram numbers a private message in each participant's message box. Only the bot's
     // numbering is projected today; the account's keeps the stored model faithful to Telegram.
-    this.#userMessageBoxes.assignMessageId(account.profile.id, storedMessage.id);
-    this.#userMessageBoxes.assignMessageId(bot.profile.id, storedMessage.id);
+    this.#messageBoxes.assignMessageId(account.profile.id, storedMessage.id);
+    this.#messageBoxes.assignMessageId(bot.profile.id, storedMessage.id);
     // As TDLib does for a private chat: a keyboard or forced reply replaces what the client shows,
     // and a removal clears it.
     if (replyInterfaceMarkup !== undefined) {
@@ -945,49 +921,6 @@ export class PrivateMessagingService {
   }
 }
 
-const utf8Encoder = new TextEncoder();
-
-/** Telegram rejects a keyboard whose callback data exceeds its byte limit when UTF-8 encoded. */
-function hasOnlyValidCallbackData(inlineKeyboard: InlineKeyboard): boolean {
-  return inlineKeyboard.every((row) =>
-    row.every((button) =>
-      button.kind !== 'callback' ||
-      utf8Encoder.encode(button.callbackData).length <= MAX_CALLBACK_DATA_BYTES
-    )
-  );
-}
-
 function hasButton(replyKeyboard: ReplyKeyboard, text: string): boolean {
   return replyKeyboard.rows.some((row) => row.some((button) => button.text === text));
-}
-
-function isSameFormattedText(first: FormattedText, second: FormattedText): boolean {
-  return first.text === second.text && areTextEntitiesEqual(first.entities, second.entities);
-}
-
-function areInlineKeyboardsEqual(
-  first: InlineKeyboard | undefined,
-  second: InlineKeyboard | undefined,
-): boolean {
-  if (first === undefined || second === undefined) {
-    return first === second;
-  }
-  return first.length === second.length && first.every((firstRow, rowIndex) => {
-    const secondRow = second[rowIndex];
-    return firstRow.length === secondRow.length && firstRow.every((firstButton, buttonIndex) => {
-      const secondButton = secondRow[buttonIndex];
-      switch (firstButton.kind) {
-        case 'callback':
-          return secondButton.kind === 'callback' && firstButton.text === secondButton.text &&
-            firstButton.callbackData === secondButton.callbackData;
-        case 'url':
-          return secondButton.kind === 'url' && firstButton.text === secondButton.text &&
-            firstButton.url === secondButton.url;
-        default: {
-          const unhandledButton: never = firstButton;
-          throw new Error(`Unhandled inline keyboard button: ${JSON.stringify(unhandledButton)}`);
-        }
-      }
-    });
-  });
 }

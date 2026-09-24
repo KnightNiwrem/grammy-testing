@@ -7,6 +7,8 @@ import type { SessionRouteContextTypes } from '../session_route_context_types.ts
 const createBotRequestSchema = z.strictObject({
   first_name: z.string().min(1),
   username: z.string().min(1),
+  /** Turns off privacy mode, so that the bot receives every message of its groups. */
+  can_read_all_group_messages: z.boolean().optional(),
 });
 
 export function createBotRoutes(): Hono<SessionRouteContextTypes> {

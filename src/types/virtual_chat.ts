@@ -45,6 +45,8 @@ export interface BasicGroup extends SharedChatBase {
 export interface Supergroup extends SharedChatBase {
   readonly kind: 'supergroup';
   readonly description?: string;
+  /** Telegram's `chat_instance` of the supergroup, as `PrivateConversation` describes it. */
+  readonly chatInstance: string;
 }
 
 export interface Channel extends SharedChatBase {
@@ -53,3 +55,8 @@ export interface Channel extends SharedChatBase {
 }
 
 export type SharedChat = BasicGroup | Supergroup | Channel;
+
+/** Creates a `chat_instance`: Telegram's chat instances look like random signed 64-bit integers. */
+export function createChatInstance(): string {
+  return crypto.getRandomValues(new BigInt64Array(1))[0].toString();
+}

@@ -116,6 +116,11 @@ export class SharedChatRepository {
     return this.#sharedChatMembershipsByChatId.get(chatId)?.get(identityId);
   }
 
+  /** Returns the identities of the chat's members, owner included, in the order they joined. */
+  getChatMemberIds(chatId: number): readonly number[] {
+    return [...(this.#sharedChatMembershipsByChatId.get(chatId)?.keys() ?? [])];
+  }
+
   addChatMember(chatId: number, memberId: number): ChatMemberAdditionResult {
     const membershipsByIdentityId = this.#sharedChatMembershipsByChatId.get(chatId);
     if (membershipsByIdentityId === undefined) {

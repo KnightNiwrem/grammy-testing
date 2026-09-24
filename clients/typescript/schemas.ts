@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from './constants.ts';
+import {
+  MAX_SUPERGROUP_OR_CHANNEL_ID,
+  MAX_TELEGRAM_USER_ID,
+  MIN_SUPERGROUP_OR_CHANNEL_ID,
+  MIN_TELEGRAM_USER_ID,
+} from './constants.ts';
 import type {
   CallbackQuery,
   CreatedVirtualBot,
@@ -11,6 +16,8 @@ import type {
   PlainMessageEntityType,
   PrivateTextMessage,
   ReplyInterface,
+  Supergroup,
+  SupergroupTextMessage,
   VirtualAccountProfile,
   VirtualBotProfile,
 } from './types.ts';
@@ -22,6 +29,10 @@ interface CreatedVirtualAccountResponse {
 const telegramUserIdSchema = z.number().int()
   .min(MIN_TELEGRAM_USER_ID)
   .max(MAX_TELEGRAM_USER_ID);
+
+const supergroupIdSchema = z.number().int()
+  .min(MIN_SUPERGROUP_OR_CHANNEL_ID)
+  .max(MAX_SUPERGROUP_OR_CHANNEL_ID);
 
 export const virtualBotProfileSchema: z.ZodType<VirtualBotProfile> = z.strictObject({
   id: telegramUserIdSchema,
@@ -86,6 +97,12 @@ const privateChatSchema = z.strictObject({
   username: z.string().optional(),
 });
 
+const supergroupChatSchema = z.strictObject({
+  id: supergroupIdSchema,
+  title: z.string(),
+  type: z.literal('supergroup'),
+});
+
 const messageEntitySpanShape = {
   offset: z.number().int().nonnegative(),
   length: z.number().int().positive(),
@@ -137,13 +154,16 @@ const inlineKeyboardMarkupSchema: z.ZodType<InlineKeyboardMarkup> = z.strictObje
   ).min(1),
 });
 
-const messageHeaderShape = {
-  message_id: z.number().int().positive(),
-  from: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
-  chat: privateChatSchema,
-  date: z.number().int().nonnegative(),
-  edit_date: z.number().int().nonnegative().optional(),
-};
+/** The fields that precede a message's reply, for a chat of the given schema. */
+function messageHeaderShape<Chat extends z.ZodType>(chat: Chat) {
+  return {
+    message_id: z.number().int().positive(),
+    from: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
+    chat,
+    date: z.number().int().nonnegative(),
+    edit_date: z.number().int().nonnegative().optional(),
+  };
+}
 
 const messageContentShape = {
   text: z.string(),
@@ -153,11 +173,22 @@ const messageContentShape = {
 };
 
 /** Fields in the order the server sends them, with a reply between header and content. */
-export const privateTextMessageSchema: z.ZodType<PrivateTextMessage> = z.strictObject({
-  ...messageHeaderShape,
-  reply_to_message: z.strictObject({ ...messageHeaderShape, ...messageContentShape }).optional(),
-  ...messageContentShape,
-});
+function textMessageSchema<Chat extends z.ZodType>(chat: Chat) {
+  return z.strictObject({
+    ...messageHeaderShape(chat),
+    reply_to_message: z.strictObject({ ...messageHeaderShape(chat), ...messageContentShape })
+      .optional(),
+    ...messageContentShape,
+  });
+}
+
+export const privateTextMessageSchema: z.ZodType<PrivateTextMessage> = textMessageSchema(
+  privateChatSchema,
+);
+
+const supergroupTextMessageSchema: z.ZodType<SupergroupTextMessage> = textMessageSchema(
+  supergroupChatSchema,
+);
 
 export const sentMessageResponseSchema = z.strictObject({
   message: privateTextMessageSchema,
@@ -165,6 +196,25 @@ export const sentMessageResponseSchema = z.strictObject({
 
 export const messageHistoryResponseSchema = z.strictObject({
   messages: z.array(privateTextMessageSchema),
+});
+
+export const sentSupergroupMessageResponseSchema = z.strictObject({
+  message: supergroupTextMessageSchema,
+});
+
+export const supergroupMessageHistoryResponseSchema = z.strictObject({
+  messages: z.array(supergroupTextMessageSchema),
+});
+
+const supergroupSchema: z.ZodType<Supergroup> = z.strictObject({
+  id: supergroupIdSchema,
+  type: z.literal('supergroup'),
+  title: z.string().min(1),
+  description: z.string().min(1).optional(),
+});
+
+export const createdSupergroupResponseSchema = z.strictObject({
+  supergroup: supergroupSchema,
 });
 
 const callbackQuerySchema: z.ZodType<CallbackQuery> = z.strictObject({

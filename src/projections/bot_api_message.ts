@@ -1,6 +1,8 @@
 import type {
   BotApiBotUser,
   BotApiCallbackQuery,
+  BotApiGroupChat,
+  BotApiGroupChatBotMember,
   BotApiInlineKeyboardButton,
   BotApiInlineKeyboardMarkup,
   BotApiMessageEntity,
@@ -9,14 +11,24 @@ import type {
   BotApiPrivateChatBotMember,
   BotApiPrivateTextMessage,
   BotApiRepliedPrivateTextMessage,
+  BotApiRepliedSupergroupTextMessage,
+  BotApiSupergroupChat,
+  BotApiSupergroupTextMessage,
+  BotApiTextMessage,
   BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
-import type { BotBlockChangedEvent } from '../types/chat_domain_event.ts';
+import type { BotBlockChangedEvent, ChatMemberAddedEvent } from '../types/chat_domain_event.ts';
 import type { InlineKeyboard, InlineKeyboardButton } from '../types/inline_keyboard.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
 import type { VirtualBotProfile } from '../types/virtual_bot.ts';
-import type { PrivateTextMessage, TextEntity } from '../types/virtual_message.ts';
+import type { BasicGroup, Supergroup } from '../types/virtual_chat.ts';
+import type {
+  PrivateTextMessage,
+  SupergroupTextMessage,
+  TextEntity,
+  TextMessage,
+} from '../types/virtual_message.ts';
 
 export interface PrivateTextMessageForBotProjectionInput {
   readonly message: PrivateTextMessage;
@@ -47,6 +59,47 @@ export function projectPrivateTextMessageForBot(
     from: message.authorRole === 'account' ? account : projectBotAsUser(bot),
     chat: projectPrivateChat(account),
     date: message.sentAtUnixSeconds,
+    ...projectTextMessageContent(message, mentionedUsers, repliedMessage),
+  };
+}
+
+export interface SupergroupTextMessageProjectionInput {
+  readonly message: SupergroupTextMessage;
+  readonly supergroup: Supergroup;
+  /** The member who wrote the message. */
+  readonly author: BotApiUser;
+  /** The message's ID in the supergroup's message box, which every member sees. */
+  readonly messageId: number;
+  /** Every user the message's text mentions, by ID. */
+  readonly mentionedUsers: ReadonlyMap<number, BotApiUser>;
+  /** The replied message; omitted when there is none to show. */
+  readonly repliedMessage?: BotApiRepliedSupergroupTextMessage;
+}
+
+/**
+ * Projects a canonical supergroup text message, in the field order Telegram uses. A supergroup
+ * numbers its messages once, so every member sees the same projection.
+ */
+export function projectSupergroupTextMessage(
+  { message, supergroup, author, messageId, mentionedUsers, repliedMessage }:
+    SupergroupTextMessageProjectionInput,
+): BotApiSupergroupTextMessage {
+  return {
+    message_id: messageId,
+    from: author,
+    chat: projectSupergroupChat(supergroup),
+    date: message.sentAtUnixSeconds,
+    ...projectTextMessageContent(message, mentionedUsers, repliedMessage),
+  };
+}
+
+/** Projects the fields that follow a message's date, which every chat type shows alike. */
+function projectTextMessageContent<RepliedMessage>(
+  message: TextMessage,
+  mentionedUsers: ReadonlyMap<number, BotApiUser>,
+  repliedMessage: RepliedMessage | undefined,
+) {
+  return {
     ...(message.textEditedAtUnixSeconds === undefined
       ? {}
       : { edit_date: message.textEditedAtUnixSeconds }),
@@ -67,7 +120,7 @@ export interface CallbackQueryForBotProjectionInput {
   /** The account that pressed the button. */
   readonly account: VirtualAccountProfile;
   /** The message carrying the pressed button, as the observing bot currently sees it. */
-  readonly message: BotApiPrivateTextMessage;
+  readonly message: BotApiTextMessage;
 }
 
 /** Projects a callback query as the bot that owns the pressed button receives it. */
@@ -111,6 +164,34 @@ export function projectBotBlockChangeForBot(
   };
 }
 
+export interface BotJoinedGroupProjectionInput {
+  readonly event: ChatMemberAddedEvent;
+  readonly chat: BasicGroup | Supergroup;
+  /** The account that added the bot. */
+  readonly account: VirtualAccountProfile;
+  /** The bot that joined the group, which observes the change. */
+  readonly bot: VirtualBotProfile;
+}
+
+/**
+ * Projects an account's addition of a bot to a group as the added bot receives it: the bot's
+ * membership changes from `left` to `member`, and the account made the change.
+ */
+export function projectBotJoinedGroupForBot(
+  { event, chat, account, bot }: BotJoinedGroupProjectionInput,
+): BotApiMyChatMemberUpdated {
+  const user = projectBotAsUser(bot);
+  const left: BotApiGroupChatBotMember = { user, status: 'left' };
+  const member: BotApiGroupChatBotMember = { user, status: 'member' };
+  return {
+    chat: projectGroupChat(chat),
+    from: account,
+    date: event.addedAtUnixSeconds,
+    old_chat_member: left,
+    new_chat_member: member,
+  };
+}
+
 /** Shows a bot as messages show users, without the capabilities that only `getMe` reports. */
 export function projectBotAsUser(bot: VirtualBotProfile): BotApiBotUser {
   const { id, first_name, last_name, username } = bot;
@@ -134,6 +215,17 @@ function projectPrivateChat(
     ...(last_name === undefined ? {} : { last_name }),
     ...(username === undefined ? {} : { username }),
   };
+}
+
+/** Shows a group chat as its members see it. */
+function projectGroupChat(chat: BasicGroup | Supergroup): BotApiGroupChat {
+  return chat.kind === 'supergroup'
+    ? projectSupergroupChat(chat)
+    : { id: chat.id, title: chat.title, type: 'group' };
+}
+
+function projectSupergroupChat({ id, title }: Supergroup): BotApiSupergroupChat {
+  return { id, title, type: 'supergroup' };
 }
 
 function projectTextEntity(

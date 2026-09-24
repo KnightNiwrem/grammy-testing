@@ -1,4 +1,3 @@
-import type { PrivateConversationKey } from './virtual_chat.ts';
 import type { CanonicalMessageId } from './virtual_message.ts';
 
 /** Telegram's decimal text form of a 64-bit callback query identifier. */
@@ -27,12 +26,18 @@ export type CallbackQueryState =
   | { readonly status: 'answered'; readonly answer: CallbackQueryAnswer }
   | { readonly status: 'expired' };
 
-/** An account's press of a callback button on a bot message in their private conversation. */
+/**
+ * An account's press of a callback button on a bot message, in their private conversation or in a
+ * supergroup both are members of.
+ */
 export interface CallbackQuery {
   readonly id: CallbackQueryId;
-  readonly conversation: PrivateConversationKey;
+  /** The account that pressed the button. */
+  readonly accountId: number;
+  /** The bot that sent the message carrying the button, which receives and answers the query. */
+  readonly botId: number;
   readonly messageId: CanonicalMessageId;
-  /** Telegram's `chat_instance` of the message's chat, fixed when the conversation began. */
+  /** Telegram's `chat_instance` of the message's chat, fixed when the chat began. */
   readonly chatInstance: string;
   readonly callbackData: string;
   readonly state: CallbackQueryState;

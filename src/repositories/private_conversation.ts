@@ -1,4 +1,8 @@
-import type { PrivateConversation, PrivateConversationKey } from '../types/virtual_chat.ts';
+import {
+  createChatInstance,
+  type PrivateConversation,
+  type PrivateConversationKey,
+} from '../types/virtual_chat.ts';
 import type { CanonicalMessageId } from '../types/virtual_message.ts';
 
 export class PrivateConversationRepository {
@@ -66,9 +70,4 @@ export class PrivateConversationRepository {
     }
     this.#replyInterfaceMessageIdsByAccountId.set(accountId, messageIdsByBotId);
   }
-}
-
-/** Telegram's chat instances look like random signed 64-bit integers. */
-function createChatInstance(): string {
-  return crypto.getRandomValues(new BigInt64Array(1))[0].toString();
 }

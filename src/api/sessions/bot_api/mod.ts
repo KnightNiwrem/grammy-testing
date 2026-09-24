@@ -68,6 +68,13 @@ const BOT_BLOCKED_DESCRIPTION = 'Forbidden: bot was blocked by the user';
 const CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION =
   'Bad Request: replies to messages of other chats are not supported';
 
+/**
+ * The emulator's description for a reply keyboard, keyboard removal, or forced reply sent to a
+ * group, where Telegram shows them to chosen members; the emulator does not support that.
+ */
+const GROUP_REPLY_INTERFACE_UNSUPPORTED_DESCRIPTION =
+  'Bad Request: reply keyboards, keyboard removals, and forced replies are not supported in groups';
+
 /** Telegram's descriptions for message text or formatting it cannot read. */
 const FORMATTED_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: text is too long';
 const PARSE_MODE_UNSUPPORTED_DESCRIPTION = 'Bad Request: unsupported parse_mode';
@@ -83,6 +90,7 @@ const MESSAGE_NOT_MODIFIED_DESCRIPTION =
 
 /** Telegram's descriptions for rejected message deletions. */
 const MESSAGE_TO_DELETE_NOT_FOUND_DESCRIPTION = 'Bad Request: message to delete not found';
+const MESSAGE_NOT_DELETABLE_DESCRIPTION = "Bad Request: message can't be deleted";
 const MESSAGE_IDENTIFIERS_NOT_SPECIFIED_DESCRIPTION =
   'Bad Request: message identifiers are not specified';
 const TOO_MANY_MESSAGE_IDENTIFIERS_DESCRIPTION =
@@ -156,8 +164,8 @@ const linkPreviewParametersShape = {
 };
 
 // Telegram treats a missing parameter as empty text. It also accepts an `@username` chat_id,
-// which it resolves only for bots, supergroups, and channels; the emulator supports only private
-// chats, so it accepts only numeric chat IDs. `reply_to_message_id` and
+// which it resolves only for bots and public supergroups and channels; the emulator's supergroups
+// have no usernames, so it accepts only numeric chat IDs. `reply_to_message_id` and
 // `allow_sending_without_reply` are the older form of `reply_parameters`, which Telegram still
 // accepts. The account's client does not model notifications, so `disable_notification` is
 // validated and ignored.
@@ -461,6 +469,8 @@ function sendMessageResponse(context: BotApiRouteContext, result: SendMessageRes
       return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
     case 'bot_blocked':
       return botApiError(context, 403, BOT_BLOCKED_DESCRIPTION);
+    case 'reply_interface_unsupported_in_groups':
+      return botApiError(context, 400, GROUP_REPLY_INTERFACE_UNSUPPORTED_DESCRIPTION);
     default: {
       const unhandledFailure: never = result;
       throw new Error(`Unhandled sendMessage failure: ${JSON.stringify(unhandledFailure)}`);
@@ -657,6 +667,8 @@ function handleDeleteMessage(
       return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'message_not_found':
       return botApiError(context, 400, MESSAGE_TO_DELETE_NOT_FOUND_DESCRIPTION);
+    case 'message_not_deletable':
+      return botApiError(context, 400, MESSAGE_NOT_DELETABLE_DESCRIPTION);
     default: {
       const unhandledReason: never = result.reason;
       throw new Error(`Unhandled deleteMessage failure: ${unhandledReason}`);
@@ -691,10 +703,19 @@ function handleDeleteMessages(
     context.get('authenticatedBot'),
     { chatId, messageIds },
   );
-  if (!result.deleted) {
-    return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+  if (result.deleted) {
+    return context.json({ ok: true as const, result: true as const });
   }
-  return context.json({ ok: true as const, result: true as const });
+  switch (result.reason) {
+    case 'chat_not_found':
+      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'message_not_deletable':
+      return botApiError(context, 400, MESSAGE_NOT_DELETABLE_DESCRIPTION);
+    default: {
+      const unhandledReason: never = result.reason;
+      throw new Error(`Unhandled deleteMessages failure: ${unhandledReason}`);
+    }
+  }
 }
 
 function handleAnswerCallbackQuery(

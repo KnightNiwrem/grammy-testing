@@ -1,21 +1,33 @@
 import {
   projectBotAsUser,
   projectBotBlockChangeForBot,
+  projectBotJoinedGroupForBot,
   projectCallbackQueryForBot,
   projectPrivateTextMessageForBot,
+  projectSupergroupTextMessage,
 } from '../projections/bot_api_message.ts';
 import type {
   BotApiCallbackQuery,
   BotApiMyChatMemberUpdated,
   BotApiPrivateTextMessage,
   BotApiRepliedPrivateTextMessage,
+  BotApiRepliedSupergroupTextMessage,
+  BotApiSupergroupTextMessage,
+  BotApiTextMessage,
   BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
-import type { BotBlockChangedEvent } from '../types/chat_domain_event.ts';
+import type { BotBlockChangedEvent, ChatMemberAddedEvent } from '../types/chat_domain_event.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
-import type { CanonicalMessageId, PrivateTextMessage } from '../types/virtual_message.ts';
+import type { SharedChat } from '../types/virtual_chat.ts';
+import type {
+  CanonicalMessageId,
+  PrivateTextMessage,
+  SupergroupMessageAuthor,
+  SupergroupTextMessage,
+  TextMessage,
+} from '../types/virtual_message.ts';
 
 interface AccountLookup {
   getById(accountId: number): VirtualAccount | undefined;
@@ -29,35 +41,59 @@ interface MessageIdLookup {
   getMessageId(ownerId: number, canonicalMessageId: CanonicalMessageId): number | undefined;
 }
 
-interface PrivateMessageLookup {
+interface MessageLookup {
   getPrivateTextMessage(messageId: CanonicalMessageId): PrivateTextMessage | undefined;
+  getSupergroupTextMessage(messageId: CanonicalMessageId): SupergroupTextMessage | undefined;
+}
+
+interface SharedChatLookup {
+  getSharedChat(chatId: number): SharedChat | undefined;
 }
 
 interface BotMessageViewServiceDependencies {
   readonly accounts: AccountLookup;
   readonly bots: BotLookup;
-  readonly userMessageBoxes: MessageIdLookup;
-  readonly messages: PrivateMessageLookup;
+  readonly sharedChats: SharedChatLookup;
+  readonly messageBoxes: MessageIdLookup;
+  readonly messages: MessageLookup;
 }
 
 /**
  * Presents committed canonical messages, callback queries on them, and changes of a bot's
- * membership in its private chats, as the Bot API shows them to an observing bot.
+ * membership in its chats, as the Bot API shows them to an observing bot.
  *
- * It reads the participants' profiles and the observer's message numbering; it never creates
- * messages or decides whether sending one is permitted.
+ * It reads the participants' profiles, the chats, and the observer's message numbering; it never
+ * creates messages or decides whether sending one is permitted.
  */
 export class BotMessageViewService {
   readonly #accounts: AccountLookup;
   readonly #bots: BotLookup;
-  readonly #userMessageBoxes: MessageIdLookup;
-  readonly #messages: PrivateMessageLookup;
+  readonly #sharedChats: SharedChatLookup;
+  readonly #messageBoxes: MessageIdLookup;
+  readonly #messages: MessageLookup;
 
-  constructor({ accounts, bots, userMessageBoxes, messages }: BotMessageViewServiceDependencies) {
+  constructor(
+    { accounts, bots, sharedChats, messageBoxes, messages }: BotMessageViewServiceDependencies,
+  ) {
     this.#accounts = accounts;
     this.#bots = bots;
-    this.#userMessageBoxes = userMessageBoxes;
+    this.#sharedChats = sharedChats;
+    this.#messageBoxes = messageBoxes;
     this.#messages = messages;
+  }
+
+  /** Returns a committed message of any chat as a bot of that chat sees it. */
+  viewTextMessageForBot(message: TextMessage): BotApiTextMessage {
+    switch (message.kind) {
+      case 'private_text':
+        return this.viewPrivateTextMessageForBot(message);
+      case 'supergroup_text':
+        return this.viewSupergroupTextMessage(message);
+      default: {
+        const unhandledMessage: never = message;
+        throw new Error(`Unhandled message: ${JSON.stringify(unhandledMessage)}`);
+      }
+    }
   }
 
   /**
@@ -76,14 +112,29 @@ export class BotMessageViewService {
   }
 
   /**
+   * Returns a supergroup text message, with the current state of the message it replies to unless
+   * that message was deleted. Every member, bot or account, sees the same message. The message
+   * must be committed: its supergroup and author exist and it is numbered in the supergroup's box.
+   */
+  viewSupergroupTextMessage(message: SupergroupTextMessage): BotApiSupergroupTextMessage {
+    const repliedMessage = message.replyToMessageId === undefined
+      ? undefined
+      : this.#messages.getSupergroupTextMessage(message.replyToMessageId);
+    return this.#viewSupergroupTextMessage(
+      message,
+      repliedMessage === undefined ? undefined : this.#viewSupergroupTextMessage(repliedMessage),
+    );
+  }
+
+  /**
    * Returns a callback query as the bot that owns the pressed button receives it, carrying the
    * given state of the button's message.
    */
   viewCallbackQueryForBot(
     callbackQuery: CallbackQuery,
-    message: PrivateTextMessage,
+    message: TextMessage,
   ): BotApiCallbackQuery {
-    const { accountId } = callbackQuery.conversation;
+    const { accountId } = callbackQuery;
     const account = this.#accounts.getById(accountId);
     if (account === undefined) {
       throw new Error(`Account ${accountId} of callback query ${callbackQuery.id} does not exist`);
@@ -92,7 +143,7 @@ export class BotMessageViewService {
     return projectCallbackQueryForBot({
       callbackQuery,
       account: account.profile,
-      message: this.viewPrivateTextMessageForBot(message),
+      message: this.viewTextMessageForBot(message),
     });
   }
 
@@ -109,6 +160,68 @@ export class BotMessageViewService {
     return projectBotBlockChangeForBot({ event, account: account.profile, bot: bot.profile });
   }
 
+  /**
+   * Returns an account's addition of a bot to a group as the added bot receives it. The added
+   * member must be a bot, and the chat a basic group or a supergroup.
+   */
+  viewBotJoinedGroupForBot(event: ChatMemberAddedEvent): BotApiMyChatMemberUpdated {
+    const { chat } = event;
+    if (chat.kind === 'channel') {
+      throw new Error(`Bot ${event.memberId} cannot join channel ${chat.id}`);
+    }
+    const account = this.#accounts.getById(event.actorAccountId);
+    if (account === undefined) {
+      throw new Error(`Account ${event.actorAccountId} that added a member does not exist`);
+    }
+    const bot = this.#bots.getById(event.memberId);
+    if (bot === undefined) {
+      throw new Error(`Added member ${event.memberId} is no bot`);
+    }
+    return projectBotJoinedGroupForBot({ event, chat, account: account.profile, bot: bot.profile });
+  }
+
+  /** Projects a supergroup message with the given view of the message it replies to, if any. */
+  #viewSupergroupTextMessage(
+    message: SupergroupTextMessage,
+    repliedMessage?: BotApiRepliedSupergroupTextMessage,
+  ): BotApiSupergroupTextMessage {
+    const supergroup = this.#sharedChats.getSharedChat(message.chatId);
+    if (supergroup?.kind !== 'supergroup') {
+      throw new Error(`Supergroup ${message.chatId} of message ${message.id} does not exist`);
+    }
+    const messageId = this.#messageBoxes.getMessageId(message.chatId, message.id);
+    if (messageId === undefined) {
+      throw new Error(`Supergroup message ${message.id} is not numbered in its supergroup`);
+    }
+
+    return projectSupergroupTextMessage({
+      message,
+      supergroup,
+      author: this.#findSupergroupMessageAuthor(message.author, message.id),
+      messageId,
+      mentionedUsers: this.#findMentionedUsers(message),
+      repliedMessage,
+    });
+  }
+
+  #findSupergroupMessageAuthor(
+    author: SupergroupMessageAuthor,
+    messageId: CanonicalMessageId,
+  ): BotApiUser {
+    const user = author.kind === 'account'
+      ? this.#accounts.getById(author.accountId)?.profile
+      : this.#findBotUser(author.botId);
+    if (user === undefined) {
+      throw new Error(`Author of message ${messageId} does not exist`);
+    }
+    return user;
+  }
+
+  #findBotUser(botId: number): BotApiUser | undefined {
+    const bot = this.#bots.getById(botId);
+    return bot === undefined ? undefined : projectBotAsUser(bot.profile);
+  }
+
   /** Projects a message with the given view of the message it replies to, if any. */
   #viewPrivateTextMessage(
     message: PrivateTextMessage,
@@ -123,7 +236,7 @@ export class BotMessageViewService {
     if (bot === undefined) {
       throw new Error(`Bot ${observingBotId} of message ${message.id} does not exist`);
     }
-    const observerMessageId = this.#userMessageBoxes.getMessageId(observingBotId, message.id);
+    const observerMessageId = this.#messageBoxes.getMessageId(observingBotId, message.id);
     if (observerMessageId === undefined) {
       throw new Error(`Private message ${message.id} was not delivered to bot ${observingBotId}`);
     }
@@ -139,16 +252,14 @@ export class BotMessageViewService {
   }
 
   /** Looks up the users a message mentions, which sending the message verified exist. */
-  #findMentionedUsers(message: PrivateTextMessage): ReadonlyMap<number, BotApiUser> {
+  #findMentionedUsers(message: TextMessage): ReadonlyMap<number, BotApiUser> {
     const mentionedUsers = new Map<number, BotApiUser>();
     for (const entity of message.entities) {
       if (entity.type !== 'text_mention') {
         continue;
       }
-      const account = this.#accounts.getById(entity.userId);
-      const bot = account === undefined ? this.#bots.getById(entity.userId) : undefined;
-      const user = account?.profile ??
-        (bot === undefined ? undefined : projectBotAsUser(bot.profile));
+      const user = this.#accounts.getById(entity.userId)?.profile ??
+        this.#findBotUser(entity.userId);
       if (user === undefined) {
         throw new Error(`User ${entity.userId} mentioned in message ${message.id} does not exist`);
       }

@@ -6,7 +6,13 @@ import type { BotCommand } from '../../../types/bot_command.ts';
 import type { CallbackQuery } from '../../../types/callback_query.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { ReplyInterface } from '../../../types/reply_interface.ts';
-import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from '../../../types/telegram_identity.ts';
+import {
+  MAX_SUPERGROUP_OR_CHANNEL_ID,
+  MAX_TELEGRAM_USER_ID,
+  MIN_SUPERGROUP_OR_CHANNEL_ID,
+  MIN_TELEGRAM_USER_ID,
+} from '../../../types/telegram_identity.ts';
+import type { Supergroup } from '../../../types/virtual_chat.ts';
 import { MAX_TEXT_MESSAGE_LENGTH } from '../../../types/virtual_message.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 
@@ -27,13 +33,36 @@ const CALLBACK_QUERY_ID_PARAMETER = 'callbackQueryId';
 const CALLBACK_QUERY_COLLECTION_PATH = `/:${ACCOUNT_ID_PARAMETER}/callback-queries` as const;
 const CALLBACK_QUERY_PATH =
   `${CALLBACK_QUERY_COLLECTION_PATH}/:${CALLBACK_QUERY_ID_PARAMETER}` as const;
+const SUPERGROUP_COLLECTION_PATH = `/:${ACCOUNT_ID_PARAMETER}/supergroups` as const;
+const CHAT_ID_PARAMETER = 'chatId';
+const SUPERGROUP_CONVERSATION_PATH =
+  `/:${ACCOUNT_ID_PARAMETER}/conversations/supergroup/:${CHAT_ID_PARAMETER}` as const;
+const SUPERGROUP_MESSAGE_HISTORY_PATH = `${SUPERGROUP_CONVERSATION_PATH}/messages` as const;
+const SUPERGROUP_MESSAGE_PATH =
+  `${SUPERGROUP_MESSAGE_HISTORY_PATH}/:${MESSAGE_ID_PARAMETER}` as const;
+const USER_ID_PARAMETER = 'userId';
+const SUPERGROUP_MEMBER_PATH =
+  `${SUPERGROUP_CONVERSATION_PATH}/members/:${USER_ID_PARAMETER}` as const;
 
 const telegramUserIdSchema = z.number().int()
   .min(MIN_TELEGRAM_USER_ID)
   .max(MAX_TELEGRAM_USER_ID);
 const telegramUserIdPathParameterSchema = z.coerce.number().pipe(telegramUserIdSchema);
-/** A message's ID as the bot sees it, which is how these routes show messages. */
+const supergroupChatIdSchema = z.number().int()
+  .min(MIN_SUPERGROUP_OR_CHANNEL_ID)
+  .max(MAX_SUPERGROUP_OR_CHANNEL_ID);
+const supergroupChatIdPathParameterSchema = z.coerce.number().pipe(supergroupChatIdSchema);
+/** A message's ID as the chat's bots see it, which is how these routes show messages. */
 const messageIdPathParameterSchema = z.coerce.number().pipe(z.int().positive());
+
+/**
+ * The chat a message goes to or a button is on: a private chat with a bot, or a supergroup the
+ * account is a member of.
+ */
+const chatSchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('private'), botId: telegramUserIdSchema }),
+  z.strictObject({ type: z.literal('supergroup'), chatId: supergroupChatIdSchema }),
+]);
 
 const createAccountRequestSchema = z.strictObject({
   first_name: z.string().min(1),
@@ -43,13 +72,15 @@ const createAccountRequestSchema = z.strictObject({
 });
 
 const sendMessageRequestSchema = z.strictObject({
-  to: z.strictObject({
-    type: z.literal('private'),
-    botId: telegramUserIdSchema,
-  }),
+  to: chatSchema,
   text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH),
-  /** The replied message's ID as the bot sees it, which is how these routes show messages. */
+  /** The replied message's ID as the chat's bots see it, which is how these routes show messages. */
   reply_to_message_id: z.int().positive().optional(),
+});
+
+const createSupergroupRequestSchema = z.strictObject({
+  title: z.string().min(1),
+  description: z.string().min(1).optional(),
 });
 
 const editMessageRequestSchema = z.strictObject({
@@ -65,11 +96,8 @@ const pressReplyKeyboardButtonRequestSchema = z.strictObject({
 });
 
 const pressCallbackButtonRequestSchema = z.strictObject({
-  chat: z.strictObject({
-    type: z.literal('private'),
-    botId: telegramUserIdSchema,
-  }),
-  /** The message's ID as the bot sees it, which is how these routes show messages. */
+  chat: chatSchema,
+  /** The message's ID as the chat's bots see it, which is how these routes show messages. */
   message_id: z.int().positive(),
   callback_data: z.string().min(1),
   expired: z.boolean().default(false),
@@ -77,7 +105,7 @@ const pressCallbackButtonRequestSchema = z.strictObject({
 
 /**
  * Account-facing routes. Private messages they return are shown as the conversation's bot sees
- * them, whichever participant wrote them.
+ * them, whichever participant wrote them. Supergroup messages look the same to every member.
  */
 export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   const accountRoutes = new Hono<SessionRouteContextTypes>();
@@ -127,13 +155,31 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 400);
     }
 
-    const { privateMessaging, botMessageViews } = context.get('emulationSession');
-    const { to, text, reply_to_message_id: replyToBotMessageId } = parsedRequest.data;
+    const { privateMessaging, supergroupMessaging, botMessageViews } = context.get(
+      'emulationSession',
+    );
+    const { to, text, reply_to_message_id: replyToMessageId } = parsedRequest.data;
+    if (to.type === 'supergroup') {
+      const result = supergroupMessaging.sendAccountMessage({
+        fromAccountId: accountId.data,
+        chatId: to.chatId,
+        text,
+        replyToMessageId,
+      });
+      if (!result.sent) {
+        return context.body(null, supergroupMemberFailureStatus(result.reason));
+      }
+      return context.json(
+        { message: botMessageViews.viewSupergroupTextMessage(result.message) },
+        201,
+      );
+    }
+
     const result = privateMessaging.sendAccountMessage({
       fromAccountId: accountId.data,
       to,
       text,
-      replyToBotMessageId,
+      replyToBotMessageId: replyToMessageId,
     });
     if (!result.sent) {
       return context.body(null, accountMessageFailureStatus(result.reason));
@@ -143,6 +189,142 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       { message: botMessageViews.viewPrivateTextMessageForBot(result.message) },
       201,
     );
+  });
+
+  accountRoutes.post(SUPERGROUP_COLLECTION_PATH, async (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    if (!accountId.success) {
+      return context.body(null, 400);
+    }
+
+    let requestBody: unknown;
+    try {
+      requestBody = await context.req.json();
+    } catch {
+      return context.body(null, 400);
+    }
+    const parsedRequest = createSupergroupRequestSchema.safeParse(requestBody);
+    if (!parsedRequest.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').sharedChatAdministration.createSupergroup({
+      creatorAccountId: accountId.data,
+      title: parsedRequest.data.title,
+      description: parsedRequest.data.description,
+    });
+    if (!result.created) {
+      return context.body(null, result.reason === 'creator_account_not_found' ? 404 : 507);
+    }
+    return context.json({ supergroup: presentSupergroup(result.supergroup) }, 201);
+  });
+
+  accountRoutes.put(SUPERGROUP_MEMBER_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const chatId = supergroupChatIdPathParameterSchema.safeParse(
+      context.req.param(CHAT_ID_PARAMETER),
+    );
+    const userId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(USER_ID_PARAMETER),
+    );
+    if (!accountId.success || !chatId.success || !userId.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').sharedChatAdministration.addChatMember({
+      actorAccountId: accountId.data,
+      chatId: chatId.data,
+      memberId: userId.data,
+    });
+    if (result.added) {
+      return context.body(null, 204);
+    }
+    switch (result.reason) {
+      // Adding a member again changes nothing, as a repeated PUT should.
+      case 'member_already_present':
+        return context.body(null, 204);
+      case 'actor_not_authorized':
+        return context.body(null, 403);
+      case 'actor_account_not_found':
+      case 'chat_not_found':
+      case 'member_not_found':
+        return context.body(null, 404);
+      // Only supergroups are addressed here, and they accept bots.
+      case 'bot_not_permitted_in_channel':
+        throw new Error(`Supergroup ${chatId.data} refused bot ${userId.data} as a channel`);
+      default: {
+        const unhandledReason: never = result.reason;
+        throw new Error(`Unhandled chat member addition failure: ${unhandledReason}`);
+      }
+    }
+  });
+
+  accountRoutes.get(SUPERGROUP_MESSAGE_HISTORY_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const chatId = supergroupChatIdPathParameterSchema.safeParse(
+      context.req.param(CHAT_ID_PARAMETER),
+    );
+    if (!accountId.success || !chatId.success) {
+      return context.body(null, 400);
+    }
+
+    const { supergroupMessaging, botMessageViews } = context.get('emulationSession');
+    const result = supergroupMessaging.getMessageHistory({
+      accountId: accountId.data,
+      chatId: chatId.data,
+    });
+    if (!result.found) {
+      return context.body(null, supergroupMemberFailureStatus(result.reason));
+    }
+    return context.json({
+      messages: result.messages.map((message) =>
+        botMessageViews.viewSupergroupTextMessage(message)
+      ),
+    });
+  });
+
+  accountRoutes.patch(SUPERGROUP_MESSAGE_PATH, async (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const chatId = supergroupChatIdPathParameterSchema.safeParse(
+      context.req.param(CHAT_ID_PARAMETER),
+    );
+    const messageId = messageIdPathParameterSchema.safeParse(
+      context.req.param(MESSAGE_ID_PARAMETER),
+    );
+    if (!accountId.success || !chatId.success || !messageId.success) {
+      return context.body(null, 400);
+    }
+
+    let requestBody: unknown;
+    try {
+      requestBody = await context.req.json();
+    } catch {
+      return context.body(null, 400);
+    }
+    const parsedRequest = editMessageRequestSchema.safeParse(requestBody);
+    if (!parsedRequest.success) {
+      return context.body(null, 400);
+    }
+
+    const { supergroupMessaging, botMessageViews } = context.get('emulationSession');
+    const result = supergroupMessaging.editAccountMessage({
+      fromAccountId: accountId.data,
+      chatId: chatId.data,
+      messageId: messageId.data,
+      text: parsedRequest.data.text,
+    });
+    if (!result.edited) {
+      return context.body(null, supergroupMemberFailureStatus(result.reason));
+    }
+    return context.json({ message: botMessageViews.viewSupergroupTextMessage(result.message) });
   });
 
   accountRoutes.get(PRIVATE_MESSAGE_HISTORY_PATH, (context) => {
@@ -341,12 +523,19 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     const result = context.get('emulationSession').callbackQueries.pressCallbackButton({
       fromAccountId: accountId.data,
       chat: parsedRequest.data.chat,
-      botMessageId: parsedRequest.data.message_id,
+      messageId: parsedRequest.data.message_id,
       callbackData: parsedRequest.data.callback_data,
       expired: parsedRequest.data.expired,
     });
     if (!result.pressed) {
-      return context.body(null, result.reason === 'callback_button_not_found' ? 400 : 404);
+      switch (result.reason) {
+        case 'callback_button_not_found':
+          return context.body(null, 400);
+        case 'not_a_member':
+          return context.body(null, 403);
+        default:
+          return context.body(null, 404);
+      }
     }
 
     const callbackQueryPath = `${
@@ -397,6 +586,41 @@ function accountMessageFailureStatus(reason: AccountMessageFailureReason): 400 |
     default:
       return 400;
   }
+}
+
+type SupergroupMessaging = EmulationSession['supergroupMessaging'];
+
+/** Why an account's message, edit, or history request in a supergroup failed. */
+type SupergroupAccountFailureReason =
+  | Extract<ReturnType<SupergroupMessaging['sendAccountMessage']>, { sent: false }>['reason']
+  | Extract<ReturnType<SupergroupMessaging['editAccountMessage']>, { edited: false }>['reason']
+  | Extract<ReturnType<SupergroupMessaging['getMessageHistory']>, { found: false }>['reason'];
+
+/**
+ * A missing account, supergroup, or message is not found, and an account that is not a member of
+ * the supergroup is forbidden from it; other failures reject the request.
+ */
+function supergroupMemberFailureStatus(reason: SupergroupAccountFailureReason): 400 | 403 | 404 {
+  switch (reason) {
+    case 'account_not_found':
+    case 'chat_not_found':
+    case 'message_not_found':
+      return 404;
+    case 'not_a_member':
+      return 403;
+    default:
+      return 400;
+  }
+}
+
+/** Shows a supergroup as the Bot API shows a chat, with its description when it has one. */
+function presentSupergroup({ id, title, description }: Supergroup) {
+  return {
+    id,
+    type: 'supergroup' as const,
+    title,
+    ...(description === undefined ? {} : { description }),
+  };
 }
 
 /** Shows a command as the account's client lists it. */

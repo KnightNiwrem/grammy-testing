@@ -1,13 +1,14 @@
 import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
+import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
-import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
+import { MessageBoxRepository } from '../src/repositories/message_box.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 
 Deno.test('BotMessageViewService shows an account message in its bot private chat', () => {
-  const { virtualUsers, messages, userMessageBoxes, botMessageViews } = createViewFixture();
+  const { virtualUsers, messages, messageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
   const message = messages.addPrivateTextMessage({
@@ -17,9 +18,9 @@ Deno.test('BotMessageViewService shows an account message in its bot private cha
     text: '/start',
     entities: [{ type: 'bot_command', offset: 0, length: 6 }],
   });
-  userMessageBoxes.assignMessageId(account.profile.id, message.id);
-  userMessageBoxes.assignMessageId(bot.profile.id, 'unrelated-message');
-  userMessageBoxes.assignMessageId(bot.profile.id, message.id);
+  messageBoxes.assignMessageId(account.profile.id, message.id);
+  messageBoxes.assignMessageId(bot.profile.id, 'unrelated-message');
+  messageBoxes.assignMessageId(bot.profile.id, message.id);
 
   const view = botMessageViews.viewPrivateTextMessageForBot(message);
 
@@ -37,7 +38,7 @@ Deno.test('BotMessageViewService shows an account message in its bot private cha
 });
 
 Deno.test('BotMessageViewService shows a bot message, then its edit date and keyboard, in Telegram order', () => {
-  const { virtualUsers, messages, userMessageBoxes, botMessageViews } = createViewFixture();
+  const { virtualUsers, messages, messageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
   const sentMessage = messages.addPrivateTextMessage({
@@ -47,7 +48,7 @@ Deno.test('BotMessageViewService shows a bot message, then its edit date and key
     text: 'Continue?',
     entities: [],
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, sentMessage.id);
+  messageBoxes.assignMessageId(bot.profile.id, sentMessage.id);
   const botSender = {
     id: bot.profile.id,
     is_bot: true,
@@ -104,7 +105,7 @@ Deno.test('BotMessageViewService shows a bot message, then its edit date and key
 });
 
 Deno.test('BotMessageViewService shows the current replied message until it is deleted', () => {
-  const { virtualUsers, messages, userMessageBoxes, botMessageViews } = createViewFixture();
+  const { virtualUsers, messages, messageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
   const conversation = { accountId: account.profile.id, botId: bot.profile.id };
@@ -115,7 +116,7 @@ Deno.test('BotMessageViewService shows the current replied message until it is d
     text: 'Your name?',
     entities: [],
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, question.id);
+  messageBoxes.assignMessageId(bot.profile.id, question.id);
   const answer = messages.addPrivateTextMessage({
     conversation,
     authorRole: 'account',
@@ -124,7 +125,7 @@ Deno.test('BotMessageViewService shows the current replied message until it is d
     entities: [],
     replyToMessageId: question.id,
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, answer.id);
+  messageBoxes.assignMessageId(bot.profile.id, answer.id);
   const confirmation = messages.addPrivateTextMessage({
     conversation,
     authorRole: 'bot',
@@ -134,7 +135,7 @@ Deno.test('BotMessageViewService shows the current replied message until it is d
     replyToMessageId: answer.id,
     isContentProtected: true,
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, confirmation.id);
+  messageBoxes.assignMessageId(bot.profile.id, confirmation.id);
   messages.editPrivateTextMessage(question.id, {
     text: 'Your first name?',
     entities: [],
@@ -203,7 +204,7 @@ Deno.test('BotMessageViewService shows the current replied message until it is d
 });
 
 Deno.test('BotMessageViewService shows a callback query with its message as the bot sees it', () => {
-  const { virtualUsers, messages, userMessageBoxes, botMessageViews } = createViewFixture();
+  const { virtualUsers, messages, messageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
   const message = messages.addPrivateTextMessage({
@@ -214,11 +215,11 @@ Deno.test('BotMessageViewService shows a callback query with its message as the 
     entities: [],
     inlineKeyboard: [[{ kind: 'callback', text: 'Yes', callbackData: 'yes' }]],
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, message.id);
+  messageBoxes.assignMessageId(bot.profile.id, message.id);
 
   const view = botMessageViews.viewCallbackQueryForBot({
     id: '7',
-    conversation: message.conversation,
+    ...message.conversation,
     messageId: message.id,
     chatInstance: '-42',
     callbackData: 'yes',
@@ -240,7 +241,7 @@ Deno.test('BotMessageViewService shows a callback query with its message as the 
 });
 
 Deno.test('BotMessageViewService rejects a message missing from the bot message box', () => {
-  const { virtualUsers, messages, userMessageBoxes, botMessageViews } = createViewFixture();
+  const { virtualUsers, messages, messageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
   const message = messages.addPrivateTextMessage({
@@ -250,7 +251,7 @@ Deno.test('BotMessageViewService rejects a message missing from the bot message 
     text: 'Hello',
     entities: [],
   });
-  userMessageBoxes.assignMessageId(account.profile.id, message.id);
+  messageBoxes.assignMessageId(account.profile.id, message.id);
 
   let viewError: unknown;
   try {
@@ -269,9 +270,16 @@ function createViewFixture() {
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const messages = new MessageRepository();
-  const userMessageBoxes = new UserMessageBoxRepository();
-  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes, messages });
-  return { virtualUsers, messages, userMessageBoxes, botMessageViews };
+  const messageBoxes = new MessageBoxRepository();
+  const sharedChats = new SharedChatRepository();
+  const botMessageViews = new BotMessageViewService({
+    accounts,
+    bots,
+    sharedChats,
+    messageBoxes,
+    messages,
+  });
+  return { virtualUsers, messages, messageBoxes, botMessageViews };
 }
 
 function createAccount(virtualUsers: VirtualUserService) {

@@ -167,6 +167,13 @@ paths:
     post:
       operationId: sendAccountMessage
       summary: Send a message as a virtual account
+      description: >-
+        Sends text to the account's private chat with a bot, or to a supergroup the account is a
+        member of. In a supergroup, the supergroup's bots receive the message unless it is not
+        addressed to a bot in privacy mode: such a bot receives only messages that start with a
+        command not addressed to another bot, reply to one of its messages, or mention it.
+        Telegram documents that a command without a bot's username reaches only the bot that last
+        wrote to the group; the emulator delivers it to every bot in privacy mode.
       requestBody:
         required: true
         content:
@@ -176,18 +183,22 @@ paths:
       responses:
         '201':
           description: >-
-            The message was stored and, unless the target bot's allowed_updates subscription
-            excludes message updates, an update was enqueued for the target bot.
+            The message was stored and, unless a receiving bot's allowed_updates subscription
+            excludes message updates, an update was enqueued for each bot that receives it.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SentMessage'
+                oneOf:
+                  - $ref: '#/components/schemas/SentMessage'
+                  - $ref: '#/components/schemas/SentSupergroupMessage'
         '400':
           description: >-
             The request or message text is invalid, or the replied message is not a message of
-            the private chat.
+            the chat.
+        '403':
+          description: The account is not a member of the supergroup.
         '404':
-          description: The session, sending account, or target bot does not exist.
+          description: The session, sending account, target bot, or supergroup does not exist.
         '409':
           description: The account blocks the target bot and must unblock it before writing to it.
   /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/messages:
@@ -247,6 +258,121 @@ paths:
             the message's current text.
         '404':
           description: The session, account, bot, or message of their private chat does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/supergroups:
+    description: Supergroups an account creates, which it owns.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      operationId: createSupergroup
+      summary: Create a supergroup owned by a virtual account
+      description: >-
+        Creates a supergroup whose only member is the account, as its owner. The owner adds
+        accounts and bots to it as members.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSupergroupRequest'
+      responses:
+        '201':
+          description: The supergroup was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedSupergroup'
+        '400':
+          description: The request body is malformed or does not match the supergroup schema.
+        '404':
+          description: The session or account does not exist.
+        '507':
+          description: The test session cannot allocate another supergroup identifier.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/members/{userId}:
+    description: A member of a supergroup, as the supergroup's owner adds it.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/SupergroupChatId'
+      - $ref: '#/components/parameters/UserId'
+    put:
+      operationId: addSupergroupMember
+      summary: Add an account or a bot to a supergroup the account owns
+      description: >-
+        Adds the user as a member. An added bot receives a my_chat_member update, from `left` to
+        `member`, unless its allowed_updates subscription excludes it. Adding a member again
+        changes nothing. Telegram also shows each addition to the supergroup's bots as a service
+        message, which the emulator does not produce.
+      responses:
+        '204':
+          description: The user is a member of the supergroup.
+        '400':
+          description: A path identifier is invalid.
+        '403':
+          description: The account does not own the supergroup.
+        '404':
+          description: The session, account, supergroup, or user to add does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/messages:
+    description: Stored messages of a supergroup the account is a member of.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/SupergroupChatId'
+    get:
+      operationId: getSupergroupMessageHistory
+      summary: Return the supergroup's stored messages
+      description: >-
+        Returns the messages every member wrote, oldest first. A supergroup numbers its messages
+        once, so every member, account or bot, sees the same message IDs. Deleted messages are
+        omitted.
+      responses:
+        '200':
+          description: The account is a member; the message list may be empty.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupergroupMessageHistory'
+        '400':
+          description: An account or supergroup path identifier is invalid.
+        '403':
+          description: The account is not a member of the supergroup.
+        '404':
+          description: The session, account, or supergroup does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/messages/{messageId}:
+    description: One message of a supergroup, addressed by its ID in the supergroup.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/SupergroupChatId'
+      - $ref: '#/components/parameters/SupergroupMessageId'
+    patch:
+      operationId: editSupergroupAccountMessage
+      summary: Edit the text of a message the account sent to a supergroup
+      description: >-
+        Replaces the text of the account's message, normalized as when sending it, and dates the
+        edit. The supergroup's bots receive an edited_message update as they would receive the
+        message with its new text, unless their allowed_updates subscription excludes it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditAccountMessageRequest'
+      responses:
+        '200':
+          description: The message was edited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentSupergroupMessage'
+        '400':
+          description: >-
+            The request or text is invalid, another member wrote the message, or the normalized
+            text is the message's current text.
+        '403':
+          description: The account is not a member of the supergroup.
+        '404':
+          description: The session, account, supergroup, or message of the supergroup does not exist.
   /sessions/{sessionId}/accounts/{accountId}/blocked-bots/{botId}:
     description: >-
       A bot on the account's block list. Telegram calls blocking a bot stopping it. While the
@@ -383,7 +509,8 @@ paths:
       summary: Press a callback button on a bot message as a virtual account
       description: >-
         Presses the button with the given callback data on a bot message in the account's private
-        chat with the bot. Unless the bot's allowed_updates subscription excludes callback_query
+        chat with the bot, or in a supergroup the account is a member of. Unless the bot that sent
+        the message has an allowed_updates subscription that excludes callback_query
         updates, the bot receives a callback_query update carrying the message as it is now. The
         bot answers asynchronously with answerCallbackQuery; read the answer from the created
         callback query. The press can create the query already expired, so that the bot receives
@@ -412,10 +539,12 @@ paths:
         '400':
           description: >-
             The request is invalid, or the message has no callback button with the given data.
+        '403':
+          description: The account is not a member of the supergroup.
         '404':
           description: >-
-            The session, account, or bot does not exist, or the private chat has no message with
-            the given ID.
+            The session, account, bot, or supergroup does not exist, or the chat has no message
+            with the given ID.
   /sessions/{sessionId}/accounts/{accountId}/callback-queries/{callbackQueryId}:
     description: One callback query created by an account.
     parameters:
@@ -583,7 +712,7 @@ paths:
       - $ref: '#/components/parameters/BotToken'
     post:
       operationId: sendMessage
-      summary: Send text from the authenticated virtual bot to an account
+      summary: Send text from the authenticated virtual bot to an account or a supergroup
       requestBody:
         required: true
         content:
@@ -616,7 +745,9 @@ paths:
                 contentType: application/json
       responses:
         '200':
-          description: The message was stored in the private conversation.
+          description: >-
+            The message was stored in the private conversation or supergroup. No bot receives an
+            update for a bot's message.
           content:
             application/json:
               schema:
@@ -628,8 +759,8 @@ paths:
             the text or its formatting cannot be read (for example `Bad Request: unsupported
             parse_mode`, `Bad Request: can't parse entities: …`, or `Bad Request: can't parse
             MessageEntity: …`); `chat_id` is missing (`Bad Request: chat_id is empty`); the chat is
-            not a private chat with an account that has written to the bot (`Bad Request: chat not
-            found`); the replied message is not a message of the chat, for example because it was
+            neither a private chat with an account that has written to the bot nor a supergroup the
+            bot is a member of (`Bad Request: chat not found`); the replied message is not a message of the chat, for example because it was
             deleted, and sending without a reply is not allowed (`Bad Request: message to be
             replied not found`); the text and its entities cannot be normalized (for example `Bad
             Request: text must be non-empty`, `Bad Request: entity URL '…' is invalid: …`, or `Bad
@@ -637,7 +768,9 @@ paths:
             Request: message is too long`); or a button's callback data exceeds 64 bytes (`Bad
             Request: BUTTON_DATA_INVALID`). Date and time entities are not supported (`Bad Request:
             date_time entities are not supported`), and neither are replies to messages of other
-            chats (`Bad Request: replies to messages of other chats are not supported`).
+            chats (`Bad Request: replies to messages of other chats are not supported`) or reply
+            keyboards, keyboard removals, and forced replies in supergroups (`Bad Request: reply
+            keyboards, keyboard removals, and forced replies are not supported in groups`).
           content:
             application/json:
               schema:
@@ -660,8 +793,8 @@ paths:
           description: No active test session has the supplied identifier.
   /sessions/{sessionId}/bot-api/bot{token}/editMessageText:
     description: >-
-      Telegram Bot API method for editing the text of a message the bot sent to a private chat.
-      As on Telegram, the text is formatted and normalized as by `sendMessage`, the edited message
+      Telegram Bot API method for editing the text of a message the bot sent to a private chat or a
+      supergroup. As on Telegram, the text is formatted and normalized as by `sendMessage`, the edited message
       keeps only the inline keyboard given in `reply_markup`, and the bot receives no update for
       its own edit. The edit date changes only when the text or its entities do. Messages sent
       through inline mode, which `inline_message_id` identifies, are not supported.
@@ -710,10 +843,10 @@ paths:
             it, checking in this order: the text is empty (`Bad Request: message text is empty`);
             the text or its formatting cannot be read, as for `sendMessage`; neither `chat_id` nor
             a positive `message_id` is given (`Bad Request: message identifier is not specified`);
-            `chat_id` is missing (`Bad Request: chat_id is empty`); the chat is not a private chat
-            with an account that has written to the bot (`Bad Request: chat not found`); the chat
-            has no message with that ID (`Bad Request: message to edit not found`); the account
-            wrote the message (`Bad Request: message can't be edited`); the text and its entities
+            `chat_id` is missing (`Bad Request: chat_id is empty`); the chat is not one the bot can
+            address, as for `sendMessage` (`Bad Request: chat not found`); the chat has no message
+            with that ID (`Bad Request: message to edit not found`); another user wrote the message
+            (`Bad Request: message can't be edited`); the text and its entities
             cannot be normalized, as for `sendMessage`; the normalized text is longer than 4096
             characters (`Bad Request: message is too long`); a button's callback data exceeds 64
             bytes (`Bad Request: BUTTON_DATA_INVALID`); or the text, entities, and keyboard are
@@ -735,7 +868,7 @@ paths:
   /sessions/{sessionId}/bot-api/bot{token}/editMessageReplyMarkup:
     description: >-
       Telegram Bot API method for replacing the inline keyboard of a message the bot sent to a
-      private chat. Omitting `reply_markup` removes the keyboard. The text and edit date are
+      private chat or a supergroup. Omitting `reply_markup` removes the keyboard. The text and edit date are
       unchanged, and the bot receives no update for its own edit. Messages sent through inline
       mode are not supported.
     parameters:
@@ -787,9 +920,10 @@ paths:
           description: No active test session has the supplied identifier.
   /sessions/{sessionId}/bot-api/bot{token}/deleteMessage:
     description: >-
-      Telegram Bot API method for deleting a message of a private chat for both participants. As
-      on Telegram, a bot can delete messages either participant wrote, and receives no update for
-      the deletion. The deleted message leaves the conversation history, and its buttons can no
+      Telegram Bot API method for deleting a message of a private chat or a supergroup for every
+      member. As on Telegram, a bot can delete messages either participant of a private chat
+      wrote, but in a supergroup, where it is no administrator, only its own; it receives no
+      update for the deletion. The deleted message leaves the conversation history, and its buttons can no
       longer be pressed; message IDs are never reused. The emulator does not age messages, so
       Telegram's 48-hour deletion limit never applies.
     parameters:
@@ -797,7 +931,7 @@ paths:
       - $ref: '#/components/parameters/BotToken'
     post:
       operationId: deleteMessage
-      summary: Delete a message of the authenticated virtual bot's private chat
+      summary: Delete a message of one of the authenticated virtual bot's chats
       requestBody:
         required: true
         content:
@@ -821,10 +955,11 @@ paths:
           description: >-
             The request cannot be decoded or has unsupported parameters, or Telegram would reject
             it, checking in this order: `chat_id` is missing (`Bad Request: chat_id is empty`);
-            the chat is not a private chat with an account that has written to the bot (`Bad
-            Request: chat not found`); or `message_id` is missing, not positive, or identifies no
-            message of the chat, including a deleted one (`Bad Request: message to delete not
-            found`).
+            the chat is not one the bot can address, as for `sendMessage` (`Bad Request: chat not
+            found`); `message_id` identifies another member's message of a supergroup (`Bad
+            Request: message can't be deleted`); or `message_id` is missing, not positive, or
+            identifies no message of the chat, including a deleted one (`Bad Request: message to
+            delete not found`).
           content:
             application/json:
               schema:
@@ -839,15 +974,15 @@ paths:
           description: No active test session has the supplied identifier.
   /sessions/{sessionId}/bot-api/bot{token}/deleteMessages:
     description: >-
-      Telegram Bot API method for deleting several messages of a private chat at once, as
-      deleteMessage deletes one. As on Telegram, identifiers that identify no message of the chat
-      are skipped.
+      Telegram Bot API method for deleting several messages of a chat at once, as deleteMessage
+      deletes one. As on Telegram, identifiers that identify no message of the chat are skipped,
+      and none is deleted when one identifies a message the bot cannot delete.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
     post:
       operationId: deleteMessages
-      summary: Delete several messages of the authenticated virtual bot's private chat
+      summary: Delete several messages of one of the authenticated virtual bot's chats
       requestBody:
         required: true
         content:
@@ -880,8 +1015,9 @@ paths:
             identifiers are not specified`); it has more than 100 identifiers (`Bad Request: too
             many message identifiers specified`); an identifier is not positive (`Bad Request:
             invalid message identifier specified`); `chat_id` is missing (`Bad Request: chat_id is
-            empty`); or the chat is not a private chat with an account that has written to the bot
-            (`Bad Request: chat not found`).
+            empty`); the chat is not one the bot can address, as for `sendMessage` (`Bad Request:
+            chat not found`); or an identifier identifies another member's message of a supergroup
+            (`Bad Request: message can't be deleted`).
           content:
             application/json:
               schema:
@@ -944,15 +1080,15 @@ paths:
   /sessions/{sessionId}/bot-api/bot{token}/sendChatAction:
     description: >-
       Telegram Bot API method for showing a chat action, such as typing, in a private chat with an
-      account that has written to the bot. Telegram shows the action in the account's client for a
-      few seconds; the emulator checks the request as Telegram does but does not keep the action.
+      account that has written to the bot or in a supergroup the bot is a member of. Telegram
+      shows the action in the members' clients for a few seconds; the emulator checks the request as Telegram does but does not keep the action.
       Topics and business connections are not supported.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
     post:
       operationId: sendChatAction
-      summary: Show a chat action from the authenticated virtual bot to an account
+      summary: Show a chat action from the authenticated virtual bot in one of its chats
       requestBody:
         required: true
         content:
@@ -977,8 +1113,8 @@ paths:
             The request cannot be decoded or has unsupported parameters, or Telegram would reject
             it, checking in this order: the action is missing or unknown (`Bad Request: wrong
             parameter action in request`); `chat_id` is missing (`Bad Request: chat_id is empty`);
-            or the chat is not a private chat with an account that has written to the bot (`Bad
-            Request: chat not found`).
+            or the chat is not one the bot can address, as for `sendMessage` (`Bad Request: chat
+            not found`).
           content:
             application/json:
               schema:
@@ -1003,8 +1139,8 @@ paths:
       Telegram Bot API method for replacing the bot's command list for a scope and language. As on
       Telegram, commands are cleaned of control characters, trimmed, and stripped of a leading
       slash, and an empty or missing `commands` list deletes the list. Chat scopes can address only
-      private chats with accounts that have written to the bot; group chats are not available to
-      bots yet.
+      private chats with accounts that have written to the bot; they cannot address supergroups
+      yet.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -1195,6 +1331,11 @@ components:
       type: integer
       minimum: 1
       maximum: 1099511627775
+    SupergroupChatId:
+      type: integer
+      minimum: -1997852516352
+      maximum: -1000000000001
+      description: Bot API chat identifier of a supergroup, which carries Telegram's `-100` prefix.
     Bot:
       type: object
       additionalProperties: false
@@ -1256,6 +1397,12 @@ components:
         username:
           type: string
           minLength: 1
+        can_read_all_group_messages:
+          type: boolean
+          default: false
+          description: >-
+            Turns off the bot's privacy mode, as BotFather does, so that it receives every account
+            message of its supergroups rather than only those addressed to it.
     CreatedBot:
       type: object
       additionalProperties: false
@@ -1328,6 +1475,63 @@ components:
           const: private
         botId:
           $ref: '#/components/schemas/TelegramUserId'
+    SupergroupMessageTarget:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - chatId
+      properties:
+        type:
+          type: string
+          const: supergroup
+        chatId:
+          $ref: '#/components/schemas/SupergroupChatId'
+    MessageTarget:
+      description: The account's private chat with a bot, or a supergroup it is a member of.
+      oneOf:
+        - $ref: '#/components/schemas/PrivateMessageTarget'
+        - $ref: '#/components/schemas/SupergroupMessageTarget'
+      discriminator:
+        propertyName: type
+        mapping:
+          private: '#/components/schemas/PrivateMessageTarget'
+          supergroup: '#/components/schemas/SupergroupMessageTarget'
+    CreateSupergroupRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+          minLength: 1
+    CreatedSupergroup:
+      type: object
+      additionalProperties: false
+      required:
+        - supergroup
+      properties:
+        supergroup:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - type
+            - title
+          properties:
+            id:
+              $ref: '#/components/schemas/SupergroupChatId'
+            type:
+              type: string
+              const: supergroup
+            title:
+              type: string
+            description:
+              type: string
     SendAccountMessageRequest:
       type: object
       additionalProperties: false
@@ -1336,7 +1540,7 @@ components:
         - text
       properties:
         to:
-          $ref: '#/components/schemas/PrivateMessageTarget'
+          $ref: '#/components/schemas/MessageTarget'
         text:
           type: string
           minLength: 1
@@ -1349,8 +1553,8 @@ components:
           type: integer
           minimum: 1
           description: >-
-            ID of the private chat's message to reply to, as message history shows it. Omit it to
-            send a message that replies to none.
+            ID of the chat's message to reply to, as message history shows it. Omit it to send a
+            message that replies to none.
     PrivateChat:
       type: object
       additionalProperties: false
@@ -1370,6 +1574,70 @@ components:
           type: string
         username:
           type: string
+    SupergroupChat:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - type
+      properties:
+        id:
+          $ref: '#/components/schemas/SupergroupChatId'
+        title:
+          type: string
+        type:
+          type: string
+          const: supergroup
+    SupergroupTextMessage:
+      type: object
+      additionalProperties: false
+      description: >-
+        A supergroup message, which every member sees alike. Its other fields mean what they mean
+        for a private message.
+      required:
+        - message_id
+        - from
+        - chat
+        - date
+        - text
+      properties:
+        message_id:
+          type: integer
+          minimum: 1
+          description: Message ID in the supergroup's own message sequence.
+        from:
+          description: The member, an account or a bot, that wrote the message.
+          oneOf:
+            - $ref: '#/components/schemas/Account'
+            - $ref: '#/components/schemas/MessageSenderBot'
+        chat:
+          $ref: '#/components/schemas/SupergroupChat'
+        date:
+          type: integer
+          minimum: 0
+        edit_date:
+          type: integer
+          minimum: 0
+        reply_to_message:
+          $ref: '#/components/schemas/SupergroupTextMessage'
+        text:
+          type: string
+        entities:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/MessageEntity'
+        reply_markup:
+          $ref: '#/components/schemas/InlineKeyboardMarkup'
+        has_protected_content:
+          type: boolean
+          const: true
+    TextMessage:
+      description: A text message of a private chat or a supergroup.
+      oneOf:
+        - $ref: '#/components/schemas/PrivateTextMessage'
+        - $ref: '#/components/schemas/SupergroupTextMessage'
     PrivateTextMessage:
       type: object
       additionalProperties: false
@@ -1417,8 +1685,8 @@ components:
           minItems: 1
           description: >-
             Entities marked in the text, omitted when there are none: formatting the bot applied,
-            and bot commands, which, as Telegram does in private chats with bots, the emulator
-            marks in text written by either participant. Other entity types Telegram detects, such
+            and bot commands, which, as Telegram does in chats with bots, the emulator marks in text
+            written by either participant. Other entity types Telegram detects, such
             as URLs and mentions, are not detected.
           items:
             $ref: '#/components/schemas/MessageEntity'
@@ -1608,6 +1876,24 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PrivateTextMessage'
+    SentSupergroupMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - message
+      properties:
+        message:
+          $ref: '#/components/schemas/SupergroupTextMessage'
+    SupergroupMessageHistory:
+      type: object
+      additionalProperties: false
+      required:
+        - messages
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupergroupTextMessage'
     MessageUpdate:
       type: object
       additionalProperties: false
@@ -1619,7 +1905,7 @@ components:
           type: integer
           minimum: 1
         message:
-          $ref: '#/components/schemas/PrivateTextMessage'
+          $ref: '#/components/schemas/TextMessage'
     EditedMessageUpdate:
       type: object
       additionalProperties: false
@@ -1631,9 +1917,9 @@ components:
           type: integer
           minimum: 1
         edited_message:
-          $ref: '#/components/schemas/PrivateTextMessage'
+          $ref: '#/components/schemas/TextMessage'
           description: >-
-            An account's message as its edit left it. A bot receives no update for its own edits.
+            An account's message as its edit left it. A bot receives no update for bots' edits.
     MyChatMemberUpdate:
       type: object
       additionalProperties: false
@@ -1645,7 +1931,9 @@ components:
           type: integer
           minimum: 1
         my_chat_member:
-          $ref: '#/components/schemas/PrivateChatMemberUpdated'
+          oneOf:
+            - $ref: '#/components/schemas/PrivateChatMemberUpdated'
+            - $ref: '#/components/schemas/SupergroupChatMemberUpdated'
     PrivateChatMemberUpdated:
       type: object
       additionalProperties: false
@@ -1672,6 +1960,45 @@ components:
           $ref: '#/components/schemas/PrivateChatBotMember'
         new_chat_member:
           $ref: '#/components/schemas/PrivateChatBotMember'
+    SupergroupChatMemberUpdated:
+      type: object
+      additionalProperties: false
+      description: >-
+        The bot's addition to a supergroup: `left` becomes `member` when an account adds the bot.
+      required:
+        - chat
+        - from
+        - date
+        - old_chat_member
+        - new_chat_member
+      properties:
+        chat:
+          $ref: '#/components/schemas/SupergroupChat'
+        from:
+          $ref: '#/components/schemas/Account'
+          description: The account that added the bot.
+        date:
+          type: integer
+          minimum: 0
+          description: Unix timestamp of the change.
+        old_chat_member:
+          $ref: '#/components/schemas/SupergroupBotMember'
+        new_chat_member:
+          $ref: '#/components/schemas/SupergroupBotMember'
+    SupergroupBotMember:
+      type: object
+      additionalProperties: false
+      required:
+        - user
+        - status
+      properties:
+        user:
+          $ref: '#/components/schemas/MessageSenderBot'
+        status:
+          type: string
+          enum:
+            - left
+            - member
     PrivateChatBotMember:
       oneOf:
         - type: object
@@ -1730,13 +2057,13 @@ components:
           $ref: '#/components/schemas/Account'
           description: The account that pressed the button.
         message:
-          $ref: '#/components/schemas/PrivateTextMessage'
+          $ref: '#/components/schemas/TextMessage'
           description: The message carrying the button, as it was when the button was pressed.
         chat_instance:
           type: string
           description: >-
             Opaque signed 64-bit decimal identifying the message's chat, fixed for each private
-            chat.
+            chat and each supergroup.
         data:
           type: string
           description: The pressed button's callback data.
@@ -1809,9 +2136,9 @@ components:
         chat_id:
           type: integer
           description: >-
-            Identifier of the private chat, which is the account's user ID. Telegram's
-            `@username` form is not accepted, because Telegram resolves it only for bots,
-            supergroups, and channels.
+            Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+            its negative chat ID. Telegram's `@username` form is not accepted, because Telegram
+            resolves it only for bots and public supergroups and channels.
         text:
           type: string
           minLength: 1
@@ -1856,9 +2183,9 @@ components:
             `reply_parameters` is given.
         reply_markup:
           description: >-
-            An inline keyboard to attach, or a change of the reply interface the account's client
-            shows. Markup that combines kinds is rejected. `selective` is accepted and, as on
-            Telegram in private chats, has no effect.
+            An inline keyboard to attach, or, in a private chat, a change of the reply interface
+            the account's client shows. Markup that combines kinds is rejected. `selective` is
+            accepted and, as on Telegram in private chats, has no effect.
           oneOf:
             - $ref: '#/components/schemas/InlineKeyboardMarkup'
             - $ref: '#/components/schemas/ReplyKeyboardMarkup'
@@ -2075,7 +2402,9 @@ components:
       properties:
         chat_id:
           type: integer
-          description: Identifier of the private chat, which is the account's user ID.
+          description: >-
+            Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+            its negative chat ID.
         message_id:
           type: integer
           description: Identifier of the message in the bot's chat.
@@ -2107,7 +2436,9 @@ components:
       properties:
         chat_id:
           type: integer
-          description: Identifier of the private chat, which is the account's user ID.
+          description: >-
+            Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+            its negative chat ID.
         message_id:
           type: integer
           description: Identifier of the message in the bot's chat.
@@ -2125,7 +2456,7 @@ components:
           type: boolean
           const: true
         result:
-          $ref: '#/components/schemas/PrivateTextMessage'
+          $ref: '#/components/schemas/TextMessage'
     DeleteMessageRequest:
       type: object
       additionalProperties: false
@@ -2135,7 +2466,9 @@ components:
       properties:
         chat_id:
           type: integer
-          description: Identifier of the private chat, which is the account's user ID.
+          description: >-
+            Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+            its negative chat ID.
         message_id:
           type: integer
           description: Identifier of the message in the bot's chat.
@@ -2148,7 +2481,9 @@ components:
       properties:
         chat_id:
           type: integer
-          description: Identifier of the private chat, which is the account's user ID.
+          description: >-
+            Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+            its negative chat ID.
         message_ids:
           type: array
           maxItems: 100
@@ -2213,7 +2548,9 @@ components:
       properties:
         chat_id:
           type: integer
-          description: Identifier of the private chat, which is the account's user ID.
+          description: >-
+            Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+            its negative chat ID.
         action:
           type: string
           description: >-
@@ -2359,7 +2696,7 @@ components:
         - callback_data
       properties:
         chat:
-          $ref: '#/components/schemas/PrivateMessageTarget'
+          $ref: '#/components/schemas/MessageTarget'
         message_id:
           type: integer
           minimum: 1
@@ -2525,6 +2862,28 @@ components:
       schema:
         type: integer
         minimum: 1
+    SupergroupChatId:
+      name: chatId
+      in: path
+      required: true
+      description: Bot API chat identifier of a supergroup.
+      schema:
+        $ref: '#/components/schemas/SupergroupChatId'
+    SupergroupMessageId:
+      name: messageId
+      in: path
+      required: true
+      description: ID of a message of the supergroup, which every member sees alike.
+      schema:
+        type: integer
+        minimum: 1
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: Telegram user identifier of a virtual account or bot.
+      schema:
+        $ref: '#/components/schemas/TelegramUserId'
     CallbackQueryId:
       name: callbackQueryId
       in: path

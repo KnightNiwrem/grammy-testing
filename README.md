@@ -45,6 +45,19 @@ failures, including calls to methods the emulator does not implement, return Tel
 errors that clients report as API errors. The session creation response identifies its Bot API root.
 Other routes described in `openapi.yaml` are not implemented yet.
 
+Bots can also take part in supergroups. An account creates a supergroup and adds accounts and bots
+to it, and each added bot receives a `my_chat_member` update. The Bot API methods above accept a
+supergroup's negative chat ID, and replies, inline keyboards, callback buttons, and account edits
+work as in private chats. A supergroup numbers its messages once, so every member sees the same
+message IDs. As on Telegram, bots never receive other bots' messages, and a bot in privacy mode, the
+default, receives only account messages addressed to it: commands not addressed to another bot,
+replies to its messages, and mentions of it. Telegram delivers a command without a bot's username
+only to the bot that last wrote to the group; the emulator delivers it to every bot in privacy mode.
+A bot created with `can_read_all_group_messages` receives every account message. In a supergroup, a
+bot edits and deletes only its own messages, as a bot without administrator rights does. Reply
+keyboards and forced replies in groups, service messages about new members, administrators, chat
+scopes of command lists for supergroups, basic groups, and channels are not supported yet.
+
 ## TypeScript client
 
 Tests can use the TypeScript client instead of constructing emulation server URLs directly:
@@ -111,6 +124,15 @@ try {
   // Read the command menu the account sees in its chat with the bot.
   const commands = await account.getBotCommands({ chat: { type: 'private', botId: bot.id } });
   console.log(commands.map(({ command }) => `/${command}`));
+
+  // Create a supergroup, add the bot, and send it a command there. The bot receives a
+  // my_chat_member update when it is added, and, in privacy mode, only messages addressed to it.
+  const supergroup = await account.createSupergroup({ title: 'Team' });
+  const groupChat = { type: 'supergroup', chatId: supergroup.id } as const;
+  await account.addChatMember({ chat: groupChat, userId: bot.id });
+  await account.sendMessage({ to: groupChat, text: '/start@test_bot' });
+  const groupHistory = await account.getMessages({ chat: groupChat });
+  console.log(groupHistory.map(({ from, text }) => `${from.first_name}: ${text}`));
   console.log(token, session.botApiRoot, incomingMessage, history);
 } finally {
   await session.end();

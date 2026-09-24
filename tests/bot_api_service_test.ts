@@ -7,8 +7,9 @@ import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_
 import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
+import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
-import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
+import { MessageBoxRepository } from '../src/repositories/message_box.ts';
 import { BotApiService } from '../src/services/bot_api.ts';
 import { BotCommandService } from '../src/services/bot_command.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
@@ -16,6 +17,7 @@ import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts
 import { BotUpdatePollingService } from '../src/services/bot_update_polling.ts';
 import { CallbackQueryService } from '../src/services/callback_query.ts';
 import { PrivateMessagingService } from '../src/services/private_messaging.ts';
+import { SupergroupMessagingService } from '../src/services/supergroup_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 
 Deno.test('BotApiService translates private messaging failures into Bot API reasons', () => {
@@ -134,12 +136,26 @@ function createBotApiFixture() {
   const accounts = new AccountRepository();
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
-  const userMessageBoxes = new UserMessageBoxRepository();
+  const messageBoxes = new MessageBoxRepository();
   const messages = new MessageRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
-  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes, messages });
-  const events = new BotUpdateDeliveryService({ botMessageViews, botUpdates, updateSubscriptions });
+  const sharedChats = new SharedChatRepository();
+  const botMessageViews = new BotMessageViewService({
+    accounts,
+    bots,
+    sharedChats,
+    messageBoxes,
+    messages,
+  });
+  const events = new BotUpdateDeliveryService({
+    botMessageViews,
+    botUpdates,
+    updateSubscriptions,
+    bots,
+    sharedChats,
+    messages,
+  });
   const privateConversations = new PrivateConversationRepository();
   const blockedUsers = new BlockedUserRepository();
   const privateMessaging = new PrivateMessagingService({
@@ -147,8 +163,17 @@ function createBotApiFixture() {
     bots,
     privateConversations,
     messages,
-    userMessageBoxes,
+    messageBoxes,
     blockedUsers,
+    events,
+    currentUnixTimeSeconds: () => 1_700_000_000,
+  });
+  const supergroupMessaging = new SupergroupMessagingService({
+    accounts,
+    bots,
+    sharedChats,
+    messages,
+    messageBoxes,
     events,
     currentUnixTimeSeconds: () => 1_700_000_000,
   });
@@ -157,6 +182,8 @@ function createBotApiFixture() {
     bots,
     privateConversations,
     privateMessages: privateMessaging,
+    sharedChats,
+    supergroupMessages: supergroupMessaging,
     callbackQueries: new CallbackQueryRepository(),
     events,
   });
@@ -165,6 +192,7 @@ function createBotApiFixture() {
     updatePolling: new BotUpdatePollingService({ botUpdates, updateSubscriptions }),
     pendingUpdates: botUpdates,
     botMessages: privateMessaging,
+    supergroupBotMessages: supergroupMessaging,
     botMessageViews,
     callbackQueries,
     botCommands: new BotCommandService({

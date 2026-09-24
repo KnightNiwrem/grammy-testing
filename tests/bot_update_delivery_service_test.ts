@@ -3,15 +3,16 @@ import { BotRepository } from '../src/repositories/bot.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
+import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
-import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
+import { MessageBoxRepository } from '../src/repositories/message_box.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
-import type { BotApiPrivateTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
+import type { BotApiTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
 
 Deno.test('BotUpdateDeliveryService delivers a private message to its conversation bot', () => {
-  const { virtualUsers, messages, userMessageBoxes, botUpdates, botUpdateDelivery } =
+  const { virtualUsers, messages, messageBoxes, botUpdates, botUpdateDelivery } =
     createDeliveryFixture();
   const account = createAccount(virtualUsers);
   const targetBot = createBot(virtualUsers, 'target_bot');
@@ -23,8 +24,8 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
     text: '/start',
     entities: [{ type: 'bot_command', offset: 0, length: 6 }],
   });
-  userMessageBoxes.assignMessageId(targetBot.profile.id, 'unrelated-message');
-  userMessageBoxes.assignMessageId(targetBot.profile.id, message.id);
+  messageBoxes.assignMessageId(targetBot.profile.id, 'unrelated-message');
+  messageBoxes.assignMessageId(targetBot.profile.id, message.id);
 
   botUpdateDelivery.publish({ type: 'message_created', message });
 
@@ -52,7 +53,7 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
 });
 
 Deno.test('BotUpdateDeliveryService does not deliver a bot its own message', () => {
-  const { virtualUsers, messages, userMessageBoxes, botUpdates, botUpdateDelivery } =
+  const { virtualUsers, messages, messageBoxes, botUpdates, botUpdateDelivery } =
     createDeliveryFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers, 'test_bot');
@@ -63,7 +64,7 @@ Deno.test('BotUpdateDeliveryService does not deliver a bot its own message', () 
     text: 'Welcome!',
     entities: [],
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, message.id);
+  messageBoxes.assignMessageId(bot.profile.id, message.id);
 
   botUpdateDelivery.publish({ type: 'message_created', message });
 
@@ -73,7 +74,7 @@ Deno.test('BotUpdateDeliveryService does not deliver a bot its own message', () 
 });
 
 Deno.test('BotUpdateDeliveryService delivers a callback query to the bot whose button was pressed', () => {
-  const { virtualUsers, messages, userMessageBoxes, botUpdates, botUpdateDelivery } =
+  const { virtualUsers, messages, messageBoxes, botUpdates, botUpdateDelivery } =
     createDeliveryFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers, 'test_bot');
@@ -85,13 +86,13 @@ Deno.test('BotUpdateDeliveryService delivers a callback query to the bot whose b
     entities: [],
     inlineKeyboard: [[{ kind: 'callback', text: 'Yes', callbackData: 'yes' }]],
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, message.id);
+  messageBoxes.assignMessageId(bot.profile.id, message.id);
 
   botUpdateDelivery.publish({
     type: 'callback_query_created',
     callbackQuery: {
       id: '7',
-      conversation: message.conversation,
+      ...message.conversation,
       messageId: message.id,
       chatInstance: '-42',
       callbackData: 'yes',
@@ -124,7 +125,7 @@ Deno.test('BotUpdateDeliveryService skips update types excluded by the bot subsc
   const {
     virtualUsers,
     messages,
-    userMessageBoxes,
+    messageBoxes,
     botUpdates,
     updateSubscriptions,
     botUpdateDelivery,
@@ -146,8 +147,8 @@ Deno.test('BotUpdateDeliveryService skips update types excluded by the bot subsc
     text: 'Hello',
     entities: [],
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, botMessage.id);
-  userMessageBoxes.assignMessageId(bot.profile.id, accountMessage.id);
+  messageBoxes.assignMessageId(bot.profile.id, botMessage.id);
+  messageBoxes.assignMessageId(bot.profile.id, accountMessage.id);
 
   updateSubscriptions.setAllowedUpdateTypes(bot.profile.id, new Set(['callback_query']));
   botUpdateDelivery.publish({ type: 'message_created', message: accountMessage });
@@ -164,7 +165,7 @@ Deno.test('BotUpdateDeliveryService skips update types excluded by the bot subsc
     type: 'callback_query_created',
     callbackQuery: {
       id: '7',
-      conversation: botMessage.conversation,
+      ...botMessage.conversation,
       messageId: botMessage.id,
       chatInstance: '-42',
       callbackData: 'yes',
@@ -179,7 +180,7 @@ Deno.test('BotUpdateDeliveryService skips update types excluded by the bot subsc
 });
 
 Deno.test('BotUpdateDeliveryService delivers an account edit, but not its own, to the bot', () => {
-  const { virtualUsers, messages, userMessageBoxes, botUpdates, botUpdateDelivery } =
+  const { virtualUsers, messages, messageBoxes, botUpdates, botUpdateDelivery } =
     createDeliveryFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers, 'test_bot');
@@ -198,8 +199,8 @@ Deno.test('BotUpdateDeliveryService delivers an account edit, but not its own, t
     text: 'Hi',
     entities: [],
   });
-  userMessageBoxes.assignMessageId(bot.profile.id, accountMessage.id);
-  userMessageBoxes.assignMessageId(bot.profile.id, botMessage.id);
+  messageBoxes.assignMessageId(bot.profile.id, accountMessage.id);
+  messageBoxes.assignMessageId(bot.profile.id, botMessage.id);
   const edit = { entities: [], inlineKeyboard: undefined, textEditedAtUnixSeconds: 1_700_000_005 };
 
   botUpdateDelivery.publish({
@@ -294,24 +295,114 @@ Deno.test('BotUpdateDeliveryService reports a block and unblock as changes of th
   }
 });
 
+Deno.test('BotUpdateDeliveryService delivers supergroup additions and edits to the bots concerned', () => {
+  const {
+    virtualUsers,
+    sharedChats,
+    messages,
+    messageBoxes,
+    botUpdates,
+    updateSubscriptions,
+    botUpdateDelivery,
+  } = createDeliveryFixture();
+  const owner = createAccount(virtualUsers);
+  const privacyModeBot = createBot(virtualUsers, 'privacy_bot');
+  const readerBotResult = virtualUsers.createBot({
+    first_name: 'Reader Bot',
+    username: 'reader_bot',
+    can_read_all_group_messages: true,
+  });
+  if (!readerBotResult.created) {
+    throw new Error('Expected the reader bot to be created');
+  }
+  const readerBot = readerBotResult.bot;
+  const supergroup = {
+    kind: 'supergroup',
+    id: -1_000_000_000_001,
+    title: 'Team',
+    chatInstance: '-42',
+  } as const;
+  sharedChats.registerSupergroup(supergroup, owner.profile.id);
+  updateSubscriptions.setAllowedUpdateTypes(privacyModeBot.profile.id, new Set(['message']));
+  for (const memberId of [privacyModeBot.profile.id, readerBot.profile.id, 999]) {
+    sharedChats.addChatMember(supergroup.id, memberId);
+    botUpdateDelivery.publish({
+      type: 'chat_member_added',
+      chat: supergroup,
+      actorAccountId: owner.profile.id,
+      memberId,
+      addedAtUnixSeconds: 1_700_000_000,
+    });
+  }
+  const message = messages.addSupergroupTextMessage({
+    chatId: supergroup.id,
+    author: { kind: 'account', accountId: owner.profile.id },
+    sentAtUnixSeconds: 1_700_000_001,
+    text: 'Hello',
+    entities: [],
+  });
+  messageBoxes.assignMessageId(supergroup.id, message.id);
+  const editedMessage = messages.editSupergroupTextMessage(message.id, {
+    text: 'Hello again',
+    entities: [],
+    inlineKeyboard: undefined,
+    textEditedAtUnixSeconds: 1_700_000_002,
+  });
+  botUpdateDelivery.publish({ type: 'message_edited', message: editedMessage });
+
+  const readerUpdates = botUpdates.confirmAndReadPendingUpdates(readerBot.profile.id, {
+    limit: 100,
+  });
+  const readerUpdateKinds = readerUpdates.map((update) => Object.keys(update)[1]);
+  const editedUpdate = readerUpdates[1];
+  if (
+    JSON.stringify(readerUpdateKinds) !== JSON.stringify(['my_chat_member', 'edited_message']) ||
+    !('edited_message' in editedUpdate) || editedUpdate.edited_message.message_id !== 1 ||
+    editedUpdate.edited_message.edit_date !== 1_700_000_002
+  ) {
+    throw new Error(
+      `Expected the reader bot to join and see the edit, received ${JSON.stringify(readerUpdates)}`,
+    );
+  }
+  const privacyModeUpdates = botUpdates.confirmAndReadPendingUpdates(privacyModeBot.profile.id, {
+    limit: 100,
+  });
+  if (privacyModeUpdates.length !== 0) {
+    throw new Error(
+      'Expected no unsubscribed join and no unaddressed edit for the privacy-mode bot',
+    );
+  }
+});
+
 function createDeliveryFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const messages = new MessageRepository();
-  const userMessageBoxes = new UserMessageBoxRepository();
+  const messageBoxes = new MessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
+  const sharedChats = new SharedChatRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
-    botMessageViews: new BotMessageViewService({ accounts, bots, userMessageBoxes, messages }),
+    botMessageViews: new BotMessageViewService({
+      accounts,
+      bots,
+      sharedChats,
+      messageBoxes,
+      messages,
+    }),
     botUpdates,
     updateSubscriptions,
+    bots,
+    sharedChats,
+    messages,
   });
   return {
     virtualUsers,
+    sharedChats,
     messages,
-    userMessageBoxes,
+    messageBoxes,
     botUpdates,
     updateSubscriptions,
     botUpdateDelivery,
@@ -334,6 +425,6 @@ function createBot(virtualUsers: VirtualUserService, username: string) {
   return result.bot;
 }
 
-function messageFromUpdate(update: BotApiUpdate | undefined): BotApiPrivateTextMessage | undefined {
+function messageFromUpdate(update: BotApiUpdate | undefined): BotApiTextMessage | undefined {
   return update !== undefined && 'message' in update ? update.message : undefined;
 }
