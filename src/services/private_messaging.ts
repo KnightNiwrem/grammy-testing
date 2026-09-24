@@ -439,6 +439,14 @@ export class PrivateMessagingService {
     };
   }
 
+  /**
+   * Whether the account has started a private conversation with the bot, which makes the private
+   * chat known to the bot.
+   */
+  isPrivateConversationStarted(key: PrivateConversationKey): boolean {
+    return this.#privateConversations.getPrivateConversation(key) !== undefined;
+  }
+
   sendAccountMessage(input: SendAccountMessageInput): SendAccountMessageResult {
     const account = this.#accounts.getById(input.fromAccountId);
     if (account === undefined) {

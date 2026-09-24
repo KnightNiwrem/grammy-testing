@@ -69,9 +69,22 @@ default, receives only account messages addressed to it: commands not addressed 
 replies to its messages, and mentions of it. Telegram delivers a command without a bot's username
 only to the bot that last wrote to the group; the emulator delivers it to every bot in privacy mode.
 A bot created with `can_read_all_group_messages` receives every account message. In a supergroup, a
-bot edits and deletes only its own messages, as a bot without administrator rights does. Reply
-keyboards and forced replies in groups, service messages about new members, administrators, chat
-scopes of command lists for supergroups, basic groups, and channels are not supported yet.
+bot edits and deletes only its own messages, as a bot without administrator rights does.
+
+Members join and leave supergroups as on Telegram, so tests can drive welcome and moderation bots.
+Each addition, departure, and removal is a service message in the supergroup's history, with
+`new_chat_members` or `left_chat_member` and Telegram's legacy fields, and every bot of the
+supergroup receives it, even in privacy mode. An account leaves a supergroup, and the owner removes
+accounts and bots, which bans them until the owner adds them again. A removed bot receives a
+`my_chat_member` update showing it as `kicked` and the service message about its removal, and its
+later requests to the supergroup fail with Telegram's
+`403 Forbidden: bot was kicked from the
+supergroup chat`. A bot leaves with `leaveChat`, after which
+its requests fail with `403 Forbidden:
+bot is not a member of the supergroup chat`. The owner cannot
+leave its supergroup, whereas Telegram lets a creator leave and stay the owner. Reply keyboards and
+forced replies in groups, members joining on their own, administrators, chat scopes of command lists
+for supergroups, basic groups, and channels are not supported yet.
 
 ## TypeScript client
 
@@ -154,13 +167,18 @@ try {
   console.log(commands.map(({ command }) => `/${command}`));
 
   // Create a supergroup, add the bot, and send it a command there. The bot receives a
-  // my_chat_member update when it is added, and, in privacy mode, only messages addressed to it.
+  // my_chat_member update and a new_chat_members service message when it is added, and, in privacy
+  // mode, only messages addressed to it.
   const supergroup = await account.createSupergroup({ title: 'Team' });
   const groupChat = { type: 'supergroup', chatId: supergroup.id } as const;
   await account.addChatMember({ chat: groupChat, userId: bot.id });
   await account.sendMessage({ to: groupChat, text: '/start@test_bot' });
   const groupHistory = await account.getMessages({ chat: groupChat });
-  console.log(groupHistory.map(({ from, text }) => `${from.first_name}: ${text}`));
+  console.log(groupHistory.map(({ from, text }) => `${from.first_name}: ${text ?? '(service)'}`));
+
+  // Remove the bot, which bans it: it receives a my_chat_member update showing it as kicked, and
+  // its requests to the supergroup fail with 403 until the owner adds it again.
+  await account.removeChatMember({ chat: groupChat, userId: bot.id });
   console.log(token, session.botApiRoot, incomingMessage, history);
 } finally {
   await session.end();

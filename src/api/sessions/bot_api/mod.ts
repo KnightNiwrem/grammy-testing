@@ -71,6 +71,11 @@ const BUTTON_DATA_INVALID_DESCRIPTION = 'Bad Request: BUTTON_DATA_INVALID';
 /** Telegram's description for a message or chat action to a user who blocked the bot. */
 const BOT_BLOCKED_DESCRIPTION = 'Forbidden: bot was blocked by the user';
 
+/** Telegram's descriptions for a request to a supergroup that the bot left or was removed from. */
+const BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION =
+  'Forbidden: bot is not a member of the supergroup chat';
+const BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION = 'Forbidden: bot was kicked from the supergroup chat';
+
 /** The emulator's description for a reply to a message of another chat, which it does not support. */
 const CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION =
   'Bad Request: replies to messages of other chats are not supported';
@@ -287,6 +292,10 @@ const answerCallbackQueryParametersSchema = z.strictObject({
     .default(0),
 });
 
+const leaveChatParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+});
+
 // Topics and business connections are not supported.
 const sendChatActionParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
@@ -382,6 +391,7 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['getme', handleGetMe],
   ['getmycommands', handleGetMyCommands],
   ['getupdates', handleGetUpdates],
+  ['leavechat', handleLeaveChat],
   ['sendchataction', handleSendChatAction],
   ['senddocument', handleSendDocument],
   ['sendmessage', handleSendMessage],
@@ -665,6 +675,10 @@ function sendResponse(context: BotApiRouteContext, result: SendResult): Response
       return botApiError(context, 400, badRequestDescription(result.textError));
     case 'chat_not_found':
       return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'bot_not_a_member':
+      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+    case 'bot_kicked':
+      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'reply_message_not_found':
       return botApiError(context, 400, REPLY_MESSAGE_NOT_FOUND_DESCRIPTION);
     case 'message_text_too_long':
@@ -913,6 +927,10 @@ function editMessageResponse(context: BotApiRouteContext, result: MessageEditRes
       return botApiError(context, 400, badRequestDescription(result.textError));
     case 'chat_not_found':
       return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'bot_not_a_member':
+      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+    case 'bot_kicked':
+      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'message_not_found':
       return botApiError(context, 400, MESSAGE_TO_EDIT_NOT_FOUND_DESCRIPTION);
     case 'message_not_editable':
@@ -960,6 +978,10 @@ function handleDeleteMessage(
   switch (result.reason) {
     case 'chat_not_found':
       return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'bot_not_a_member':
+      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+    case 'bot_kicked':
+      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'message_not_found':
       return botApiError(context, 400, MESSAGE_TO_DELETE_NOT_FOUND_DESCRIPTION);
     case 'message_not_deletable':
@@ -1004,6 +1026,10 @@ function handleDeleteMessages(
   switch (result.reason) {
     case 'chat_not_found':
       return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'bot_not_a_member':
+      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+    case 'bot_kicked':
+      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'message_not_deletable':
       return botApiError(context, 400, MESSAGE_NOT_DELETABLE_DESCRIPTION);
     default: {
@@ -1097,11 +1123,51 @@ function handleSendChatAction(
   switch (result.reason) {
     case 'chat_not_found':
       return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'bot_not_a_member':
+      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+    case 'bot_kicked':
+      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'bot_blocked':
       return botApiError(context, 403, BOT_BLOCKED_DESCRIPTION);
     default: {
       const unhandledReason: never = result.reason;
       throw new Error(`Unhandled sendChatAction failure: ${unhandledReason}`);
+    }
+  }
+}
+
+function handleLeaveChat(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = leaveChatParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid leaveChat parameters');
+  }
+  const { chat_id: chatId } = parsedParameters.data;
+  if (chatId === undefined) {
+    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+  }
+
+  const result = context.get('emulationSession').botApi.leaveChat(
+    context.get('authenticatedBot'),
+    { chatId },
+  );
+  if (result.left) {
+    return context.json({ ok: true as const, result: true as const });
+  }
+  switch (result.reason) {
+    case 'chat_not_found':
+      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'bot_not_a_member':
+      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+    case 'bot_kicked':
+      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
+    case 'private_chat_not_leavable':
+      return botApiError(context, 400, badRequestDescription("Can't leave private chats"));
+    default: {
+      const unhandledReason: never = result.reason;
+      throw new Error(`Unhandled leaveChat failure: ${unhandledReason}`);
     }
   }
 }

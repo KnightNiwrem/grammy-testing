@@ -1,15 +1,24 @@
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
-import type { ChatMembership } from '../types/chat_membership.ts';
+import {
+  type ChatMembership,
+  type FormerChatMemberStatus,
+  type FormerSupergroupMemberFailureReason,
+  getSupergroupNonMemberFailureReason,
+} from '../types/chat_membership.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { ChatAction, SharedChat, Supergroup } from '../types/virtual_chat.ts';
-import type {
-  CanonicalMessageId,
-  MessageContent,
-  SupergroupMessage,
-  SupergroupMessageAuthor,
-  TextEntity,
+import {
+  type CanonicalMessageId,
+  isSupergroupContentMessage,
+  type MembershipServiceContent,
+  type MessageContent,
+  type SupergroupContentMessage,
+  type SupergroupMessage,
+  type SupergroupMessageAuthor,
+  type SupergroupMessageContent,
+  type TextEntity,
 } from '../types/virtual_message.ts';
 import {
   type AccountMessageContent,
@@ -32,6 +41,14 @@ import {
   type TextInvalidFailure,
   toOutgoingAccountContent,
 } from './message_content.ts';
+
+/**
+ * Why a bot cannot act in a supergroup: one it never joined is unknown to it, as on Telegram,
+ * whereas one it left or was removed from turns it away.
+ */
+type SupergroupBotAccessFailureReason =
+  | 'chat_not_found'
+  | FormerSupergroupMemberFailureReason;
 
 export interface SendSupergroupAccountMessageInput {
   readonly fromAccountId: number;
@@ -78,7 +95,7 @@ export interface SendSupergroupBotMessageInput {
 export type SendSupergroupBotMessageFailureReason =
   | 'bot_not_found'
   | 'message_text_empty'
-  | 'chat_not_found'
+  | SupergroupBotAccessFailureReason
   | 'reply_message_not_found'
   | 'callback_data_invalid';
 
@@ -122,7 +139,7 @@ export interface EditSupergroupBotMessageInlineKeyboardInput
 
 export type EditSupergroupBotMessageInlineKeyboardFailureReason =
   | 'bot_not_found'
-  | 'chat_not_found'
+  | SupergroupBotAccessFailureReason
   | 'message_not_found'
   | 'message_not_editable'
   | 'callback_data_invalid'
@@ -191,7 +208,7 @@ export type DeleteSupergroupMessagesByBotResult =
   }
   | {
     readonly deleted: false;
-    readonly reason: 'bot_not_found' | 'chat_not_found' | 'message_not_deletable';
+    readonly reason: 'bot_not_found' | SupergroupBotAccessFailureReason | 'message_not_deletable';
   };
 
 export interface SendSupergroupBotChatActionInput {
@@ -202,7 +219,15 @@ export interface SendSupergroupBotChatActionInput {
 
 export type SendSupergroupBotChatActionResult =
   | { readonly sent: true }
-  | { readonly sent: false; readonly reason: 'bot_not_found' | 'chat_not_found' };
+  | { readonly sent: false; readonly reason: 'bot_not_found' | SupergroupBotAccessFailureReason };
+
+export interface RecordSupergroupMembershipChangeInput {
+  readonly chatId: number;
+  /** The member who made the change: the one who added members, left, or removed a member. */
+  readonly author: SupergroupMessageAuthor;
+  readonly content: MembershipServiceContent;
+  readonly changedAtUnixSeconds: number;
+}
 
 export interface GetSupergroupMessageHistoryInput {
   readonly accountId: number;
@@ -227,18 +252,22 @@ interface BotLookup {
 interface SupergroupMembershipLookup {
   getSharedChat(chatId: number): SharedChat | undefined;
   getChatMembership(chatId: number, identityId: number): ChatMembership | undefined;
+  getFormerMemberStatus(chatId: number, identityId: number): FormerChatMemberStatus | undefined;
+}
+
+/** A message to store, before the store gives it an identity. */
+interface NewSupergroupMessage {
+  readonly chatId: number;
+  readonly author: SupergroupMessageAuthor;
+  readonly sentAtUnixSeconds: number;
+  readonly content: SupergroupMessageContent;
+  readonly replyToMessageId?: CanonicalMessageId;
+  readonly inlineKeyboard?: InlineKeyboard;
+  readonly isContentProtected?: boolean;
 }
 
 interface SupergroupMessageStore {
-  addSupergroupMessage(input: {
-    readonly chatId: number;
-    readonly author: SupergroupMessageAuthor;
-    readonly sentAtUnixSeconds: number;
-    readonly content: MessageContent;
-    readonly replyToMessageId?: CanonicalMessageId;
-    readonly inlineKeyboard?: InlineKeyboard;
-    readonly isContentProtected?: boolean;
-  }): SupergroupMessage;
+  addSupergroupMessage(input: NewSupergroupMessage): SupergroupMessage;
   getSupergroupMessage(messageId: CanonicalMessageId): SupergroupMessage | undefined;
   editSupergroupMessage(messageId: CanonicalMessageId, edit: {
     readonly content: MessageContent;
@@ -358,8 +387,9 @@ export class SupergroupMessagingService {
     if (input.content.kind === 'text' && input.content.text.length === 0) {
       return { sent: false, reason: 'message_text_empty' };
     }
-    if (this.#findBotSupergroup(input.fromBotId, input.chatId) === undefined) {
-      return { sent: false, reason: 'chat_not_found' };
+    const accessFailure = this.#checkBotAccess(input.fromBotId, input.chatId);
+    if (accessFailure !== undefined) {
+      return { sent: false, reason: accessFailure };
     }
     const repliedMessage = input.replyTo === undefined
       ? undefined
@@ -471,7 +501,10 @@ export class SupergroupMessagingService {
     if (message === undefined) {
       return { edited: false, reason: 'message_not_found' };
     }
-    if (message.author.kind !== 'account' || message.author.accountId !== input.fromAccountId) {
+    if (
+      !isSupergroupContentMessage(message) || message.author.kind !== 'account' ||
+      message.author.accountId !== input.fromAccountId
+    ) {
       return { edited: false, reason: 'message_not_editable' };
     }
     const replacement = replaceAccountMessageContent(
@@ -506,8 +539,9 @@ export class SupergroupMessagingService {
     if (this.#bots.getById(input.fromBotId) === undefined) {
       return { deleted: false, reason: 'bot_not_found' };
     }
-    if (this.#findBotSupergroup(input.fromBotId, input.chatId) === undefined) {
-      return { deleted: false, reason: 'chat_not_found' };
+    const accessFailure = this.#checkBotAccess(input.fromBotId, input.chatId);
+    if (accessFailure !== undefined) {
+      return { deleted: false, reason: accessFailure };
     }
 
     const messages = new Map<CanonicalMessageId, SupergroupMessage>();
@@ -537,9 +571,23 @@ export class SupergroupMessagingService {
     if (this.#bots.getById(fromBotId) === undefined) {
       return { sent: false, reason: 'bot_not_found' };
     }
-    return this.#findBotSupergroup(fromBotId, chatId) === undefined
-      ? { sent: false, reason: 'chat_not_found' }
-      : { sent: true };
+    const accessFailure = this.#checkBotAccess(fromBotId, chatId);
+    return accessFailure === undefined ? { sent: true } : { sent: false, reason: accessFailure };
+  }
+
+  /**
+   * Records a change of a supergroup's members, which the caller has made, as a service message of
+   * the member who made it. As on Telegram, the service message is numbered like any message.
+   */
+  recordMembershipChange(
+    { chatId, author, content, changedAtUnixSeconds }: RecordSupergroupMembershipChangeInput,
+  ): SupergroupMessage {
+    return this.#commitMessage({
+      chatId,
+      author,
+      sentAtUnixSeconds: changedAtUnixSeconds,
+      content,
+    });
   }
 
   /** Returns the supergroup's messages, oldest first, to an account that is a member of it. */
@@ -586,32 +634,43 @@ export class SupergroupMessagingService {
     return { resolved: true, supergroup: chat };
   }
 
-  /** Returns the supergroup if the bot is a member of it; otherwise the bot cannot know it. */
-  #findBotSupergroup(botId: number, chatId: number): Supergroup | undefined {
-    const chat = this.#sharedChats.getSharedChat(chatId);
-    return chat?.kind === 'supergroup' &&
-        this.#sharedChats.getChatMembership(chatId, botId) !== undefined
-      ? chat
+  /** Checks that the bot is a member of the supergroup, which it needs to act there. */
+  #checkBotAccess(botId: number, chatId: number): SupergroupBotAccessFailureReason | undefined {
+    if (this.#sharedChats.getSharedChat(chatId)?.kind !== 'supergroup') {
+      return 'chat_not_found';
+    }
+    return this.#sharedChats.getChatMembership(chatId, botId) === undefined
+      ? getSupergroupNonMemberFailureReason(this.#sharedChats.getFormerMemberStatus(chatId, botId))
       : undefined;
   }
 
-  /** Resolves the bot message an edit targets, which only the bot that sent it can edit. */
+  /**
+   * Resolves the bot message an edit targets, which only the bot that sent it can edit. A service
+   * message has no content to edit.
+   */
   #resolveEditableBotMessage(
     { fromBotId, chatId, messageId }: EditSupergroupBotMessageTarget,
   ):
-    | { readonly resolved: true; readonly message: SupergroupMessage }
+    | { readonly resolved: true; readonly message: SupergroupContentMessage }
     | {
       readonly resolved: false;
-      readonly reason: 'chat_not_found' | 'message_not_found' | 'message_not_editable';
+      readonly reason:
+        | SupergroupBotAccessFailureReason
+        | 'message_not_found'
+        | 'message_not_editable';
     } {
-    if (this.#findBotSupergroup(fromBotId, chatId) === undefined) {
-      return { resolved: false, reason: 'chat_not_found' };
+    const accessFailure = this.#checkBotAccess(fromBotId, chatId);
+    if (accessFailure !== undefined) {
+      return { resolved: false, reason: accessFailure };
     }
     const message = this.getMessageByChatMessageId(chatId, messageId);
     if (message === undefined) {
       return { resolved: false, reason: 'message_not_found' };
     }
-    if (message.author.kind !== 'bot' || message.author.botId !== fromBotId) {
+    if (
+      !isSupergroupContentMessage(message) || message.author.kind !== 'bot' ||
+      message.author.botId !== fromBotId
+    ) {
       return { resolved: false, reason: 'message_not_editable' };
     }
     return { resolved: true, message };
@@ -622,7 +681,7 @@ export class SupergroupMessagingService {
    * content dates the edit.
    */
   #editBotMessageContent<FailureReason extends string>(
-    message: SupergroupMessage,
+    message: SupergroupContentMessage,
     replacement: ContentReplacement<FailureReason>,
     inlineKeyboard: InlineKeyboard | undefined,
   ):
@@ -642,7 +701,7 @@ export class SupergroupMessagingService {
 
   /** Validates, stores, and publishes a bot's edit of its message, which must change it. */
   #editBotMessage(
-    message: SupergroupMessage,
+    message: SupergroupContentMessage,
     edit: {
       readonly content: MessageContent;
       readonly inlineKeyboard: InlineKeyboard | undefined;
@@ -692,7 +751,7 @@ export class SupergroupMessagingService {
       readonly isContentProtected?: boolean;
     },
   ): SupergroupMessage {
-    const storedMessage = this.#messages.addSupergroupMessage({
+    return this.#commitMessage({
       chatId,
       author,
       sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
@@ -701,7 +760,12 @@ export class SupergroupMessagingService {
       inlineKeyboard,
       isContentProtected,
     });
-    this.#messageBoxes.assignMessageId(chatId, storedMessage.id);
+  }
+
+  /** Stores a message, numbers it in the supergroup's box, and publishes it. */
+  #commitMessage(message: NewSupergroupMessage): SupergroupMessage {
+    const storedMessage = this.#messages.addSupergroupMessage(message);
+    this.#messageBoxes.assignMessageId(message.chatId, storedMessage.id);
     this.#events.publish({ type: 'message_created', message: storedMessage });
     return storedMessage;
   }

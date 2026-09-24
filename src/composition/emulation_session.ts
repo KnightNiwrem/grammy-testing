@@ -53,11 +53,22 @@ export function createEmulationSession(id: string): EmulationSession {
     messages,
   });
   const currentUnixTimeSeconds = () => Math.floor(Date.now() / 1_000);
+  const supergroupMessaging = new SupergroupMessagingService({
+    accounts,
+    bots,
+    sharedChats,
+    messages,
+    files,
+    messageBoxes,
+    events: botUpdateDelivery,
+    currentUnixTimeSeconds,
+  });
   const sharedChatAdministration = new SharedChatAdministrationService({
     identities,
     accounts,
     bots,
     sharedChats,
+    supergroupMessages: supergroupMessaging,
     events: botUpdateDelivery,
     currentUnixTimeSeconds,
   });
@@ -71,16 +82,6 @@ export function createEmulationSession(id: string): EmulationSession {
     files,
     messageBoxes,
     blockedUsers,
-    events: botUpdateDelivery,
-    currentUnixTimeSeconds,
-  });
-  const supergroupMessaging = new SupergroupMessagingService({
-    accounts,
-    bots,
-    sharedChats,
-    messages,
-    files,
-    messageBoxes,
     events: botUpdateDelivery,
     currentUnixTimeSeconds,
   });
@@ -117,6 +118,7 @@ export function createEmulationSession(id: string): EmulationSession {
     pendingUpdates: botUpdates,
     botMessages: privateMessaging,
     supergroupBotMessages: supergroupMessaging,
+    chatMemberships: sharedChatAdministration,
     botMessageViews,
     mediaFiles,
     callbackQueries,

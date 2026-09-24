@@ -15,6 +15,7 @@ import { BotApiService } from '../src/services/bot_api.ts';
 import { BotCommandService } from '../src/services/bot_command.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { MediaFileService } from '../src/services/media_file.ts';
+import { SharedChatAdministrationService } from '../src/services/shared_chat_administration.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../src/services/bot_update_polling.ts';
 import { CallbackQueryService } from '../src/services/callback_query.ts';
@@ -199,6 +200,15 @@ function createBotApiFixture() {
     pendingUpdates: botUpdates,
     botMessages: privateMessaging,
     supergroupBotMessages: supergroupMessaging,
+    chatMemberships: new SharedChatAdministrationService({
+      identities,
+      accounts,
+      bots,
+      sharedChats,
+      supergroupMessages: supergroupMessaging,
+      events,
+      currentUnixTimeSeconds: () => 1_700_000_000,
+    }),
     botMessageViews,
     mediaFiles: new MediaFileService({ files }),
     callbackQueries,

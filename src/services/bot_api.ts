@@ -9,6 +9,10 @@ import type {
 } from '../types/bot_api.ts';
 import type { BotCommand, BotCommandLanguageCode, BotCommandScope } from '../types/bot_command.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
+import {
+  type FormerSupergroupMemberFailureReason,
+  getSupergroupNonMemberFailureReason,
+} from '../types/chat_membership.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
@@ -16,6 +20,7 @@ import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { ChatAction } from '../types/virtual_chat.ts';
 import type { PrivateMessage, SupergroupMessage, TextEntity } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
+import type { LeaveChatResult } from './shared_chat_administration.ts';
 import type {
   ContentNormalizationFailure,
   OutgoingDocument,
@@ -126,6 +131,7 @@ export type SendDocumentRequest = SendRequestOptions & {
 export type SendFailureReason =
   | 'message_text_empty'
   | 'chat_not_found'
+  | FormerSupergroupMemberFailureReason
   | 'reply_message_not_found'
   | 'message_text_too_long'
   | 'caption_too_long'
@@ -184,6 +190,7 @@ export interface EditMessageReplyMarkupRequest extends MessageTarget {
 
 export type EditMessageReplyMarkupFailureReason =
   | 'chat_not_found'
+  | FormerSupergroupMemberFailureReason
   | 'message_not_found'
   | 'message_not_editable'
   | 'callback_data_invalid'
@@ -224,7 +231,24 @@ export interface SendChatActionRequest {
 
 export type SendChatActionResult =
   | { readonly sent: true }
-  | { readonly sent: false; readonly reason: 'chat_not_found' | 'bot_blocked' };
+  | {
+    readonly sent: false;
+    readonly reason: 'chat_not_found' | FormerSupergroupMemberFailureReason | 'bot_blocked';
+  };
+
+export interface LeaveChatRequest {
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
+  readonly chatId: number;
+}
+
+export type BotApiLeaveChatFailureReason =
+  | 'chat_not_found'
+  | FormerSupergroupMemberFailureReason
+  | 'private_chat_not_leavable';
+
+export type BotApiLeaveChatResult =
+  | { readonly left: true }
+  | { readonly left: false; readonly reason: BotApiLeaveChatFailureReason };
 
 export type DeleteMessageRequest = MessageTarget;
 
@@ -232,7 +256,11 @@ export type DeleteMessageResult =
   | { readonly deleted: true }
   | {
     readonly deleted: false;
-    readonly reason: 'chat_not_found' | 'message_not_found' | 'message_not_deletable';
+    readonly reason:
+      | 'chat_not_found'
+      | FormerSupergroupMemberFailureReason
+      | 'message_not_found'
+      | 'message_not_deletable';
   };
 
 export interface DeleteMessagesRequest {
@@ -244,7 +272,13 @@ export interface DeleteMessagesRequest {
 
 export type DeleteMessagesResult =
   | { readonly deleted: true }
-  | { readonly deleted: false; readonly reason: 'chat_not_found' | 'message_not_deletable' };
+  | {
+    readonly deleted: false;
+    readonly reason:
+      | 'chat_not_found'
+      | FormerSupergroupMemberFailureReason
+      | 'message_not_deletable';
+  };
 
 export interface AnswerCallbackQueryRequest {
   readonly callbackQueryId: CallbackQueryId;
@@ -312,6 +346,9 @@ interface CaptionEdit {
 }
 
 interface BotMessaging {
+  isPrivateConversationStarted(
+    key: { readonly accountId: number; readonly botId: number },
+  ): boolean;
   sendBotMessage(
     input: BotMessageReplyMarkup & {
       readonly fromBotId: number;
@@ -390,6 +427,7 @@ type SupergroupBotMessageEditingResult<FailureReason extends string> =
 type SupergroupBotMessageEditFailureReason =
   | 'bot_not_found'
   | 'chat_not_found'
+  | FormerSupergroupMemberFailureReason
   | 'message_not_found'
   | 'message_not_editable'
   | 'callback_data_invalid'
@@ -411,6 +449,7 @@ interface SupergroupBotMessaging {
         | 'bot_not_found'
         | 'message_text_empty'
         | 'chat_not_found'
+        | FormerSupergroupMemberFailureReason
         | 'reply_message_not_found'
         | 'callback_data_invalid';
     }
@@ -453,7 +492,10 @@ interface SupergroupBotMessaging {
     readonly action: ChatAction;
   }):
     | { readonly sent: true }
-    | { readonly sent: false; readonly reason: 'bot_not_found' | 'chat_not_found' };
+    | {
+      readonly sent: false;
+      readonly reason: 'bot_not_found' | 'chat_not_found' | FormerSupergroupMemberFailureReason;
+    };
   deleteMessagesByBot(input: {
     readonly fromBotId: number;
     readonly chatId: number;
@@ -462,8 +504,16 @@ interface SupergroupBotMessaging {
     | { readonly deleted: true; readonly deletedMessageCount: number }
     | {
       readonly deleted: false;
-      readonly reason: 'bot_not_found' | 'chat_not_found' | 'message_not_deletable';
+      readonly reason:
+        | 'bot_not_found'
+        | 'chat_not_found'
+        | FormerSupergroupMemberFailureReason
+        | 'message_not_deletable';
     };
+}
+
+interface ChatMemberships {
+  leaveChat(input: { readonly memberId: number; readonly chatId: number }): LeaveChatResult;
 }
 
 interface MediaFiles {
@@ -580,6 +630,7 @@ interface BotApiServiceDependencies {
   readonly pendingUpdates: PendingBotUpdates;
   readonly botMessages: BotMessaging;
   readonly supergroupBotMessages: SupergroupBotMessaging;
+  readonly chatMemberships: ChatMemberships;
   readonly botMessageViews: BotMessageViews;
   readonly mediaFiles: MediaFiles;
   readonly callbackQueries: CallbackQueryAnswering;
@@ -600,6 +651,7 @@ export class BotApiService {
   readonly #pendingUpdates: PendingBotUpdates;
   readonly #botMessages: BotMessaging;
   readonly #supergroupBotMessages: SupergroupBotMessaging;
+  readonly #chatMemberships: ChatMemberships;
   readonly #botMessageViews: BotMessageViews;
   readonly #mediaFiles: MediaFiles;
   readonly #callbackQueries: CallbackQueryAnswering;
@@ -612,6 +664,7 @@ export class BotApiService {
       pendingUpdates,
       botMessages,
       supergroupBotMessages,
+      chatMemberships,
       botMessageViews,
       mediaFiles,
       callbackQueries,
@@ -623,6 +676,7 @@ export class BotApiService {
     this.#pendingUpdates = pendingUpdates;
     this.#botMessages = botMessages;
     this.#supergroupBotMessages = supergroupBotMessages;
+    this.#chatMemberships = chatMemberships;
     this.#botMessageViews = botMessageViews;
     this.#mediaFiles = mediaFiles;
     this.#callbackQueries = callbackQueries;
@@ -857,6 +911,8 @@ export class BotApiService {
         return result;
       case 'message_text_empty':
       case 'chat_not_found':
+      case 'bot_not_a_member':
+      case 'bot_kicked':
       case 'reply_message_not_found':
       case 'message_text_too_long':
       case 'caption_too_long':
@@ -922,10 +978,13 @@ export class BotApiService {
         chatId,
         action,
       });
-      if (!supergroupResult.sent && supergroupResult.reason === 'bot_not_found') {
+      if (supergroupResult.sent) {
+        return supergroupResult;
+      }
+      if (supergroupResult.reason === 'bot_not_found') {
         throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
       }
-      return supergroupResult.sent ? supergroupResult : { sent: false, reason: 'chat_not_found' };
+      return { sent: false, reason: supergroupResult.reason };
     }
     const result = this.#botMessages.sendBotChatAction({
       fromBotId: authenticatedBot.id,
@@ -947,6 +1006,42 @@ export class BotApiService {
       default: {
         const unhandledReason: never = result.reason;
         throw new Error(`Unhandled chat action failure: ${unhandledReason}`);
+      }
+    }
+  }
+
+  /**
+   * Leaves a supergroup, which the bot's own `my_chat_member` update and a service message record.
+   * As on Telegram, a private chat cannot be left, and a supergroup the bot already left or was
+   * removed from turns it away.
+   */
+  leaveChat(
+    authenticatedBot: VirtualBotProfile,
+    { chatId }: LeaveChatRequest,
+  ): BotApiLeaveChatResult {
+    if (isUserId(chatId)) {
+      const isChatKnown = this.#botMessages.isPrivateConversationStarted({
+        accountId: chatId,
+        botId: authenticatedBot.id,
+      });
+      return { left: false, reason: isChatKnown ? 'private_chat_not_leavable' : 'chat_not_found' };
+    }
+    const result = this.#chatMemberships.leaveChat({ memberId: authenticatedBot.id, chatId });
+    if (result.left) {
+      return result;
+    }
+    switch (result.reason) {
+      case 'chat_not_found':
+        return { left: false, reason: 'chat_not_found' };
+      case 'not_a_member':
+        return { left: false, reason: getSupergroupNonMemberFailureReason(result.formerStatus) };
+      case 'member_not_found':
+        throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+      case 'owner_cannot_leave':
+        throw new Error(`Bot ${authenticatedBot.id} owns chat ${chatId}`);
+      default: {
+        const unhandledReason: never = result.reason;
+        throw new Error(`Unhandled leaveChat failure: ${unhandledReason}`);
       }
     }
   }
@@ -1180,7 +1275,13 @@ export class BotApiService {
     messageIds: readonly number[],
   ):
     | { readonly deleted: true; readonly deletedMessageCount: number }
-    | { readonly deleted: false; readonly reason: 'chat_not_found' | 'message_not_deletable' } {
+    | {
+      readonly deleted: false;
+      readonly reason:
+        | 'chat_not_found'
+        | FormerSupergroupMemberFailureReason
+        | 'message_not_deletable';
+    } {
     const result = isUserId(chatId)
       ? this.#botMessages.deleteMessagesByBot({
         fromBotId: authenticatedBot.id,
@@ -1198,6 +1299,8 @@ export class BotApiService {
 
     switch (result.reason) {
       case 'chat_not_found':
+      case 'bot_not_a_member':
+      case 'bot_kicked':
       case 'message_not_deletable':
         return { deleted: false, reason: result.reason };
       // As for sending, a chat the bot cannot address is not found.
@@ -1283,6 +1386,8 @@ function toEditMessageFailureReason(
 ): EditMessageReplyMarkupFailureReason {
   switch (reason) {
     case 'chat_not_found':
+    case 'bot_not_a_member':
+    case 'bot_kicked':
     case 'message_not_found':
     case 'message_not_editable':
     case 'callback_data_invalid':

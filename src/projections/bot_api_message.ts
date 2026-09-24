@@ -6,6 +6,7 @@ import type {
   BotApiGroupChatBotMember,
   BotApiInlineKeyboardButton,
   BotApiInlineKeyboardMarkup,
+  BotApiMembershipServiceContent,
   BotApiMessage,
   BotApiMessageContent,
   BotApiMessageEntity,
@@ -18,10 +19,16 @@ import type {
   BotApiRepliedSupergroupMessage,
   BotApiSupergroupChat,
   BotApiSupergroupMessage,
+  BotApiSupergroupMessageContent,
   BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
-import type { BotBlockChangedEvent, ChatMemberAddedEvent } from '../types/chat_domain_event.ts';
+import type {
+  BotBlockChangedEvent,
+  ChatMemberAddedEvent,
+  ChatMemberLeftEvent,
+} from '../types/chat_domain_event.ts';
+import type { FormerChatMemberStatus } from '../types/chat_membership.ts';
 import type { InlineKeyboard, InlineKeyboardButton } from '../types/inline_keyboard.ts';
 import type { StoredFile } from '../types/stored_file.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
@@ -30,9 +37,11 @@ import type { BasicGroup, Supergroup } from '../types/virtual_chat.ts';
 import type {
   ChatMessage,
   FormattedText,
+  MembershipServiceContent,
   MessageContent,
   PrivateMessage,
   SupergroupMessage,
+  SupergroupMessageContent,
   TextEntity,
 } from '../types/virtual_message.ts';
 
@@ -44,10 +53,17 @@ export interface ObservedFile {
 
 /** What a projection shows beyond the message itself, resolved for the observer. */
 interface MessageProjectionContext {
+  /** The user the projection is for. */
+  readonly observerId: number;
   /** Every user the message's text or caption mentions, by ID. */
   readonly mentionedUsers: ReadonlyMap<number, BotApiUser>;
-  /** The file of a photo or document message; omitted for a text message. */
+  /** The file of a photo or document message; omitted for other messages. */
   readonly contentFile?: ObservedFile;
+  /**
+   * The members that joined or left, in the order a service message names them; omitted for
+   * other messages.
+   */
+  readonly changedMembers?: readonly BotApiUser[];
 }
 
 export interface PrivateMessageForBotProjectionInput {
@@ -78,7 +94,7 @@ export function projectPrivateMessageForBot(
     from: message.authorRole === 'account' ? account : projectBotAsUser(bot),
     chat: projectPrivateChat(account),
     date: message.sentAtUnixSeconds,
-    ...projectMessageBody(message, context, repliedMessage),
+    ...projectMessageBody(message, projectMessageContent(message.content, context), repliedMessage),
   };
 }
 
@@ -96,7 +112,8 @@ export interface SupergroupMessageProjectionInput {
 
 /**
  * Projects a canonical supergroup message, in the field order Telegram uses. A supergroup numbers
- * its messages once, so members see the same projection, apart from the `file_id` of its file.
+ * its messages once, so members see the same projection, apart from the `file_id` of its file and
+ * the legacy `new_chat_member` field of a service message.
  */
 export function projectSupergroupMessage(
   { message, supergroup, author, messageId, context, repliedMessage }:
@@ -107,14 +124,21 @@ export function projectSupergroupMessage(
     from: author,
     chat: projectSupergroupChat(supergroup),
     date: message.sentAtUnixSeconds,
-    ...projectMessageBody(message, context, repliedMessage),
+    ...projectMessageBody(
+      message,
+      projectSupergroupMessageContent(message.content, context),
+      repliedMessage,
+    ),
   };
 }
 
-/** Projects the fields that follow a message's date, which every chat type shows alike. */
-function projectMessageBody<RepliedMessage>(
+/**
+ * Projects the fields that follow a message's date, which every chat type shows alike, with the
+ * given projection of its content.
+ */
+function projectMessageBody<Content extends BotApiSupergroupMessageContent, RepliedMessage>(
   message: ChatMessage,
-  context: MessageProjectionContext,
+  content: Content,
   repliedMessage: RepliedMessage | undefined,
 ) {
   return {
@@ -122,11 +146,40 @@ function projectMessageBody<RepliedMessage>(
       ? {}
       : { edit_date: message.contentEditedAtUnixSeconds }),
     ...(repliedMessage === undefined ? {} : { reply_to_message: repliedMessage }),
-    ...projectMessageContent(message.content, context),
+    ...content,
     ...(message.inlineKeyboard === undefined
       ? {}
       : { reply_markup: projectInlineKeyboardMarkup(message.inlineKeyboard) }),
     ...(message.isContentProtected ? { has_protected_content: true as const } : {}),
+  };
+}
+
+function projectSupergroupMessageContent(
+  content: SupergroupMessageContent,
+  context: MessageProjectionContext,
+): BotApiSupergroupMessageContent {
+  return content.kind === 'members_joined' || content.kind === 'member_left'
+    ? projectMembershipServiceContent(content, context)
+    : projectMessageContent(content, context);
+}
+
+/** Projects a membership change with the members the context resolved for it. */
+function projectMembershipServiceContent(
+  content: MembershipServiceContent,
+  { observerId, changedMembers }: MessageProjectionContext,
+): BotApiMembershipServiceContent {
+  const [firstMember] = changedMembers ?? [];
+  if (firstMember === undefined) {
+    throw new Error('Expected the members of the service message to be provided');
+  }
+  if (content.kind === 'member_left') {
+    return { left_chat_participant: firstMember, left_chat_member: firstMember };
+  }
+  const newChatMember = changedMembers?.find((member) => member.id === observerId) ?? firstMember;
+  return {
+    new_chat_participant: newChatMember,
+    new_chat_member: newChatMember,
+    new_chat_members: changedMembers ?? [],
   };
 }
 
@@ -268,21 +321,53 @@ export interface BotJoinedGroupProjectionInput {
 
 /**
  * Projects an account's addition of a bot to a group as the added bot receives it: the bot's
- * membership changes from `left` to `member`, and the account made the change.
+ * membership changes to `member` from `left`, or from `kicked` for a bot removed before, and the
+ * account made the change.
  */
 export function projectBotJoinedGroupForBot(
   { event, chat, account, bot }: BotJoinedGroupProjectionInput,
 ): BotApiMyChatMemberUpdated {
   const user = projectBotAsUser(bot);
-  const left: BotApiGroupChatBotMember = { user, status: 'left' };
-  const member: BotApiGroupChatBotMember = { user, status: 'member' };
   return {
     chat: projectGroupChat(chat),
     from: account,
     date: event.addedAtUnixSeconds,
-    old_chat_member: left,
-    new_chat_member: member,
+    old_chat_member: projectFormerGroupChatBotMember(user, event.statusBeforeJoining),
+    new_chat_member: { user, status: 'member' },
   };
+}
+
+export interface BotLeftGroupProjectionInput {
+  readonly event: ChatMemberLeftEvent;
+  readonly chat: BasicGroup | Supergroup;
+  /** The bot itself when it left, or the account that removed it. */
+  readonly actor: BotApiUser;
+  /** The bot that left the group, which observes the change. */
+  readonly bot: VirtualBotProfile;
+}
+
+/**
+ * Projects a bot's departure from a group as the bot receives it: its membership changes from
+ * `member` to `left` when it left, or to `kicked` when an account removed it.
+ */
+export function projectBotLeftGroupForBot(
+  { event, chat, actor, bot }: BotLeftGroupProjectionInput,
+): BotApiMyChatMemberUpdated {
+  const user = projectBotAsUser(bot);
+  return {
+    chat: projectGroupChat(chat),
+    from: actor,
+    date: event.leftAtUnixSeconds,
+    old_chat_member: { user, status: 'member' },
+    new_chat_member: projectFormerGroupChatBotMember(user, event.statusAfterLeaving),
+  };
+}
+
+function projectFormerGroupChatBotMember(
+  user: BotApiBotUser,
+  status: FormerChatMemberStatus,
+): BotApiGroupChatBotMember {
+  return status === 'kicked' ? { user, status, until_date: 0 } : { user, status };
 }
 
 /** Shows a bot as messages show users, without the capabilities that only `getMe` reports. */

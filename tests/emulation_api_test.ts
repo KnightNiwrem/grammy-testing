@@ -2568,10 +2568,28 @@ Deno.test('an account creates a supergroup and adds a bot, which receives my_cha
   const myChatMember = updates[0]?.my_chat_member as Record<string, unknown> | undefined;
   const { date, ...myChatMemberWithoutDate } = myChatMember ?? {};
   if (
-    updates.length !== 1 || typeof date !== 'number' ||
+    typeof date !== 'number' ||
     JSON.stringify(myChatMemberWithoutDate) !== JSON.stringify(expectedChatMemberUpdate)
   ) {
-    throw new Error(`Expected one my_chat_member update, received ${JSON.stringify(updates)}`);
+    throw new Error(`Expected a my_chat_member update first, received ${JSON.stringify(updates)}`);
+  }
+  // The bot then sees the service messages of its own addition and of the next bot's, but not of
+  // the account's addition before it joined.
+  const joinMessages = updates.slice(1).map((update) => update.message as Record<string, unknown>);
+  const readerBotUser = { ...botUser, id: readerBot.bot.id, username: readerBot.bot.username };
+  const expectedJoinMessages = [[2, botUser], [3, readerBotUser]].map(([messageId, user]) => ({
+    message_id: messageId,
+    from: owner,
+    chat: expectedChatMemberUpdate.chat,
+    date,
+    new_chat_participant: user,
+    new_chat_member: user,
+    new_chat_members: [user],
+  }));
+  if (JSON.stringify(joinMessages) !== JSON.stringify(expectedJoinMessages)) {
+    throw new Error(
+      `Expected new_chat_members service messages, received ${JSON.stringify(updates)}`,
+    );
   }
 
   const membersPath =
@@ -2596,7 +2614,7 @@ Deno.test('an account creates a supergroup and adds a bot, which receives my_cha
     throw new Error(`Expected membership checks, received ${additionStatuses.join()}`);
   }
   const repeatedAddition = await callBotApi(api, `${bot.botApiPath}/getUpdates`, {
-    offset: (updates[0].update_id as number) + 1,
+    offset: (updates.at(-1)?.update_id as number) + 1,
   });
   if ((repeatedAddition.body as { result: unknown[] }).result.length !== 0) {
     throw new Error('Expected adding a member again to send no update');
@@ -2616,7 +2634,10 @@ Deno.test('an account creates a supergroup and adds a bot, which receives my_cha
 
   const readerUpdates = await callBotApi(api, `${readerBot.botApiPath}/getUpdates`, {});
   const readerUpdate = (readerUpdates.body as { result: Array<Record<string, unknown>> }).result;
-  if (readerUpdate.length !== 1 || readerUpdate[0].my_chat_member === undefined) {
+  if (
+    readerUpdate.length !== 2 || readerUpdate[0].my_chat_member === undefined ||
+    (readerUpdate[1].message as Record<string, unknown>)?.message_id !== 3
+  ) {
     throw new Error(`Expected the second bot to learn it joined, received ${readerUpdate.length}`);
   }
   if (supergroupPath(owner.id) === supergroupPath(member.id)) {
@@ -2660,8 +2681,14 @@ Deno.test('bots in privacy mode receive only supergroup messages addressed to th
       update.message?.text
     );
   };
-  const privacyModeTexts = await receivedTexts(bot.botApiPath, joinUpdates[0].update_id);
-  const readerTexts = await receivedTexts(readerBot.botApiPath, readerJoinUpdates[0].update_id);
+  const privacyModeTexts = await receivedTexts(
+    bot.botApiPath,
+    joinUpdates.at(-1)?.update_id as number,
+  );
+  const readerTexts = await receivedTexts(
+    readerBot.botApiPath,
+    readerJoinUpdates.at(-1)?.update_id as number,
+  );
   const expectedPrivacyModeTexts = [
     '/start',
     '/help@Test_Bot now',
@@ -2694,8 +2721,9 @@ Deno.test('supergroup members see the same message IDs and replies', async () =>
   const reply = await sendSupergroupText(member.id, 'Friday', answerMessage?.message_id as number);
 
   const expectedChat = { id: supergroup.id, title: 'Team', type: 'supergroup' };
+  // The service messages of the fixture's three additions are messages 1 to 3.
   if (
-    question.message_id !== 1 || answerMessage?.message_id !== 2 || reply.message_id !== 3 ||
+    question.message_id !== 4 || answerMessage?.message_id !== 5 || reply.message_id !== 6 ||
     JSON.stringify(answerMessage.chat) !== JSON.stringify(expectedChat) ||
     JSON.stringify((answerMessage.reply_to_message as Record<string, unknown>)?.text) !==
       JSON.stringify('/poll') ||
@@ -2715,12 +2743,19 @@ Deno.test('supergroup members see the same message IDs and replies', async () =>
 
   const histories = await Promise.all([owner.id, member.id].map(async (accountId) => {
     const response = await api.request(`${supergroupPath(accountId)}/messages`);
-    return await response.json() as { messages: Array<{ message_id: number; text: string }> };
+    return await response.json() as { messages: Array<{ message_id: number; text?: string }> };
   }));
   if (
     JSON.stringify(histories[0]) !== JSON.stringify(histories[1]) ||
     JSON.stringify(histories[0].messages.map(({ message_id, text }) => [message_id, text])) !==
-      JSON.stringify([[1, '/poll'], [2, 'Which day?'], [3, 'Friday']])
+      JSON.stringify([
+        [1, undefined],
+        [2, undefined],
+        [3, undefined],
+        [4, '/poll'],
+        [5, 'Which day?'],
+        [6, 'Friday'],
+      ])
   ) {
     throw new Error(
       `Expected both members to see one history, received ${JSON.stringify(histories)}`,
@@ -2858,9 +2893,10 @@ Deno.test('Bot API methods follow Telegram checks in supergroups', async () => {
     throw new Error('Expected a chat action and the deletion of its own message to succeed');
   }
   const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
-    messages: Array<{ text: string }>;
+    messages: Array<{ text?: string }>;
   };
-  if (JSON.stringify(history.messages.map(({ text }) => text)) !== JSON.stringify(['Hello'])) {
+  const texts = history.messages.flatMap(({ text }) => text === undefined ? [] : [text]);
+  if (JSON.stringify(texts) !== JSON.stringify(['Hello'])) {
     throw new Error(
       `Expected only the account message to remain, received ${JSON.stringify(history)}`,
     );
@@ -2947,16 +2983,323 @@ Deno.test('a grammY bot runs a vote with an inline keyboard in a supergroup', as
     throw new Error(`Expected the voter to see the answer, received ${JSON.stringify(answered)}`);
   }
   const history = await (await api.request(`${supergroupPath(member.id)}/messages`)).json() as {
-    messages: Array<{ text: string; reply_markup?: unknown }>;
+    messages: Array<{ text?: string; reply_markup?: unknown }>;
   };
+  const textMessages = history.messages.filter(({ text }) => text !== undefined);
   if (
-    JSON.stringify(history.messages.map(({ text }) => text)) !==
+    JSON.stringify(textMessages.map(({ text }) => text)) !==
       JSON.stringify(['/vote@test_bot Pasta', 'Votes: 1']) ||
-    history.messages[1].reply_markup !== undefined ||
+    textMessages[1].reply_markup !== undefined ||
     JSON.stringify(chatTypes) !==
       JSON.stringify(['supergroup', 'supergroup', 'edited /vote@test_bot Pasta'])
   ) {
     throw new Error(`Expected the vote to run in the group, received ${JSON.stringify(history)}`);
+  }
+});
+
+Deno.test('members leave or are removed from supergroups, which bots see as service messages', async () => {
+  const { api, sessionPath, owner, member, bot, readerBot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const readNewUpdates = createUpdateReader(api);
+  await readNewUpdates(bot.botApiPath);
+  await readNewUpdates(readerBot.botApiPath);
+  const membersPath = `${supergroupPath(owner.id)}/members`;
+  const botUser = (created: typeof bot) => ({
+    id: created.bot.id,
+    is_bot: true,
+    first_name: created.bot.first_name,
+    username: created.bot.username,
+  });
+  const chat = { id: supergroup.id, title: 'Team', type: 'supergroup' };
+  // Update IDs and dates vary between runs.
+  const withoutDates = (updates: Array<Record<string, unknown>>) =>
+    updates.map(({ update_id: _updateId, ...update }) =>
+      Object.fromEntries(
+        Object.entries(update).map(([type, payload]) => {
+          const { date: _date, ...payloadWithoutDate } = payload as Record<string, unknown>;
+          return [type, payloadWithoutDate];
+        }),
+      )
+    );
+
+  // An account that leaves is announced to every bot, privacy mode notwithstanding.
+  const leaving = await api.request(`${supergroupPath(member.id)}/members/${member.id}`, {
+    method: 'DELETE',
+  });
+  const memberLeftMessage = {
+    message_id: 4,
+    from: member,
+    chat,
+    left_chat_participant: member,
+    left_chat_member: member,
+  };
+  const botUpdatesAfterLeaving = withoutDates(await readNewUpdates(bot.botApiPath));
+  const readerUpdatesAfterLeaving = withoutDates(await readNewUpdates(readerBot.botApiPath));
+  const formerMemberStatuses = await Promise.all([
+    api.request(`${supergroupPath(member.id)}/messages`),
+    api.request(`${supergroupPath(member.id)}/members/${member.id}`, { method: 'DELETE' }),
+  ]).then((responses) => responses.map((response) => response.status));
+  if (
+    leaving.status !== 204 ||
+    JSON.stringify(botUpdatesAfterLeaving) !== JSON.stringify([{ message: memberLeftMessage }]) ||
+    JSON.stringify(readerUpdatesAfterLeaving) !== JSON.stringify(botUpdatesAfterLeaving) ||
+    JSON.stringify(formerMemberStatuses) !== JSON.stringify([403, 204])
+  ) {
+    throw new Error(
+      `Expected the member to leave, received ${JSON.stringify(botUpdatesAfterLeaving)}`,
+    );
+  }
+
+  // A bot the owner removes is banned: it learns so, and Telegram turns it away from then on.
+  const removal = await api.request(`${membersPath}/${bot.bot.id}`, { method: 'DELETE' });
+  const botLeftMessage = {
+    message_id: 5,
+    from: owner,
+    chat,
+    left_chat_participant: botUser(bot),
+    left_chat_member: botUser(bot),
+  };
+  const expectedRemovalUpdates = [
+    {
+      my_chat_member: {
+        chat,
+        from: owner,
+        old_chat_member: { user: botUser(bot), status: 'member' },
+        new_chat_member: { user: botUser(bot), status: 'kicked', until_date: 0 },
+      },
+    },
+    { message: botLeftMessage },
+  ];
+  const removedBotUpdates = withoutDates(await readNewUpdates(bot.botApiPath));
+  const readerUpdatesAfterRemoval = withoutDates(await readNewUpdates(readerBot.botApiPath));
+  if (
+    removal.status !== 204 ||
+    JSON.stringify(removedBotUpdates) !== JSON.stringify(expectedRemovalUpdates) ||
+    JSON.stringify(readerUpdatesAfterRemoval) !== JSON.stringify([{ message: botLeftMessage }])
+  ) {
+    throw new Error(
+      `Expected the bot to learn it was removed, received ${
+        JSON.stringify([removedBotUpdates, readerUpdatesAfterRemoval])
+      }`,
+    );
+  }
+  const kickedDescription = 'Forbidden: bot was kicked from the supergroup chat';
+  const removedBotResponses = await Promise.all([
+    callBotApi(api, `${bot.botApiPath}/sendMessage`, { chat_id: supergroup.id, text: 'Hi' }),
+    callBotApi(api, `${bot.botApiPath}/sendChatAction`, {
+      chat_id: supergroup.id,
+      action: 'typing',
+    }),
+    callBotApi(api, `${bot.botApiPath}/leaveChat`, { chat_id: supergroup.id }),
+  ]);
+  if (
+    !removedBotResponses.every(({ status, body }) =>
+      status === 403 &&
+      JSON.stringify(body) ===
+        JSON.stringify({ ok: false, error_code: 403, description: kickedDescription })
+    )
+  ) {
+    throw new Error(
+      `Expected a removed bot to be turned away, received ${JSON.stringify(removedBotResponses)}`,
+    );
+  }
+
+  // Adding the bot again lifts its ban.
+  await api.request(`${membersPath}/${bot.bot.id}`, { method: 'PUT' });
+  const readditionUpdates = withoutDates(await readNewUpdates(bot.botApiPath));
+  const readdedChatMember = readditionUpdates[0]?.my_chat_member as Record<string, unknown>;
+  if (
+    JSON.stringify(readdedChatMember?.old_chat_member) !==
+      JSON.stringify({ user: botUser(bot), status: 'kicked', until_date: 0 }) ||
+    readditionUpdates.length !== 2
+  ) {
+    throw new Error(`Expected the bot to rejoin, received ${JSON.stringify(readditionUpdates)}`);
+  }
+  await readNewUpdates(readerBot.botApiPath);
+
+  // A bot that leaves learns of its own departure, which other bots never see.
+  const readerLeaving = await callBotApi(api, `${readerBot.botApiPath}/leaveChat`, {
+    chat_id: supergroup.id,
+  });
+  const readerLeftMessage = {
+    message_id: 7,
+    from: botUser(readerBot),
+    chat,
+    left_chat_participant: botUser(readerBot),
+    left_chat_member: botUser(readerBot),
+  };
+  const expectedLeavingUpdates = [
+    {
+      my_chat_member: {
+        chat,
+        from: botUser(readerBot),
+        old_chat_member: { user: botUser(readerBot), status: 'member' },
+        new_chat_member: { user: botUser(readerBot), status: 'left' },
+      },
+    },
+    { message: readerLeftMessage },
+  ];
+  const readerLeavingUpdates = withoutDates(await readNewUpdates(readerBot.botApiPath));
+  const botUpdatesAfterReaderLeft = await readNewUpdates(bot.botApiPath);
+  if (
+    JSON.stringify(readerLeaving.body) !== JSON.stringify({ ok: true, result: true }) ||
+    JSON.stringify(readerLeavingUpdates) !== JSON.stringify(expectedLeavingUpdates) ||
+    botUpdatesAfterReaderLeft.length !== 0
+  ) {
+    throw new Error(
+      `Expected the reader bot to leave, received ${
+        JSON.stringify([readerLeaving, readerLeavingUpdates, botUpdatesAfterReaderLeft])
+      }`,
+    );
+  }
+  const notMemberDescription = 'Forbidden: bot is not a member of the supergroup chat';
+  const leftBotResponses = await Promise.all([
+    callBotApi(api, `${readerBot.botApiPath}/sendMessage`, {
+      chat_id: supergroup.id,
+      text: 'Hi',
+    }),
+    callBotApi(api, `${readerBot.botApiPath}/leaveChat`, { chat_id: supergroup.id }),
+  ]);
+  if (
+    !leftBotResponses.every(({ status, body }) =>
+      status === 403 && (body as { description?: string }).description === notMemberDescription
+    )
+  ) {
+    throw new Error(
+      `Expected a bot that left to be turned away, received ${JSON.stringify(leftBotResponses)}`,
+    );
+  }
+
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: Array<Record<string, unknown>>;
+  };
+  const leftMemberIds = history.messages.flatMap((message) =>
+    'left_chat_member' in message ? [(message.left_chat_member as { id: number }).id] : []
+  );
+  if (
+    JSON.stringify(leftMemberIds) !==
+      JSON.stringify([member.id, bot.bot.id, readerBot.bot.id])
+  ) {
+    throw new Error(`Expected the departures in the history, received ${JSON.stringify(history)}`);
+  }
+
+  const outsider = await createAccount(api, sessionPath, 'Linus');
+  const memberRouteStatuses = await Promise.all([
+    api.request(`${membersPath}/${owner.id}`, { method: 'DELETE' }),
+    api.request(`${supergroupPath(outsider.id)}/members/${bot.bot.id}`, { method: 'DELETE' }),
+    api.request(`${membersPath}/${outsider.id}`, { method: 'DELETE' }),
+    api.request(`${membersPath}/999`, { method: 'DELETE' }),
+    api.request(
+      `${sessionPath}/accounts/${owner.id}/conversations/supergroup/-1000000009999/members/${bot.bot.id}`,
+      { method: 'DELETE' },
+    ),
+    api.request(`${sessionPath}/accounts/${owner.id}/conversations/supergroup/-5/members/1`, {
+      method: 'DELETE',
+    }),
+  ]).then((responses) => responses.map((response) => response.status));
+  if (JSON.stringify(memberRouteStatuses) !== JSON.stringify([409, 403, 204, 404, 404, 400])) {
+    throw new Error(`Expected membership checks, received ${memberRouteStatuses.join()}`);
+  }
+});
+
+Deno.test('leaveChat follows Telegram checks outside supergroups', async () => {
+  const { api, sessionPath, botApiPath, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const stranger = await createAccount(api, sessionPath, 'Grace');
+  await sendText('/start');
+
+  const responses = await Promise.all([
+    callBotApi(api, `${botApiPath}/leaveChat`, { chat_id: createdAccount.account.id }),
+    callBotApi(api, `${botApiPath}/leaveChat`, { chat_id: stranger.id }),
+    callBotApi(api, `${botApiPath}/leaveChat`, { chat_id: -1_000_000_009_999 }),
+    callBotApi(api, `${botApiPath}/leaveChat`, {}),
+  ]);
+  const descriptions = responses.map(({ body }) => (body as { description?: string }).description);
+  const expectedDescriptions = [
+    "Bad Request: can't leave private chats",
+    'Bad Request: chat not found',
+    'Bad Request: chat not found',
+    'Bad Request: chat_id is empty',
+  ];
+  if (
+    JSON.stringify(descriptions) !== JSON.stringify(expectedDescriptions) ||
+    !responses.every(({ status }) => status === 400)
+  ) {
+    throw new Error(`Expected leaveChat checks, received ${JSON.stringify(responses)}`);
+  }
+});
+
+Deno.test('a grammY bot welcomes new members and learns it was removed', async () => {
+  const { api, sessionPath, owner, bot, supergroupPath } = await createSupergroupFixture();
+  const newcomer = await createAccount(api, sessionPath, 'Linus');
+  const grammyBot = new Bot(bot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const handled = {
+    welcome: Promise.withResolvers<void>(),
+    farewell: Promise.withResolvers<void>(),
+    removal: Promise.withResolvers<void>(),
+  };
+  let removalError: unknown;
+  grammyBot.on('message:new_chat_members', async (context) => {
+    const names = context.message.new_chat_members.map(({ first_name }) => first_name);
+    if (names.includes('Linus')) {
+      await context.reply(`Welcome, ${names.join(', ')}!`, {
+        reply_parameters: { message_id: context.message.message_id },
+      });
+      handled.welcome.resolve();
+    }
+  });
+  grammyBot.on('message:left_chat_member', async (context) => {
+    if (context.message.left_chat_member.id === newcomer.id) {
+      await context.reply(`Goodbye, ${context.message.left_chat_member.first_name}.`);
+      handled.farewell.resolve();
+    }
+  });
+  grammyBot.on('my_chat_member', async (context) => {
+    if (context.myChatMember.new_chat_member.status === 'kicked') {
+      removalError = await context.reply('Why?').catch((error: unknown) => error);
+      handled.removal.resolve();
+    }
+  });
+  const polling = grammyBot.start();
+
+  try {
+    await api.request(`${supergroupPath(owner.id)}/members/${newcomer.id}`, { method: 'PUT' });
+    await Promise.race([handled.welcome.promise, polling]);
+    await api.request(`${supergroupPath(newcomer.id)}/members/${newcomer.id}`, {
+      method: 'DELETE',
+    });
+    await Promise.race([handled.farewell.promise, polling]);
+    await api.request(`${supergroupPath(owner.id)}/members/${bot.bot.id}`, { method: 'DELETE' });
+    await Promise.race([handled.removal.promise, polling]);
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: Array<
+      { message_id: number; text?: string; reply_to_message?: { message_id: number } }
+    >;
+  };
+  const replies = history.messages.flatMap(({ text, reply_to_message }) =>
+    text === undefined ? [] : [[text, reply_to_message?.message_id]]
+  );
+  if (
+    JSON.stringify(replies) !==
+      JSON.stringify([['Welcome, Linus!', 4], ['Goodbye, Linus.', undefined]])
+  ) {
+    throw new Error(`Expected a welcome and a farewell, received ${JSON.stringify(history)}`);
+  }
+  if (
+    !(removalError instanceof GrammyError) || removalError.error_code !== 403 ||
+    removalError.description !== 'Forbidden: bot was kicked from the supergroup chat'
+  ) {
+    throw new Error(`Expected the removed bot to be turned away, received ${removalError}`);
   }
 });
 
@@ -3829,6 +4172,22 @@ function isUserProfile(value: unknown): value is {
     (profile.username === undefined || typeof profile.username === 'string') &&
     (profile.language_code === undefined || typeof profile.language_code === 'string')
   );
+}
+
+/** Returns a reader of each bot's updates since the reader last read that bot's updates. */
+function createUpdateReader(api: ReturnType<typeof createEmulationApi>) {
+  const nextOffsetsByBotApiPath = new Map<string, number>();
+  return async (botApiPath: string): Promise<Array<Record<string, unknown>>> => {
+    const { body } = await callBotApi(api, `${botApiPath}/getUpdates`, {
+      offset: nextOffsetsByBotApiPath.get(botApiPath) ?? 0,
+    });
+    const updates = (body as { result: Array<Record<string, unknown>> }).result;
+    const lastUpdateId = updates.at(-1)?.update_id;
+    if (typeof lastUpdateId === 'number') {
+      nextOffsetsByBotApiPath.set(botApiPath, lastUpdateId + 1);
+    }
+    return updates;
+  };
 }
 
 function createInProcessFetch(

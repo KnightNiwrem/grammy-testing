@@ -52,6 +52,12 @@ const supergroupChatIdSchema = z.number().int()
   .min(MIN_SUPERGROUP_OR_CHANNEL_ID)
   .max(MAX_SUPERGROUP_OR_CHANNEL_ID);
 const supergroupChatIdPathParameterSchema = z.coerce.number().pipe(supergroupChatIdSchema);
+/** The path parameters of a supergroup member as an account addresses it. */
+const supergroupMemberPathSchema = z.object({
+  [ACCOUNT_ID_PARAMETER]: telegramUserIdPathParameterSchema,
+  [CHAT_ID_PARAMETER]: supergroupChatIdPathParameterSchema,
+  [USER_ID_PARAMETER]: telegramUserIdPathParameterSchema,
+});
 /** A message's ID as the chat's bots see it, which is how these routes show messages. */
 const messageIdPathParameterSchema = z.coerce.number().pipe(z.int().positive());
 
@@ -141,7 +147,8 @@ const pressCallbackButtonRequestSchema = z.strictObject({
 /**
  * Account-facing routes. Private messages they return are shown as the conversation's bot sees
  * them, whichever participant wrote them. Supergroup messages are shown as the requesting account
- * sees them, which differs from what other members see only in the `file_id` of a file.
+ * sees them, which differs from what other members see only in the `file_id` of a file and the
+ * legacy `new_chat_member` of a service message.
  */
 export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   const accountRoutes = new Hono<SessionRouteContextTypes>();
@@ -262,23 +269,16 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.put(SUPERGROUP_MEMBER_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const chatId = supergroupChatIdPathParameterSchema.safeParse(
-      context.req.param(CHAT_ID_PARAMETER),
-    );
-    const userId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(USER_ID_PARAMETER),
-    );
-    if (!accountId.success || !chatId.success || !userId.success) {
+    const memberPath = supergroupMemberPathSchema.safeParse(context.req.param());
+    if (!memberPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, chatId, userId } = memberPath.data;
 
     const result = context.get('emulationSession').sharedChatAdministration.addChatMember({
-      actorAccountId: accountId.data,
-      chatId: chatId.data,
-      memberId: userId.data,
+      actorAccountId: accountId,
+      chatId,
+      memberId: userId,
     });
     if (result.added) {
       return context.body(null, 204);
@@ -295,10 +295,71 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
         return context.body(null, 404);
       // Only supergroups are addressed here, and they accept bots.
       case 'bot_not_permitted_in_channel':
-        throw new Error(`Supergroup ${chatId.data} refused bot ${userId.data} as a channel`);
+        throw new Error(`Supergroup ${chatId} refused bot ${userId} as a channel`);
       default: {
         const unhandledReason: never = result.reason;
         throw new Error(`Unhandled chat member addition failure: ${unhandledReason}`);
+      }
+    }
+  });
+
+  // The account leaves when it names itself, and otherwise removes the member as the owner.
+  accountRoutes.delete(SUPERGROUP_MEMBER_PATH, (context) => {
+    const memberPath = supergroupMemberPathSchema.safeParse(context.req.param());
+    if (!memberPath.success) {
+      return context.body(null, 400);
+    }
+    const { accountId, chatId, userId } = memberPath.data;
+
+    const { sharedChatAdministration } = context.get('emulationSession');
+    if (userId === accountId) {
+      const result = sharedChatAdministration.leaveChat({
+        memberId: accountId,
+        chatId,
+      });
+      if (result.left) {
+        return context.body(null, 204);
+      }
+      switch (result.reason) {
+        // Leaving again changes nothing, as a repeated DELETE should.
+        case 'not_a_member':
+          return context.body(null, 204);
+        case 'member_not_found':
+        case 'chat_not_found':
+          return context.body(null, 404);
+        case 'owner_cannot_leave':
+          return context.body(null, 409);
+        default: {
+          const unhandledReason: never = result.reason;
+          throw new Error(`Unhandled chat leaving failure: ${unhandledReason}`);
+        }
+      }
+    }
+
+    const result = sharedChatAdministration.removeChatMember({
+      actorAccountId: accountId,
+      chatId,
+      memberId: userId,
+    });
+    if (result.removed) {
+      return context.body(null, 204);
+    }
+    switch (result.reason) {
+      // Removing a member again changes nothing, as a repeated DELETE should.
+      case 'not_a_member':
+        return context.body(null, 204);
+      case 'actor_not_authorized':
+        return context.body(null, 403);
+      case 'actor_account_not_found':
+      case 'chat_not_found':
+      case 'member_not_found':
+        return context.body(null, 404);
+      // A chat has one owner, and an owner naming itself leaves instead.
+      case 'member_is_owner':
+        throw new Error(`Supergroup ${chatId} has an owner besides ${accountId}`);
+      default: {
+        const unhandledReason: never = result.reason;
+        throw new Error(`Unhandled chat member removal failure: ${unhandledReason}`);
       }
     }
   });

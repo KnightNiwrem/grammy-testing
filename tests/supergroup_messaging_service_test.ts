@@ -23,7 +23,7 @@ Deno.test('SupergroupMessagingService numbers messages once for the supergroup a
   const botMessage = expectSent(supergroupMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     chatId: supergroup.id,
-    replyTo: { messageId: 1, allowSendingWithoutReply: false },
+    replyTo: { messageId: 2, allowSendingWithoutReply: false },
     isContentProtected: true,
     content: { kind: 'text', text: 'Welcome' },
   }));
@@ -47,7 +47,7 @@ Deno.test('SupergroupMessagingService numbers messages once for the supergroup a
     messageBoxes.getMessageId(supergroup.id, message.id)
   );
   if (
-    JSON.stringify(messageIds) !== JSON.stringify([1, 2, 3]) ||
+    JSON.stringify(messageIds) !== JSON.stringify([2, 3, 4]) ||
     messageBoxes.getMessageId(owner.profile.id, accountMessage.id) !== undefined ||
     messageBoxes.getMessageId(bot.profile.id, botMessage.id) !== undefined
   ) {
@@ -97,7 +97,7 @@ Deno.test('SupergroupMessagingService lets only members write and read', () => {
     supergroupMessaging.sendAccountMessage({
       fromAccountId: owner.profile.id,
       chatId: supergroup.id,
-      replyToMessageId: 1,
+      replyToMessageId: 99,
       content: { kind: 'text', text: 'Hi' },
     }),
   ].map((result) => result.sent ? 'sent' : result.reason);
@@ -120,7 +120,7 @@ Deno.test('SupergroupMessagingService lets only members write and read', () => {
     supergroupMessaging.sendBotMessage({
       fromBotId: bot.profile.id,
       chatId: supergroup.id,
-      replyTo: { messageId: 1, allowSendingWithoutReply: false },
+      replyTo: { messageId: 99, allowSendingWithoutReply: false },
       content: { kind: 'text', text: 'Hi' },
     }),
     supergroupMessaging.sendBotMessage({
@@ -206,13 +206,13 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
     supergroupMessaging.editBotMessageText({
       fromBotId: bot.profile.id,
       chatId: supergroup.id,
-      messageId: 1,
+      messageId: 3,
       text: 'Changed',
     }),
     supergroupMessaging.editBotMessageText({
       fromBotId: otherBot.profile.id,
       chatId: supergroup.id,
-      messageId: 2,
+      messageId: 4,
       text: 'Changed',
     }),
     supergroupMessaging.editBotMessageText({
@@ -224,13 +224,19 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
     supergroupMessaging.editBotMessageInlineKeyboard({
       fromBotId: bot.profile.id,
       chatId: supergroup.id,
-      messageId: 2,
+      messageId: 4,
     }),
     supergroupMessaging.editAccountMessage({
       fromAccountId: owner.profile.id,
       chatId: supergroup.id,
-      messageId: 2,
+      messageId: 4,
       edit: { kind: 'text', text: 'Changed' },
+    }),
+    supergroupMessaging.editAccountMessage({
+      fromAccountId: owner.profile.id,
+      chatId: supergroup.id,
+      messageId: 3,
+      edit: { kind: 'text', text: 'Hello' },
     }),
     supergroupMessaging.editAccountMessage({
       fromAccountId: owner.profile.id,
@@ -243,12 +249,12 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
     supergroupMessaging.deleteMessagesByBot({
       fromBotId: bot.profile.id,
       chatId: supergroup.id,
-      messageIds: [2, 1],
+      messageIds: [4, 3],
     }),
     supergroupMessaging.deleteMessagesByBot({
       fromBotId: otherBot.profile.id,
       chatId: supergroup.id,
-      messageIds: [2],
+      messageIds: [4],
     }),
   ].map((result) => result.deleted ? 'deleted' : result.reason);
   const expectedFailures = {
@@ -259,6 +265,7 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
       'message_not_modified',
       'message_not_editable',
       'message_not_modified',
+      'message_not_editable',
     ],
     deletionFailures: ['message_not_deletable', 'message_not_deletable'],
   };
@@ -272,13 +279,13 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
   const accountEdit = supergroupMessaging.editAccountMessage({
     fromAccountId: owner.profile.id,
     chatId: supergroup.id,
-    messageId: 1,
+    messageId: 3,
     edit: { kind: 'text', text: 'Hello /help' },
   });
   const deletion = supergroupMessaging.deleteMessagesByBot({
     fromBotId: bot.profile.id,
     chatId: supergroup.id,
-    messageIds: [2, 2, 99],
+    messageIds: [4, 4, 99],
   });
   const history = supergroupMessaging.getMessageHistory({
     accountId: owner.profile.id,
@@ -290,10 +297,84 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
     publishedEvents.length !== publishedEventCount + 1 ||
     !deletion.deleted || deletion.deletedMessageCount !== 1 ||
     !history.found ||
-    JSON.stringify(history.messages.map(({ content }) => getContentText(content).text)) !==
-      JSON.stringify(['Hello /help'])
+    JSON.stringify(
+        history.messages.map(({ content }) =>
+          content.kind === 'text' ? content.text : content.kind
+        ),
+      ) !== JSON.stringify(['members_joined', 'members_joined', 'Hello /help'])
   ) {
     throw new Error('Expected the account edit to be published and the bot message deleted');
+  }
+});
+
+Deno.test('SupergroupMessagingService turns away bots that left or were removed', () => {
+  const { supergroupMessaging, virtualUsers, sharedChatAdministration, owner, bot, supergroup } =
+    createSupergroupMessagingFixture();
+  const removedBot = createBot(virtualUsers, 'removed_bot');
+  sharedChatAdministration.addChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: supergroup.id,
+    memberId: removedBot.profile.id,
+  });
+  const botMessage = expectSent(supergroupMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    chatId: supergroup.id,
+    content: { kind: 'text', text: 'Bye' },
+  }));
+  sharedChatAdministration.leaveChat({ memberId: bot.profile.id, chatId: supergroup.id });
+  sharedChatAdministration.removeChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: supergroup.id,
+    memberId: removedBot.profile.id,
+  });
+
+  const failures = [bot, removedBot].flatMap(({ profile: { id: fromBotId } }) =>
+    [
+      supergroupMessaging.sendBotMessage({
+        fromBotId,
+        chatId: supergroup.id,
+        content: { kind: 'text', text: 'Hi' },
+      }),
+      supergroupMessaging.sendBotChatAction({ fromBotId, chatId: supergroup.id, action: 'typing' }),
+      supergroupMessaging.editBotMessageInlineKeyboard({
+        fromBotId,
+        chatId: supergroup.id,
+        messageId: 3,
+      }),
+      supergroupMessaging.deleteMessagesByBot({
+        fromBotId,
+        chatId: supergroup.id,
+        messageIds: [3],
+      }),
+    ].map((result) => 'reason' in result ? result.reason : 'succeeded')
+  );
+  const expectedFailures = [
+    ...Array(4).fill('bot_not_a_member'),
+    ...Array(4).fill('bot_kicked'),
+  ];
+  if (JSON.stringify(failures) !== JSON.stringify(expectedFailures)) {
+    throw new Error(`Expected former members to be turned away, received ${failures.join()}`);
+  }
+  const history = supergroupMessaging.getMessageHistory({
+    accountId: owner.profile.id,
+    chatId: supergroup.id,
+  });
+  const expectedHistory = [
+    { author: { kind: 'account', accountId: owner.profile.id }, kind: 'members_joined' },
+    { author: { kind: 'account', accountId: owner.profile.id }, kind: 'members_joined' },
+    { author: { kind: 'bot', botId: bot.profile.id }, kind: 'text' },
+    { author: { kind: 'bot', botId: bot.profile.id }, kind: 'member_left' },
+    { author: { kind: 'account', accountId: owner.profile.id }, kind: 'member_left' },
+  ];
+  if (
+    !history.found ||
+    JSON.stringify(
+        history.messages.map(({ author, content }) => ({ author, kind: content.kind })),
+      ) !==
+      JSON.stringify(expectedHistory) ||
+    history.messages[2].id !== botMessage.id
+  ) {
+    throw new Error(`Expected the departures in the history, received ${JSON.stringify(history)}`);
   }
 });
 
@@ -307,14 +388,6 @@ function createSupergroupMessagingFixture() {
   const publishedEvents: ChatDomainEvent[] = [];
   const events = { publish: (event: ChatDomainEvent) => publishedEvents.push(event) };
   const currentUnixTimeSeconds = () => 1_700_000_000;
-  const sharedChatAdministration = new SharedChatAdministrationService({
-    identities,
-    accounts,
-    bots,
-    sharedChats,
-    events,
-    currentUnixTimeSeconds,
-  });
   const supergroupMessaging = new SupergroupMessagingService({
     accounts,
     bots,
@@ -322,6 +395,15 @@ function createSupergroupMessagingFixture() {
     messages: new MessageRepository(),
     files: new FileRepository(),
     messageBoxes,
+    events,
+    currentUnixTimeSeconds,
+  });
+  const sharedChatAdministration = new SharedChatAdministrationService({
+    identities,
+    accounts,
+    bots,
+    sharedChats,
+    supergroupMessages: supergroupMessaging,
     events,
     currentUnixTimeSeconds,
   });

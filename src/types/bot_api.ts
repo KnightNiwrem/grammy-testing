@@ -117,6 +117,29 @@ export type BotApiMessageContent =
   })
   | (BotApiCaption & { readonly document: BotApiDocument });
 
+/**
+ * The fields of a service message about a membership change, which take the place of content.
+ * Telegram still sends each change's legacy fields before its current ones.
+ */
+export type BotApiMembershipServiceContent =
+  | {
+    /** Legacy alias of `new_chat_member`. */
+    readonly new_chat_participant: BotApiUser;
+    /** Legacy: the observing bot if it joined, otherwise the first new member. */
+    readonly new_chat_member: BotApiUser;
+    readonly new_chat_members: readonly BotApiUser[];
+  }
+  | {
+    /** Legacy alias of `left_chat_member`. */
+    readonly left_chat_participant: BotApiUser;
+    readonly left_chat_member: BotApiUser;
+  };
+
+/** What a supergroup message shows: content, or a membership change. */
+export type BotApiSupergroupMessageContent =
+  | BotApiMessageContent
+  | BotApiMembershipServiceContent;
+
 interface BotApiMessageHeader<Chat> {
   readonly message_id: number;
   readonly from: BotApiUser;
@@ -134,33 +157,42 @@ interface BotApiMessageTrailer {
 }
 
 /** A message as a reply shows it: Telegram never nests the replied message's own reply. */
-type BotApiRepliedMessageInChat<Chat> =
+type BotApiRepliedMessageInChat<Chat, Content> =
   & BotApiMessageHeader<Chat>
-  & BotApiMessageContent
+  & Content
   & BotApiMessageTrailer;
 
 /** A message in a chat of the given type, in the field order Telegram uses. */
-type BotApiMessageInChat<Chat> =
+type BotApiMessageInChat<Chat, Content> =
   & BotApiMessageHeader<Chat>
   & {
     /**
      * The replied message, without its own reply; omitted when the message is no reply or the
      * replied message was deleted.
      */
-    readonly reply_to_message?: BotApiRepliedMessageInChat<Chat>;
+    readonly reply_to_message?: BotApiRepliedMessageInChat<Chat, Content>;
   }
-  & BotApiMessageContent
+  & Content
   & BotApiMessageTrailer;
 
-export type BotApiPrivateMessage = BotApiMessageInChat<BotApiPrivateChat>;
+export type BotApiPrivateMessage = BotApiMessageInChat<BotApiPrivateChat, BotApiMessageContent>;
 
-export type BotApiSupergroupMessage = BotApiMessageInChat<BotApiSupergroupChat>;
+export type BotApiSupergroupMessage = BotApiMessageInChat<
+  BotApiSupergroupChat,
+  BotApiSupergroupMessageContent
+>;
 
 export type BotApiMessage = BotApiPrivateMessage | BotApiSupergroupMessage;
 
-export type BotApiRepliedPrivateMessage = BotApiRepliedMessageInChat<BotApiPrivateChat>;
+export type BotApiRepliedPrivateMessage = BotApiRepliedMessageInChat<
+  BotApiPrivateChat,
+  BotApiMessageContent
+>;
 
-export type BotApiRepliedSupergroupMessage = BotApiRepliedMessageInChat<BotApiSupergroupChat>;
+export type BotApiRepliedSupergroupMessage = BotApiRepliedMessageInChat<
+  BotApiSupergroupChat,
+  BotApiSupergroupMessageContent
+>;
 
 /** A bot command as the Bot API shows it. */
 export interface BotApiBotCommand {
@@ -183,19 +215,23 @@ export type BotApiPrivateChatBotMember =
   | { readonly user: BotApiBotUser; readonly status: 'member' }
   | { readonly user: BotApiBotUser; readonly status: 'kicked'; readonly until_date: 0 };
 
-/** The bot's membership in a group: `left` before it joins. */
+/**
+ * The bot's membership in a group: `left` before it joins and after it leaves, and `kicked`, which
+ * is forever, after an administrator removes it from a supergroup.
+ */
 export type BotApiGroupChatBotMember =
   | { readonly user: BotApiBotUser; readonly status: 'left' }
-  | { readonly user: BotApiBotUser; readonly status: 'member' };
+  | { readonly user: BotApiBotUser; readonly status: 'member' }
+  | { readonly user: BotApiBotUser; readonly status: 'kicked'; readonly until_date: 0 };
 
 /** A change of the bot's own membership in a chat, in the field order Telegram uses. */
 interface BotApiMyChatMemberUpdatedInChat<Chat, ChatMember> {
   readonly chat: Chat;
   /**
    * The user who changed the membership: in a private chat, the account at its other end; in a
-   * group, the account that added the bot.
+   * group, the account that added or removed the bot, or the bot itself when it left.
    */
-  readonly from: VirtualAccountProfile;
+  readonly from: BotApiUser;
   readonly date: number;
   readonly old_chat_member: ChatMember;
   readonly new_chat_member: ChatMember;

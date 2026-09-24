@@ -33,11 +33,13 @@ import type {
   CreateVirtualAccountInput,
   CreateVirtualBotInput,
   EmulationSession,
+  LeaveChatInput,
   MessageIn,
   MessageTarget,
   PressCallbackButtonInput,
   PressReplyKeyboardButtonInput,
   PrivateMessage,
+  RemoveChatMemberInput,
   ReplyInterface,
   Supergroup,
   VirtualAccountClient,
@@ -233,6 +235,22 @@ function createVirtualAccountClient(
         url: `${conversationUrl(accountUrl, input.chat)}/members/${
           encodeURIComponent(input.userId)
         }`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+      });
+    },
+    async removeChatMember(input: RemoveChatMemberInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'DELETE',
+        url: `${conversationUrl(accountUrl, input.chat)}/members/${
+          encodeURIComponent(input.userId)
+        }`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+      });
+    },
+    async leaveChat(input: LeaveChatInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'DELETE',
+        url: `${conversationUrl(accountUrl, input.chat)}/members/${encodeURIComponent(profile.id)}`,
         expectedStatus: HTTP_STATUS_NO_CONTENT,
       });
     },

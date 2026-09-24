@@ -207,30 +207,58 @@ const messageTrailerShape = {
   has_protected_content: z.literal(true).optional(),
 };
 
+const messageUserSchema = z.union([virtualAccountProfileSchema, messageSenderBotSchema]);
+
+const membersJoinedContentShape = {
+  new_chat_participant: messageUserSchema,
+  new_chat_member: messageUserSchema,
+  new_chat_members: z.array(messageUserSchema).min(1),
+};
+
+const memberLeftContentShape = {
+  left_chat_participant: messageUserSchema,
+  left_chat_member: messageUserSchema,
+};
+
 /**
- * A message of each content kind, with fields in the order the server sends them and a reply,
- * which shows no reply of its own, between header and content.
+ * A message with the given fields before its content, of each content kind, with fields in the
+ * order the server sends them.
  */
-function messageSchema<Chat extends z.ZodType>(chat: Chat) {
-  const header = messageHeaderShape(chat);
-  const repliedMessage = z.union([
+function contentMessageSchemas<Header extends z.ZodRawShape>(header: Header) {
+  return [
     z.strictObject({ ...header, ...textContentShape, ...messageTrailerShape }),
     z.strictObject({ ...header, ...photoContentShape, ...messageTrailerShape }),
     z.strictObject({ ...header, ...documentContentShape, ...messageTrailerShape }),
-  ]);
-  const reply = { reply_to_message: repliedMessage.optional() };
-  return z.union([
-    z.strictObject({ ...header, ...reply, ...textContentShape, ...messageTrailerShape }),
-    z.strictObject({ ...header, ...reply, ...photoContentShape, ...messageTrailerShape }),
-    z.strictObject({ ...header, ...reply, ...documentContentShape, ...messageTrailerShape }),
-  ]);
+  ] as const;
 }
 
-export const privateMessageSchema: z.ZodType<PrivateMessage> = messageSchema(privateChatSchema);
+/** A service message about members joining or leaving, as `contentMessageSchemas` reads others. */
+function membershipChangeMessageSchemas<Header extends z.ZodRawShape>(header: Header) {
+  return [
+    z.strictObject({ ...header, ...membersJoinedContentShape, ...messageTrailerShape }),
+    z.strictObject({ ...header, ...memberLeftContentShape, ...messageTrailerShape }),
+  ] as const;
+}
 
-const supergroupMessageSchema: z.ZodType<SupergroupMessage> = messageSchema(
-  supergroupChatSchema,
-);
+// A reply, which shows no reply of its own, comes between a message's header and content.
+const privateMessageHeader = messageHeaderShape(privateChatSchema);
+
+export const privateMessageSchema: z.ZodType<PrivateMessage> = z.union(contentMessageSchemas({
+  ...privateMessageHeader,
+  reply_to_message: z.union(contentMessageSchemas(privateMessageHeader)).optional(),
+}));
+
+const supergroupMessageHeader = messageHeaderShape(supergroupChatSchema);
+
+/** Supergroup messages, which service messages about members joining or leaving are among. */
+function supergroupMessageSchemas<Header extends z.ZodRawShape>(header: Header) {
+  return [...contentMessageSchemas(header), ...membershipChangeMessageSchemas(header)] as const;
+}
+
+const supergroupMessageSchema: z.ZodType<SupergroupMessage> = z.union(supergroupMessageSchemas({
+  ...supergroupMessageHeader,
+  reply_to_message: z.union(supergroupMessageSchemas(supergroupMessageHeader)).optional(),
+}));
 
 export const sentMessageResponseSchema = z.strictObject({
   message: privateMessageSchema,

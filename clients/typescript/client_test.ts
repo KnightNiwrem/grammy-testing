@@ -345,19 +345,39 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     text: 'Hello everyone',
   });
   const history = await owner.getMessages({ chat });
+  const menu = history[3];
   const callbackQuery = await owner.pressCallbackButton({
     chat,
-    message_id: history[1].message_id,
+    message_id: menu.message_id,
     callback_data: 'yes',
   });
   if (
     greeting.chat.title !== 'Team' || edited.edit_date === undefined ||
-    JSON.stringify(history.map(({ message_id, text }) => [message_id, text])) !==
-      JSON.stringify([[1, 'Hello everyone'], [2, 'Continue?']]) ||
-    history[1].reply_to_message?.text !== 'Hello everyone' ||
+    JSON.stringify(history.map(({ message_id, text, new_chat_members }) => [
+        message_id,
+        text ?? new_chat_members?.map(({ id }) => id),
+      ]
+      )) !==
+      JSON.stringify([[1, [member.id]], [2, [bot.id]], [3, 'Hello everyone'], [4, 'Continue?']]) ||
+    menu.reply_to_message?.text !== 'Hello everyone' ||
     callbackQuery.status !== 'awaiting_answer'
   ) {
     throw new Error('Expected the client to exchange messages and press buttons in the supergroup');
+  }
+
+  await owner.removeChatMember({ chat, userId: bot.id });
+  await owner.removeChatMember({ chat, userId: bot.id });
+  await member.leaveChat({ chat });
+  const departures = (await owner.getMessages({ chat })).slice(4);
+  if (
+    JSON.stringify(
+      departures.map(({ from, left_chat_member }) => [from.id, left_chat_member?.id]),
+    ) !==
+      JSON.stringify([[owner.id, bot.id], [member.id, member.id]])
+  ) {
+    throw new Error(
+      `Expected the client to remove the bot and leave, received ${JSON.stringify(departures)}`,
+    );
   }
 
   const { account: stranger } = await session.createAccount({ first_name: 'Linus' });

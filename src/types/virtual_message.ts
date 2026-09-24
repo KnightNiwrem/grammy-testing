@@ -102,12 +102,47 @@ export interface DocumentMessageContent {
 /** What a message shows: text, or a file with a caption. */
 export type MessageContent = TextMessageContent | PhotoMessageContent | DocumentMessageContent;
 
+/** A service message's record that accounts or bots joined a supergroup. */
+export interface MembersJoinedMessageContent {
+  readonly kind: 'members_joined';
+  /** The accounts and bots that joined. */
+  readonly memberIds: readonly number[];
+}
+
+/** A service message's record that a member left a supergroup or was removed from it. */
+export interface MemberLeftMessageContent {
+  readonly kind: 'member_left';
+  readonly memberId: number;
+}
+
+/**
+ * What a service message shows instead of content: a change of the supergroup's members, which
+ * Telegram records as a message of the member who made the change.
+ */
+export type MembershipServiceContent = MembersJoinedMessageContent | MemberLeftMessageContent;
+
+/** What a supergroup message shows: content its author wrote, or a membership change. */
+export type SupergroupMessageContent = MessageContent | MembershipServiceContent;
+
 /**
  * The text a message's content carries: the text of a text message, or the caption of a media
- * message, which is empty when it has none.
+ * message, which is empty when it has none. A service message carries no text.
  */
-export function getContentText(content: MessageContent): FormattedText {
-  return content.kind === 'text' ? content : content.caption;
+export function getContentText(content: SupergroupMessageContent): FormattedText {
+  switch (content.kind) {
+    case 'text':
+      return content;
+    case 'photo':
+    case 'document':
+      return content.caption;
+    case 'members_joined':
+    case 'member_left':
+      return { text: '', entities: [] };
+    default: {
+      const unhandledContent: never = content;
+      throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
+    }
+  }
 }
 
 /** A canonical message of a private conversation, written by either participant. */
@@ -136,19 +171,25 @@ export interface PrivateMessage {
   readonly isContentProtected: boolean;
 }
 
-/** The member of a supergroup who wrote a message there: an account or a bot. */
+/**
+ * The member of a supergroup who wrote a message there, or made the change a service message
+ * records: an account or a bot.
+ */
 export type SupergroupMessageAuthor =
   | { readonly kind: 'account'; readonly accountId: number }
   | { readonly kind: 'bot'; readonly botId: number };
 
-/** A canonical message of a supergroup, written by one of its members. */
+/**
+ * A canonical message of a supergroup: one that a member wrote, or a service message recording a
+ * membership change that its author made.
+ */
 export interface SupergroupMessage {
   readonly kind: 'supergroup_message';
   readonly id: CanonicalMessageId;
   readonly chatId: number;
   readonly author: SupergroupMessageAuthor;
   readonly sentAtUnixSeconds: number;
-  readonly content: MessageContent;
+  readonly content: SupergroupMessageContent;
   /** The message of the same supergroup this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
   /** Omitted when the message has no inline keyboard. Only bots attach inline keyboards. */
@@ -164,3 +205,13 @@ export interface SupergroupMessage {
 
 /** A canonical message of any chat the emulator supports. */
 export type ChatMessage = PrivateMessage | SupergroupMessage;
+
+/** A supergroup message that shows content its author wrote, rather than a membership change. */
+export type SupergroupContentMessage = SupergroupMessage & { readonly content: MessageContent };
+
+/** Whether a supergroup message shows content its author wrote, which only such a message has. */
+export function isSupergroupContentMessage(
+  message: SupergroupMessage,
+): message is SupergroupContentMessage {
+  return message.content.kind !== 'members_joined' && message.content.kind !== 'member_left';
+}

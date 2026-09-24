@@ -12,12 +12,14 @@ import type {
   CallbackQueryCreatedEvent,
   ChatDomainEvent,
   ChatMemberAddedEvent,
+  ChatMemberLeftEvent,
 } from '../types/chat_domain_event.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import {
   type CanonicalMessageId,
   type ChatMessage,
   getContentText,
+  isSupergroupContentMessage,
   type PrivateMessage,
   type SupergroupMessage,
 } from '../types/virtual_message.ts';
@@ -31,6 +33,7 @@ interface BotMessageViews {
   ): BotApiCallbackQuery;
   viewBotBlockChangeForBot(event: BotBlockChangedEvent): BotApiMyChatMemberUpdated;
   viewBotJoinedGroupForBot(event: ChatMemberAddedEvent): BotApiMyChatMemberUpdated;
+  viewBotLeftGroupForBot(event: ChatMemberLeftEvent): BotApiMyChatMemberUpdated;
 }
 
 interface BotUpdateMailboxes {
@@ -113,6 +116,9 @@ export class BotUpdateDeliveryService {
       case 'chat_member_added':
         this.#deliverChatMemberAddition(event);
         return;
+      case 'chat_member_left':
+        this.#deliverChatMemberDeparture(event);
+        return;
       default: {
         const unhandledEvent: never = event;
         throw new Error(`Unhandled chat domain event: ${JSON.stringify(unhandledEvent)}`);
@@ -161,6 +167,10 @@ export class BotUpdateDeliveryService {
     message: SupergroupMessage,
     updateType: MessageUpdateType,
   ): void {
+    if (!isSupergroupContentMessage(message)) {
+      this.#deliverMembershipServiceMessage(message);
+      return;
+    }
     if (message.author.kind === 'bot') {
       return;
     }
@@ -179,6 +189,32 @@ export class BotUpdateDeliveryService {
         bot.id,
         updateType,
         this.#botMessageViews.viewSupergroupMessage(message, bot.id),
+      );
+    }
+  }
+
+  /**
+   * A service message about a membership change is observed by every bot of the supergroup,
+   * privacy mode notwithstanding, and by a bot that left or was removed, which, as on Telegram,
+   * still learns of its own departure. A bot's service message, about its leaving, is observed
+   * only by that bot, since bots never observe other bots' messages.
+   */
+  #deliverMembershipServiceMessage(message: SupergroupMessage): void {
+    const departedMemberIds = message.content.kind === 'member_left'
+      ? [message.content.memberId]
+      : [];
+    const observerIds = message.author.kind === 'bot'
+      ? [message.author.botId]
+      : [...this.#sharedChats.getChatMemberIds(message.chatId), ...departedMemberIds];
+    for (const observerId of observerIds) {
+      if (
+        this.#bots.getById(observerId) === undefined || !this.#isSubscribed(observerId, 'message')
+      ) {
+        continue;
+      }
+      this.#botUpdates.enqueueMessageUpdate(
+        observerId,
+        this.#botMessageViews.viewSupergroupMessage(message, observerId),
       );
     }
   }
@@ -217,8 +253,8 @@ export class BotUpdateDeliveryService {
   }
 
   /**
-   * A bot's addition to a group is observed by the added bot. Telegram also shows every addition
-   * to the group's bots as a service message, which the emulator does not produce.
+   * A bot's addition to a group is observed by the added bot. The group's bots learn of every
+   * addition from the service message that records it.
    */
   #deliverChatMemberAddition(event: ChatMemberAddedEvent): void {
     if (
@@ -231,6 +267,24 @@ export class BotUpdateDeliveryService {
     this.#botUpdates.enqueueMyChatMemberUpdate(
       event.memberId,
       this.#botMessageViews.viewBotJoinedGroupForBot(event),
+    );
+  }
+
+  /**
+   * A bot's departure from a group is observed by the departed bot. The group's bots learn of
+   * every departure from the service message that records it.
+   */
+  #deliverChatMemberDeparture(event: ChatMemberLeftEvent): void {
+    if (
+      this.#bots.getById(event.memberId) === undefined ||
+      !this.#isSubscribed(event.memberId, 'my_chat_member')
+    ) {
+      return;
+    }
+
+    this.#botUpdates.enqueueMyChatMemberUpdate(
+      event.memberId,
+      this.#botMessageViews.viewBotLeftGroupForBot(event),
     );
   }
 

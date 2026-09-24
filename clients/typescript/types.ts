@@ -119,6 +119,16 @@ export interface AddChatMemberInput {
   readonly userId: number;
 }
 
+export interface RemoveChatMemberInput {
+  readonly chat: SupergroupMessageTarget;
+  /** The account or bot to remove. */
+  readonly userId: number;
+}
+
+export interface LeaveChatInput {
+  readonly chat: SupergroupMessageTarget;
+}
+
 export interface AccountEditMessageInput<Target extends MessageTarget = MessageTarget> {
   readonly chat: Target;
   /** The ID of the account's message to edit, as message history shows it. */
@@ -284,6 +294,54 @@ export type MessageContent =
     readonly caption_entities?: readonly MessageEntity[];
   };
 
+/** The fields of a membership change, which content never has. */
+interface NoMembershipChange {
+  readonly new_chat_participant?: never;
+  readonly new_chat_member?: never;
+  readonly new_chat_members?: never;
+  readonly left_chat_participant?: never;
+  readonly left_chat_member?: never;
+}
+
+/** The fields of content, which a service message never has. */
+interface NoContent {
+  readonly text?: never;
+  readonly entities?: never;
+  readonly photo?: never;
+  readonly document?: never;
+  readonly caption?: never;
+  readonly caption_entities?: never;
+}
+
+/**
+ * The fields of a service message about members joining or leaving a supergroup, which take the
+ * place of content. As Telegram does, each change also carries its legacy fields.
+ */
+export type MembershipChangeContent =
+  | (NoContent & {
+    /** Legacy alias of `new_chat_member`. */
+    readonly new_chat_participant: VirtualAccountProfile | MessageSenderBot;
+    /** Legacy: the requesting account if it joined, otherwise the first new member. */
+    readonly new_chat_member: VirtualAccountProfile | MessageSenderBot;
+    readonly new_chat_members: readonly (VirtualAccountProfile | MessageSenderBot)[];
+    readonly left_chat_participant?: never;
+    readonly left_chat_member?: never;
+  })
+  | (NoContent & {
+    readonly new_chat_participant?: never;
+    readonly new_chat_member?: never;
+    readonly new_chat_members?: never;
+    /** Legacy alias of `left_chat_member`. */
+    readonly left_chat_participant: VirtualAccountProfile | MessageSenderBot;
+    /** The member that left or was removed. */
+    readonly left_chat_member: VirtualAccountProfile | MessageSenderBot;
+  });
+
+/** What a supergroup message shows: content, or a membership change. */
+export type SupergroupMessageContent =
+  | (MessageContent & NoMembershipChange)
+  | MembershipChangeContent;
+
 /** The fields that precede a message's reply and content. */
 interface MessageHeader<Chat> {
   readonly message_id: number;
@@ -321,13 +379,14 @@ export type PrivateMessage =
 /** A message as a reply shows it, without its own reply. */
 export type RepliedSupergroupMessage =
   & MessageHeader<SupergroupChat>
-  & MessageContent
+  & SupergroupMessageContent
   & MessageTrailer;
 
 /**
  * A supergroup message as the requesting account sees it: numbered once by the supergroup, and
- * written by an account or a bot. Members see the same message, apart from the `file_id` of its
- * file.
+ * written by an account or a bot, or a service message about members joining or leaving, from the
+ * member who made the change. Members see the same message, apart from the `file_id` of its file
+ * and the legacy `new_chat_member` of a service message.
  */
 export type SupergroupMessage =
   & MessageHeader<SupergroupChat>
@@ -335,7 +394,7 @@ export type SupergroupMessage =
     /** The message this one replies to, unless it was deleted; it never shows its own reply. */
     readonly reply_to_message?: RepliedSupergroupMessage;
   }
-  & MessageContent
+  & SupergroupMessageContent
   & MessageTrailer;
 
 /** A reply keyboard button, which sends its text to the chat when pressed. */
@@ -441,10 +500,24 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
   /** Creates a supergroup that this account owns. */
   createSupergroup(input: CreateSupergroupInput): Promise<Supergroup>;
   /**
-   * Adds an account or a bot to a supergroup this account owns. An added bot receives a
-   * `my_chat_member` update. Adding a member again has no effect.
+   * Adds an account or a bot to a supergroup this account owns, which a `new_chat_members`
+   * service message records. An added bot first receives a `my_chat_member` update. Adding a
+   * removed member lifts its ban; adding a member again has no effect.
    */
   addChatMember(input: AddChatMemberInput): Promise<void>;
+  /**
+   * Removes an account or a bot from a supergroup this account owns, which bans it until it is
+   * added again, and which a `left_chat_member` service message records. A removed bot receives a
+   * `my_chat_member` update showing it as `kicked` and the service message, and its later
+   * requests there fail with `403 Forbidden: bot was kicked from the supergroup chat`. Removing a
+   * non-member has no effect.
+   */
+  removeChatMember(input: RemoveChatMemberInput): Promise<void>;
+  /**
+   * Leaves a supergroup, which a `left_chat_member` service message records. The owner cannot
+   * leave. Leaving a supergroup this account is not a member of has no effect.
+   */
+  leaveChat(input: LeaveChatInput): Promise<void>;
   /**
    * Blocks a bot, which Telegram calls stopping it. The bot receives a `my_chat_member` update
    * showing it as `kicked`, its messages to this account fail with `403 Forbidden: bot was

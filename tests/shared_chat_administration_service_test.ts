@@ -8,9 +8,12 @@ import {
   type BasicGroupCreationFailureReason,
   type BasicGroupCreationResult,
   type ChannelCreationResult,
+  type LeaveChatResult,
+  type RemoveChatMemberResult,
   SharedChatAdministrationService,
   type SupergroupCreationResult,
 } from '../src/services/shared_chat_administration.ts';
+import type { RecordSupergroupMembershipChangeInput } from '../src/services/supergroup_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
 import type { ChatMembership } from '../src/types/chat_membership.ts';
@@ -152,8 +155,13 @@ Deno.test('SharedChatAdministrationService validates owners before reserving sha
 });
 
 Deno.test('SharedChatAdministrationService adds permitted members to shared chats', () => {
-  const { virtualUsers, sharedChats, publishedEvents, sharedChatAdministration } =
-    createSharedChatAdministrationFixture();
+  const {
+    virtualUsers,
+    sharedChats,
+    publishedEvents,
+    recordedMembershipChanges,
+    sharedChatAdministration,
+  } = createSharedChatAdministrationFixture();
   const owner = createAccount(virtualUsers, 'Ada');
   const account = createAccount(virtualUsers, 'Grace');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
@@ -209,11 +217,25 @@ Deno.test('SharedChatAdministrationService adds permitted members to shared chat
     chat,
     actorAccountId: owner.profile.id,
     memberId,
+    statusBeforeJoining: 'left',
     addedAtUnixSeconds: 1_700_000_000,
   }));
   if (JSON.stringify(publishedEvents) !== JSON.stringify(expectedEvents)) {
     throw new Error(
       `Expected each addition to be published, received ${JSON.stringify(publishedEvents)}`,
+    );
+  }
+  const expectedMembershipChanges = [{
+    chatId: supergroup.id,
+    author: { kind: 'account', accountId: owner.profile.id },
+    content: { kind: 'members_joined', memberIds: [bot.profile.id] },
+    changedAtUnixSeconds: 1_700_000_000,
+  }];
+  if (JSON.stringify(recordedMembershipChanges) !== JSON.stringify(expectedMembershipChanges)) {
+    throw new Error(
+      `Expected only the supergroup to record the addition, received ${
+        JSON.stringify(recordedMembershipChanges)
+      }`,
     );
   }
   if (!/^-?\d+$/.test(supergroup.chatInstance)) {
@@ -404,6 +426,143 @@ function assertMembershipStatus(
   }
 }
 
+Deno.test('SharedChatAdministrationService ends memberships as members leave or are removed', () => {
+  const {
+    virtualUsers,
+    sharedChats,
+    publishedEvents,
+    recordedMembershipChanges,
+    sharedChatAdministration,
+  } = createSharedChatAdministrationFixture();
+  const owner = createAccount(virtualUsers, 'Ada');
+  const member = createAccount(virtualUsers, 'Grace');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const supergroup = getCreatedSupergroup(sharedChatAdministration.createSupergroup({
+    title: 'Team',
+    creatorAccountId: owner.profile.id,
+  }));
+  for (const memberId of [member.profile.id, bot.profile.id]) {
+    assertMemberAdded(sharedChatAdministration.addChatMember({
+      actorAccountId: owner.profile.id,
+      chatId: supergroup.id,
+      memberId,
+    }));
+  }
+  publishedEvents.length = 0;
+  recordedMembershipChanges.length = 0;
+
+  const refusals = [
+    sharedChatAdministration.removeChatMember({
+      actorAccountId: member.profile.id,
+      chatId: supergroup.id,
+      memberId: bot.profile.id,
+    }),
+    sharedChatAdministration.removeChatMember({
+      actorAccountId: owner.profile.id,
+      chatId: supergroup.id,
+      memberId: 999,
+    }),
+    sharedChatAdministration.leaveChat({ memberId: owner.profile.id, chatId: supergroup.id }),
+    sharedChatAdministration.leaveChat({ memberId: bot.profile.id, chatId: -999 }),
+  ];
+  const expectedRefusals = [
+    'actor_not_authorized',
+    'member_not_found',
+    'owner_cannot_leave',
+    'chat_not_found',
+  ];
+  if (
+    JSON.stringify(refusals.map(failureReason)) !== JSON.stringify(expectedRefusals) ||
+    publishedEvents.length !== 0 || recordedMembershipChanges.length !== 0
+  ) {
+    throw new Error(`Expected refusals to change nothing, received ${JSON.stringify(refusals)}`);
+  }
+
+  const leaving = sharedChatAdministration.leaveChat({
+    memberId: member.profile.id,
+    chatId: supergroup.id,
+  });
+  const removal = sharedChatAdministration.removeChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: supergroup.id,
+    memberId: bot.profile.id,
+  });
+  if (!('left' in leaving) || !leaving.left || !('removed' in removal) || !removal.removed) {
+    throw new Error(`Expected the member to leave and the bot to be removed`);
+  }
+  if (
+    sharedChats.getChatMembership(supergroup.id, member.profile.id) !== undefined ||
+    sharedChats.getFormerMemberStatus(supergroup.id, member.profile.id) !== 'left' ||
+    sharedChats.getFormerMemberStatus(supergroup.id, bot.profile.id) !== 'kicked'
+  ) {
+    throw new Error('Expected the member to have left and the bot to be banned');
+  }
+  const expectedEvents = [
+    [member.profile.id, member.profile.id, 'left'],
+    [owner.profile.id, bot.profile.id, 'kicked'],
+  ].map(([actorId, memberId, statusAfterLeaving]) => ({
+    type: 'chat_member_left',
+    chat: supergroup,
+    actorId,
+    memberId,
+    statusAfterLeaving,
+    leftAtUnixSeconds: 1_700_000_000,
+  }));
+  const expectedChanges = [
+    [{ kind: 'account', accountId: member.profile.id }, member.profile.id],
+    [{ kind: 'account', accountId: owner.profile.id }, bot.profile.id],
+  ].map(([author, memberId]) => ({
+    chatId: supergroup.id,
+    author,
+    content: { kind: 'member_left', memberId },
+    changedAtUnixSeconds: 1_700_000_000,
+  }));
+  if (
+    JSON.stringify(publishedEvents) !== JSON.stringify(expectedEvents) ||
+    JSON.stringify(recordedMembershipChanges) !== JSON.stringify(expectedChanges)
+  ) {
+    throw new Error(
+      `Expected each departure to be published and recorded, received ${
+        JSON.stringify([publishedEvents, recordedMembershipChanges])
+      }`,
+    );
+  }
+
+  const repeatedLeaving = sharedChatAdministration.leaveChat({
+    memberId: bot.profile.id,
+    chatId: supergroup.id,
+  });
+  if (
+    JSON.stringify(repeatedLeaving) !==
+      '{"left":false,"reason":"not_a_member","formerStatus":"kicked"}'
+  ) {
+    throw new Error(
+      `Expected a removed bot to be told how it left, received ${JSON.stringify(repeatedLeaving)}`,
+    );
+  }
+  assertMemberAdded(sharedChatAdministration.addChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: supergroup.id,
+    memberId: bot.profile.id,
+  }));
+  const readdition = publishedEvents.at(-1);
+  if (
+    readdition?.type !== 'chat_member_added' || readdition.statusBeforeJoining !== 'kicked' ||
+    sharedChats.getFormerMemberStatus(supergroup.id, bot.profile.id) !== undefined
+  ) {
+    throw new Error(
+      `Expected adding the removed bot to lift its ban, received ${JSON.stringify(readdition)}`,
+    );
+  }
+});
+
+function failureReason(result: LeaveChatResult | RemoveChatMemberResult): string | undefined {
+  if ('left' in result) {
+    return result.left ? undefined : result.reason;
+  }
+  return result.removed ? undefined : result.reason;
+}
+
 function createSharedChatAdministrationFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();
@@ -411,15 +570,26 @@ function createSharedChatAdministrationFixture() {
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const sharedChats = new SharedChatRepository();
   const publishedEvents: ChatDomainEvent[] = [];
+  const recordedMembershipChanges: RecordSupergroupMembershipChangeInput[] = [];
   const sharedChatAdministration = new SharedChatAdministrationService({
     identities,
     accounts,
     bots,
     sharedChats,
+    supergroupMessages: {
+      recordMembershipChange: (change) => recordedMembershipChanges.push(change),
+    },
     events: { publish: (event) => publishedEvents.push(event) },
     currentUnixTimeSeconds: () => 1_700_000_000,
   });
-  return { identities, virtualUsers, sharedChats, publishedEvents, sharedChatAdministration };
+  return {
+    identities,
+    virtualUsers,
+    sharedChats,
+    publishedEvents,
+    recordedMembershipChanges,
+    sharedChatAdministration,
+  };
 }
 
 function createAccount(virtualUsers: VirtualUserService, firstName: string) {

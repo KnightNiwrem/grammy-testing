@@ -3,6 +3,7 @@ import {
   projectBotAsUser,
   projectBotBlockChangeForBot,
   projectBotJoinedGroupForBot,
+  projectBotLeftGroupForBot,
   projectCallbackQueryForBot,
   projectPrivateMessageForBot,
   projectSupergroupMessage,
@@ -19,7 +20,11 @@ import type {
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
 import type { StoredFile, StoredFileId } from '../types/stored_file.ts';
-import type { BotBlockChangedEvent, ChatMemberAddedEvent } from '../types/chat_domain_event.ts';
+import type {
+  BotBlockChangedEvent,
+  ChatMemberAddedEvent,
+  ChatMemberLeftEvent,
+} from '../types/chat_domain_event.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { SharedChat } from '../types/virtual_chat.ts';
@@ -200,6 +205,27 @@ export class BotMessageViewService {
     return projectBotJoinedGroupForBot({ event, chat, account: account.profile, bot: bot.profile });
   }
 
+  /**
+   * Returns a bot's departure from a group, which it left or an account removed it from, as the
+   * bot receives it. The departed member must be a bot, and the chat a basic group or a
+   * supergroup.
+   */
+  viewBotLeftGroupForBot(event: ChatMemberLeftEvent): BotApiMyChatMemberUpdated {
+    const { chat } = event;
+    if (chat.kind === 'channel') {
+      throw new Error(`Bot ${event.memberId} cannot leave channel ${chat.id}`);
+    }
+    const actor = this.#findUser(event.actorId);
+    if (actor === undefined) {
+      throw new Error(`User ${event.actorId} that ended a membership does not exist`);
+    }
+    const bot = this.#bots.getById(event.memberId);
+    if (bot === undefined) {
+      throw new Error(`Departed member ${event.memberId} is no bot`);
+    }
+    return projectBotLeftGroupForBot({ event, chat, actor, bot: bot.profile });
+  }
+
   /** Projects a supergroup message with the given view of the message it replies to, if any. */
   #viewSupergroupMessage(
     message: SupergroupMessage,
@@ -229,17 +255,20 @@ export class BotMessageViewService {
     author: SupergroupMessageAuthor,
     messageId: CanonicalMessageId,
   ): BotApiUser {
-    const user = author.kind === 'account'
-      ? this.#accounts.getById(author.accountId)?.profile
-      : this.#findBotUser(author.botId);
+    const user = this.#findUser(author.kind === 'account' ? author.accountId : author.botId);
     if (user === undefined) {
       throw new Error(`Author of message ${messageId} does not exist`);
     }
     return user;
   }
 
-  #findBotUser(botId: number): BotApiUser | undefined {
-    const bot = this.#bots.getById(botId);
+  /** Shows an account or a bot as messages show users. */
+  #findUser(userId: number): BotApiUser | undefined {
+    const account = this.#accounts.getById(userId);
+    if (account !== undefined) {
+      return account.profile;
+    }
+    const bot = this.#bots.getById(userId);
     return bot === undefined ? undefined : projectBotAsUser(bot.profile);
   }
 
@@ -272,15 +301,45 @@ export class BotMessageViewService {
     });
   }
 
-  /** Resolves the users a message mentions and its file, as the observer sees them. */
+  /**
+   * Resolves the users a message mentions, its file, and the members a service message names, as
+   * the observer sees them.
+   */
   #resolveProjectionContext(message: ChatMessage, observerId: number) {
+    const context = { observerId, mentionedUsers: this.#findMentionedUsers(message) };
     const { content } = message;
-    return {
-      mentionedUsers: this.#findMentionedUsers(message),
-      ...(content.kind === 'text'
-        ? {}
-        : { contentFile: this.#observeFile(content.fileId, observerId, message.id) }),
-    };
+    switch (content.kind) {
+      case 'text':
+        return context;
+      case 'photo':
+      case 'document':
+        return {
+          ...context,
+          contentFile: this.#observeFile(content.fileId, observerId, message.id),
+        };
+      case 'members_joined':
+        return { ...context, changedMembers: this.#findChangedMembers(content.memberIds, message) };
+      case 'member_left':
+        return {
+          ...context,
+          changedMembers: this.#findChangedMembers([content.memberId], message),
+        };
+      default: {
+        const unhandledContent: never = content;
+        throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
+      }
+    }
+  }
+
+  /** Looks up the members a service message names, which exist as long as the session does. */
+  #findChangedMembers(memberIds: readonly number[], message: ChatMessage): BotApiUser[] {
+    return memberIds.map((memberId) => {
+      const user = this.#findUser(memberId);
+      if (user === undefined) {
+        throw new Error(`Member ${memberId} named by message ${message.id} does not exist`);
+      }
+      return user;
+    });
   }
 
   #observeFile(
@@ -302,8 +361,7 @@ export class BotMessageViewService {
       if (entity.type !== 'text_mention') {
         continue;
       }
-      const user = this.#accounts.getById(entity.userId)?.profile ??
-        this.#findBotUser(entity.userId);
+      const user = this.#findUser(entity.userId);
       if (user === undefined) {
         throw new Error(`User ${entity.userId} mentioned in message ${message.id} does not exist`);
       }

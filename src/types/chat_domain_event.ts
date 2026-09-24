@@ -1,4 +1,5 @@
 import type { CallbackQuery } from './callback_query.ts';
+import type { FormerChatMemberStatus } from './chat_membership.ts';
 import type { SharedChat } from './virtual_chat.ts';
 import type { ChatMessage } from './virtual_message.ts';
 
@@ -41,7 +42,21 @@ export interface ChatMemberAddedEvent {
   readonly actorAccountId: number;
   /** The account or bot that became a member. */
   readonly memberId: number;
+  /** `left` unless an administrator had removed the member before. */
+  readonly statusBeforeJoining: FormerChatMemberStatus;
   readonly addedAtUnixSeconds: number;
+}
+
+/** A member left a shared chat, or an account removed it. */
+export interface ChatMemberLeftEvent {
+  readonly type: 'chat_member_left';
+  readonly chat: SharedChat;
+  /** The user that ended the membership: the member itself, or the account that removed it. */
+  readonly actorId: number;
+  /** The account or bot that is no longer a member. */
+  readonly memberId: number;
+  readonly statusAfterLeaving: FormerChatMemberStatus;
+  readonly leftAtUnixSeconds: number;
 }
 
 /** A state change produced by a chat command, published in the order it happened. */
@@ -50,4 +65,5 @@ export type ChatDomainEvent =
   | MessageEditedEvent
   | CallbackQueryCreatedEvent
   | BotBlockChangedEvent
-  | ChatMemberAddedEvent;
+  | ChatMemberAddedEvent
+  | ChatMemberLeftEvent;

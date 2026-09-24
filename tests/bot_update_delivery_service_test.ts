@@ -339,6 +339,7 @@ Deno.test('BotUpdateDeliveryService delivers supergroup additions and edits to t
       chat: supergroup,
       actorAccountId: owner.profile.id,
       memberId,
+      statusBeforeJoining: 'left',
       addedAtUnixSeconds: 1_700_000_000,
     });
   }

@@ -7,6 +7,7 @@ import type {
   PrivateMessage,
   SupergroupMessage,
   SupergroupMessageAuthor,
+  SupergroupMessageContent,
 } from '../types/virtual_message.ts';
 
 export interface AddPrivateMessageInput {
@@ -26,7 +27,7 @@ export interface AddSupergroupMessageInput {
   readonly chatId: number;
   readonly author: SupergroupMessageAuthor;
   readonly sentAtUnixSeconds: number;
-  readonly content: MessageContent;
+  readonly content: SupergroupMessageContent;
   /** The message of the same supergroup this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
   readonly inlineKeyboard?: InlineKeyboard;
@@ -242,7 +243,8 @@ export class MessageRepository {
   }
 }
 
-function copyContent(content: MessageContent): MessageContent {
+function copyContent<Content extends SupergroupMessageContent>(content: Content): Content;
+function copyContent(content: SupergroupMessageContent): SupergroupMessageContent {
   switch (content.kind) {
     case 'text':
       return { ...content, entities: content.entities.map((entity) => ({ ...entity })) };
@@ -255,6 +257,10 @@ function copyContent(content: MessageContent): MessageContent {
           entities: content.caption.entities.map((entity) => ({ ...entity })),
         },
       };
+    case 'members_joined':
+      return { ...content, memberIds: [...content.memberIds] };
+    case 'member_left':
+      return { ...content };
     default: {
       const unhandledContent: never = content;
       throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
