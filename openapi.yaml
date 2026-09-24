@@ -1,6 +1,6 @@
 openapi: 3.1.1
 info:
-  title: grammY Testing Emulation Server
+  title: tg-bot-api-emulator
   version: 0.0.0
   description: >-
     HTTP interface for isolated Telegram Bot API test sessions. Objects marked with
@@ -29,6 +29,9 @@ info:
     API routes authenticate the bot token in their path, as Telegram does, and answer a token that
     no bot of the session owns with a `401` Bot API error. OpenAPI security schemes cannot describe
     a credential in the path, so no operation declares one.
+  license:
+    name: CC0 1.0 Universal
+    identifier: CC0-1.0
 security: []
 servers:
   - url: http://{domain}:{port}

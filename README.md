@@ -1,4 +1,4 @@
-# grammY Testing
+# tg-bot-api-emulator
 
 An HTTP server for emulating the Telegram Bot API in end-to-end tests. The server will expose both
 the emulated Bot API and an admin API for controlling isolated test sessions.
@@ -132,3 +132,8 @@ try {
 
 - `DOMAIN` — domain advertised to clients; defaults to `localhost`
 - `PORT` — listening and advertised port; defaults to `8081`
+
+## License
+
+The project is almost entirely AI-generated. [COPYRIGHT.md](COPYRIGHT.md) records its provenance and
+dedicates any rights the maintainer holds under [CC0 1.0 Universal](LICENSE).
