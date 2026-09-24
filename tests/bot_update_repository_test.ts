@@ -9,12 +9,12 @@ Deno.test('BotUpdateRepository sequences and confirms each bot mailbox independe
   botUpdates.enqueueMessageUpdate(10, createMessage('second'));
   botUpdates.enqueueMessageUpdate(20, message);
 
-  const limitedUpdates = botUpdates.readPendingUpdates(10, { limit: 1 });
+  const limitedUpdates = botUpdates.confirmAndReadPendingUpdates(10, { limit: 1 });
   if (limitedUpdates.length !== 1 || limitedUpdates[0].update_id !== 1) {
     throw new Error('Expected a read to honor its limit without confirming updates');
   }
 
-  const repeatedUpdates = botUpdates.readPendingUpdates(10, { limit: 100 });
+  const repeatedUpdates = botUpdates.confirmAndReadPendingUpdates(10, { limit: 100 });
   if (
     repeatedUpdates.length !== 2 ||
     repeatedUpdates[0].update_id !== 1 ||
@@ -23,7 +23,7 @@ Deno.test('BotUpdateRepository sequences and confirms each bot mailbox independe
     throw new Error('Expected unconfirmed updates to remain pending');
   }
 
-  const afterConfirmation = botUpdates.readPendingUpdates(10, {
+  const afterConfirmation = botUpdates.confirmAndReadPendingUpdates(10, {
     firstUnconfirmedUpdateId: 2,
     limit: 100,
   });
@@ -31,7 +31,7 @@ Deno.test('BotUpdateRepository sequences and confirms each bot mailbox independe
     throw new Error('Expected a read to confirm only earlier updates');
   }
 
-  const otherBotUpdates = botUpdates.readPendingUpdates(20, { limit: 100 });
+  const otherBotUpdates = botUpdates.confirmAndReadPendingUpdates(20, { limit: 100 });
   if (otherBotUpdates.length !== 1 || otherBotUpdates[0].update_id !== 1) {
     throw new Error('Expected each bot to own an independent update sequence');
   }
@@ -44,7 +44,7 @@ Deno.test('BotUpdateRepository wakes a waiter when an update arrives for its bot
   queueMicrotask(() => botUpdates.enqueueMessageUpdate(10, createMessage('arrived')));
 
   await pendingWait;
-  const updates = botUpdates.readPendingUpdates(10, { limit: 100 });
+  const updates = botUpdates.confirmAndReadPendingUpdates(10, { limit: 100 });
   if (updates.length !== 1 || updates[0].message.text !== 'arrived') {
     throw new Error('Expected an enqueued update to end the wait');
   }
@@ -73,12 +73,15 @@ Deno.test('BotUpdateRepository resolves a negative offset against the queue tail
   botUpdates.enqueueMessageUpdate(10, createMessage('third'));
 
   const firstUnconfirmedUpdateId = botUpdates.resolveFirstUnconfirmedUpdateId(10, -2);
-  const tailUpdates = botUpdates.readPendingUpdates(10, { firstUnconfirmedUpdateId, limit: 100 });
+  const tailUpdates = botUpdates.confirmAndReadPendingUpdates(10, {
+    firstUnconfirmedUpdateId,
+    limit: 100,
+  });
   if (tailUpdates.map((update) => update.update_id).join() !== '2,3') {
     throw new Error('Expected a negative offset to return the requested queue tail');
   }
 
-  const remainingUpdates = botUpdates.readPendingUpdates(10, { limit: 100 });
+  const remainingUpdates = botUpdates.confirmAndReadPendingUpdates(10, { limit: 100 });
   if (remainingUpdates.map((update) => update.update_id).join() !== '2,3') {
     throw new Error('Expected a negative offset to forget updates before the tail');
   }
@@ -93,7 +96,7 @@ Deno.test('BotUpdateRepository ignores an offset too far beyond the next update 
   botUpdates.enqueueMessageUpdate(10, createMessage('second'));
 
   // The next update will receive ID 3, so Telegram ignores offsets above 13.
-  const afterIgnoredOffset = botUpdates.readPendingUpdates(10, {
+  const afterIgnoredOffset = botUpdates.confirmAndReadPendingUpdates(10, {
     firstUnconfirmedUpdateId: 14,
     limit: 100,
   });
@@ -101,7 +104,7 @@ Deno.test('BotUpdateRepository ignores an offset too far beyond the next update 
     throw new Error('Expected an offset beyond the tolerance to confirm no updates');
   }
 
-  const afterFurthestHonoredOffset = botUpdates.readPendingUpdates(10, {
+  const afterFurthestHonoredOffset = botUpdates.confirmAndReadPendingUpdates(10, {
     firstUnconfirmedUpdateId: 13,
     limit: 100,
   });
@@ -109,7 +112,7 @@ Deno.test('BotUpdateRepository ignores an offset too far beyond the next update 
     throw new Error('Expected an offset within the tolerance to confirm every pending update');
   }
   botUpdates.enqueueMessageUpdate(10, createMessage('third'));
-  const nextUpdates = botUpdates.readPendingUpdates(10, { limit: 100 });
+  const nextUpdates = botUpdates.confirmAndReadPendingUpdates(10, { limit: 100 });
   if (nextUpdates.map((update) => update.update_id).join() !== '3') {
     throw new Error('Expected an honored future offset not to change the update sequence');
   }
@@ -123,11 +126,11 @@ Deno.test('BotUpdateRepository discards pending updates without restarting the s
   botUpdates.discardPendingUpdates(10);
   botUpdates.enqueueMessageUpdate(10, createMessage('second'));
 
-  const updates = botUpdates.readPendingUpdates(10, { limit: 100 });
+  const updates = botUpdates.confirmAndReadPendingUpdates(10, { limit: 100 });
   if (updates.map((update) => update.update_id).join() !== '2') {
     throw new Error('Expected only the later update to remain, continuing the ID sequence');
   }
-  if (botUpdates.readPendingUpdates(20, { limit: 100 }).length !== 1) {
+  if (botUpdates.confirmAndReadPendingUpdates(20, { limit: 100 }).length !== 1) {
     throw new Error("Expected discarding one bot's updates to leave other bots untouched");
   }
 });

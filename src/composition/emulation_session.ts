@@ -11,6 +11,7 @@ import { UserMessageBoxRepository } from '../repositories/user_message_box.ts';
 import { BotApiService } from '../services/bot_api.ts';
 import { BotMessageViewService } from '../services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
+import { BotUpdatePollingService } from '../services/bot_update_polling.ts';
 import { PrivateMessagingService } from '../services/private_messaging.ts';
 import { SharedChatAdministrationService } from '../services/shared_chat_administration.ts';
 import { VirtualUserService } from '../services/virtual_user.ts';
@@ -46,10 +47,11 @@ export function createEmulationSession(id: string): EmulationSession {
     currentUnixTimeSeconds: () => Math.floor(Date.now() / 1_000),
   });
 
+  const botUpdatePolling = new BotUpdatePollingService({ botUpdates, updateSubscriptions });
   const botApi = new BotApiService({
     bots,
-    botUpdates,
-    updateSubscriptions,
+    updatePolling: botUpdatePolling,
+    pendingUpdates: botUpdates,
     botMessages: privateMessaging,
     botMessageViews,
   });
@@ -61,6 +63,6 @@ export function createEmulationSession(id: string): EmulationSession {
     privateMessaging,
     botMessageViews,
     botApi,
-    end: () => botApi.endLongPolling(),
+    end: () => botUpdatePolling.endLongPolling(),
   };
 }

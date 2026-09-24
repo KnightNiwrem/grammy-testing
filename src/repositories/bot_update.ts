@@ -7,7 +7,7 @@ import type { BotApiPrivateTextMessage, BotApiUpdate } from '../types/bot_api.ts
  */
 const MAX_OFFSET_BEYOND_NEXT_UPDATE_ID = 10;
 
-interface ReadPendingUpdatesInput {
+interface ConfirmAndReadPendingUpdatesInput {
   /**
    * Updates with a lower ID are confirmed and forgotten; `undefined` confirms none. As on Telegram,
    * an ID more than 10 beyond the ID the next update will receive also confirms none.
@@ -58,9 +58,9 @@ export class BotUpdateRepository {
   }
 
   /** Confirms updates preceding `firstUnconfirmedUpdateId`, then reads pending updates. */
-  readPendingUpdates(
+  confirmAndReadPendingUpdates(
     botId: number,
-    { firstUnconfirmedUpdateId, limit }: ReadPendingUpdatesInput,
+    { firstUnconfirmedUpdateId, limit }: ConfirmAndReadPendingUpdatesInput,
   ): readonly BotApiUpdate[] {
     const mailbox = this.#getOrCreateMailbox(botId);
     if (

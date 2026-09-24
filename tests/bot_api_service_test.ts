@@ -6,21 +6,16 @@ import { MessageRepository } from '../src/repositories/message.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
-import {
-  BotApiService,
-  type GetUpdatesResult,
-  type SendMessageResult,
-} from '../src/services/bot_api.ts';
+import { BotApiService, type SendMessageResult } from '../src/services/bot_api.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
+import {
+  BotUpdatePollingService,
+  type GetUpdatesResult,
+} from '../src/services/bot_update_polling.ts';
 import { PrivateMessagingService } from '../src/services/private_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
-import {
-  type BotApiPrivateTextMessage,
-  type BotApiUpdate,
-  type BotApiUpdateType,
-  DEFAULT_ALLOWED_UPDATE_TYPES,
-} from '../src/types/bot_api.ts';
+import type { BotApiPrivateTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
 import { MAX_TEXT_MESSAGE_LENGTH } from '../src/types/virtual_message.ts';
 
 Deno.test('BotApiService authenticates a bot by its token', () => {
@@ -55,205 +50,13 @@ Deno.test('BotApiService polls only the authenticated bot mailbox', async () => 
   }
 });
 
-Deno.test('BotApiService keeps a bot update subscription until a request replaces it', async () => {
-  const { virtualUsers, updateSubscriptions, botApi } = createBotApiFixture();
-  const subscribedBot = createBot(virtualUsers, 'subscribed_bot');
-  const otherBot = createBot(virtualUsers, 'other_bot');
-
-  await botApi.getUpdates(subscribedBot.profile, {
-    limit: 100,
-    timeoutSeconds: 0,
-    allowedUpdates: ['callback_query'],
-  });
-  await botApi.getUpdates(subscribedBot.profile, { limit: 100, timeoutSeconds: 0 });
-
-  assertAllowedUpdateTypes(
-    updateSubscriptions.getAllowedUpdateTypes(subscribedBot.profile.id),
-    ['callback_query'],
-  );
-  assertAllowedUpdateTypes(
-    updateSubscriptions.getAllowedUpdateTypes(otherBot.profile.id),
-    [...DEFAULT_ALLOWED_UPDATE_TYPES],
-  );
-});
-
-Deno.test('BotApiService resolves allowed update names as Telegram does', async () => {
-  const { virtualUsers, updateSubscriptions, botApi } = createBotApiFixture();
-  const bot = createBot(virtualUsers, 'test_bot');
-  const cases: { allowedUpdates: string[]; expected: readonly BotApiUpdateType[] }[] = [
-    { allowedUpdates: ['MESSAGE', 'not_an_update_type'], expected: ['message'] },
-    { allowedUpdates: ['chat_member'], expected: ['chat_member'] },
-    { allowedUpdates: ['not_an_update_type'], expected: [...DEFAULT_ALLOWED_UPDATE_TYPES] },
-    { allowedUpdates: ['message'], expected: ['message'] },
-    { allowedUpdates: [], expected: [...DEFAULT_ALLOWED_UPDATE_TYPES] },
-  ];
-
-  for (const { allowedUpdates, expected } of cases) {
-    await botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 0, allowedUpdates });
-    assertAllowedUpdateTypes(updateSubscriptions.getAllowedUpdateTypes(bot.profile.id), expected);
-  }
-  const optInUpdateTypes: BotApiUpdateType[] = [
-    'chat_member',
-    'message_reaction',
-    'message_reaction_count',
-  ];
-  for (const optInUpdateType of optInUpdateTypes) {
-    if (DEFAULT_ALLOWED_UPDATE_TYPES.has(optInUpdateType)) {
-      throw new Error(`Expected the default subscription to exclude ${optInUpdateType}`);
-    }
-  }
-});
-
-Deno.test('BotApiService keeps updates that arrive during a negative offset long poll', async () => {
-  const { virtualUsers, botUpdates, botApi } = createBotApiFixture();
-  const bot = createBot(virtualUsers, 'test_bot');
-  const pendingResult = botApi.getUpdates(bot.profile, {
-    offset: -1,
-    limit: 100,
-    timeoutSeconds: 1,
-  });
-
-  queueMicrotask(() => {
-    for (const messageId of [1, 2, 3]) {
-      botUpdates.enqueueMessageUpdate(bot.profile.id, createPrivateTextMessage(messageId));
-    }
-  });
-
-  const updates = expectRetrievedUpdates(await pendingResult);
-  if (updates.map((update) => update.update_id).join() !== '1,2,3') {
-    throw new Error('Expected the long poll to return every update that arrived while waiting');
-  }
-  const remainingUpdates = botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 });
-  if (remainingUpdates.map((update) => update.update_id).join() !== '1,2,3') {
-    throw new Error('Expected updates that arrived while waiting to remain pending');
-  }
-});
-
-Deno.test('BotApiService terminates a held long poll when another is held for the bot', async () => {
-  const { virtualUsers, botUpdates, botApi } = createBotApiFixture();
-  const bot = createBot(virtualUsers, 'test_bot');
-  const displacedResult = botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 50 });
-  const replacementResult = botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 50 });
-
-  const displaced = await displacedResult;
-  if (displaced.retrieved || displaced.reason !== 'terminated_by_other_long_poll') {
-    throw new Error('Expected the earlier held long poll to be terminated');
-  }
-
-  botUpdates.enqueueMessageUpdate(bot.profile.id, createPrivateTextMessage(1));
-  const updates = expectRetrievedUpdates(await replacementResult);
-  if (updates.length !== 1 || updates[0].message.message_id !== 1) {
-    throw new Error('Expected the replacement long poll to receive the next update');
-  }
-});
-
-Deno.test('BotApiService does not terminate a held long poll for an immediate answer', async () => {
-  const { virtualUsers, botUpdates, botApi } = createBotApiFixture();
-  const bot = createBot(virtualUsers, 'test_bot');
-  const heldResult = botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 50 });
-
-  const immediateUpdates = expectRetrievedUpdates(
-    await botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 0 }),
-  );
-  if (immediateUpdates.length !== 0) {
-    throw new Error('Expected the immediate request to find no updates');
-  }
-
-  botUpdates.enqueueMessageUpdate(bot.profile.id, createPrivateTextMessage(1));
-  if (expectRetrievedUpdates(await heldResult).length !== 1) {
-    throw new Error('Expected the held long poll to survive a request answered immediately');
-  }
-});
-
-Deno.test('BotApiService holds long polls for different bots independently', async () => {
-  const { virtualUsers, botUpdates, botApi } = createBotApiFixture();
-  const firstBot = createBot(virtualUsers, 'first_bot');
-  const secondBot = createBot(virtualUsers, 'second_bot');
-  const firstResult = botApi.getUpdates(firstBot.profile, { limit: 100, timeoutSeconds: 50 });
-  const secondResult = botApi.getUpdates(secondBot.profile, { limit: 100, timeoutSeconds: 50 });
-
-  botUpdates.enqueueMessageUpdate(firstBot.profile.id, createPrivateTextMessage(1));
-  botUpdates.enqueueMessageUpdate(secondBot.profile.id, createPrivateTextMessage(2));
-
-  if (expectRetrievedUpdates(await firstResult)[0]?.message.message_id !== 1) {
-    throw new Error("Expected the first bot's long poll to receive its update");
-  }
-  if (expectRetrievedUpdates(await secondResult)[0]?.message.message_id !== 2) {
-    throw new Error("Expected the second bot's long poll to receive its update");
-  }
-});
-
-Deno.test('BotApiService ends a cancelled long poll without terminating it', async () => {
-  const { virtualUsers, botUpdates, botApi } = createBotApiFixture();
-  const bot = createBot(virtualUsers, 'test_bot');
-  const abortController = new AbortController();
-  const cancelledResult = botApi.getUpdates(bot.profile, {
-    limit: 100,
-    timeoutSeconds: 50,
-    signal: abortController.signal,
-  });
-
-  abortController.abort();
-  if (expectRetrievedUpdates(await cancelledResult).length !== 0) {
-    throw new Error('Expected a cancelled long poll to end without updates');
-  }
-
-  const laterResult = botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 50 });
-  botUpdates.enqueueMessageUpdate(bot.profile.id, createPrivateTextMessage(1));
-  if (expectRetrievedUpdates(await laterResult).length !== 1) {
-    throw new Error('Expected a long poll after cancellation to receive the next update');
-  }
-});
-
-Deno.test('BotApiService answers held long polls without a conflict when polling ends', async () => {
-  const { virtualUsers, botApi } = createBotApiFixture();
-  const firstBot = createBot(virtualUsers, 'first_bot');
-  const secondBot = createBot(virtualUsers, 'second_bot');
-  const heldResults = [firstBot, secondBot].map((bot) =>
-    botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 50 })
-  );
-
-  botApi.endLongPolling();
-  const results = await expectSettlementWithin(
-    Promise.all(heldResults),
-    1_000,
-    'Expected ending long polling to answer every held long poll at once',
-  );
-  if (!results.every((result) => expectRetrievedUpdates(result).length === 0)) {
-    throw new Error('Expected each held long poll to end without updates');
-  }
-});
-
-Deno.test('BotApiService answers long polls at once after polling ends', async () => {
-  const { virtualUsers, botUpdates, botApi } = createBotApiFixture();
-  const bot = createBot(virtualUsers, 'test_bot');
-  botApi.endLongPolling();
-
-  const emptyResult = await expectSettlementWithin(
-    botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 50 }),
-    1_000,
-    'Expected a long poll after polling ended not to be held',
-  );
-  if (expectRetrievedUpdates(emptyResult).length !== 0) {
-    throw new Error('Expected the unheld long poll to find no updates');
-  }
-
-  botUpdates.enqueueMessageUpdate(bot.profile.id, createPrivateTextMessage(1));
-  const pendingUpdates = expectRetrievedUpdates(
-    await botApi.getUpdates(bot.profile, { limit: 100, timeoutSeconds: 50 }),
-  );
-  if (pendingUpdates.length !== 1) {
-    throw new Error('Expected pending updates to remain readable after polling ended');
-  }
-});
-
 Deno.test('BotApiService deleteWebhook discards pending updates only when asked', async () => {
   const { virtualUsers, botUpdates, botApi } = createBotApiFixture();
   const bot = createBot(virtualUsers, 'test_bot');
   botUpdates.enqueueMessageUpdate(bot.profile.id, createPrivateTextMessage(1));
 
   botApi.deleteWebhook(bot.profile, { dropPendingUpdates: false });
-  if (botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 }).length !== 1) {
+  if (botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 }).length !== 1) {
     throw new Error('Expected deleteWebhook to keep pending updates by default');
   }
 
@@ -291,7 +94,7 @@ Deno.test('BotApiService sends a message to an account that has written to the b
       "Expected the reply to be projected in the bot's private chat with the account",
     );
   }
-  const pendingUpdates = botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 });
+  const pendingUpdates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
   if (pendingUpdates.length !== 1 || pendingUpdates[0].message.text !== '/start') {
     throw new Error('Expected the bot not to receive an update for its own message');
   }
@@ -351,36 +154,6 @@ function expectRetrievedUpdates(result: GetUpdatesResult): readonly BotApiUpdate
   return result.updates;
 }
 
-/** Returns what `pending` settles to, failing if it is still pending after `milliseconds`. */
-async function expectSettlementWithin<T>(
-  pending: Promise<T>,
-  milliseconds: number,
-  failureMessage: string,
-): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(failureMessage)), milliseconds);
-  });
-  try {
-    return await Promise.race([pending, timeout]);
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-function assertAllowedUpdateTypes(
-  actual: ReadonlySet<BotApiUpdateType>,
-  expected: readonly BotApiUpdateType[],
-): void {
-  if (actual.size !== expected.length || !expected.every((updateType) => actual.has(updateType))) {
-    throw new Error(
-      `Expected allowed update types ${JSON.stringify(expected)}, received ${
-        JSON.stringify([...actual])
-      }`,
-    );
-  }
-}
-
 function createBotApiFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();
@@ -405,12 +178,12 @@ function createBotApiFixture() {
   });
   const botApi = new BotApiService({
     bots,
-    botUpdates,
-    updateSubscriptions,
+    updatePolling: new BotUpdatePollingService({ botUpdates, updateSubscriptions }),
+    pendingUpdates: botUpdates,
     botMessages: privateMessaging,
     botMessageViews,
   });
-  return { virtualUsers, botUpdates, updateSubscriptions, privateMessaging, botApi };
+  return { virtualUsers, botUpdates, privateMessaging, botApi };
 }
 
 function createBot(virtualUsers: VirtualUserService, username: string) {

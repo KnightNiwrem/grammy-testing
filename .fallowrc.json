@@ -121,6 +121,12 @@
         ]
       },
       {
+        "name": "update-polling",
+        "patterns": [
+          "src/services/bot_update_polling.ts"
+        ]
+      },
+      {
         "name": "bot-api-service",
         "patterns": [
           "src/services/bot_api.ts"
@@ -262,9 +268,18 @@
         ]
       },
       {
+        "from": "update-polling",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "bot-api-service",
         "allow": [
           "domain"
+        ],
+        "allowTypeOnly": [
+          "update-polling"
         ]
       },
       {
@@ -292,6 +307,7 @@
           "domain-services",
           "bot-message-view",
           "update-delivery",
+          "update-polling",
           "bot-api-service",
           "application-services",
           "session",

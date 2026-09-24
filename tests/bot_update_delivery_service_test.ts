@@ -27,7 +27,9 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
 
   botUpdateDelivery.publish({ type: 'message_created', message });
 
-  const targetBotUpdates = botUpdates.readPendingUpdates(targetBot.profile.id, { limit: 100 });
+  const targetBotUpdates = botUpdates.confirmAndReadPendingUpdates(targetBot.profile.id, {
+    limit: 100,
+  });
   if (
     targetBotUpdates.length !== 1 ||
     targetBotUpdates[0].message.message_id !== 2 ||
@@ -40,7 +42,9 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
   ) {
     throw new Error("Expected one update projected with the bot's own message ID");
   }
-  const otherBotUpdates = botUpdates.readPendingUpdates(otherBot.profile.id, { limit: 100 });
+  const otherBotUpdates = botUpdates.confirmAndReadPendingUpdates(otherBot.profile.id, {
+    limit: 100,
+  });
   if (otherBotUpdates.length !== 0) {
     throw new Error('Expected a private message not to reach other bots');
   }
@@ -69,7 +73,7 @@ Deno.test('BotUpdateDeliveryService skips updates excluded by the bot subscripti
 
   botUpdateDelivery.publish({ type: 'message_created', message });
 
-  const updates = botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 });
+  const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
   if (updates.length !== 0) {
     throw new Error('Expected a message update not to reach a bot that excluded message updates');
   }
@@ -91,7 +95,7 @@ Deno.test('BotUpdateDeliveryService does not deliver a bot its own message', () 
 
   botUpdateDelivery.publish({ type: 'message_created', message });
 
-  if (botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 }).length !== 0) {
+  if (botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 }).length !== 0) {
     throw new Error('Expected a bot-authored message not to become an update for its bot');
   }
 });

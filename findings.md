@@ -17,20 +17,16 @@
 
 Code identifiers in this report refer to the [reviewed source snapshot][snapshot]. Proposed
 component names and illustrative contracts are recommendations, not claims about existing code.
-Exact source links appear in the appendix.
 
 ## Executive assessment
 
 **The architecture has a sound foundation, but several boundaries are broader than their names
 suggest.** The main issue is not a shortage of classes or files. Some components own policies that
-should be independently understandable and changeable—particularly long-poll coordination.
+should be independently understandable and changeable.
 
-The highest-value change is to give long-poll coordination an explicit owner.
-
-| Priority   | Finding and recommendation                                                                       | Nature of the finding                                  |
-| ---------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| **Medium** | Give long-poll coordination an explicit owner and clarify the queue's mutating operations.       | Cohesion and semantic clarity improvement.             |
-| **Lower**  | Improve ownership of application contracts and distinguish fixture setup from simulated actions. | Targeted refinements, not reasons for a large rewrite. |
+| Priority  | Finding and recommendation                                                                       | Nature of the finding                                  |
+| --------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| **Lower** | Improve ownership of application contracts and distinguish fixture setup from simulated actions. | Targeted refinements, not reasons for a large rewrite. |
 
 These are implementation priorities for this review, not formal security or incident severity
 ratings. The architectural recommendations should not all be read as demonstrated runtime bugs.
@@ -78,96 +74,12 @@ smaller classes.
 
 ---
 
-## 2. Finding SRP-04: polling coordination needs a more explicit owner
-
-**Priority: Medium**\
-**Classification: Cohesion and semantic clarity improvement**
-
-This area requires a more nuanced judgment than simply declaring the repository or service too
-large.
-
-### Existing behavior and context
-
-`BotApiService` is described as the application boundary for Bot API methods. It authenticates
-tokens and adapts message sending, but also contains the full held-long-poll state machine:
-subscription updates, offset resolution, waiting, supersession, cancellation composition, and
-held-controller cleanup. See the pinned [Bot API service][bot-api-source].
-
-A façade can legitimately expose all these operations. What is less cohesive is **the façade also
-owning the detailed state machine of one particular operation family**.
-
-### Recommended refinement
-
-Extract the stateful polling behavior into something such as `BotUpdatePollingService`.
-
-Its responsibility should be:
-
-> Coordinate a bot's polling requests against its subscription and pending update queue, including
-> cancellation and competing held requests.
-
-`BotApiService` may remain a thin application façade. Its delegation to another service through an
-explicit interface is not an SRP violation.
-
-### Do not force the update queue into passive storage
-
-`BotUpdateRepository` owns update sequencing, pending entries, acknowledgement-related removal, and
-notification of waiting readers. See the pinned [update repository][bot-update-source].
-
-That can be a coherent **stateful queue** abstraction.
-
-The presence of `setTimeout()` does not, by itself, prove SRP failure. Separating notification from
-queue mutation carelessly can introduce a coordination problem: enqueueing an update must reliably
-notify the appropriate waiters.
-
-The useful distinction is:
-
-| Responsibility | Scope                                                                                                 |
-| -------------- | ----------------------------------------------------------------------------------------------------- |
-| Polling policy | Which request supersedes another, when subscriptions change, and how an API polling request proceeds. |
-| Queue behavior | Retaining ordered entries, confirming entries, and making new availability observable.                |
-
-The existing code already partially makes this distinction. The improvement is to make the policy
-owner more explicit and give its lifetime a complete contract.
-
-### Concrete naming improvement
-
-`readPendingUpdates()` can delete confirmed updates before returning the remainder. The
-implementation and comment make that clear, but the method name does not.
-
-Prefer a name such as:
-
-```ts
-confirmAndReadPendingUpdates(...)
-```
-
-This communicates that invoking the operation can advance destructive queue state.
-
-Do not necessarily split confirmation and reading into two calls. Keeping them together can preserve
-a useful atomic operation.
-
-### Preserve the existing behavioral distinctions
-
-The polling tests encode important distinctions that a structural extraction must preserve:
-
-- Negative offsets are resolved once; a newly held poll supersedes an earlier held poll, but an
-  immediately answered request does not.
-- Different bots poll independently.
-- Ordinary request cancellation is not a competing-poller conflict.
-- Ending a session answers its held polls without reporting a competing-poller conflict.
-
-### Practical outcome
-
-Polling-specific state and lifecycle become easier to understand, test, and close without weakening
-the queue's own consistency guarantees.
-
----
-
-## 3. Additional targeted refinements
+## 2. Targeted refinements
 
 These recommendations are useful, but they are not equally severe findings and do not justify a
 broad rewrite.
 
-### 3.1 Put contracts with the responsibility that owns them
+### 2.1 Put contracts with the responsibility that owns them
 
 Dependency injection is generally explicit, and several consumers already declare narrow interfaces.
 
@@ -187,7 +99,7 @@ imports create a runtime dependency bug.
 Do not centralize every structurally similar interface. Two small `AccountLookup` interfaces may be
 valid consumer-owned contracts. Identical syntax alone does not establish shared responsibility.
 
-### 3.2 Clarify what “activate private conversation” means
+### 2.2 Clarify what “activate private conversation” means
 
 `activatePrivateConversation()` establishes a conversation without storing a message or publishing a
 message-created event. Its tests exercise that behavior directly.
@@ -206,7 +118,7 @@ observable effects.
 This does not require an entire `ScenarioSetupService` today. A clearly named, separately exposed
 setup capability may be enough.
 
-### 3.3 Keep the SDK independent while maintaining wire-contract alignment
+### 2.3 Keep the SDK independent while maintaining wire-contract alignment
 
 The TypeScript client has its own response types and schemas. Its request utilities own HTTP
 execution, response validation, and client error construction. That is a sensible client boundary.
@@ -222,19 +134,19 @@ service would not.
 
 ---
 
-## 4. Existing boundaries worth preserving
+## 3. Existing boundaries worth preserving
 
 An aggressive “SRP cleanup” could make several parts of this code worse. Preserve the following
 foundations.
 
-### 4.1 The composition root
+### 3.1 The composition root
 
 `createEmulationSession()` constructs repositories and wires services. Having many dependencies
 there is appropriate: **assembling the object graph is its responsibility**.
 
 Keep construction out of the individual services.
 
-### 4.2 Three distinct identity concepts
+### 3.2 Three distinct identity concepts
 
 Canonical message identity, observer-specific Telegram message numbering, and Bot API update
 sequencing are represented separately.
@@ -242,7 +154,7 @@ sequencing are represented separately.
 These are different concepts and should remain different owners. Do not consolidate them into a
 generic message counter or merge canonical storage into the pending update queue.
 
-### 4.3 Event-to-update delivery
+### 3.3 Event-to-update delivery
 
 `BotUpdateDeliveryService` selects whether an event produces an update, applies subscription rules,
 projects it, and enqueues it.
@@ -254,7 +166,7 @@ That is a coherent application responsibility:
 Subscription filtering does not control canonical message existence. Its orchestration is not a
 reason to split it into a service for each step.
 
-### 4.4 Shared identity allocation and username uniqueness
+### 3.4 Shared identity allocation and username uniqueness
 
 `TelegramIdentityRepository` coordinates ID allocation and username reservations across identity
 kinds. Those operations protect a shared namespace invariant.
@@ -265,7 +177,7 @@ are different types.
 Similarly, `VirtualUserService` handling both account and bot provisioning is defensible at its
 current size and scope.
 
-### 4.5 HTTP decoding outside domain operations
+### 3.5 HTTP decoding outside domain operations
 
 The separate Bot API request decoder handles transport encodings and parameter extraction, while
 routes validate method parameters and render responses.
@@ -273,14 +185,14 @@ routes validate method parameters and render responses.
 Retain this boundary. Moving those concerns into message repositories or canonical domain objects
 would be a regression.
 
-### 4.6 The pure message projector
+### 3.6 The pure message projector
 
 Preserve `projectPrivateTextMessageForBot()` as a pure projection function with explicit inputs. Do
 not replace the pure function with a stateful object unnecessarily.
 
 ---
 
-## 5. Proposed ownership model
+## 4. Proposed ownership model
 
 The target is the following ownership model—not necessarily one class for every row.
 
@@ -304,22 +216,7 @@ The key invariants remain deliberately grouped:
 | Bot-facing projections use the documented observer's numbering and representation | Explicit bot-view assembly plus the pure projector.            |
 | IDs and usernames respect the shared namespace                                    | Shared identity authority.                                     |
 
-## 6. Recommended implementation sequence
-
-Use separate, reviewable changes rather than one repository-wide redesign.
-
-### PR 1: extract polling coordination and clarify queue operation names
-
-Move the detailed held-poll state machine behind an explicit polling capability while retaining
-cohesive queue behavior.
-
-**Acceptance criteria:** existing polling semantics remain intact, including supersession behavior,
-independent bots, negative-offset handling, and cancellation-cause distinctions.
-
-Move contracts and improve naming alongside the relevant extraction rather than performing an
-unrelated repository-wide directory reorganization.
-
-## 7. Validation and limitations
+## 5. Validation and limitations
 
 The original review inspected source through the GitHub connector and made no repository changes.
 
@@ -338,8 +235,7 @@ Consequently:
 **Organize around owned invariants and distinct policies, not around broad nouns such as “chat” or a
 rule that every service must be a leaf.**
 
-The canonical-state, observer-numbering, and event-delivery foundations are worth keeping. The
-highest-value work is giving long-poll coordination an explicit owner.
+The canonical-state, observer-numbering, and event-delivery foundations are worth keeping.
 
 ---
 
@@ -348,20 +244,13 @@ highest-value work is giving long-poll coordination an explicit owner.
 ### Pinned repository references
 
 All repository observations concern [commit `d0f166d212990d1594ef8530bf13eb47f9390308`][snapshot].
-The following source files are central to the polling findings:
 
-| Source                                                | Relevance                                                                              |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| [`src/repositories/bot_update.ts`][bot-update-source] | Pending update state, waiting, timers, and cancellation cleanup.                       |
-| [`src/services/bot_api.ts`][bot-api-source]           | Held polling, supersession, request cancellation, and Bot API façade responsibilities. |
+### Inspected components identified by symbol
 
-### Additional inspected components identified by symbol
-
-| Finding or assessment         | Relevant components and tests                                                                                          |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Polling semantics             | `BotApiService`, `BotUpdateRepository`, polling tests covering offsets, supersession, cancellation, and bot isolation. |
-| Identity and provisioning     | `TelegramIdentityRepository`, `VirtualUserService`.                                                                    |
-| Adapter and client boundaries | Bot API request decoder, HTTP routes, TypeScript client response schemas and request utilities.                        |
+| Finding or assessment         | Relevant components and tests                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------- |
+| Identity and provisioning     | `TelegramIdentityRepository`, `VirtualUserService`.                                             |
+| Adapter and client boundaries | Bot API request decoder, HTTP routes, TypeScript client response schemas and request utilities. |
 
 ### SRP reference
 
@@ -370,6 +259,4 @@ reference supports the interpretation of responsibility used in the review; repo
 findings are based on the pinned source.
 
 [snapshot]: https://github.com/KnightNiwrem/grammy-testing/tree/d0f166d212990d1594ef8530bf13eb47f9390308
-[bot-update-source]: https://github.com/KnightNiwrem/grammy-testing/blob/d0f166d212990d1594ef8530bf13eb47f9390308/src/repositories/bot_update.ts
-[bot-api-source]: https://github.com/KnightNiwrem/grammy-testing/blob/d0f166d212990d1594ef8530bf13eb47f9390308/src/services/bot_api.ts
 [srp-reference]: https://blog.cleancoder.com/uncle-bob/2014/05/08/SingleReponsibilityPrinciple.html

@@ -1,0 +1,253 @@
+import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
+import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
+import {
+  BotUpdatePollingService,
+  type GetUpdatesResult,
+} from '../src/services/bot_update_polling.ts';
+import {
+  type BotApiPrivateTextMessage,
+  type BotApiUpdate,
+  type BotApiUpdateType,
+  DEFAULT_ALLOWED_UPDATE_TYPES,
+} from '../src/types/bot_api.ts';
+
+const BOT_ID = 10;
+const OTHER_BOT_ID = 20;
+
+Deno.test('BotUpdatePollingService keeps a bot update subscription until a request replaces it', async () => {
+  const { updateSubscriptions, botUpdatePolling } = createPollingFixture();
+
+  await botUpdatePolling.getUpdates(BOT_ID, {
+    limit: 100,
+    timeoutSeconds: 0,
+    allowedUpdates: ['callback_query'],
+  });
+  await botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 0 });
+
+  assertAllowedUpdateTypes(updateSubscriptions.getAllowedUpdateTypes(BOT_ID), ['callback_query']);
+  assertAllowedUpdateTypes(
+    updateSubscriptions.getAllowedUpdateTypes(OTHER_BOT_ID),
+    [...DEFAULT_ALLOWED_UPDATE_TYPES],
+  );
+});
+
+Deno.test('BotUpdatePollingService resolves allowed update names as Telegram does', async () => {
+  const { updateSubscriptions, botUpdatePolling } = createPollingFixture();
+  const cases: { allowedUpdates: string[]; expected: readonly BotApiUpdateType[] }[] = [
+    { allowedUpdates: ['MESSAGE', 'not_an_update_type'], expected: ['message'] },
+    { allowedUpdates: ['chat_member'], expected: ['chat_member'] },
+    { allowedUpdates: ['not_an_update_type'], expected: [...DEFAULT_ALLOWED_UPDATE_TYPES] },
+    { allowedUpdates: ['message'], expected: ['message'] },
+    { allowedUpdates: [], expected: [...DEFAULT_ALLOWED_UPDATE_TYPES] },
+  ];
+
+  for (const { allowedUpdates, expected } of cases) {
+    await botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 0, allowedUpdates });
+    assertAllowedUpdateTypes(updateSubscriptions.getAllowedUpdateTypes(BOT_ID), expected);
+  }
+  const optInUpdateTypes: BotApiUpdateType[] = [
+    'chat_member',
+    'message_reaction',
+    'message_reaction_count',
+  ];
+  for (const optInUpdateType of optInUpdateTypes) {
+    if (DEFAULT_ALLOWED_UPDATE_TYPES.has(optInUpdateType)) {
+      throw new Error(`Expected the default subscription to exclude ${optInUpdateType}`);
+    }
+  }
+});
+
+Deno.test('BotUpdatePollingService keeps updates that arrive during a negative offset long poll', async () => {
+  const { botUpdates, botUpdatePolling } = createPollingFixture();
+  const pendingResult = botUpdatePolling.getUpdates(BOT_ID, {
+    offset: -1,
+    limit: 100,
+    timeoutSeconds: 1,
+  });
+
+  queueMicrotask(() => {
+    for (const messageId of [1, 2, 3]) {
+      botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(messageId));
+    }
+  });
+
+  const updates = expectRetrievedUpdates(await pendingResult);
+  if (updates.map((update) => update.update_id).join() !== '1,2,3') {
+    throw new Error('Expected the long poll to return every update that arrived while waiting');
+  }
+  const remainingUpdates = botUpdates.confirmAndReadPendingUpdates(BOT_ID, { limit: 100 });
+  if (remainingUpdates.map((update) => update.update_id).join() !== '1,2,3') {
+    throw new Error('Expected updates that arrived while waiting to remain pending');
+  }
+});
+
+Deno.test('BotUpdatePollingService terminates a held long poll when another is held for the bot', async () => {
+  const { botUpdates, botUpdatePolling } = createPollingFixture();
+  const displacedResult = botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 });
+  const replacementResult = botUpdatePolling.getUpdates(BOT_ID, {
+    limit: 100,
+    timeoutSeconds: 50,
+  });
+
+  const displaced = await displacedResult;
+  if (displaced.retrieved || displaced.reason !== 'terminated_by_other_long_poll') {
+    throw new Error('Expected the earlier held long poll to be terminated');
+  }
+
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
+  const updates = expectRetrievedUpdates(await replacementResult);
+  if (updates.length !== 1 || updates[0].message.message_id !== 1) {
+    throw new Error('Expected the replacement long poll to receive the next update');
+  }
+});
+
+Deno.test('BotUpdatePollingService does not terminate a held long poll for an immediate answer', async () => {
+  const { botUpdates, botUpdatePolling } = createPollingFixture();
+  const heldResult = botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 });
+
+  const immediateUpdates = expectRetrievedUpdates(
+    await botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 0 }),
+  );
+  if (immediateUpdates.length !== 0) {
+    throw new Error('Expected the immediate request to find no updates');
+  }
+
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
+  if (expectRetrievedUpdates(await heldResult).length !== 1) {
+    throw new Error('Expected the held long poll to survive a request answered immediately');
+  }
+});
+
+Deno.test('BotUpdatePollingService holds long polls for different bots independently', async () => {
+  const { botUpdates, botUpdatePolling } = createPollingFixture();
+  const firstResult = botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 });
+  const secondResult = botUpdatePolling.getUpdates(OTHER_BOT_ID, {
+    limit: 100,
+    timeoutSeconds: 50,
+  });
+
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
+  botUpdates.enqueueMessageUpdate(OTHER_BOT_ID, createPrivateTextMessage(2));
+
+  if (expectRetrievedUpdates(await firstResult)[0]?.message.message_id !== 1) {
+    throw new Error("Expected the first bot's long poll to receive its update");
+  }
+  if (expectRetrievedUpdates(await secondResult)[0]?.message.message_id !== 2) {
+    throw new Error("Expected the second bot's long poll to receive its update");
+  }
+});
+
+Deno.test('BotUpdatePollingService ends a cancelled long poll without terminating it', async () => {
+  const { botUpdates, botUpdatePolling } = createPollingFixture();
+  const abortController = new AbortController();
+  const cancelledResult = botUpdatePolling.getUpdates(BOT_ID, {
+    limit: 100,
+    timeoutSeconds: 50,
+    signal: abortController.signal,
+  });
+
+  abortController.abort();
+  if (expectRetrievedUpdates(await cancelledResult).length !== 0) {
+    throw new Error('Expected a cancelled long poll to end without updates');
+  }
+
+  const laterResult = botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 });
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
+  if (expectRetrievedUpdates(await laterResult).length !== 1) {
+    throw new Error('Expected a long poll after cancellation to receive the next update');
+  }
+});
+
+Deno.test('BotUpdatePollingService answers held long polls without a conflict when polling ends', async () => {
+  const { botUpdatePolling } = createPollingFixture();
+  const heldResults = [BOT_ID, OTHER_BOT_ID].map((botId) =>
+    botUpdatePolling.getUpdates(botId, { limit: 100, timeoutSeconds: 50 })
+  );
+
+  botUpdatePolling.endLongPolling();
+  const results = await expectSettlementWithin(
+    Promise.all(heldResults),
+    1_000,
+    'Expected ending long polling to answer every held long poll at once',
+  );
+  if (!results.every((result) => expectRetrievedUpdates(result).length === 0)) {
+    throw new Error('Expected each held long poll to end without updates');
+  }
+});
+
+Deno.test('BotUpdatePollingService answers long polls at once after polling ends', async () => {
+  const { botUpdates, botUpdatePolling } = createPollingFixture();
+  botUpdatePolling.endLongPolling();
+
+  const emptyResult = await expectSettlementWithin(
+    botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 }),
+    1_000,
+    'Expected a long poll after polling ended not to be held',
+  );
+  if (expectRetrievedUpdates(emptyResult).length !== 0) {
+    throw new Error('Expected the unheld long poll to find no updates');
+  }
+
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
+  const pendingUpdates = expectRetrievedUpdates(
+    await botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 }),
+  );
+  if (pendingUpdates.length !== 1) {
+    throw new Error('Expected pending updates to remain readable after polling ended');
+  }
+});
+
+function createPollingFixture() {
+  const botUpdates = new BotUpdateRepository();
+  const updateSubscriptions = new BotUpdateSubscriptionRepository();
+  const botUpdatePolling = new BotUpdatePollingService({ botUpdates, updateSubscriptions });
+  return { botUpdates, updateSubscriptions, botUpdatePolling };
+}
+
+function createPrivateTextMessage(messageId: number): BotApiPrivateTextMessage {
+  const author = { id: 1, is_bot: false as const, first_name: 'Ada' };
+  return {
+    message_id: messageId,
+    from: author,
+    chat: { id: author.id, type: 'private', first_name: author.first_name },
+    date: 1_700_000_000,
+    text: 'Hello',
+  };
+}
+
+function expectRetrievedUpdates(result: GetUpdatesResult): readonly BotApiUpdate[] {
+  if (!result.retrieved) {
+    throw new Error(`Expected getUpdates to retrieve updates, received ${result.reason}`);
+  }
+  return result.updates;
+}
+
+/** Returns what `pending` settles to, failing if it is still pending after `milliseconds`. */
+async function expectSettlementWithin<T>(
+  pending: Promise<T>,
+  milliseconds: number,
+  failureMessage: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(failureMessage)), milliseconds);
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function assertAllowedUpdateTypes(
+  actual: ReadonlySet<BotApiUpdateType>,
+  expected: readonly BotApiUpdateType[],
+): void {
+  if (actual.size !== expected.length || !expected.every((updateType) => actual.has(updateType))) {
+    throw new Error(
+      `Expected allowed update types ${JSON.stringify(expected)}, received ${
+        JSON.stringify([...actual])
+      }`,
+    );
+  }
+}

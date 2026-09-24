@@ -134,7 +134,7 @@ Deno.test('PrivateMessagingService sends and stores private account messages', (
     throw new Error('Expected history to return the stored messages in order');
   }
 
-  const updates = botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 });
+  const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
   if (
     updates.length !== 2 ||
     updates[0].message.text !== 'Hello' ||
@@ -196,7 +196,9 @@ Deno.test('PrivateMessagingService numbers private messages in each bot message 
   ) {
     throw new Error('Expected each bot to number messages from its own message box');
   }
-  const secondBotUpdates = botUpdates.readPendingUpdates(secondBot.profile.id, { limit: 100 });
+  const secondBotUpdates = botUpdates.confirmAndReadPendingUpdates(secondBot.profile.id, {
+    limit: 100,
+  });
   if (secondBotUpdates.length !== 1 || secondBotUpdates[0].message.message_id !== 1) {
     throw new Error("Expected the bot's update to carry its own message ID");
   }
@@ -327,7 +329,7 @@ Deno.test('PrivateMessagingService validates private messages before changing st
         accountId: account.profile.id,
         botId: bot.profile.id,
       }).length !== 0 ||
-    botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 }).length !== 0
+    botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 }).length !== 0
   ) {
     throw new Error('Expected rejected messages not to change conversation state');
   }
@@ -393,7 +395,7 @@ Deno.test('PrivateMessagingService stores a bot reply in the private conversatio
   if (
     publishedEvents.length !== 2 ||
     publishedEvents[1].message !== reply ||
-    botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 }).length !== 1
+    botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 }).length !== 1
   ) {
     throw new Error('Expected the reply to be published without becoming an update for its bot');
   }
