@@ -9,6 +9,7 @@ import { type InlineKeyboard, MAX_CALLBACK_DATA_BYTES } from '../types/inline_ke
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type {
+  ChatAction,
   PrivateConversation,
   PrivateConversationKey,
   PrivateConversationRole,
@@ -176,6 +177,19 @@ export type DeleteMessagesByBotResult =
   | {
     readonly deleted: false;
     readonly reason: DeleteMessagesByBotFailureReason;
+  };
+
+export interface SendBotChatActionInput {
+  readonly fromBotId: number;
+  readonly to: BotPrivateChat;
+  readonly action: ChatAction;
+}
+
+export type SendBotChatActionResult =
+  | { readonly sent: true }
+  | {
+    readonly sent: false;
+    readonly reason: 'bot_not_found' | 'account_not_found' | 'conversation_not_started';
   };
 
 export interface GetPrivateMessageHistoryInput {
@@ -480,6 +494,27 @@ export class PrivateMessagingService {
       }
     }
     return { deleted: true, deletedMessageCount };
+  }
+
+  /**
+   * Shows a chat action, such as typing, from a bot to an account. As for messages, the account
+   * must have started a conversation with the bot. Telegram shows the action in the account's
+   * client for a few seconds; the emulator only checks that the bot may send it.
+   */
+  sendBotChatAction({ fromBotId, to }: SendBotChatActionInput): SendBotChatActionResult {
+    if (this.#bots.getById(fromBotId) === undefined) {
+      return { sent: false, reason: 'bot_not_found' };
+    }
+    if (this.#accounts.getById(to.accountId) === undefined) {
+      return { sent: false, reason: 'account_not_found' };
+    }
+    const conversation = this.#privateConversations.getPrivateConversation({
+      accountId: to.accountId,
+      botId: fromBotId,
+    });
+    return conversation === undefined
+      ? { sent: false, reason: 'conversation_not_started' }
+      : { sent: true };
   }
 
   /**

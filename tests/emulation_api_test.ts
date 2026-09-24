@@ -2126,6 +2126,78 @@ Deno.test('a grammY bot registers its command menu at startup and for a chat', a
   }
 });
 
+Deno.test('sendChatAction accepts Telegram actions in started private chats', async () => {
+  const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  const sendChatAction = (parameters: Record<string, unknown>) =>
+    callBotApi(api, `${botApiPath}/sendChatAction`, parameters);
+  const expectDescription = async (parameters: Record<string, unknown>, expected: string) => {
+    const { status, body } = await sendChatAction(parameters);
+    if (status !== 400 || !isBadRequestResponse(body) || body.description !== expected) {
+      throw new Error(
+        `Expected ${JSON.stringify(parameters)} to fail with ${expected}, received ${
+          JSON.stringify(body)
+        }`,
+      );
+    }
+  };
+
+  await expectDescription({ chat_id: accountId, action: 'typing' }, 'Bad Request: chat not found');
+  await sendText('Hi');
+  for (const action of ['typing', 'UPLOAD_PHOTO', 'record_audio', 'cancel']) {
+    const { status, body } = await sendChatAction({ chat_id: accountId, action });
+    if (status !== 200 || JSON.stringify(body) !== JSON.stringify({ ok: true, result: true })) {
+      throw new Error(
+        `Expected ${action} to be accepted, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  }
+  // Telegram reads the action before the chat.
+  await expectDescription({ action: 'dancing' }, 'Bad Request: wrong parameter action in request');
+  await expectDescription({ chat_id: accountId }, 'Bad Request: wrong parameter action in request');
+  await expectDescription({ action: 'typing' }, 'Bad Request: chat_id is empty');
+  await expectDescription(
+    { chat_id: accountId, action: 'typing', message_thread_id: 1 },
+    'Bad Request: invalid sendChatAction parameters',
+  );
+});
+
+Deno.test('a grammY bot shows typing before it replies', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const replied = Promise.withResolvers<void>();
+  grammyBot.on('message:text', async (context) => {
+    await context.replyWithChatAction('typing');
+    await context.reply(`You said: ${context.message.text}`);
+    replied.resolve();
+  });
+  const polling = grammyBot.start();
+
+  try {
+    await sendText('hello');
+    // Polling ends only when stopped, so settling first means startup failed.
+    await Promise.race([replied.promise, polling]);
+    const historyBody: unknown = await (await api.request(
+      `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/messages`,
+    )).json();
+    const reply = isMessageHistoryResponse(historyBody) ? historyBody.messages.at(-1) : undefined;
+    if (reply?.text !== 'You said: hello') {
+      throw new Error(
+        `Expected the reply after the chat action, received ${JSON.stringify(historyBody)}`,
+      );
+    }
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+});
+
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,

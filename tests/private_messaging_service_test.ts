@@ -1012,6 +1012,38 @@ Deno.test('PrivateMessagingService treats changed entities as an edit of the tex
   }
 });
 
+Deno.test('PrivateMessagingService lets a bot show chat actions only in started chats', () => {
+  const { virtualUsers, publishedEvents, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const strangerAccount = createAccount(virtualUsers, 'Grace');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const sendAction = (fromBotId: number, accountId: number) =>
+    privateMessaging.sendBotChatAction({
+      fromBotId,
+      to: { type: 'private', accountId },
+      action: 'typing',
+    });
+
+  const cases = [
+    [sendAction(bot.profile.id, account.profile.id), undefined],
+    [sendAction(999, account.profile.id), 'bot_not_found'],
+    [sendAction(bot.profile.id, 999), 'account_not_found'],
+    [sendAction(bot.profile.id, strangerAccount.profile.id), 'conversation_not_started'],
+  ] as const;
+  for (const [result, expectedReason] of cases) {
+    const reason = result.sent ? undefined : result.reason;
+    if (reason !== expectedReason) {
+      throw new Error(
+        `Expected ${expectedReason ?? 'success'}, received ${JSON.stringify(result)}`,
+      );
+    }
+  }
+  if (publishedEvents.length !== 1) {
+    throw new Error('Expected chat actions not to store or publish anything');
+  }
+});
+
 const YES_NO_KEYBOARD: InlineKeyboard = [[
   { kind: 'callback', text: 'Yes', callbackData: 'yes' },
   { kind: 'callback', text: 'No', callbackData: 'no' },

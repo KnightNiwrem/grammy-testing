@@ -9,6 +9,7 @@ import {
 import { MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH } from '../../../types/callback_query.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { VirtualBotProfile } from '../../../types/virtual_bot.ts';
+import type { ChatAction } from '../../../types/virtual_chat.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 import {
   botCommandScopeParameter,
@@ -81,6 +82,28 @@ const NO_MESSAGE_ID = 0;
 /** Telegram's description for an unknown, expired, or already answered callback query. */
 const QUERY_ID_INVALID_DESCRIPTION =
   'Bad Request: query is too old and response timeout expired or query ID is invalid';
+
+/** Telegram's description for a missing or unknown chat action. */
+const CHAT_ACTION_INVALID_DESCRIPTION = 'Bad Request: wrong parameter action in request';
+
+/** Chat actions by the lowercase names Telegram reads, including its older aliases. */
+const CHAT_ACTIONS_BY_NAME: ReadonlyMap<string, ChatAction> = new Map([
+  ['cancel', 'cancel'],
+  ['typing', 'typing'],
+  ['record_video', 'record_video'],
+  ['upload_video', 'upload_video'],
+  ['record_voice', 'record_voice'],
+  ['record_audio', 'record_voice'],
+  ['upload_voice', 'upload_voice'],
+  ['upload_audio', 'upload_voice'],
+  ['upload_photo', 'upload_photo'],
+  ['upload_document', 'upload_document'],
+  ['choose_sticker', 'choose_sticker'],
+  ['find_location', 'find_location'],
+  ['pick_up_location', 'find_location'],
+  ['record_video_note', 'record_video_note'],
+  ['upload_video_note', 'upload_video_note'],
+]);
 
 /** Telegram's descriptions for rejected command list changes. */
 const SCOPE_NOT_ALLOWED_IN_PRIVATE_CHATS_DESCRIPTION =
@@ -157,6 +180,12 @@ const answerCallbackQueryParametersSchema = z.strictObject({
     .default(0),
 });
 
+// Topics and business connections are not supported.
+const sendChatActionParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  action: z.string().default(''),
+});
+
 // Telegram treats a missing commands parameter as an empty list, which deletes the list.
 const setMyCommandsParametersSchema = z.strictObject({
   commands: botCommandsParameter().default([]),
@@ -226,6 +255,7 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['getme', handleGetMe],
   ['getmycommands', handleGetMyCommands],
   ['getupdates', handleGetUpdates],
+  ['sendchataction', handleSendChatAction],
   ['sendmessage', handleSendMessage],
   ['setmycommands', handleSetMyCommands],
 ]);
@@ -630,6 +660,33 @@ function handleAnswerCallbackQuery(
     return botApiError(context, 400, QUERY_ID_INVALID_DESCRIPTION);
   }
   return context.json({ ok: true as const, result: true as const });
+}
+
+function handleSendChatAction(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = sendChatActionParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid sendChatAction parameters');
+  }
+  const { chat_id: chatId, action: actionName } = parsedParameters.data;
+  // Telegram reads the action before it looks at the chat.
+  const action = CHAT_ACTIONS_BY_NAME.get(actionName.toLowerCase());
+  if (action === undefined) {
+    return botApiError(context, 400, CHAT_ACTION_INVALID_DESCRIPTION);
+  }
+  if (chatId === undefined) {
+    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+  }
+
+  const result = context.get('emulationSession').botApi.sendChatAction(
+    context.get('authenticatedBot'),
+    { chatId, action },
+  );
+  return result.sent
+    ? context.json({ ok: true as const, result: true as const })
+    : botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
 }
 
 function handleSetMyCommands(

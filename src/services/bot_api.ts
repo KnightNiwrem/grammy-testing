@@ -4,6 +4,7 @@ import type { BotCommand, BotCommandLanguageCode, BotCommandScope } from '../typ
 import type { CallbackQueryId } from '../types/callback_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
+import type { ChatAction } from '../types/virtual_chat.ts';
 import type { PrivateTextMessage, TextEntity } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
 
@@ -118,6 +119,16 @@ export type EditMessageTextResult =
   | EditMessageResult<EditMessageTextFailureReason>
   | ({ readonly edited: false } & TextInvalidFailure);
 
+export interface SendChatActionRequest {
+  /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
+  readonly chatId: number;
+  readonly action: ChatAction;
+}
+
+export type SendChatActionResult =
+  | { readonly sent: true }
+  | { readonly sent: false; readonly reason: 'chat_not_found' };
+
 export type DeleteMessageRequest = MessageTarget;
 
 export type DeleteMessageResult =
@@ -217,6 +228,16 @@ interface BotMessaging {
     readonly botMessageId: number;
     readonly inlineKeyboard?: InlineKeyboard;
   }): BotMessageEditingResult<BotMessageEditFailureReason>;
+  sendBotChatAction(input: {
+    readonly fromBotId: number;
+    readonly to: BotPrivateChat;
+    readonly action: ChatAction;
+  }):
+    | { readonly sent: true }
+    | {
+      readonly sent: false;
+      readonly reason: 'bot_not_found' | 'account_not_found' | 'conversation_not_started';
+    };
   deleteMessagesByBot(input: {
     readonly fromBotId: number;
     readonly chat: BotPrivateChat;
@@ -455,6 +476,33 @@ export class BotApiService {
       default: {
         const unhandledFailure: never = result;
         throw new Error(`Unhandled bot message failure: ${JSON.stringify(unhandledFailure)}`);
+      }
+    }
+  }
+
+  /** Shows a chat action, such as typing, in a private chat; other chat types are not supported. */
+  sendChatAction(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, action }: SendChatActionRequest,
+  ): SendChatActionResult {
+    const result = this.#botMessages.sendBotChatAction({
+      fromBotId: authenticatedBot.id,
+      to: { type: 'private', accountId: chatId },
+      action,
+    });
+    if (result.sent) {
+      return result;
+    }
+    switch (result.reason) {
+      // As for sending, a chat the bot cannot address is not found.
+      case 'account_not_found':
+      case 'conversation_not_started':
+        return { sent: false, reason: 'chat_not_found' };
+      case 'bot_not_found':
+        throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+      default: {
+        const unhandledReason: never = result.reason;
+        throw new Error(`Unhandled chat action failure: ${unhandledReason}`);
       }
     }
   }

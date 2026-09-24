@@ -3,6 +3,24 @@ export interface PrivateConversationKey {
   readonly botId: number;
 }
 
+/**
+ * What a bot shows it is doing in a chat, such as typing, by the Bot API names. `cancel` stops
+ * showing an action.
+ */
+export type ChatAction =
+  | 'cancel'
+  | 'typing'
+  | 'record_video'
+  | 'upload_video'
+  | 'record_voice'
+  | 'upload_voice'
+  | 'upload_photo'
+  | 'upload_document'
+  | 'choose_sticker'
+  | 'find_location'
+  | 'record_video_note'
+  | 'upload_video_note';
+
 /** Which participant of a private conversation, identified relative to its key. */
 export type PrivateConversationRole = 'account' | 'bot';
 
