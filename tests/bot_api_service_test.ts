@@ -11,6 +11,7 @@ import {
   type GetUpdatesResult,
   type SendMessageResult,
 } from '../src/services/bot_api.ts';
+import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import { PrivateMessagingService } from '../src/services/private_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
@@ -388,6 +389,7 @@ function createBotApiFixture() {
   const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
+  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes });
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
@@ -395,9 +397,7 @@ function createBotApiFixture() {
     messages: new MessageRepository(),
     userMessageBoxes,
     events: new BotUpdateDeliveryService({
-      accounts,
-      bots,
-      userMessageBoxes,
+      botMessageViews,
       botUpdates,
       updateSubscriptions,
     }),
@@ -408,6 +408,7 @@ function createBotApiFixture() {
     botUpdates,
     updateSubscriptions,
     botMessages: privateMessaging,
+    botMessageViews,
   });
   return { virtualUsers, botUpdates, updateSubscriptions, privateMessaging, botApi };
 }

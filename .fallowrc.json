@@ -109,6 +109,12 @@
         ]
       },
       {
+        "name": "bot-message-view",
+        "patterns": [
+          "src/services/bot_message_view.ts"
+        ]
+      },
+      {
         "name": "update-delivery",
         "patterns": [
           "src/services/bot_update_delivery.ts"
@@ -206,7 +212,8 @@
         "allow": [],
         "allowTypeOnly": [
           "domain-services",
-          "bot-api-service"
+          "bot-api-service",
+          "bot-message-view"
         ]
       },
       {
@@ -232,7 +239,6 @@
         "from": "domain-services",
         "allow": [
           "domain",
-          "bot-api-projection",
           "text-entity-detection"
         ],
         "allowTypeOnly": [
@@ -243,10 +249,16 @@
         ]
       },
       {
-        "from": "update-delivery",
+        "from": "bot-message-view",
         "allow": [
           "domain",
           "bot-api-projection"
+        ]
+      },
+      {
+        "from": "update-delivery",
+        "allow": [
+          "domain"
         ]
       },
       {
@@ -278,6 +290,7 @@
           "session-repository",
           "bot-api-projection",
           "domain-services",
+          "bot-message-view",
           "update-delivery",
           "bot-api-service",
           "application-services",

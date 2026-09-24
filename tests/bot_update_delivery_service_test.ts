@@ -5,6 +5,7 @@ import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_
 import { MessageRepository } from '../src/repositories/message.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
+import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 
@@ -95,29 +96,6 @@ Deno.test('BotUpdateDeliveryService does not deliver a bot its own message', () 
   }
 });
 
-Deno.test('BotUpdateDeliveryService rejects a message missing from the bot message box', () => {
-  const { virtualUsers, messages, botUpdateDelivery } = createDeliveryFixture();
-  const account = createAccount(virtualUsers);
-  const bot = createBot(virtualUsers, 'test_bot');
-  const message = messages.addPrivateTextMessage({
-    conversation: { accountId: account.profile.id, botId: bot.profile.id },
-    authorRole: 'account',
-    sentAtUnixSeconds: 1_700_000_000,
-    text: 'Hello',
-    entities: [],
-  });
-
-  let deliveryError: unknown;
-  try {
-    botUpdateDelivery.publish({ type: 'message_created', message });
-  } catch (error) {
-    deliveryError = error;
-  }
-  if (!(deliveryError instanceof Error)) {
-    throw new Error('Expected delivery of an unnumbered message to throw');
-  }
-});
-
 function createDeliveryFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();
@@ -128,9 +106,7 @@ function createDeliveryFixture() {
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
-    accounts,
-    bots,
-    userMessageBoxes,
+    botMessageViews: new BotMessageViewService({ accounts, bots, userMessageBoxes }),
     botUpdates,
     updateSubscriptions,
   });

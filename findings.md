@@ -23,15 +23,12 @@ Exact source links appear in the appendix.
 
 **The architecture has a sound foundation, but several boundaries are broader than their names
 suggest.** The main issue is not a shortage of classes or files. Some components own policies that
-should be independently understandable and changeable—particularly the boundary between canonical
-messages and Bot API views.
+should be independently understandable and changeable—particularly long-poll coordination.
 
-The highest-value change is to keep Bot API presentation outside the operation that commits
-canonical message state.
+The highest-value change is to give long-poll coordination an explicit owner.
 
 | Priority   | Finding and recommendation                                                                       | Nature of the finding                                  |
 | ---------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| **High**   | Separate canonical messaging operations from Bot API message presentation.                       | Clear architectural boundary improvement.              |
 | **Medium** | Give long-poll coordination an explicit owner and clarify the queue's mutating operations.       | Cohesion and semantic clarity improvement.             |
 | **Lower**  | Improve ownership of application contracts and distinguish fixture setup from simulated actions. | Targeted refinements, not reasons for a large rewrite. |
 
@@ -81,132 +78,7 @@ smaller classes.
 
 ---
 
-## 2. Finding SRP-03: canonical messaging still owns Bot API presentation
-
-**Priority: High**\
-**Classification: Clear architectural boundary improvement**
-
-The project already has a valuable projection boundary, but the messaging service does not
-consistently respect it.
-
-### Existing behavior and context
-
-`ChatInteractionService`:
-
-- Returns `BotApiPrivateTextMessage` from its send operations and Bot API messages from history
-  queries.
-- Resolves the bot's observer-specific message ID.
-- Calls `projectPrivateTextMessageForBot()`.
-
-Its private storage helper both commits canonical state and returns a Bot API projection.
-
-At the same time, `BotUpdateDeliveryService` independently resolves the observing bot, account, and
-observer-specific message ID before calling the same pure projector.
-
-The pure projector itself is reasonably well designed. It takes explicit message, participant, and
-observer-numbering inputs and constructs the Bot API view. **Preserve that pure function.** The
-issue is where responsibility for obtaining and applying the view lives.
-
-### Why this boundary matters
-
-There are two independent questions:
-
-> What happened in the emulated conversation?
-
-and:
-
-> How is that occurrence represented to a particular API observer?
-
-The canonical message model already answers the first independently. It stores an internal message
-identity, conversation key, author role, timestamp, text, and entities. It does not need a Bot API
-`chat` object or `message_id` to exist.
-
-But the application command currently rejoins those responsibilities by making its successful result
-a Bot API view. The domain-facing operation is therefore shaped around a particular consumer's
-presentation even though canonical state and observer numbering have already been separated
-underneath it.
-
-### Recommended design
-
-Have the messaging operation return a canonical result:
-
-```ts
-// Illustrative target contract, not a drop-in patch.
-type SendPrivateTextResult =
-  | {
-    readonly sent: true;
-    readonly message: PrivateTextMessage;
-  }
-  | {
-    readonly sent: false;
-    readonly reason: PrivateMessageFailureReason;
-  };
-```
-
-Then give **bot-view assembly** an explicit owner outside that command.
-
-For example, a `BotMessageViewReader` could obtain the relevant participant profiles and
-observer-specific ID, then delegate to the existing pure projector. It could be used by the
-bot-facing application boundary, admin history presentation, and update delivery.
-
-The precise name is less important than the responsibility:
-
-> Read canonical state and produce the supported bot-observer view. Do not create messages or decide
-> whether sending is permitted.
-
-Do not achieve this by handing repositories directly to Hono routes. Keep raw repositories private
-to composition and expose suitable application queries or view capabilities.
-
-History retrieval may remain a small query component. There is no need to adopt a full CQRS
-framework merely to separate a read view from a command.
-
-### Preserve the documented public view
-
-The account-facing client currently documents that returned private messages use **the conversation
-bot's view and numbering**, regardless of the author.
-
-That is an explicit current contract—not automatically an observer-ID defect.
-
-The recommendation is therefore:
-
-> Move responsibility for producing the documented view; do not silently change which view the API
-> returns.
-
-### Preserve the canonical commit invariant
-
-Within the private-message commit operation, keeping the following steps coordinated is sensible:
-
-```text
-Store canonical message
-        |
-        v
-Assign participant message IDs
-        |
-        v
-Publish message-created event
-```
-
-The existing implementation performs observer numbering before event publication. That ordering lets
-update delivery project an already-numbered message.
-
-Do not fragment those steps into unrelated services that callers must invoke correctly. That would
-replace an overly broad class with an under-owned invariant.
-
-### Recommended validation
-
-Verify that command responses, history, and delivered updates continue to produce the documented
-observer-specific view. Preserve canonical message persistence, participant numbering, and event
-ordering independently of presentation changes.
-
-### Practical outcome
-
-Canonical messaging can evolve without carrying Bot API presentation policy. Presentation remains
-consistent across responses, history, and update delivery without making HTTP routes responsible for
-assembling domain state.
-
----
-
-## 3. Finding SRP-04: polling coordination needs a more explicit owner
+## 2. Finding SRP-04: polling coordination needs a more explicit owner
 
 **Priority: Medium**\
 **Classification: Cohesion and semantic clarity improvement**
@@ -290,12 +162,12 @@ the queue's own consistency guarantees.
 
 ---
 
-## 4. Additional targeted refinements
+## 3. Additional targeted refinements
 
 These recommendations are useful, but they are not equally severe findings and do not justify a
 broad rewrite.
 
-### 4.1 Put contracts with the responsibility that owns them
+### 3.1 Put contracts with the responsibility that owns them
 
 Dependency injection is generally explicit, and several consumers already declare narrow interfaces.
 
@@ -315,7 +187,7 @@ imports create a runtime dependency bug.
 Do not centralize every structurally similar interface. Two small `AccountLookup` interfaces may be
 valid consumer-owned contracts. Identical syntax alone does not establish shared responsibility.
 
-### 4.2 Clarify what “activate private conversation” means
+### 3.2 Clarify what “activate private conversation” means
 
 `activatePrivateConversation()` establishes a conversation without storing a message or publishing a
 message-created event. Its tests exercise that behavior directly.
@@ -334,7 +206,7 @@ observable effects.
 This does not require an entire `ScenarioSetupService` today. A clearly named, separately exposed
 setup capability may be enough.
 
-### 4.3 Keep the SDK independent while maintaining wire-contract alignment
+### 3.3 Keep the SDK independent while maintaining wire-contract alignment
 
 The TypeScript client has its own response types and schemas. Its request utilities own HTTP
 execution, response validation, and client error construction. That is a sensible client boundary.
@@ -350,19 +222,19 @@ service would not.
 
 ---
 
-## 5. Existing boundaries worth preserving
+## 4. Existing boundaries worth preserving
 
 An aggressive “SRP cleanup” could make several parts of this code worse. Preserve the following
 foundations.
 
-### 5.1 The composition root
+### 4.1 The composition root
 
 `createEmulationSession()` constructs repositories and wires services. Having many dependencies
 there is appropriate: **assembling the object graph is its responsibility**.
 
 Keep construction out of the individual services.
 
-### 5.2 Three distinct identity concepts
+### 4.2 Three distinct identity concepts
 
 Canonical message identity, observer-specific Telegram message numbering, and Bot API update
 sequencing are represented separately.
@@ -370,7 +242,7 @@ sequencing are represented separately.
 These are different concepts and should remain different owners. Do not consolidate them into a
 generic message counter or merge canonical storage into the pending update queue.
 
-### 5.3 Event-to-update delivery
+### 4.3 Event-to-update delivery
 
 `BotUpdateDeliveryService` selects whether an event produces an update, applies subscription rules,
 projects it, and enqueues it.
@@ -382,7 +254,7 @@ That is a coherent application responsibility:
 Subscription filtering does not control canonical message existence. Its orchestration is not a
 reason to split it into a service for each step.
 
-### 5.4 Shared identity allocation and username uniqueness
+### 4.4 Shared identity allocation and username uniqueness
 
 `TelegramIdentityRepository` coordinates ID allocation and username reservations across identity
 kinds. Those operations protect a shared namespace invariant.
@@ -393,7 +265,7 @@ are different types.
 Similarly, `VirtualUserService` handling both account and bot provisioning is defensible at its
 current size and scope.
 
-### 5.5 HTTP decoding outside domain operations
+### 4.5 HTTP decoding outside domain operations
 
 The separate Bot API request decoder handles transport encodings and parameter extraction, while
 routes validate method parameters and render responses.
@@ -401,15 +273,14 @@ routes validate method parameters and render responses.
 Retain this boundary. Moving those concerns into message repositories or canonical domain objects
 would be a regression.
 
-### 5.6 The pure message projector
+### 4.6 The pure message projector
 
-Preserve `projectPrivateTextMessageForBot()` as a pure projection function with explicit inputs.
-Move responsibility for assembling those inputs; do not replace the pure function with a stateful
-object unnecessarily.
+Preserve `projectPrivateTextMessageForBot()` as a pure projection function with explicit inputs. Do
+not replace the pure function with a stateful object unnecessarily.
 
 ---
 
-## 6. Proposed ownership model
+## 5. Proposed ownership model
 
 The target is the following ownership model—not necessarily one class for every row.
 
@@ -433,20 +304,11 @@ The key invariants remain deliberately grouped:
 | Bot-facing projections use the documented observer's numbering and representation | Explicit bot-view assembly plus the pure projector.            |
 | IDs and usernames respect the shared namespace                                    | Shared identity authority.                                     |
 
-## 7. Recommended implementation sequence
+## 6. Recommended implementation sequence
 
 Use separate, reviewable changes rather than one repository-wide redesign.
 
-### PR 1: move Bot API view assembly out of canonical message commands
-
-Return canonical results from private-message operations and apply the documented bot view at the
-appropriate application/query boundary.
-
-**Acceptance criteria:** command responses, history, and updates remain consistent with the current
-public bot-view contract; canonical message storage, participant numbering, and event ordering
-remain coordinated.
-
-### PR 2: extract polling coordination and clarify queue operation names
+### PR 1: extract polling coordination and clarify queue operation names
 
 Move the detailed held-poll state machine behind an explicit polling capability while retaining
 cohesive queue behavior.
@@ -457,7 +319,7 @@ independent bots, negative-offset handling, and cancellation-cause distinctions.
 Move contracts and improve naming alongside the relevant extraction rather than performing an
 unrelated repository-wide directory reorganization.
 
-## 8. Validation and limitations
+## 7. Validation and limitations
 
 The original review inspected source through the GitHub connector and made no repository changes.
 
@@ -477,8 +339,7 @@ Consequently:
 rule that every service must be a leaf.**
 
 The canonical-state, observer-numbering, and event-delivery foundations are worth keeping. The
-highest-value work is ensuring that producing a Bot API view is not part of committing canonical
-domain state.
+highest-value work is giving long-poll coordination an explicit owner.
 
 ---
 
@@ -496,12 +357,11 @@ The following source files are central to the polling findings:
 
 ### Additional inspected components identified by symbol
 
-| Finding or assessment               | Relevant components and tests                                                                                                                                                |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Canonical state versus presentation | `PrivateTextMessage`, `ChatInteractionService`, `projectPrivateTextMessageForBot`, `BotUpdateDeliveryService`, observer message numbering, client private-message contracts. |
-| Polling semantics                   | `BotApiService`, `BotUpdateRepository`, polling tests covering offsets, supersession, cancellation, and bot isolation.                                                       |
-| Identity and provisioning           | `TelegramIdentityRepository`, `VirtualUserService`.                                                                                                                          |
-| Adapter and client boundaries       | Bot API request decoder, HTTP routes, TypeScript client response schemas and request utilities.                                                                              |
+| Finding or assessment         | Relevant components and tests                                                                                          |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Polling semantics             | `BotApiService`, `BotUpdateRepository`, polling tests covering offsets, supersession, cancellation, and bot isolation. |
+| Identity and provisioning     | `TelegramIdentityRepository`, `VirtualUserService`.                                                                    |
+| Adapter and client boundaries | Bot API request decoder, HTTP routes, TypeScript client response schemas and request utilities.                        |
 
 ### SRP reference
 

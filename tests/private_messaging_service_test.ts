@@ -6,15 +6,15 @@ import { MessageRepository } from '../src/repositories/message.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
+import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import {
   PrivateMessagingService,
   type SendBotMessageFailureReason,
 } from '../src/services/private_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
-import type { BotApiPrivateTextMessage } from '../src/types/bot_api.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
-import { MAX_TEXT_MESSAGE_LENGTH } from '../src/types/virtual_message.ts';
+import { MAX_TEXT_MESSAGE_LENGTH, type PrivateTextMessage } from '../src/types/virtual_message.ts';
 import type { VirtualBot } from '../src/types/virtual_bot.ts';
 
 Deno.test('PrivateMessagingService activates a private conversation for known participants', () => {
@@ -107,10 +107,19 @@ Deno.test('PrivateMessagingService sends and stores private account messages', (
   });
   if (
     storedMessages.length !== 2 ||
-    storedMessages[0].text !== 'Hello' ||
-    storedMessages[1].text !== 'Again'
+    storedMessages[0] !== firstResult.message ||
+    storedMessages[1] !== secondResult.message
   ) {
-    throw new Error('Expected canonical messages to be retained in conversation history');
+    throw new Error('Expected the sent canonical messages to be retained in conversation history');
+  }
+  if (
+    firstResult.message.text !== 'Hello' ||
+    firstResult.message.authorRole !== 'account' ||
+    firstResult.message.sentAtUnixSeconds !== 1_700_000_000 ||
+    firstResult.message.conversation.accountId !== account.profile.id ||
+    firstResult.message.conversation.botId !== bot.profile.id
+  ) {
+    throw new Error('Expected the result to carry the canonical account message');
   }
 
   const history = privateMessaging.getPrivateMessageHistory({
@@ -119,19 +128,17 @@ Deno.test('PrivateMessagingService sends and stores private account messages', (
   });
   if (
     !history.found ||
-    history.messages.length !== 2 ||
-    history.messages[0].message_id !== firstResult.message.message_id ||
-    history.messages[0].chat.id !== account.profile.id ||
-    history.messages[0].from.id !== account.profile.id
+    history.messages.map((message) => message.id).join() !==
+      [firstResult.message.id, secondResult.message.id].join()
   ) {
-    throw new Error('Expected history to project stored messages as private Bot API messages');
+    throw new Error('Expected history to return the stored messages in order');
   }
 
   const updates = botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 });
   if (
     updates.length !== 2 ||
-    !haveSameBotApiView(updates[0].message, firstResult.message) ||
-    !haveSameBotApiView(updates[1].message, secondResult.message)
+    updates[0].message.text !== 'Hello' ||
+    updates[1].message.text !== 'Again'
   ) {
     throw new Error('Expected each sent message to enqueue one update for the target bot');
   }
@@ -162,33 +169,18 @@ Deno.test('PrivateMessagingService marks bot commands in private account message
     botId: bot.profile.id,
   });
   if (
-    JSON.stringify(storedMessages[0].entities) !== JSON.stringify(expectedCommandEntities) ||
-    storedMessages[1].entities.length !== 0
+    storedMessages[0] !== commandResult.message ||
+    storedMessages[1] !== plainResult.message ||
+    JSON.stringify(commandResult.message.entities) !== JSON.stringify(expectedCommandEntities) ||
+    plainResult.message.entities.length !== 0
   ) {
     throw new Error('Expected canonical messages to store the detected bot command entities');
-  }
-
-  const history = privateMessaging.getPrivateMessageHistory({
-    accountId: account.profile.id,
-    botId: bot.profile.id,
-  });
-  if (!history.found) {
-    throw new Error('Expected the private conversation history to be found');
-  }
-  for (const projectedCommand of [commandResult.message, history.messages[0]]) {
-    if (JSON.stringify(projectedCommand.entities) !== JSON.stringify(expectedCommandEntities)) {
-      throw new Error('Expected the projected command message to carry its entities');
-    }
-  }
-  for (const projectedPlainText of [plainResult.message, history.messages[1]]) {
-    if ('entities' in projectedPlainText) {
-      throw new Error('Expected a message without entities to omit the entities field');
-    }
   }
 });
 
 Deno.test('PrivateMessagingService numbers private messages in each bot message box', () => {
-  const { virtualUsers, botUpdates, privateMessaging } = createPrivateMessagingFixture();
+  const { virtualUsers, userMessageBoxes, botUpdates, privateMessaging } =
+    createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');
   const firstBot = createBot(virtualUsers, 'First Bot', 'first_bot');
   const secondBot = createBot(virtualUsers, 'Second Bot', 'second_bot');
@@ -198,9 +190,9 @@ Deno.test('PrivateMessagingService numbers private messages in each bot message 
   const firstBotSecondMessage = sendPrivateText(privateMessaging, account.profile.id, firstBot);
 
   if (
-    firstBotFirstMessage.message_id !== 1 ||
-    secondBotFirstMessage.message_id !== 1 ||
-    firstBotSecondMessage.message_id !== 2
+    userMessageBoxes.getMessageId(firstBot.profile.id, firstBotFirstMessage.id) !== 1 ||
+    userMessageBoxes.getMessageId(secondBot.profile.id, secondBotFirstMessage.id) !== 1 ||
+    userMessageBoxes.getMessageId(firstBot.profile.id, firstBotSecondMessage.id) !== 2
   ) {
     throw new Error('Expected each bot to number messages from its own message box');
   }
@@ -208,26 +200,19 @@ Deno.test('PrivateMessagingService numbers private messages in each bot message 
   if (secondBotUpdates.length !== 1 || secondBotUpdates[0].message.message_id !== 1) {
     throw new Error("Expected the bot's update to carry its own message ID");
   }
-  const firstBotHistory = privateMessaging.getPrivateMessageHistory({
-    accountId: account.profile.id,
-    botId: firstBot.profile.id,
-  });
-  if (
-    !firstBotHistory.found ||
-    firstBotHistory.messages.map((message) => message.message_id).join() !== '1,2'
-  ) {
-    throw new Error("Expected history to project the bot's message IDs");
-  }
 });
 
 Deno.test('PrivateMessagingService continues a bot message box across private chats', () => {
-  const { virtualUsers, privateMessaging } = createPrivateMessagingFixture();
+  const { virtualUsers, userMessageBoxes, privateMessaging } = createPrivateMessagingFixture();
   const firstAccount = createAccount(virtualUsers, 'Ada');
   const secondAccount = createAccount(virtualUsers, 'Grace');
   const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
 
   const messageIds = [firstAccount, secondAccount, firstAccount].map((account) =>
-    sendPrivateText(privateMessaging, account.profile.id, bot).message_id
+    userMessageBoxes.getMessageId(
+      bot.profile.id,
+      sendPrivateText(privateMessaging, account.profile.id, bot).id,
+    )
   );
 
   if (messageIds.join() !== '1,2,3') {
@@ -370,49 +355,44 @@ Deno.test('PrivateMessagingService stores a bot reply in the private conversatio
     throw new Error(`Expected the bot reply to succeed, received ${replyResult.reason}`);
   }
 
-  const expectedSender = {
-    id: bot.profile.id,
-    is_bot: true,
-    first_name: 'Test Bot',
-    username: 'test_bot',
-  };
+  const reply = replyResult.message;
   if (
-    replyResult.message.message_id !== 2 ||
-    replyResult.message.chat.id !== account.profile.id ||
-    JSON.stringify(replyResult.message.from) !== JSON.stringify(expectedSender) ||
-    replyResult.message.date !== 1_700_000_000 ||
-    JSON.stringify(replyResult.message.entities) !==
+    reply.authorRole !== 'bot' ||
+    reply.conversation.accountId !== account.profile.id ||
+    reply.conversation.botId !== bot.profile.id ||
+    reply.sentAtUnixSeconds !== 1_700_000_000 ||
+    JSON.stringify(reply.entities) !==
       JSON.stringify([{ type: 'bot_command', offset: 4, length: 5 }])
   ) {
-    throw new Error("Expected the reply in the bot's view, sent by the bot to the account's chat");
+    throw new Error("Expected the result to carry the bot's canonical reply with its entities");
   }
-
-  const [, storedReply] = messages.getPrivateConversationMessages({
-    accountId: account.profile.id,
-    botId: bot.profile.id,
-  });
   if (
-    storedReply?.authorRole !== 'bot' ||
-    userMessageBoxes.getMessageId(account.profile.id, storedReply.id) !== 2 ||
-    userMessageBoxes.getMessageId(bot.profile.id, storedReply.id) !== 2
+    userMessageBoxes.getMessageId(account.profile.id, reply.id) !== 2 ||
+    userMessageBoxes.getMessageId(bot.profile.id, reply.id) !== 2
   ) {
     throw new Error("Expected the reply to be numbered in both participants' message boxes");
   }
+  const storedMessages = messages.getPrivateConversationMessages({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
   const history = privateMessaging.getPrivateMessageHistory({
     accountId: account.profile.id,
     botId: bot.profile.id,
   });
   if (
+    storedMessages.length !== 2 ||
+    storedMessages[0] !== incomingMessage ||
+    storedMessages[1] !== reply ||
     !history.found ||
-    history.messages.length !== 2 ||
-    !haveSameBotApiView(history.messages[0], incomingMessage) ||
-    !haveSameBotApiView(history.messages[1], replyResult.message)
+    history.messages.map((message) => message.id).join() !==
+      [incomingMessage.id, reply.id].join()
   ) {
     throw new Error('Expected history to hold the incoming message and then the reply');
   }
   if (
     publishedEvents.length !== 2 ||
-    publishedEvents[1].message !== storedReply ||
+    publishedEvents[1].message !== reply ||
     botUpdates.readPendingUpdates(bot.profile.id, { limit: 100 }).length !== 1
   ) {
     throw new Error('Expected the reply to be published without becoming an update for its bot');
@@ -483,9 +463,7 @@ function createPrivateMessagingFixture() {
   const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const botUpdateDelivery = new BotUpdateDeliveryService({
-    accounts,
-    bots,
-    userMessageBoxes,
+    botMessageViews: new BotMessageViewService({ accounts, bots, userMessageBoxes }),
     botUpdates,
     updateSubscriptions: new BotUpdateSubscriptionRepository(),
   });
@@ -515,22 +493,11 @@ function createPrivateMessagingFixture() {
   };
 }
 
-function haveSameBotApiView(
-  actual: BotApiPrivateTextMessage,
-  expected: BotApiPrivateTextMessage,
-): boolean {
-  return actual.message_id === expected.message_id &&
-    actual.chat.id === expected.chat.id &&
-    actual.from.id === expected.from.id &&
-    actual.date === expected.date &&
-    actual.text === expected.text;
-}
-
 function sendPrivateText(
   privateMessaging: PrivateMessagingService,
   accountId: number,
   bot: VirtualBot,
-): BotApiPrivateTextMessage {
+): PrivateTextMessage {
   const result = privateMessaging.sendAccountMessage({
     fromAccountId: accountId,
     to: { type: 'private', botId: bot.profile.id },

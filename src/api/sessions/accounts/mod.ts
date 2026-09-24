@@ -32,6 +32,10 @@ const sendMessageRequestSchema = z.strictObject({
   text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH),
 });
 
+/**
+ * Account-facing routes. Private messages they return are shown as the conversation's bot sees
+ * them, whichever participant wrote them.
+ */
 export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   const accountRoutes = new Hono<SessionRouteContextTypes>();
 
@@ -80,7 +84,8 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 400);
     }
 
-    const result = context.get('emulationSession').privateMessaging.sendAccountMessage({
+    const { privateMessaging, botMessageViews } = context.get('emulationSession');
+    const result = privateMessaging.sendAccountMessage({
       fromAccountId: accountId.data,
       ...parsedRequest.data,
     });
@@ -91,7 +96,10 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       );
     }
 
-    return context.json({ message: result.message }, 201);
+    return context.json(
+      { message: botMessageViews.viewPrivateTextMessageForBot(result.message) },
+      201,
+    );
   });
 
   accountRoutes.get(PRIVATE_MESSAGE_HISTORY_PATH, (context) => {
@@ -103,7 +111,8 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 400);
     }
 
-    const result = context.get('emulationSession').privateMessaging.getPrivateMessageHistory({
+    const { privateMessaging, botMessageViews } = context.get('emulationSession');
+    const result = privateMessaging.getPrivateMessageHistory({
       accountId: accountId.data,
       botId: botId.data,
     });
@@ -111,7 +120,11 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 404);
     }
 
-    return context.json({ messages: result.messages });
+    return context.json({
+      messages: result.messages.map((message) =>
+        botMessageViews.viewPrivateTextMessageForBot(message)
+      ),
+    });
   });
 
   return accountRoutes;

@@ -1,6 +1,4 @@
-import { projectPrivateTextMessageForBot } from '../projections/bot_api_message.ts';
 import { findBotCommandEntities } from '../text_entities/bot_command.ts';
-import type { BotApiPrivateTextMessage } from '../types/bot_api.ts';
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
@@ -48,7 +46,7 @@ export type SendAccountMessageFailureReason =
 export type SendAccountMessageResult =
   | {
     readonly sent: true;
-    readonly message: BotApiPrivateTextMessage;
+    readonly message: PrivateTextMessage;
   }
   | {
     readonly sent: false;
@@ -74,7 +72,7 @@ export type SendBotMessageFailureReason =
 export type SendBotMessageResult =
   | {
     readonly sent: true;
-    readonly message: BotApiPrivateTextMessage;
+    readonly message: PrivateTextMessage;
   }
   | {
     readonly sent: false;
@@ -89,7 +87,7 @@ export interface GetPrivateMessageHistoryInput {
 export type GetPrivateMessageHistoryResult =
   | {
     readonly found: true;
-    readonly messages: readonly BotApiPrivateTextMessage[];
+    readonly messages: readonly PrivateTextMessage[];
   }
   | {
     readonly found: false;
@@ -124,7 +122,6 @@ interface PrivateMessageStore {
 
 interface UserMessageBoxStore {
   assignMessageId(ownerId: number, canonicalMessageId: CanonicalMessageId): number;
-  getMessageId(ownerId: number, canonicalMessageId: CanonicalMessageId): number | undefined;
 }
 
 interface ChatDomainEventSink {
@@ -144,6 +141,9 @@ interface PrivateMessagingServiceDependencies {
 /**
  * Carries out text exchanges between an account and a bot in their private conversation, and
  * commits each accepted message: stored, numbered for both participants, then published.
+ *
+ * Results carry canonical messages; presenting them to an observer, such as through the Bot API,
+ * is left to the caller.
  */
 export class PrivateMessagingService {
   readonly #accounts: AccountLookup;
@@ -269,10 +269,7 @@ export class PrivateMessagingService {
       return { found: false, reason: 'bot_not_found' };
     }
 
-    const messages = this.#messages.getPrivateConversationMessages(input).map((message) =>
-      this.#projectPrivateTextMessageForBot(message, account, bot)
-    );
-    return { found: true, messages };
+    return { found: true, messages: this.#messages.getPrivateConversationMessages(input) };
   }
 
   /**
@@ -286,7 +283,7 @@ export class PrivateMessagingService {
       readonly authorRole: PrivateConversationRole;
       readonly text: string;
     },
-  ): BotApiPrivateTextMessage {
+  ): PrivateTextMessage {
     const storedMessage = this.#messages.addPrivateTextMessage({
       conversation: { accountId: account.profile.id, botId: bot.profile.id },
       authorRole,
@@ -302,23 +299,6 @@ export class PrivateMessagingService {
     this.#userMessageBoxes.assignMessageId(bot.profile.id, storedMessage.id);
     this.#events.publish({ type: 'message_created', message: storedMessage });
 
-    return this.#projectPrivateTextMessageForBot(storedMessage, account, bot);
-  }
-
-  #projectPrivateTextMessageForBot(
-    message: PrivateTextMessage,
-    account: VirtualAccount,
-    bot: VirtualBot,
-  ): BotApiPrivateTextMessage {
-    const observerMessageId = this.#userMessageBoxes.getMessageId(bot.profile.id, message.id);
-    if (observerMessageId === undefined) {
-      throw new Error(`Private message ${message.id} was not delivered to bot ${bot.profile.id}`);
-    }
-    return projectPrivateTextMessageForBot({
-      message,
-      account: account.profile,
-      bot: bot.profile,
-      observerMessageId,
-    });
+    return storedMessage;
   }
 }

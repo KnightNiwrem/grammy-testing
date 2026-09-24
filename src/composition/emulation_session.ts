@@ -9,6 +9,7 @@ import { SharedChatRepository } from '../repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../repositories/user_message_box.ts';
 import { BotApiService } from '../services/bot_api.ts';
+import { BotMessageViewService } from '../services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
 import { PrivateMessagingService } from '../services/private_messaging.ts';
 import { SharedChatAdministrationService } from '../services/shared_chat_administration.ts';
@@ -29,10 +30,9 @@ export function createEmulationSession(id: string): EmulationSession {
   const userMessageBoxes = new UserMessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
+  const botMessageViews = new BotMessageViewService({ accounts, bots, userMessageBoxes });
   const botUpdateDelivery = new BotUpdateDeliveryService({
-    accounts,
-    bots,
-    userMessageBoxes,
+    botMessageViews,
     botUpdates,
     updateSubscriptions,
   });
@@ -51,6 +51,7 @@ export function createEmulationSession(id: string): EmulationSession {
     botUpdates,
     updateSubscriptions,
     botMessages: privateMessaging,
+    botMessageViews,
   });
 
   return {
@@ -58,6 +59,7 @@ export function createEmulationSession(id: string): EmulationSession {
     virtualUsers,
     sharedChatAdministration,
     privateMessaging,
+    botMessageViews,
     botApi,
     end: () => botApi.endLongPolling(),
   };

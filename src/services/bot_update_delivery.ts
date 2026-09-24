@@ -1,20 +1,9 @@
-import { projectPrivateTextMessageForBot } from '../projections/bot_api_message.ts';
 import type { BotApiPrivateTextMessage, BotApiUpdateType } from '../types/bot_api.ts';
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
-import type { VirtualAccount } from '../types/virtual_account.ts';
-import type { VirtualBot } from '../types/virtual_bot.ts';
-import type { CanonicalMessageId, PrivateTextMessage } from '../types/virtual_message.ts';
+import type { PrivateTextMessage } from '../types/virtual_message.ts';
 
-interface AccountLookup {
-  getById(accountId: number): VirtualAccount | undefined;
-}
-
-interface BotLookup {
-  getById(botId: number): VirtualBot | undefined;
-}
-
-interface MessageIdLookup {
-  getMessageId(ownerId: number, canonicalMessageId: CanonicalMessageId): number | undefined;
+interface BotMessageViews {
+  viewPrivateTextMessageForBot(message: PrivateTextMessage): BotApiPrivateTextMessage;
 }
 
 interface BotUpdateMailboxes {
@@ -26,9 +15,7 @@ interface BotUpdateSubscriptionLookup {
 }
 
 interface BotUpdateDeliveryServiceDependencies {
-  readonly accounts: AccountLookup;
-  readonly bots: BotLookup;
-  readonly userMessageBoxes: MessageIdLookup;
+  readonly botMessageViews: BotMessageViews;
   readonly botUpdates: BotUpdateMailboxes;
   readonly updateSubscriptions: BotUpdateSubscriptionLookup;
 }
@@ -42,19 +29,14 @@ interface BotUpdateDeliveryServiceDependencies {
  * state is unaffected.
  */
 export class BotUpdateDeliveryService {
-  readonly #accounts: AccountLookup;
-  readonly #bots: BotLookup;
-  readonly #userMessageBoxes: MessageIdLookup;
+  readonly #botMessageViews: BotMessageViews;
   readonly #botUpdates: BotUpdateMailboxes;
   readonly #updateSubscriptions: BotUpdateSubscriptionLookup;
 
   constructor(
-    { accounts, bots, userMessageBoxes, botUpdates, updateSubscriptions }:
-      BotUpdateDeliveryServiceDependencies,
+    { botMessageViews, botUpdates, updateSubscriptions }: BotUpdateDeliveryServiceDependencies,
   ) {
-    this.#accounts = accounts;
-    this.#bots = bots;
-    this.#userMessageBoxes = userMessageBoxes;
+    this.#botMessageViews = botMessageViews;
     this.#botUpdates = botUpdates;
     this.#updateSubscriptions = updateSubscriptions;
   }
@@ -76,31 +58,14 @@ export class BotUpdateDeliveryService {
    * receives no update for a message it sent itself.
    */
   #deliverPrivateTextMessage(message: PrivateTextMessage): void {
-    const { accountId, botId: observingBotId } = message.conversation;
+    const observingBotId = message.conversation.botId;
     if (message.authorRole === 'bot' || !this.#isSubscribed(observingBotId, 'message')) {
       return;
-    }
-    const account = this.#accounts.getById(accountId);
-    if (account === undefined) {
-      throw new Error(`Account ${accountId} of message ${message.id} does not exist`);
-    }
-    const bot = this.#bots.getById(observingBotId);
-    if (bot === undefined) {
-      throw new Error(`Bot ${observingBotId} of message ${message.id} does not exist`);
-    }
-    const observerMessageId = this.#userMessageBoxes.getMessageId(observingBotId, message.id);
-    if (observerMessageId === undefined) {
-      throw new Error(`Private message ${message.id} was not delivered to bot ${observingBotId}`);
     }
 
     this.#botUpdates.enqueueMessageUpdate(
       observingBotId,
-      projectPrivateTextMessageForBot({
-        message,
-        account: account.profile,
-        bot: bot.profile,
-        observerMessageId,
-      }),
+      this.#botMessageViews.viewPrivateTextMessageForBot(message),
     );
   }
 

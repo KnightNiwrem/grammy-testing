@@ -6,6 +6,7 @@ import {
   DEFAULT_ALLOWED_UPDATE_TYPES,
 } from '../types/bot_api.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
+import type { PrivateTextMessage } from '../types/virtual_message.ts';
 
 export interface GetUpdatesRequest {
   readonly offset?: number;
@@ -57,7 +58,7 @@ interface BotUpdateMailboxPolling {
 }
 
 type BotMessageSendingResult =
-  | { readonly sent: true; readonly message: BotApiPrivateTextMessage }
+  | { readonly sent: true; readonly message: PrivateTextMessage }
   | {
     readonly sent: false;
     readonly reason:
@@ -76,6 +77,10 @@ interface BotMessageSender {
   }): BotMessageSendingResult;
 }
 
+interface BotMessageViews {
+  viewPrivateTextMessageForBot(message: PrivateTextMessage): BotApiPrivateTextMessage;
+}
+
 interface BotUpdateSubscriptionStore {
   setAllowedUpdateTypes(botId: number, allowedUpdateTypes: ReadonlySet<BotApiUpdateType>): void;
 }
@@ -85,6 +90,7 @@ interface BotApiServiceDependencies {
   readonly botUpdates: BotUpdateMailboxPolling;
   readonly updateSubscriptions: BotUpdateSubscriptionStore;
   readonly botMessages: BotMessageSender;
+  readonly botMessageViews: BotMessageViews;
 }
 
 /**
@@ -100,6 +106,7 @@ export class BotApiService {
   readonly #botUpdates: BotUpdateMailboxPolling;
   readonly #updateSubscriptions: BotUpdateSubscriptionStore;
   readonly #botMessages: BotMessageSender;
+  readonly #botMessageViews: BotMessageViews;
   /** Aborting a bot's controller terminates the long poll it holds. */
   readonly #heldLongPollsByBotId = new Map<number, AbortController>();
   /**
@@ -108,11 +115,15 @@ export class BotApiService {
    */
   readonly #longPollingEnd = new AbortController();
 
-  constructor({ bots, botUpdates, updateSubscriptions, botMessages }: BotApiServiceDependencies) {
+  constructor(
+    { bots, botUpdates, updateSubscriptions, botMessages, botMessageViews }:
+      BotApiServiceDependencies,
+  ) {
     this.#bots = bots;
     this.#botUpdates = botUpdates;
     this.#updateSubscriptions = updateSubscriptions;
     this.#botMessages = botMessages;
+    this.#botMessageViews = botMessageViews;
   }
 
   /** Returns the profile of the bot that owns `token`, or `undefined` if no bot does. */
@@ -212,7 +223,10 @@ export class BotApiService {
       text,
     });
     if (result.sent) {
-      return result;
+      return {
+        sent: true,
+        message: this.#botMessageViews.viewPrivateTextMessageForBot(result.message),
+      };
     }
 
     switch (result.reason) {
