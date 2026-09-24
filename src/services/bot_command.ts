@@ -1,0 +1,291 @@
+import { cleanInputString, trimTdlibSpaces } from '../text_entities/input_string.ts';
+import {
+  type BotCommand,
+  type BotCommandLanguageCode,
+  type BotCommandScope,
+  MAX_BOT_COMMAND_COUNT,
+  MAX_BOT_COMMAND_DESCRIPTION_LENGTH,
+  MAX_BOT_COMMAND_LENGTH,
+} from '../types/bot_command.ts';
+import type { VirtualAccount } from '../types/virtual_account.ts';
+import type { VirtualBot } from '../types/virtual_bot.ts';
+import type { PrivateConversation, PrivateConversationKey } from '../types/virtual_chat.ts';
+
+/** A command as a bot specified it, before Telegram cleans and checks it. */
+export interface SpecifiedBotCommand {
+  readonly command: string;
+  readonly description: string;
+  readonly isEphemeral: boolean;
+}
+
+/** Addresses one command list of the bot: a scope and a language. */
+export interface BotCommandListTarget {
+  readonly botId: number;
+  readonly scope: BotCommandScope;
+  readonly languageCode: BotCommandLanguageCode;
+}
+
+export interface SetBotCommandsInput extends BotCommandListTarget {
+  readonly commands: readonly SpecifiedBotCommand[];
+}
+
+/** Why a scope or language cannot address a command list, in the order Telegram checks them. */
+export type BotCommandListTargetFailureReason =
+  | 'bot_not_found'
+  | 'chat_not_found'
+  | 'scope_not_allowed_in_private_chats'
+  | 'language_code_invalid';
+
+/** Why a command is rejected, in the order Telegram checks each command. */
+export type BotCommandFailureReason =
+  | 'command_not_utf8'
+  | 'command_description_not_utf8'
+  | 'command_empty'
+  | 'command_too_long'
+  | 'command_description_empty'
+  | 'command_description_too_long'
+  | 'too_many_commands'
+  | 'command_invalid';
+
+export type SetBotCommandsResult =
+  | { readonly set: true }
+  | {
+    readonly set: false;
+    readonly reason: BotCommandListTargetFailureReason | BotCommandFailureReason;
+  };
+
+export type GetBotCommandsResult =
+  | { readonly found: true; readonly commands: readonly BotCommand[] }
+  | { readonly found: false; readonly reason: BotCommandListTargetFailureReason };
+
+export type DeleteBotCommandsResult =
+  | { readonly deleted: true }
+  | { readonly deleted: false; readonly reason: BotCommandListTargetFailureReason };
+
+export type GetPrivateChatCommandsResult =
+  | { readonly found: true; readonly commands: readonly BotCommand[] }
+  | { readonly found: false; readonly reason: 'account_not_found' | 'bot_not_found' };
+
+interface AccountLookup {
+  getById(accountId: number): VirtualAccount | undefined;
+}
+
+interface BotLookup {
+  getById(botId: number): VirtualBot | undefined;
+}
+
+interface PrivateConversationLookup {
+  getPrivateConversation(key: PrivateConversationKey): PrivateConversation | undefined;
+}
+
+interface BotCommandStore {
+  setCommands(key: BotCommandListTarget, commands: readonly BotCommand[]): void;
+  getCommands(key: BotCommandListTarget): readonly BotCommand[] | undefined;
+}
+
+interface BotCommandServiceDependencies {
+  readonly accounts: AccountLookup;
+  readonly bots: BotLookup;
+  readonly privateConversations: PrivateConversationLookup;
+  readonly botCommands: BotCommandStore;
+}
+
+/** Characters Telegram allows in a bot command. */
+const BOT_COMMAND_PATTERN = /^[a-z0-9_]+$/;
+
+/** A language code Telegram accepts for a command list: empty or two lowercase letters. */
+const LANGUAGE_CODE_PATTERN = /^(?:[a-z]{2})?$/;
+
+/**
+ * Keeps each bot's command lists by scope and language, as `setMyCommands`, `getMyCommands`, and
+ * `deleteMyCommands` manage them, and resolves the list an account's client shows in its private
+ * chat with the bot.
+ *
+ * Chat scopes can address only private chats the account has started with the bot, as elsewhere
+ * in the emulator; group chats are not available to bots yet.
+ */
+export class BotCommandService {
+  readonly #accounts: AccountLookup;
+  readonly #bots: BotLookup;
+  readonly #privateConversations: PrivateConversationLookup;
+  readonly #botCommands: BotCommandStore;
+
+  constructor(
+    { accounts, bots, privateConversations, botCommands }: BotCommandServiceDependencies,
+  ) {
+    this.#accounts = accounts;
+    this.#bots = bots;
+    this.#privateConversations = privateConversations;
+    this.#botCommands = botCommands;
+  }
+
+  /**
+   * Replaces the bot's command list for a scope and language; an empty list deletes it. Commands
+   * are cleaned, trimmed, and stripped of a leading slash, then checked in TDLib's order, as
+   * `set_commands` in `td/telegram/BotCommand.cpp` does. Telegram's server then limits their
+   * number and characters.
+   */
+  setBotCommands(input: SetBotCommandsInput): SetBotCommandsResult {
+    const targetFailure = this.#checkListTarget(input);
+    if (targetFailure !== undefined) {
+      return { set: false, reason: targetFailure };
+    }
+
+    const commands: BotCommand[] = [];
+    for (const specifiedCommand of input.commands) {
+      const normalization = normalizeBotCommand(specifiedCommand);
+      if (!normalization.normalized) {
+        return { set: false, reason: normalization.reason };
+      }
+      commands.push(normalization.command);
+    }
+    if (commands.length > MAX_BOT_COMMAND_COUNT) {
+      return { set: false, reason: 'too_many_commands' };
+    }
+    if (commands.some(({ command }) => !BOT_COMMAND_PATTERN.test(command))) {
+      return { set: false, reason: 'command_invalid' };
+    }
+
+    this.#botCommands.setCommands(input, commands);
+    return { set: true };
+  }
+
+  /** Returns the bot's command list for exactly this scope and language, without fallback. */
+  getBotCommands(target: BotCommandListTarget): GetBotCommandsResult {
+    const targetFailure = this.#checkListTarget(target);
+    if (targetFailure !== undefined) {
+      return { found: false, reason: targetFailure };
+    }
+    return { found: true, commands: this.#botCommands.getCommands(target) ?? [] };
+  }
+
+  /** Deletes the bot's command list for a scope and language. */
+  deleteBotCommands(target: BotCommandListTarget): DeleteBotCommandsResult {
+    const targetFailure = this.#checkListTarget(target);
+    if (targetFailure !== undefined) {
+      return { deleted: false, reason: targetFailure };
+    }
+    this.#botCommands.setCommands(target, []);
+    return { deleted: true };
+  }
+
+  /**
+   * Returns the commands an account's client suggests in its private chat with the bot: the first
+   * list found for the chat, then all private chats, then the default scope, each preferring the
+   * account's language over the list without one, as the Bot API documents.
+   */
+  getPrivateChatCommands(
+    { accountId, botId }: PrivateConversationKey,
+  ): GetPrivateChatCommandsResult {
+    const account = this.#accounts.getById(accountId);
+    if (account === undefined) {
+      return { found: false, reason: 'account_not_found' };
+    }
+    if (this.#bots.getById(botId) === undefined) {
+      return { found: false, reason: 'bot_not_found' };
+    }
+
+    const accountLanguageCode = getCommandListLanguageCode(account.profile.language_code);
+    const scopes: readonly BotCommandScope[] = [
+      { type: 'chat', chatId: accountId },
+      { type: 'all_private_chats' },
+      { type: 'default' },
+    ];
+    for (const scope of scopes) {
+      for (const languageCode of new Set([accountLanguageCode, ''])) {
+        const commands = this.#botCommands.getCommands({ botId, scope, languageCode });
+        if (commands !== undefined) {
+          return { found: true, commands };
+        }
+      }
+    }
+    return { found: true, commands: [] };
+  }
+
+  /**
+   * Checks that a scope and language can address a command list, as the Bot API server's
+   * `check_bot_command_scope` and TDLib's `BotCommandScope::get_bot_command_scope` do.
+   */
+  #checkListTarget(
+    { botId, scope, languageCode }: BotCommandListTarget,
+  ): BotCommandListTargetFailureReason | undefined {
+    if (this.#bots.getById(botId) === undefined) {
+      return 'bot_not_found';
+    }
+    switch (scope.type) {
+      case 'default':
+      case 'all_private_chats':
+      case 'all_group_chats':
+      case 'all_chat_administrators':
+        break;
+      case 'chat':
+      case 'chat_administrators':
+      case 'chat_member': {
+        const conversation = this.#privateConversations.getPrivateConversation({
+          accountId: scope.chatId,
+          botId,
+        });
+        if (conversation === undefined) {
+          return 'chat_not_found';
+        }
+        if (scope.type !== 'chat') {
+          return 'scope_not_allowed_in_private_chats';
+        }
+        break;
+      }
+      default: {
+        const unhandledScope: never = scope;
+        throw new Error(`Unhandled bot command scope: ${JSON.stringify(unhandledScope)}`);
+      }
+    }
+    return LANGUAGE_CODE_PATTERN.test(languageCode) ? undefined : 'language_code_invalid';
+  }
+}
+
+type BotCommandNormalization =
+  | { readonly normalized: true; readonly command: BotCommand }
+  | { readonly normalized: false; readonly reason: BotCommandFailureReason };
+
+function normalizeBotCommand(
+  { command, description, isEphemeral }: SpecifiedBotCommand,
+): BotCommandNormalization {
+  const cleanedCommand = cleanInputString(command);
+  if (cleanedCommand === undefined) {
+    return { normalized: false, reason: 'command_not_utf8' };
+  }
+  const cleanedDescription = cleanInputString(description);
+  if (cleanedDescription === undefined) {
+    return { normalized: false, reason: 'command_description_not_utf8' };
+  }
+
+  let normalizedCommand = trimTdlibSpaces(cleanedCommand);
+  if (normalizedCommand.startsWith('/')) {
+    normalizedCommand = normalizedCommand.slice(1);
+  }
+  if (normalizedCommand.length === 0) {
+    return { normalized: false, reason: 'command_empty' };
+  }
+  if ([...normalizedCommand].length > MAX_BOT_COMMAND_LENGTH) {
+    return { normalized: false, reason: 'command_too_long' };
+  }
+  const normalizedDescription = trimTdlibSpaces(cleanedDescription);
+  if (normalizedDescription.length === 0) {
+    return { normalized: false, reason: 'command_description_empty' };
+  }
+  if ([...normalizedDescription].length > MAX_BOT_COMMAND_DESCRIPTION_LENGTH) {
+    return { normalized: false, reason: 'command_description_too_long' };
+  }
+  return {
+    normalized: true,
+    command: { command: normalizedCommand, description: normalizedDescription, isEphemeral },
+  };
+}
+
+/**
+ * The command list language for a user's language: the primary subtag of an IETF language tag,
+ * such as `en` for `en-US`.
+ */
+function getCommandListLanguageCode(userLanguageCode: string | undefined): BotCommandLanguageCode {
+  const primarySubtag = userLanguageCode?.split('-')[0].toLowerCase() ?? '';
+  return LANGUAGE_CODE_PATTERN.test(primarySubtag) ? primarySubtag : '';
+}

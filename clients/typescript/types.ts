@@ -153,6 +153,14 @@ export interface PrivateTextMessage {
   readonly reply_markup?: InlineKeyboardMarkup;
 }
 
+/** A bot command as an account's client lists it. */
+export interface BotCommand {
+  /** The command without its leading slash. */
+  readonly command: string;
+  readonly description: string;
+  readonly is_ephemeral: boolean;
+}
+
 export interface CallbackQueryAnswer {
   /** Omitted when the answer shows no notification. */
   readonly text?: string;
@@ -184,6 +192,16 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
   pressCallbackButton(input: PressCallbackButtonInput): Promise<CallbackQuery>;
   /** Returns a callback query this account created, with the bot's answer once given. */
   getCallbackQuery(callbackQueryId: string): Promise<CallbackQuery>;
+  /**
+   * Returns the commands this account's client suggests in its private chat with a bot: the
+   * bot's list for the chat, for all private chats, or by default, in the account's language if
+   * the bot has one.
+   */
+  getBotCommands(input: AccountBotCommandsInput): Promise<readonly BotCommand[]>;
+}
+
+export interface AccountBotCommandsInput {
+  readonly chat: PrivateMessageTarget;
 }
 
 export interface CreatedVirtualAccount {

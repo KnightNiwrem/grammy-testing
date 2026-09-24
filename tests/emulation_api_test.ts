@@ -1930,6 +1930,202 @@ Deno.test('a grammY bot replies with HTML and receives Telegram errors for bad M
   }
 });
 
+Deno.test('setMyCommands, getMyCommands, and deleteMyCommands follow Telegram checks', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  const expectBadRequest = async (
+    methodName: string,
+    parameters: Record<string, unknown>,
+    expectedDescription: string,
+  ) => {
+    const { status, body } = await callBotApi(api, `${botApiPath}/${methodName}`, parameters);
+    if (status !== 400 || !isBadRequestResponse(body) || body.description !== expectedDescription) {
+      throw new Error(
+        `Expected ${methodName} ${
+          JSON.stringify(parameters)
+        } to fail with ${expectedDescription}, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  };
+  const getCommands = async (parameters: Record<string, unknown>) => {
+    const { status, body } = await callBotApi(api, `${botApiPath}/getMyCommands`, parameters);
+    if (status !== 200 || typeof body !== 'object' || body === null || !('result' in body)) {
+      throw new Error(
+        `Expected getMyCommands to succeed, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+    return body.result;
+  };
+
+  const setResponse = await api.request(`${botApiPath}/setMyCommands`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      commands: JSON.stringify([
+        { command: '/start', description: 'Start over' },
+        { command: 'help', description: 'Show help', is_ephemeral: true },
+      ]),
+      language_code: 'en',
+    }),
+  });
+  const setBody: unknown = await setResponse.json();
+  if (
+    setResponse.status !== 200 ||
+    JSON.stringify(setBody) !== JSON.stringify({ ok: true, result: true })
+  ) {
+    throw new Error(`Expected setMyCommands to succeed, received ${JSON.stringify(setBody)}`);
+  }
+  const englishCommands = [
+    { command: 'start', description: 'Start over' },
+    { command: 'help', description: 'Show help', is_ephemeral: true },
+  ];
+  if (
+    JSON.stringify(await getCommands({ language_code: 'en' })) !==
+      JSON.stringify(englishCommands) ||
+    JSON.stringify(await getCommands({})) !== JSON.stringify([])
+  ) {
+    throw new Error('Expected getMyCommands to return exactly the list of its scope and language');
+  }
+
+  await expectBadRequest('setMyCommands', {
+    commands: [{ command: 'Start', description: 'Go' }],
+  }, 'Bad Request: BOT_COMMAND_INVALID');
+  await expectBadRequest('setMyCommands', {
+    commands: [{ command: 'start', description: ' ' }],
+  }, 'Bad Request: command description must be non-empty');
+  await expectBadRequest('setMyCommands', {
+    commands: [{ command: 'c'.repeat(33), description: 'Go' }],
+  }, 'Bad Request: command length must not exceed 32');
+  await expectBadRequest(
+    'setMyCommands',
+    { commands: [], language_code: 'english' },
+    'Bad Request: invalid language code specified',
+  );
+  await expectBadRequest(
+    'getMyCommands',
+    { scope: { type: 'chat', chat_id: accountId } },
+    'Bad Request: chat not found',
+  );
+  await expectBadRequest(
+    'deleteMyCommands',
+    { scope: { type: 'everyone' } },
+    "Bad Request: can't parse BotCommandScope: Unsupported type specified",
+  );
+  await expectBadRequest(
+    'getMyCommands',
+    { scope: { type: 'chat_member', chat_id: accountId, user_id: 0 } },
+    "Bad Request: can't parse BotCommandScope: Invalid user_id specified",
+  );
+  await expectBadRequest(
+    'setMyCommands',
+    { commands: [{ command: 'start' }] },
+    'Bad Request: invalid setMyCommands parameters',
+  );
+
+  await sendText('Hi');
+  await expectBadRequest(
+    'getMyCommands',
+    { scope: { type: 'chat_administrators', chat_id: accountId } },
+    "Bad Request: can't use specified scope in private chats",
+  );
+  const chatScope = { type: 'chat', chat_id: accountId };
+  const chatSetResult = await callBotApi(api, `${botApiPath}/setMyCommands`, {
+    commands: [{ command: 'order', description: 'Order again' }],
+    scope: chatScope,
+  });
+  if (chatSetResult.status !== 200) {
+    throw new Error(
+      `Expected chat commands to be set, received ${JSON.stringify(chatSetResult.body)}`,
+    );
+  }
+  const commandsPath =
+    `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/commands`;
+  const chatCommandsBody: unknown = await (await api.request(commandsPath)).json();
+  if (
+    JSON.stringify(chatCommandsBody) !== JSON.stringify({
+      commands: [{ command: 'order', description: 'Order again', is_ephemeral: false }],
+    })
+  ) {
+    throw new Error(
+      `Expected the account to see its chat's commands, received ${
+        JSON.stringify(chatCommandsBody)
+      }`,
+    );
+  }
+
+  const deleteResult = await callBotApi(api, `${botApiPath}/deleteMyCommands`, {
+    scope: chatScope,
+  });
+  const fallbackBody: unknown = await (await api.request(commandsPath)).json();
+  if (
+    deleteResult.status !== 200 ||
+    JSON.stringify(fallbackBody) !== JSON.stringify({ commands: [] }) ||
+    JSON.stringify(await getCommands({ scope: chatScope })) !== JSON.stringify([])
+  ) {
+    throw new Error(
+      `Expected the chat's commands to be deleted, received ${JSON.stringify(fallbackBody)}`,
+    );
+  }
+  const unknownBotResponse = await api.request(
+    `${sessionPath}/accounts/${accountId}/conversations/private/999/commands`,
+  );
+  if (unknownBotResponse.status !== 404) {
+    throw new Error(
+      `Expected an unknown bot to be reported, received ${unknownBotResponse.status}`,
+    );
+  }
+});
+
+Deno.test('a grammY bot registers its command menu at startup and for a chat', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const chatMenuSet = Promise.withResolvers<void>();
+  grammyBot.command('start', async (context) => {
+    await context.api.setMyCommands(
+      [{ command: 'order', description: 'Place an order' }, {
+        command: 'help',
+        description: 'Help',
+      }],
+      { scope: { type: 'chat', chat_id: context.chat.id } },
+    );
+    chatMenuSet.resolve();
+  });
+  await grammyBot.api.setMyCommands([{ command: 'start', description: 'Start the bot' }]);
+  const commandsPath =
+    `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/commands`;
+  const menuCommands = async () => {
+    const body: unknown = await (await api.request(commandsPath)).json();
+    const commands = typeof body === 'object' && body !== null && 'commands' in body &&
+        Array.isArray(body.commands)
+      ? body.commands
+      : [];
+    return commands.map((command: { command?: unknown }) => command.command).join();
+  };
+  if (await menuCommands() !== 'start') {
+    throw new Error('Expected the account to see the default commands');
+  }
+  const polling = grammyBot.start();
+
+  try {
+    await sendText('/start');
+    // Polling ends only when stopped, so settling first means startup failed.
+    await Promise.race([chatMenuSet.promise, polling]);
+    if (await menuCommands() !== 'order,help') {
+      throw new Error(`Expected the chat's own commands, received ${await menuCommands()}`);
+    }
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+});
+
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,

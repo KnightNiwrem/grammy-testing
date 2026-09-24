@@ -2,10 +2,19 @@ import { type Context, Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 
+import {
+  MAX_BOT_COMMAND_DESCRIPTION_LENGTH,
+  MAX_BOT_COMMAND_LENGTH,
+} from '../../../types/bot_command.ts';
 import { MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH } from '../../../types/callback_query.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { VirtualBotProfile } from '../../../types/virtual_bot.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
+import {
+  botCommandScopeParameter,
+  botCommandsParameter,
+  readBotCommandScopeParameter,
+} from './bot_command_parameters.ts';
 import {
   DATE_TIME_UNSUPPORTED_DESCRIPTION,
   messageEntitiesParameter,
@@ -73,6 +82,22 @@ const NO_MESSAGE_ID = 0;
 const QUERY_ID_INVALID_DESCRIPTION =
   'Bad Request: query is too old and response timeout expired or query ID is invalid';
 
+/** Telegram's descriptions for rejected command list changes. */
+const SCOPE_NOT_ALLOWED_IN_PRIVATE_CHATS_DESCRIPTION =
+  "Bad Request: can't use specified scope in private chats";
+const LANGUAGE_CODE_INVALID_DESCRIPTION = 'Bad Request: invalid language code specified';
+const BOT_COMMAND_FAILURE_DESCRIPTIONS = {
+  command_not_utf8: 'Bad Request: command must be encoded in UTF-8',
+  command_description_not_utf8: 'Bad Request: command description must be encoded in UTF-8',
+  command_empty: 'Bad Request: command must be non-empty',
+  command_too_long: `Bad Request: command length must not exceed ${MAX_BOT_COMMAND_LENGTH}`,
+  command_description_empty: 'Bad Request: command description must be non-empty',
+  command_description_too_long:
+    `Bad Request: command description length must not exceed ${MAX_BOT_COMMAND_DESCRIPTION_LENGTH}`,
+  too_many_commands: 'Bad Request: BOT_COMMANDS_TOO_MUCH',
+  command_invalid: 'Bad Request: BOT_COMMAND_INVALID',
+} as const;
+
 /** Telegram caps how long a client may cache a callback query answer at 30 days. */
 const MAX_CALLBACK_QUERY_ANSWER_CACHE_TIME_SECONDS = 30 * 24 * 60 * 60;
 
@@ -132,6 +157,19 @@ const answerCallbackQueryParametersSchema = z.strictObject({
     .default(0),
 });
 
+// Telegram treats a missing commands parameter as an empty list, which deletes the list.
+const setMyCommandsParametersSchema = z.strictObject({
+  commands: botCommandsParameter().default([]),
+  scope: botCommandScopeParameter().optional(),
+  language_code: z.string().default(''),
+});
+
+/** Parameters of getMyCommands and deleteMyCommands, which address one command list. */
+const myCommandsTargetParametersSchema = z.strictObject({
+  scope: botCommandScopeParameter().optional(),
+  language_code: z.string().default(''),
+});
+
 const getUpdatesParametersSchema = z.strictObject({
   offset: integerParameter(z.int()).optional(),
   limit: integerParameter(z.int().min(1).max(100)).default(100),
@@ -157,6 +195,13 @@ type MessageEditResult = ReturnType<EmulationSession['botApi']['editMessageText'
 
 type SendMessageResult = ReturnType<EmulationSession['botApi']['sendMessage']>;
 
+type MyCommandsTarget = Parameters<EmulationSession['botApi']['getMyCommands']>[1];
+
+type MyCommandsTargetFailureReason = Extract<
+  ReturnType<EmulationSession['botApi']['getMyCommands']>,
+  { readonly found: false }
+>['reason'];
+
 type FormattedTextReadingResult = ReturnType<EmulationSession['botApi']['readFormattedText']>;
 
 /** Message text with the entities its bot specified, or the error response for reading it. */
@@ -174,12 +219,15 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['answercallbackquery', handleAnswerCallbackQuery],
   ['deletemessage', handleDeleteMessage],
   ['deletemessages', handleDeleteMessages],
+  ['deletemycommands', handleDeleteMyCommands],
   ['deletewebhook', handleDeleteWebhook],
   ['editmessagereplymarkup', handleEditMessageReplyMarkup],
   ['editmessagetext', handleEditMessageText],
   ['getme', handleGetMe],
+  ['getmycommands', handleGetMyCommands],
   ['getupdates', handleGetUpdates],
   ['sendmessage', handleSendMessage],
+  ['setmycommands', handleSetMyCommands],
 ]);
 
 export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
@@ -582,6 +630,129 @@ function handleAnswerCallbackQuery(
     return botApiError(context, 400, QUERY_ID_INVALID_DESCRIPTION);
   }
   return context.json({ ok: true as const, result: true as const });
+}
+
+function handleSetMyCommands(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const invalidParametersDescription = 'Bad Request: invalid setMyCommands parameters';
+  const parsedParameters = setMyCommandsParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, invalidParametersDescription);
+  }
+  const { commands, scope, language_code: languageCode } = parsedParameters.data;
+  const targetReading = readMyCommandsTarget(
+    context,
+    { scope, languageCode },
+    invalidParametersDescription,
+  );
+  if (!targetReading.read) {
+    return targetReading.response;
+  }
+
+  const result = context.get('emulationSession').botApi.setMyCommands(
+    context.get('authenticatedBot'),
+    { commands, ...targetReading.target },
+  );
+  if (result.set) {
+    return context.json({ ok: true as const, result: true as const });
+  }
+  switch (result.reason) {
+    case 'chat_not_found':
+    case 'scope_not_allowed_in_private_chats':
+    case 'language_code_invalid':
+      return myCommandsTargetError(context, result.reason);
+    default:
+      return botApiError(context, 400, BOT_COMMAND_FAILURE_DESCRIPTIONS[result.reason]);
+  }
+}
+
+function handleGetMyCommands(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const invalidParametersDescription = 'Bad Request: invalid getMyCommands parameters';
+  const parsedParameters = myCommandsTargetParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, invalidParametersDescription);
+  }
+  const targetReading = readMyCommandsTarget(
+    context,
+    { scope: parsedParameters.data.scope, languageCode: parsedParameters.data.language_code },
+    invalidParametersDescription,
+  );
+  if (!targetReading.read) {
+    return targetReading.response;
+  }
+
+  const result = context.get('emulationSession').botApi.getMyCommands(
+    context.get('authenticatedBot'),
+    targetReading.target,
+  );
+  return result.found
+    ? context.json({ ok: true as const, result: result.commands })
+    : myCommandsTargetError(context, result.reason);
+}
+
+function handleDeleteMyCommands(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const invalidParametersDescription = 'Bad Request: invalid deleteMyCommands parameters';
+  const parsedParameters = myCommandsTargetParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, invalidParametersDescription);
+  }
+  const targetReading = readMyCommandsTarget(
+    context,
+    { scope: parsedParameters.data.scope, languageCode: parsedParameters.data.language_code },
+    invalidParametersDescription,
+  );
+  if (!targetReading.read) {
+    return targetReading.response;
+  }
+
+  const result = context.get('emulationSession').botApi.deleteMyCommands(
+    context.get('authenticatedBot'),
+    targetReading.target,
+  );
+  return result.deleted
+    ? context.json({ ok: true as const, result: true as const })
+    : myCommandsTargetError(context, result.reason);
+}
+
+/** Reads the scope and language that address one of the bot's command lists. */
+function readMyCommandsTarget(
+  context: BotApiRouteContext,
+  { scope, languageCode }: { readonly scope: unknown; readonly languageCode: string },
+  invalidParametersDescription: string,
+):
+  | { readonly read: true; readonly target: MyCommandsTarget }
+  | { readonly read: false; readonly response: Response } {
+  const scopeReading = readBotCommandScopeParameter(scope, invalidParametersDescription);
+  if (!scopeReading.read) {
+    return { read: false, response: botApiError(context, 400, scopeReading.description) };
+  }
+  return { read: true, target: { scope: scopeReading.scope, languageCode } };
+}
+
+function myCommandsTargetError(
+  context: BotApiRouteContext,
+  reason: MyCommandsTargetFailureReason,
+): Response {
+  switch (reason) {
+    case 'chat_not_found':
+      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'scope_not_allowed_in_private_chats':
+      return botApiError(context, 400, SCOPE_NOT_ALLOWED_IN_PRIVATE_CHATS_DESCRIPTION);
+    case 'language_code_invalid':
+      return botApiError(context, 400, LANGUAGE_CODE_INVALID_DESCRIPTION);
+    default: {
+      const unhandledReason: never = reason;
+      throw new Error(`Unhandled command list failure: ${unhandledReason}`);
+    }
+  }
 }
 
 /**

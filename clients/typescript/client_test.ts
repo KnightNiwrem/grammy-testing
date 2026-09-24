@@ -193,6 +193,26 @@ Deno.test('TypeScript client manages all currently implemented session resources
     throw new Error('Expected the client to create an expired callback query');
   }
 
+  const setCommandsResponse = await api.request(`${botApiPath}/setMyCommands`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ commands: [{ command: 'start', description: 'Start over' }] }),
+  });
+  if (setCommandsResponse.status !== 200) {
+    throw new Error(`Expected the commands to be set, received ${setCommandsResponse.status}`);
+  }
+  const commands = await createdAccount.account.getBotCommands({
+    chat: { type: 'private', botId: createdBot.bot.id },
+  });
+  if (
+    JSON.stringify(commands) !==
+      JSON.stringify([{ command: 'start', description: 'Start over', is_ephemeral: false }])
+  ) {
+    throw new Error(
+      `Expected the client to return the bot's commands, received ${JSON.stringify(commands)}`,
+    );
+  }
+
   await session.end();
 });
 

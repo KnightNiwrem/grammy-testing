@@ -1,5 +1,6 @@
 import { HTTP_STATUS_CREATED, HTTP_STATUS_NO_CONTENT, HTTP_STATUS_OK } from './constants.ts';
 import {
+  botCommandsResponseSchema,
   callbackQueryResponseSchema,
   createdVirtualAccountSchema,
   createdVirtualBotSchema,
@@ -8,8 +9,10 @@ import {
   sentMessageResponseSchema,
 } from './schemas.ts';
 import type {
+  AccountBotCommandsInput,
   AccountMessageHistoryInput,
   AccountSendMessageInput,
+  BotCommand,
   CallbackQuery,
   CreatedVirtualAccount,
   CreatedVirtualBot,
@@ -153,6 +156,16 @@ function createVirtualAccountClient(
         responseSchema: callbackQueryResponseSchema,
       });
       return response.callback_query;
+    },
+    async getBotCommands(input: AccountBotCommandsInput): Promise<readonly BotCommand[]> {
+      const botId = encodeURIComponent(input.chat.botId);
+      const response = await requestJson(fetchImplementation, {
+        method: 'GET',
+        url: `${accountUrl}/conversations/private/${botId}/commands`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: botCommandsResponseSchema,
+      });
+      return response.commands;
     },
   });
 }

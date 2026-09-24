@@ -199,6 +199,31 @@ paths:
           description: An account or bot path identifier is invalid.
         '404':
           description: The session, account, or bot does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/commands:
+    description: The bot commands an account's client suggests in its private chat with a bot.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      operationId: getPrivateChatBotCommands
+      summary: Return the commands the account sees in its private chat with the bot
+      description: >-
+        Resolves the bot's command lists as Telegram documents for private chats: the list for
+        the chat, then for all private chats, then the default list, each preferring the list in
+        the account's language, taken from the primary subtag of its `language_code`, over the
+        list without a language. The account need not have written to the bot.
+      responses:
+        '200':
+          description: The commands, which are empty if the bot set none that apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountBotCommands'
+        '400':
+          description: A path identifier is invalid.
+        '404':
+          description: The session, account, or bot does not exist.
   /sessions/{sessionId}/accounts/{accountId}/callback-queries:
     description: Callback queries an account created by pressing callback buttons.
     parameters:
@@ -727,6 +752,190 @@ paths:
             The request cannot be decoded or has unsupported parameters, or the callback query
             does not exist, was sent to another bot, is already answered, or has expired (`Bad
             Request: query is too old and response timeout expired or query ID is invalid`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/setMyCommands:
+    description: >-
+      Telegram Bot API method for replacing the bot's command list for a scope and language. As on
+      Telegram, commands are cleaned of control characters, trimmed, and stripped of a leading
+      slash, and an empty or missing `commands` list deletes the list. Chat scopes can address only
+      private chats with accounts that have written to the bot; group chats are not available to
+      bots yet.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: setMyCommands
+      summary: Replace one of the authenticated virtual bot's command lists
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMyCommandsRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SetMyCommandsRequest'
+            encoding:
+              commands:
+                contentType: application/json
+              scope:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SetMyCommandsRequest'
+            encoding:
+              commands:
+                contentType: application/json
+              scope:
+                contentType: application/json
+      responses:
+        '200':
+          description: The command list was replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrueResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it, checking in this order: the scope is not a known type (`Bad Request: can't parse
+            BotCommandScope: Unsupported type specified`) or names a user ID that is not positive
+            (`Bad Request: can't parse BotCommandScope: Invalid user_id specified`); a chat scope
+            names a chat that is not a private chat with an account that has written to the bot
+            (`Bad Request: chat not found`); an administrator or member scope names a private chat
+            (`Bad Request: can't use specified scope in private chats`); or the language code is
+            neither empty nor two lowercase letters (`Bad Request: invalid language code
+            specified`). Each command is then checked for UTF-8 text, a nonempty command of at most
+            32 characters (`Bad Request: command must be non-empty`, `Bad Request: command length
+            must not exceed 32`), and a nonempty description of at most 256 characters (`Bad
+            Request: command description must be non-empty`, `Bad Request: command description
+            length must not exceed 256`); finally, more than 100 commands (`Bad Request:
+            BOT_COMMANDS_TOO_MUCH`) or a command with characters other than lowercase English
+            letters, digits, and underscores (`Bad Request: BOT_COMMAND_INVALID`) are rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/getMyCommands:
+    description: >-
+      Telegram Bot API method for reading the bot's command list for exactly one scope and
+      language, without falling back to other scopes or languages.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getMyCommands
+      summary: Return one of the authenticated virtual bot's command lists
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MyCommandsTargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MyCommandsTargetRequest'
+            encoding:
+              scope:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MyCommandsTargetRequest'
+            encoding:
+              scope:
+                contentType: application/json
+      responses:
+        '200':
+          description: The command list, which is empty if none is set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotCommandsResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it, checking in this order: the scope is not a known type (`Bad Request: can't parse
+            BotCommandScope: Unsupported type specified`) or names a user ID that is not positive
+            (`Bad Request: can't parse BotCommandScope: Invalid user_id specified`); a chat scope
+            names a chat that is not a private chat with an account that has written to the bot
+            (`Bad Request: chat not found`); an administrator or member scope names a private chat
+            (`Bad Request: can't use specified scope in private chats`); or the language code is
+            neither empty nor two lowercase letters (`Bad Request: invalid language code
+            specified`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/deleteMyCommands:
+    description: >-
+      Telegram Bot API method for deleting the bot's command list for a scope and language, so
+      that users see the list of the next broader scope.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: deleteMyCommands
+      summary: Delete one of the authenticated virtual bot's command lists
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MyCommandsTargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MyCommandsTargetRequest'
+            encoding:
+              scope:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MyCommandsTargetRequest'
+            encoding:
+              scope:
+                contentType: application/json
+      responses:
+        '200':
+          description: The command list was deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrueResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it, checking in this order: the scope is not a known type (`Bad Request: can't parse
+            BotCommandScope: Unsupported type specified`) or names a user ID that is not positive
+            (`Bad Request: can't parse BotCommandScope: Invalid user_id specified`); a chat scope
+            names a chat that is not a private chat with an account that has written to the bot
+            (`Bad Request: chat not found`); an administrator or member scope names a private chat
+            (`Bad Request: can't use specified scope in private chats`); or the language code is
+            neither empty nor two lowercase letters (`Bad Request: invalid language code
+            specified`).
           content:
             application/json:
               schema:
@@ -1424,6 +1633,124 @@ components:
         result:
           type: boolean
           const: true
+    BotCommand:
+      type: object
+      additionalProperties: false
+      required:
+        - command
+        - description
+      properties:
+        command:
+          type: string
+          description: >-
+            The command, 1-32 lowercase English letters, digits, and underscores. As a request
+            parameter, a leading slash and surrounding whitespace are removed first.
+        description:
+          type: string
+          description: The description, 1-256 characters after surrounding whitespace is removed.
+        is_ephemeral:
+          type: boolean
+          description: Telegram's ephemeral command flag, stored as given; omitted when false.
+    BotCommandScope:
+      type: object
+      additionalProperties: false
+      description: >-
+        The users and chats a command list applies to; a missing scope is the default scope.
+        Chat IDs must be numbers, and chat scopes can name only private chats.
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - default
+            - all_private_chats
+            - all_group_chats
+            - all_chat_administrators
+            - chat
+            - chat_administrators
+            - chat_member
+        chat_id:
+          type: integer
+          description: Required for `chat`, `chat_administrators`, and `chat_member`.
+        user_id:
+          type: integer
+          minimum: 1
+          description: Required for `chat_member`.
+    MyCommandsTargetRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        scope:
+          $ref: '#/components/schemas/BotCommandScope'
+        language_code:
+          type: string
+          pattern: '^([a-z]{2})?$'
+          description: >-
+            Two-letter ISO 639-1 language code of the list, or empty for users whose language has
+            no dedicated list.
+    SetMyCommandsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        commands:
+          type: array
+          items:
+            $ref: '#/components/schemas/BotCommand'
+        scope:
+          $ref: '#/components/schemas/BotCommandScope'
+        language_code:
+          type: string
+          pattern: '^([a-z]{2})?$'
+    BotCommandsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/BotCommand'
+    TrueResultResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: boolean
+          const: true
+    AccountBotCommands:
+      type: object
+      additionalProperties: false
+      required:
+        - commands
+      properties:
+        commands:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - command
+              - description
+              - is_ephemeral
+            properties:
+              command:
+                type: string
+              description:
+                type: string
+              is_ephemeral:
+                type: boolean
     PressCallbackButtonRequest:
       type: object
       additionalProperties: false

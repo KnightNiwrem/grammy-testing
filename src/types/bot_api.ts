@@ -66,6 +66,14 @@ export interface BotApiPrivateTextMessage {
   readonly reply_markup?: BotApiInlineKeyboardMarkup;
 }
 
+/** A bot command as the Bot API shows it. */
+export interface BotApiBotCommand {
+  readonly command: string;
+  readonly description: string;
+  /** Present only when set. */
+  readonly is_ephemeral?: true;
+}
+
 export interface BotApiCallbackQuery {
   readonly id: string;
   readonly from: VirtualAccountProfile;

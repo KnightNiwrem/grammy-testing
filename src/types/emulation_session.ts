@@ -1,4 +1,5 @@
 import type { BotApiService } from '../services/bot_api.ts';
+import type { BotCommandService } from '../services/bot_command.ts';
 import type { BotMessageViewService } from '../services/bot_message_view.ts';
 import type { CallbackQueryService } from '../services/callback_query.ts';
 import type { PrivateMessagingService } from '../services/private_messaging.ts';
@@ -16,6 +17,7 @@ export interface EmulationSession {
   readonly sharedChatAdministration: SharedChatAdministrationService;
   readonly privateMessaging: PrivateMessagingService;
   readonly callbackQueries: CallbackQueryService;
+  readonly botCommands: BotCommandService;
   readonly botMessageViews: BotMessageViewService;
   readonly botApi: BotApiService;
   /**

@@ -23,14 +23,17 @@ answer, such as one that arrives after downtime. Bots edit their messages with `
 `editMessageReplyMarkup`, and delete messages that either side wrote in their private chats with
 `deleteMessage` and `deleteMessages`; deleted messages leave the conversation history. With
 `deleteWebhook` and `getMe` also implemented, a grammY bot can run with `bot.start()` and stop with
-`bot.stop()`. As Telegram does in private chats with bots, the emulator marks bot commands such as
-`/start` with `bot_command` entities, so framework command handlers match them; other entity types
-that Telegram detects, such as URLs and mentions, are not detected yet, and date and time entities
-are not supported. Bot API requests follow Telegram's conventions: GET or POST, case-insensitive
-method names, and parameters in the query string or a JSON, URL-encoded, or multipart body. Bot API
-failures, including calls to methods the emulator does not implement, return Telegram-shaped JSON
-errors that clients report as API errors. The session creation response identifies its Bot API root.
-Other routes described in `openapi.yaml` are not implemented yet.
+`bot.stop()`. Bots manage their command menus with `setMyCommands`, `getMyCommands`, and
+`deleteMyCommands` for any scope and language, and a test reads the commands an account's private
+chat shows, resolved by scope and language as Telegram documents. As Telegram does in private chats
+with bots, the emulator marks bot commands such as `/start` with `bot_command` entities, so
+framework command handlers match them; other entity types that Telegram detects, such as URLs and
+mentions, are not detected yet, and date and time entities are not supported. Bot API requests
+follow Telegram's conventions: GET or POST, case-insensitive method names, and parameters in the
+query string or a JSON, URL-encoded, or multipart body. Bot API failures, including calls to methods
+the emulator does not implement, return Telegram-shaped JSON errors that clients report as API
+errors. The session creation response identifies its Bot API root. Other routes described in
+`openapi.yaml` are not implemented yet.
 
 ## TypeScript client
 
@@ -71,6 +74,10 @@ try {
     const { answer } = await account.getCallbackQuery(callbackQuery.id);
     console.log(answer?.text);
   }
+
+  // Read the command menu the account sees in its chat with the bot.
+  const commands = await account.getBotCommands({ chat: { type: 'private', botId: bot.id } });
+  console.log(commands.map(({ command }) => `/${command}`));
   console.log(token, session.botApiRoot, incomingMessage, history);
 } finally {
   await session.end();

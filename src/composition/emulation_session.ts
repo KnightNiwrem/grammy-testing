@@ -1,6 +1,7 @@
 import type { EmulationSession } from '../types/emulation_session.ts';
 import { AccountRepository } from '../repositories/account.ts';
 import { BotRepository } from '../repositories/bot.ts';
+import { BotCommandRepository } from '../repositories/bot_command.ts';
 import { BotUpdateRepository } from '../repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../repositories/bot_update_subscription.ts';
 import { CallbackQueryRepository } from '../repositories/callback_query.ts';
@@ -10,6 +11,7 @@ import { SharedChatRepository } from '../repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../repositories/user_message_box.ts';
 import { BotApiService } from '../services/bot_api.ts';
+import { BotCommandService } from '../services/bot_command.ts';
 import { BotMessageViewService } from '../services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../services/bot_update_polling.ts';
@@ -58,6 +60,13 @@ export function createEmulationSession(id: string): EmulationSession {
     events: botUpdateDelivery,
   });
 
+  const botCommands = new BotCommandService({
+    accounts,
+    bots,
+    privateConversations,
+    botCommands: new BotCommandRepository(),
+  });
+
   const botUpdatePolling = new BotUpdatePollingService({ botUpdates, updateSubscriptions });
   const botApi = new BotApiService({
     bots,
@@ -66,6 +75,7 @@ export function createEmulationSession(id: string): EmulationSession {
     botMessages: privateMessaging,
     botMessageViews,
     callbackQueries,
+    botCommands,
   });
 
   return {
@@ -74,6 +84,7 @@ export function createEmulationSession(id: string): EmulationSession {
     sharedChatAdministration,
     privateMessaging,
     callbackQueries,
+    botCommands,
     botMessageViews,
     botApi,
     end: () => botUpdatePolling.endLongPolling(),

@@ -24,3 +24,28 @@ export function isRemovedCharacter(codePoint: number): boolean {
 export function replaceRepeatedDirectionMarks(text: string): string {
   return text.replace(/[\u200e\u200f](?=[\u200e\u200f])/g, '\u200c');
 }
+
+/**
+ * Cleans text as Telegram does, or returns `undefined` for text that is not well-formed Unicode,
+ * which Telegram rejects as not encoded in UTF-8.
+ */
+export function cleanInputString(text: string): string | undefined {
+  if (!text.isWellFormed()) {
+    return undefined;
+  }
+  let cleanedText = '';
+  for (const character of text) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (isReplacedWithSpace(codePoint)) {
+      cleanedText += ' ';
+    } else if (!isRemovedCharacter(codePoint)) {
+      cleanedText += character;
+    }
+  }
+  return replaceRepeatedDirectionMarks(cleanedText);
+}
+
+/** Removes the characters TDLib's `trim` does from both ends: spaces, tabs, and line breaks. */
+export function trimTdlibSpaces(text: string): string {
+  return text.replace(/^[ \t\r\n\0\v]+|[ \t\r\n\0\v]+$/g, '');
+}

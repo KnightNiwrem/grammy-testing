@@ -1,5 +1,6 @@
 import { isParseMode, parseMarkup } from '../text_entities/parse_mode.ts';
-import type { BotApiPrivateTextMessage } from '../types/bot_api.ts';
+import type { BotApiBotCommand, BotApiPrivateTextMessage } from '../types/bot_api.ts';
+import type { BotCommand, BotCommandLanguageCode, BotCommandScope } from '../types/bot_command.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
@@ -228,6 +229,75 @@ interface BotMessaging {
     };
 }
 
+/** A command list of the bot, addressed as the command methods address it. */
+export interface MyCommandsTarget {
+  readonly scope: BotCommandScope;
+  readonly languageCode: BotCommandLanguageCode;
+}
+
+export interface SetMyCommandsRequest extends MyCommandsTarget {
+  readonly commands: readonly {
+    readonly command: string;
+    readonly description: string;
+    readonly isEphemeral: boolean;
+  }[];
+}
+
+/** Why a scope or language cannot address one of the bot's command lists. */
+export type MyCommandsTargetFailureReason =
+  | 'chat_not_found'
+  | 'scope_not_allowed_in_private_chats'
+  | 'language_code_invalid';
+
+export type SetMyCommandsFailureReason =
+  | MyCommandsTargetFailureReason
+  | 'command_not_utf8'
+  | 'command_description_not_utf8'
+  | 'command_empty'
+  | 'command_too_long'
+  | 'command_description_empty'
+  | 'command_description_too_long'
+  | 'too_many_commands'
+  | 'command_invalid';
+
+export type SetMyCommandsResult =
+  | { readonly set: true }
+  | { readonly set: false; readonly reason: SetMyCommandsFailureReason };
+
+export type GetMyCommandsResult =
+  | { readonly found: true; readonly commands: readonly BotApiBotCommand[] }
+  | { readonly found: false; readonly reason: MyCommandsTargetFailureReason };
+
+export type DeleteMyCommandsResult =
+  | { readonly deleted: true }
+  | { readonly deleted: false; readonly reason: MyCommandsTargetFailureReason };
+
+interface BotCommandListAddress extends MyCommandsTarget {
+  readonly botId: number;
+}
+
+type BotCommandListTargetFailure = MyCommandsTargetFailureReason | 'bot_not_found';
+
+interface BotCommandLists {
+  setBotCommands(input: BotCommandListAddress & Pick<SetMyCommandsRequest, 'commands'>):
+    | { readonly set: true }
+    | {
+      readonly set: false;
+      readonly reason:
+        | BotCommandListTargetFailure
+        | Exclude<
+          SetMyCommandsFailureReason,
+          MyCommandsTargetFailureReason
+        >;
+    };
+  getBotCommands(target: BotCommandListAddress):
+    | { readonly found: true; readonly commands: readonly BotCommand[] }
+    | { readonly found: false; readonly reason: BotCommandListTargetFailure };
+  deleteBotCommands(target: BotCommandListAddress):
+    | { readonly deleted: true }
+    | { readonly deleted: false; readonly reason: BotCommandListTargetFailure };
+}
+
 interface CallbackQueryAnswering {
   answerCallbackQuery(input: {
     readonly fromBotId: number;
@@ -249,6 +319,7 @@ interface BotApiServiceDependencies {
   readonly botMessages: BotMessaging;
   readonly botMessageViews: BotMessageViews;
   readonly callbackQueries: CallbackQueryAnswering;
+  readonly botCommands: BotCommandLists;
 }
 
 /**
@@ -266,10 +337,18 @@ export class BotApiService {
   readonly #botMessages: BotMessaging;
   readonly #botMessageViews: BotMessageViews;
   readonly #callbackQueries: CallbackQueryAnswering;
+  readonly #botCommands: BotCommandLists;
 
   constructor(
-    { bots, updatePolling, pendingUpdates, botMessages, botMessageViews, callbackQueries }:
-      BotApiServiceDependencies,
+    {
+      bots,
+      updatePolling,
+      pendingUpdates,
+      botMessages,
+      botMessageViews,
+      callbackQueries,
+      botCommands,
+    }: BotApiServiceDependencies,
   ) {
     this.#bots = bots;
     this.#updatePolling = updatePolling;
@@ -277,6 +356,7 @@ export class BotApiService {
     this.#botMessages = botMessages;
     this.#botMessageViews = botMessageViews;
     this.#callbackQueries = callbackQueries;
+    this.#botCommands = botCommands;
   }
 
   /** Returns the profile of the bot that owns `token`, or `undefined` if no bot does. */
@@ -473,6 +553,64 @@ export class BotApiService {
     return result.answered ? { answered: true } : { answered: false, reason: 'query_id_invalid' };
   }
 
+  /** Replaces the bot's command list for a scope and language; an empty list deletes it. */
+  setMyCommands(
+    authenticatedBot: VirtualBotProfile,
+    { commands, scope, languageCode }: SetMyCommandsRequest,
+  ): SetMyCommandsResult {
+    const result = this.#botCommands.setBotCommands({
+      botId: authenticatedBot.id,
+      scope,
+      languageCode,
+      commands,
+    });
+    if (result.set) {
+      return result;
+    }
+    if (result.reason === 'bot_not_found') {
+      throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+    }
+    return { set: false, reason: result.reason };
+  }
+
+  /** Returns the bot's command list for exactly this scope and language. */
+  getMyCommands(
+    authenticatedBot: VirtualBotProfile,
+    { scope, languageCode }: MyCommandsTarget,
+  ): GetMyCommandsResult {
+    const result = this.#botCommands.getBotCommands({
+      botId: authenticatedBot.id,
+      scope,
+      languageCode,
+    });
+    if (!result.found) {
+      if (result.reason === 'bot_not_found') {
+        throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+      }
+      return { found: false, reason: result.reason };
+    }
+    return { found: true, commands: result.commands.map(projectBotCommand) };
+  }
+
+  /** Deletes the bot's command list for a scope and language. */
+  deleteMyCommands(
+    authenticatedBot: VirtualBotProfile,
+    { scope, languageCode }: MyCommandsTarget,
+  ): DeleteMyCommandsResult {
+    const result = this.#botCommands.deleteBotCommands({
+      botId: authenticatedBot.id,
+      scope,
+      languageCode,
+    });
+    if (result.deleted) {
+      return result;
+    }
+    if (result.reason === 'bot_not_found') {
+      throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+    }
+    return { deleted: false, reason: result.reason };
+  }
+
   #deleteChatMessages(
     authenticatedBot: VirtualBotProfile,
     chatId: number,
@@ -508,6 +646,11 @@ export class BotApiService {
   ): { readonly edited: true; readonly message: BotApiPrivateTextMessage } {
     return { edited: true, message: this.#botMessageViews.viewPrivateTextMessageForBot(message) };
   }
+}
+
+/** Shows a command as the Bot API does, with `is_ephemeral` only when set. */
+function projectBotCommand({ command, description, isEphemeral }: BotCommand): BotApiBotCommand {
+  return { command, description, ...(isEphemeral ? { is_ephemeral: true as const } : {}) };
 }
 
 /** Translates the edit failures shared by both edit methods into Bot API failures. */

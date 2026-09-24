@@ -8,8 +8,10 @@ export {
   type TelegramEmulationClientOptions,
 } from './telegram_emulation_client.ts';
 export type {
+  AccountBotCommandsInput,
   AccountMessageHistoryInput,
   AccountSendMessageInput,
+  BotCommand,
   CallbackInlineKeyboardButton,
   CallbackQuery,
   CallbackQueryAnswer,

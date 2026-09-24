@@ -166,6 +166,14 @@ const callbackQuerySchema: z.ZodType<CallbackQuery> = z.strictObject({
   }).nullable(),
 });
 
+export const botCommandsResponseSchema = z.strictObject({
+  commands: z.array(z.strictObject({
+    command: z.string().min(1),
+    description: z.string().min(1),
+    is_ephemeral: z.boolean(),
+  })),
+});
+
 export const callbackQueryResponseSchema = z.strictObject({
   callback_query: callbackQuerySchema,
 });

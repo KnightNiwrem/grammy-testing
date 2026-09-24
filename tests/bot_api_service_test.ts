@@ -1,5 +1,6 @@
 import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
+import { BotCommandRepository } from '../src/repositories/bot_command.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
@@ -8,6 +9,7 @@ import { PrivateConversationRepository } from '../src/repositories/private_conve
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import { UserMessageBoxRepository } from '../src/repositories/user_message_box.ts';
 import { BotApiService, type SendMessageResult } from '../src/services/bot_api.ts';
+import { BotCommandService } from '../src/services/bot_command.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import {
@@ -416,6 +418,12 @@ function createBotApiFixture() {
     botMessages: privateMessaging,
     botMessageViews,
     callbackQueries,
+    botCommands: new BotCommandService({
+      accounts,
+      bots,
+      privateConversations,
+      botCommands: new BotCommandRepository(),
+    }),
   });
   const advanceClockSeconds = (seconds: number) => {
     currentUnixTimeSeconds += seconds;

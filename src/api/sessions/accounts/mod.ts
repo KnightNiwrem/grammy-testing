@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 import { z } from 'zod';
 
+import type { BotCommand } from '../../../types/bot_command.ts';
 import type { CallbackQuery } from '../../../types/callback_query.ts';
 import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from '../../../types/telegram_identity.ts';
 import { MAX_TEXT_MESSAGE_LENGTH } from '../../../types/virtual_message.ts';
@@ -10,8 +11,10 @@ import type { SessionRouteContextTypes } from '../session_route_context_types.ts
 const ACCOUNT_ID_PARAMETER = 'accountId';
 const BOT_ID_PARAMETER = 'botId';
 const ACCOUNT_MESSAGE_COLLECTION_PATH = `/:${ACCOUNT_ID_PARAMETER}/messages` as const;
-const PRIVATE_MESSAGE_HISTORY_PATH =
-  `/:${ACCOUNT_ID_PARAMETER}/conversations/private/:${BOT_ID_PARAMETER}/messages` as const;
+const PRIVATE_CONVERSATION_PATH =
+  `/:${ACCOUNT_ID_PARAMETER}/conversations/private/:${BOT_ID_PARAMETER}` as const;
+const PRIVATE_MESSAGE_HISTORY_PATH = `${PRIVATE_CONVERSATION_PATH}/messages` as const;
+const PRIVATE_CHAT_COMMANDS_PATH = `${PRIVATE_CONVERSATION_PATH}/commands` as const;
 const CALLBACK_QUERY_ID_PARAMETER = 'callbackQueryId';
 const CALLBACK_QUERY_COLLECTION_PATH = `/:${ACCOUNT_ID_PARAMETER}/callback-queries` as const;
 const CALLBACK_QUERY_PATH =
@@ -143,6 +146,25 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     });
   });
 
+  accountRoutes.get(PRIVATE_CHAT_COMMANDS_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
+    if (!accountId.success || !botId.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').botCommands.getPrivateChatCommands({
+      accountId: accountId.data,
+      botId: botId.data,
+    });
+    if (!result.found) {
+      return context.body(null, 404);
+    }
+    return context.json({ commands: result.commands.map(presentBotCommandForAccount) });
+  });
+
   accountRoutes.post(CALLBACK_QUERY_COLLECTION_PATH, async (context) => {
     const accountId = telegramUserIdPathParameterSchema.safeParse(
       context.req.param(ACCOUNT_ID_PARAMETER),
@@ -202,6 +224,11 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   return accountRoutes;
+}
+
+/** Shows a command as the account's client lists it. */
+function presentBotCommandForAccount({ command, description, isEphemeral }: BotCommand) {
+  return { command, description, is_ephemeral: isEphemeral };
 }
 
 /** Shows a callback query to the account that created it, with the bot's answer once given. */
