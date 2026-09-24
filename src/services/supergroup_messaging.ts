@@ -4,25 +4,39 @@ import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { ChatAction, SharedChat, Supergroup } from '../types/virtual_chat.ts';
-import {
-  type CanonicalMessageId,
-  type SupergroupMessageAuthor,
-  type SupergroupTextMessage,
-  type TextEntity,
+import type {
+  CanonicalMessageId,
+  MessageContent,
+  SupergroupMessage,
+  SupergroupMessageAuthor,
+  TextEntity,
 } from '../types/virtual_message.ts';
 import {
+  type AccountMessageContent,
+  type AccountMessageEdit,
   checkBotMessageEdit,
+  type ContentNormalizationFailure,
+  type ContentReplacement,
+  type FileUploadStore,
   hasOnlyValidCallbackData,
-  isSameFormattedText,
-  type MessageTextNormalization,
-  normalizeMessageText,
+  isSameMessageContent,
+  type NormalizedOutgoingContent,
+  normalizeOutgoingContent,
+  type OutgoingContentNormalization,
+  type OutgoingMessageContent,
+  replaceAccountMessageContent,
+  replaceMessageCaption,
+  replaceMessageText,
+  type SpecifiedCaption,
+  storeOutgoingContent,
   type TextInvalidFailure,
+  toOutgoingAccountContent,
 } from './message_content.ts';
 
 export interface SendSupergroupAccountMessageInput {
   readonly fromAccountId: number;
   readonly chatId: number;
-  readonly text: string;
+  readonly content: AccountMessageContent;
   /** The supergroup's ID of the message to reply to; omitted for no reply. */
   readonly replyToMessageId?: number;
 }
@@ -32,14 +46,13 @@ export type SendSupergroupAccountMessageFailureReason =
   | 'chat_not_found'
   | 'not_a_member'
   | 'message_text_empty'
-  | 'message_text_too_long'
   | 'reply_message_not_found';
 
 export type SendSupergroupAccountMessageResult =
-  | { readonly sent: true; readonly message: SupergroupTextMessage }
+  | { readonly sent: true; readonly message: SupergroupMessage }
   | (
     & { readonly sent: false }
-    & ({ readonly reason: SendSupergroupAccountMessageFailureReason } | TextInvalidFailure)
+    & ({ readonly reason: SendSupergroupAccountMessageFailureReason } | ContentNormalizationFailure)
   );
 
 /** The message of the supergroup that a bot's message replies to. */
@@ -53,9 +66,7 @@ export interface SupergroupBotMessageReplyTarget {
 export interface SendSupergroupBotMessageInput {
   readonly fromBotId: number;
   readonly chatId: number;
-  readonly text: string;
-  /** Formatting the bot specified, which Telegram validates and normalizes; omitted for none. */
-  readonly entities?: readonly TextEntity[];
+  readonly content: OutgoingMessageContent;
   /** Omitted when the message has no inline keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
   /** Omitted for a message that replies to none. */
@@ -69,14 +80,13 @@ export type SendSupergroupBotMessageFailureReason =
   | 'message_text_empty'
   | 'chat_not_found'
   | 'reply_message_not_found'
-  | 'message_text_too_long'
   | 'callback_data_invalid';
 
 export type SendSupergroupBotMessageResult =
-  | { readonly sent: true; readonly message: SupergroupTextMessage }
+  | { readonly sent: true; readonly message: SupergroupMessage }
   | (
     & { readonly sent: false }
-    & ({ readonly reason: SendSupergroupBotMessageFailureReason } | TextInvalidFailure)
+    & ({ readonly reason: SendSupergroupBotMessageFailureReason } | ContentNormalizationFailure)
   );
 
 interface EditSupergroupBotMessageTarget {
@@ -93,6 +103,16 @@ export interface EditSupergroupBotMessageTextInput extends EditSupergroupBotMess
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
 }
+
+export type EditSupergroupBotMessageCaptionInput =
+  & EditSupergroupBotMessageTarget
+  & SpecifiedCaption
+  & {
+    /** Whether a photo shows its caption above itself; a document ignores it. */
+    readonly showsCaptionAboveMedia: boolean;
+    /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
+    readonly inlineKeyboard?: InlineKeyboard;
+  };
 
 export interface EditSupergroupBotMessageInlineKeyboardInput
   extends EditSupergroupBotMessageTarget {
@@ -111,14 +131,24 @@ export type EditSupergroupBotMessageInlineKeyboardFailureReason =
 export type EditSupergroupBotMessageTextFailureReason =
   | EditSupergroupBotMessageInlineKeyboardFailureReason
   | 'message_text_empty'
+  | 'message_has_no_text'
   | 'message_text_too_long';
 
+export type EditSupergroupBotMessageCaptionFailureReason =
+  | EditSupergroupBotMessageInlineKeyboardFailureReason
+  | 'message_has_no_caption'
+  | 'caption_too_long';
+
 export type SupergroupMessageEditResult<FailureReason extends string> =
-  | { readonly edited: true; readonly message: SupergroupTextMessage }
+  | { readonly edited: true; readonly message: SupergroupMessage }
   | { readonly edited: false; readonly reason: FailureReason };
 
 export type EditSupergroupBotMessageTextResult =
   | SupergroupMessageEditResult<EditSupergroupBotMessageTextFailureReason>
+  | ({ readonly edited: false } & TextInvalidFailure);
+
+export type EditSupergroupBotMessageCaptionResult =
+  | SupergroupMessageEditResult<EditSupergroupBotMessageCaptionFailureReason>
   | ({ readonly edited: false } & TextInvalidFailure);
 
 export interface EditSupergroupAccountMessageInput {
@@ -126,7 +156,7 @@ export interface EditSupergroupAccountMessageInput {
   readonly chatId: number;
   /** The supergroup's ID of the message. */
   readonly messageId: number;
-  readonly text: string;
+  readonly edit: AccountMessageEdit;
 }
 
 export type EditSupergroupAccountMessageFailureReason =
@@ -136,7 +166,10 @@ export type EditSupergroupAccountMessageFailureReason =
   | 'message_not_found'
   | 'message_not_editable'
   | 'message_text_empty'
+  | 'message_has_no_text'
   | 'message_text_too_long'
+  | 'message_has_no_caption'
+  | 'caption_too_long'
   | 'message_not_modified';
 
 export type EditSupergroupAccountMessageResult =
@@ -177,7 +210,7 @@ export interface GetSupergroupMessageHistoryInput {
 }
 
 export type GetSupergroupMessageHistoryResult =
-  | { readonly found: true; readonly messages: readonly SupergroupTextMessage[] }
+  | { readonly found: true; readonly messages: readonly SupergroupMessage[] }
   | {
     readonly found: false;
     readonly reason: 'account_not_found' | 'chat_not_found' | 'not_a_member';
@@ -197,25 +230,23 @@ interface SupergroupMembershipLookup {
 }
 
 interface SupergroupMessageStore {
-  addSupergroupTextMessage(input: {
+  addSupergroupMessage(input: {
     readonly chatId: number;
     readonly author: SupergroupMessageAuthor;
     readonly sentAtUnixSeconds: number;
-    readonly text: string;
-    readonly entities: readonly TextEntity[];
+    readonly content: MessageContent;
     readonly replyToMessageId?: CanonicalMessageId;
     readonly inlineKeyboard?: InlineKeyboard;
     readonly isContentProtected?: boolean;
-  }): SupergroupTextMessage;
-  getSupergroupTextMessage(messageId: CanonicalMessageId): SupergroupTextMessage | undefined;
-  editSupergroupTextMessage(messageId: CanonicalMessageId, edit: {
-    readonly text: string;
-    readonly entities: readonly TextEntity[];
+  }): SupergroupMessage;
+  getSupergroupMessage(messageId: CanonicalMessageId): SupergroupMessage | undefined;
+  editSupergroupMessage(messageId: CanonicalMessageId, edit: {
+    readonly content: MessageContent;
     readonly inlineKeyboard: InlineKeyboard | undefined;
-    readonly textEditedAtUnixSeconds: number | undefined;
-  }): SupergroupTextMessage;
-  deleteSupergroupTextMessage(messageId: CanonicalMessageId): void;
-  getSupergroupMessages(chatId: number): readonly SupergroupTextMessage[];
+    readonly contentEditedAtUnixSeconds: number | undefined;
+  }): SupergroupMessage;
+  deleteSupergroupMessage(messageId: CanonicalMessageId): void;
+  getSupergroupMessages(chatId: number): readonly SupergroupMessage[];
 }
 
 interface MessageBoxStore {
@@ -232,19 +263,21 @@ interface SupergroupMessagingServiceDependencies {
   readonly bots: BotLookup;
   readonly sharedChats: SupergroupMembershipLookup;
   readonly messages: SupergroupMessageStore;
+  readonly files: FileUploadStore;
   readonly messageBoxes: MessageBoxStore;
   readonly events: ChatDomainEventSink;
   readonly currentUnixTimeSeconds: () => number;
 }
 
 /**
- * Carries out text exchanges among the members of a supergroup, accounts and bots alike, and
- * commits each accepted message: stored, numbered once in the supergroup's own message box, then
- * published. Only members write to a supergroup or read its messages.
+ * Carries out exchanges of text, photos, and documents among the members of a supergroup,
+ * accounts and bots alike, and commits each accepted message: its upload stored, the message
+ * stored, numbered once in the supergroup's own message box, then published. Only members write to
+ * a supergroup or read its messages.
  *
  * Bots attach inline keyboards, edit their own messages, and delete them; as on Telegram, a bot
- * that is no administrator cannot delete other members' messages. Accounts edit the text of their
- * own messages. Reply keyboards and forced replies, which Telegram shows to chosen members of a
+ * that is no administrator cannot delete other members' messages. Accounts edit the text or
+ * caption of their own messages. Reply keyboards and forced replies, which Telegram shows to chosen members of a
  * group, are not supported.
  *
  * Results carry canonical messages; presenting them to an observer is left to the caller.
@@ -254,38 +287,43 @@ export class SupergroupMessagingService {
   readonly #bots: BotLookup;
   readonly #sharedChats: SupergroupMembershipLookup;
   readonly #messages: SupergroupMessageStore;
+  readonly #files: FileUploadStore;
   readonly #messageBoxes: MessageBoxStore;
   readonly #events: ChatDomainEventSink;
   readonly #currentUnixTimeSeconds: () => number;
 
   constructor(
-    { accounts, bots, sharedChats, messages, messageBoxes, events, currentUnixTimeSeconds }:
+    { accounts, bots, sharedChats, messages, files, messageBoxes, events, currentUnixTimeSeconds }:
       SupergroupMessagingServiceDependencies,
   ) {
     this.#accounts = accounts;
     this.#bots = bots;
     this.#sharedChats = sharedChats;
     this.#messages = messages;
+    this.#files = files;
     this.#messageBoxes = messageBoxes;
     this.#events = events;
     this.#currentUnixTimeSeconds = currentUnixTimeSeconds;
   }
 
   /**
-   * Sends text from an account to a supergroup it is a member of. As a Telegram client does, the
-   * text is normalized, which marks bot commands.
+   * Sends text, a photo, or a document from an account to a supergroup it is a member of. As a
+   * Telegram client does, the text or caption is normalized, which marks bot commands.
    */
   sendAccountMessage(input: SendSupergroupAccountMessageInput): SendSupergroupAccountMessageResult {
     const memberResolution = this.#resolveAccountMember(input.fromAccountId, input.chatId);
     if (!memberResolution.resolved) {
       return { sent: false, reason: memberResolution.reason };
     }
-    if (input.text.length === 0) {
+    if (input.content.kind === 'text' && input.content.text.length === 0) {
       return { sent: false, reason: 'message_text_empty' };
     }
-    const textNormalization = this.#normalizeText(input.text, []);
-    if (!textNormalization.normalized) {
-      return { sent: false, ...textNormalization.failure };
+    const contentNormalization = this.#normalizeContent(
+      toOutgoingAccountContent(input.content),
+      'account',
+    );
+    if (!contentNormalization.normalized) {
+      return { sent: false, ...contentNormalization.failure };
     }
     const repliedMessage = input.replyToMessageId === undefined
       ? undefined
@@ -299,26 +337,25 @@ export class SupergroupMessagingService {
       message: this.#storeMessage({
         chatId: input.chatId,
         author: { kind: 'account', accountId: input.fromAccountId },
-        sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
-        ...textNormalization.formattedText,
+        content: contentNormalization.content,
         replyToMessageId: repliedMessage?.id,
       }),
     };
   }
 
   /**
-   * Sends text from a bot to a supergroup it is a member of. A supergroup the bot is not a member
-   * of is unknown to it, as on Telegram.
+   * Sends text, a photo, or a document from a bot to a supergroup it is a member of. A supergroup
+   * the bot is not a member of is unknown to it, as on Telegram.
    *
-   * Checks follow Telegram's order: the text is checked for emptiness before the chat is resolved,
-   * and the replied message is looked up after it; the text is then normalized with its entities,
-   * and the result is checked for length. Callback data is checked last.
+   * Checks follow Telegram's order: text is checked for emptiness before the chat is resolved, and
+   * the replied message is looked up after it; the text or caption is then normalized with its
+   * entities, and the result is checked for length. Callback data is checked last.
    */
   sendBotMessage(input: SendSupergroupBotMessageInput): SendSupergroupBotMessageResult {
     if (this.#bots.getById(input.fromBotId) === undefined) {
       return { sent: false, reason: 'bot_not_found' };
     }
-    if (input.text.length === 0) {
+    if (input.content.kind === 'text' && input.content.text.length === 0) {
       return { sent: false, reason: 'message_text_empty' };
     }
     if (this.#findBotSupergroup(input.fromBotId, input.chatId) === undefined) {
@@ -333,9 +370,9 @@ export class SupergroupMessagingService {
     ) {
       return { sent: false, reason: 'reply_message_not_found' };
     }
-    const textNormalization = this.#normalizeText(input.text, input.entities ?? []);
-    if (!textNormalization.normalized) {
-      return { sent: false, ...textNormalization.failure };
+    const contentNormalization = this.#normalizeContent(input.content, 'bot');
+    if (!contentNormalization.normalized) {
+      return { sent: false, ...contentNormalization.failure };
     }
     if (input.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(input.inlineKeyboard)) {
       return { sent: false, reason: 'callback_data_invalid' };
@@ -346,8 +383,7 @@ export class SupergroupMessagingService {
       message: this.#storeMessage({
         chatId: input.chatId,
         author: { kind: 'bot', botId: input.fromBotId },
-        sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
-        ...textNormalization.formattedText,
+        content: contentNormalization.content,
         replyToMessageId: repliedMessage?.id,
         inlineKeyboard: input.inlineKeyboard,
         isContentProtected: input.isContentProtected,
@@ -356,8 +392,8 @@ export class SupergroupMessagingService {
   }
 
   /**
-   * Replaces the text, entities, and inline keyboard of a message the bot sent. Only changed text
-   * or entities date the edit. As on Telegram, no bot receives an update for a bot's edit.
+   * Replaces the text, entities, and inline keyboard of a text message the bot sent. Only changed
+   * text or entities date the edit. As on Telegram, no bot receives an update for a bot's edit.
    */
   editBotMessageText(input: EditSupergroupBotMessageTextInput): EditSupergroupBotMessageTextResult {
     if (this.#bots.getById(input.fromBotId) === undefined) {
@@ -370,23 +406,38 @@ export class SupergroupMessagingService {
     if (!resolution.resolved) {
       return { edited: false, reason: resolution.reason };
     }
-    const textNormalization = this.#normalizeText(input.text, input.entities ?? []);
-    if (!textNormalization.normalized) {
-      return { edited: false, ...textNormalization.failure };
-    }
-    const { formattedText } = textNormalization;
-
     const { message } = resolution;
-    return this.#editBotMessage(message, {
-      ...formattedText,
-      inlineKeyboard: input.inlineKeyboard,
-      textEditedAtUnixSeconds: isSameFormattedText(formattedText, message)
-        ? message.textEditedAtUnixSeconds
-        : this.#currentUnixTimeSeconds(),
-    });
+    return this.#editBotMessageContent(
+      message,
+      replaceMessageText(message.content, input, this.#textFixingContext),
+      input.inlineKeyboard,
+    );
   }
 
-  /** Replaces the inline keyboard of a message the bot sent, leaving its text as it is. */
+  /**
+   * Replaces the caption, its entities, and the inline keyboard of a photo or document the bot
+   * sent; an empty caption removes it. Only a changed caption dates the edit. As on Telegram, no
+   * bot receives an update for a bot's edit.
+   */
+  editBotMessageCaption(
+    input: EditSupergroupBotMessageCaptionInput,
+  ): EditSupergroupBotMessageCaptionResult {
+    if (this.#bots.getById(input.fromBotId) === undefined) {
+      return { edited: false, reason: 'bot_not_found' };
+    }
+    const resolution = this.#resolveEditableBotMessage(input);
+    if (!resolution.resolved) {
+      return { edited: false, reason: resolution.reason };
+    }
+    const { message } = resolution;
+    return this.#editBotMessageContent(
+      message,
+      replaceMessageCaption(message.content, input, 'bot', this.#textFixingContext),
+      input.inlineKeyboard,
+    );
+  }
+
+  /** Replaces the inline keyboard of a message the bot sent, leaving its content as it is. */
   editBotMessageInlineKeyboard(
     input: EditSupergroupBotMessageInlineKeyboardInput,
   ): SupergroupMessageEditResult<EditSupergroupBotMessageInlineKeyboardFailureReason> {
@@ -400,17 +451,16 @@ export class SupergroupMessagingService {
 
     const { message } = resolution;
     return this.#editBotMessage(message, {
-      text: message.text,
-      entities: message.entities,
+      content: message.content,
       inlineKeyboard: input.inlineKeyboard,
-      textEditedAtUnixSeconds: message.textEditedAtUnixSeconds,
+      contentEditedAtUnixSeconds: message.contentEditedAtUnixSeconds,
     });
   }
 
   /**
-   * Replaces the text of a message the account wrote to the supergroup, which the supergroup's
-   * bots may receive as an `edited_message` update. As when sending, the text is normalized as a
-   * Telegram client does.
+   * Replaces the text or caption of a message the account wrote to the supergroup, which the
+   * supergroup's bots may receive as an `edited_message` update. As when sending, the text is
+   * normalized as a Telegram client does.
    */
   editAccountMessage(input: EditSupergroupAccountMessageInput): EditSupergroupAccountMessageResult {
     const memberResolution = this.#resolveAccountMember(input.fromAccountId, input.chatId);
@@ -424,22 +474,22 @@ export class SupergroupMessagingService {
     if (message.author.kind !== 'account' || message.author.accountId !== input.fromAccountId) {
       return { edited: false, reason: 'message_not_editable' };
     }
-    if (input.text.length === 0) {
-      return { edited: false, reason: 'message_text_empty' };
+    const replacement = replaceAccountMessageContent(
+      message.content,
+      input.edit,
+      this.#textFixingContext,
+    );
+    if (!replacement.replaced) {
+      return { edited: false, ...replacement.failure };
     }
-    const textNormalization = this.#normalizeText(input.text, []);
-    if (!textNormalization.normalized) {
-      return { edited: false, ...textNormalization.failure };
-    }
-    const { formattedText } = textNormalization;
-    if (isSameFormattedText(formattedText, message)) {
+    if (isSameMessageContent(replacement.content, message.content)) {
       return { edited: false, reason: 'message_not_modified' };
     }
 
-    const editedMessage = this.#messages.editSupergroupTextMessage(message.id, {
-      ...formattedText,
+    const editedMessage = this.#messages.editSupergroupMessage(message.id, {
+      content: replacement.content,
       inlineKeyboard: message.inlineKeyboard,
-      textEditedAtUnixSeconds: this.#currentUnixTimeSeconds(),
+      contentEditedAtUnixSeconds: this.#currentUnixTimeSeconds(),
     });
     this.#events.publish({ type: 'message_edited', message: editedMessage });
     return { edited: true, message: editedMessage };
@@ -460,7 +510,7 @@ export class SupergroupMessagingService {
       return { deleted: false, reason: 'chat_not_found' };
     }
 
-    const messages = new Map<CanonicalMessageId, SupergroupTextMessage>();
+    const messages = new Map<CanonicalMessageId, SupergroupMessage>();
     for (const messageId of input.messageIds) {
       const message = this.getMessageByChatMessageId(input.chatId, messageId);
       if (message === undefined) {
@@ -472,7 +522,7 @@ export class SupergroupMessagingService {
       messages.set(message.id, message);
     }
     for (const messageId of messages.keys()) {
-      this.#messages.deleteSupergroupTextMessage(messageId);
+      this.#messages.deleteSupergroupMessage(messageId);
     }
     return { deleted: true, deletedMessageCount: messages.size };
   }
@@ -507,11 +557,11 @@ export class SupergroupMessagingService {
   getMessageByChatMessageId(
     chatId: number,
     messageId: number,
-  ): SupergroupTextMessage | undefined {
+  ): SupergroupMessage | undefined {
     const canonicalMessageId = this.#messageBoxes.getCanonicalMessageId(chatId, messageId);
     return canonicalMessageId === undefined
       ? undefined
-      : this.#messages.getSupergroupTextMessage(canonicalMessageId);
+      : this.#messages.getSupergroupMessage(canonicalMessageId);
   }
 
   #resolveAccountMember(
@@ -549,7 +599,7 @@ export class SupergroupMessagingService {
   #resolveEditableBotMessage(
     { fromBotId, chatId, messageId }: EditSupergroupBotMessageTarget,
   ):
-    | { readonly resolved: true; readonly message: SupergroupTextMessage }
+    | { readonly resolved: true; readonly message: SupergroupMessage }
     | {
       readonly resolved: false;
       readonly reason: 'chat_not_found' | 'message_not_found' | 'message_not_editable';
@@ -567,14 +617,36 @@ export class SupergroupMessagingService {
     return { resolved: true, message };
   }
 
+  /**
+   * Applies a bot's replacement of its message's content with the given keyboard; only changed
+   * content dates the edit.
+   */
+  #editBotMessageContent<FailureReason extends string>(
+    message: SupergroupMessage,
+    replacement: ContentReplacement<FailureReason>,
+    inlineKeyboard: InlineKeyboard | undefined,
+  ):
+    | SupergroupMessageEditResult<FailureReason | 'callback_data_invalid' | 'message_not_modified'>
+    | ({ readonly edited: false } & TextInvalidFailure) {
+    if (!replacement.replaced) {
+      return { edited: false, ...replacement.failure };
+    }
+    return this.#editBotMessage(message, {
+      content: replacement.content,
+      inlineKeyboard,
+      contentEditedAtUnixSeconds: isSameMessageContent(replacement.content, message.content)
+        ? message.contentEditedAtUnixSeconds
+        : this.#currentUnixTimeSeconds(),
+    });
+  }
+
   /** Validates, stores, and publishes a bot's edit of its message, which must change it. */
   #editBotMessage(
-    message: SupergroupTextMessage,
+    message: SupergroupMessage,
     edit: {
-      readonly text: string;
-      readonly entities: readonly TextEntity[];
+      readonly content: MessageContent;
       readonly inlineKeyboard: InlineKeyboard | undefined;
-      readonly textEditedAtUnixSeconds: number | undefined;
+      readonly contentEditedAtUnixSeconds: number | undefined;
     },
   ): SupergroupMessageEditResult<'callback_data_invalid' | 'message_not_modified'> {
     const editFailure = checkBotMessageEdit(message, edit);
@@ -582,28 +654,54 @@ export class SupergroupMessagingService {
       return { edited: false, reason: editFailure };
     }
 
-    const editedMessage = this.#messages.editSupergroupTextMessage(message.id, edit);
+    const editedMessage = this.#messages.editSupergroupMessage(message.id, edit);
     this.#events.publish({ type: 'message_edited', message: editedMessage });
     return { edited: true, message: editedMessage };
   }
 
-  /**
-   * Normalizes text and the entities its sender specified as Telegram does, and checks its length.
-   * A text mention may name any user of the session.
-   */
-  #normalizeText(text: string, entities: readonly TextEntity[]): MessageTextNormalization {
-    return normalizeMessageText(text, entities, {
-      isMentionableUser: (userId) =>
+  /** A text mention may name any user of the session. */
+  get #textFixingContext() {
+    return {
+      isMentionableUser: (userId: number) =>
         this.#accounts.getById(userId) !== undefined || this.#bots.getById(userId) !== undefined,
-    });
+    };
   }
 
-  /** Stores a normalized message, numbers it in the supergroup's box, and publishes it. */
+  /**
+   * Normalizes the text or caption of new content, with the entities its sender specified, as
+   * Telegram does, and checks its length.
+   */
+  #normalizeContent(
+    content: OutgoingMessageContent,
+    sender: SupergroupMessageAuthor['kind'],
+  ): OutgoingContentNormalization {
+    return normalizeOutgoingContent(content, sender, this.#textFixingContext);
+  }
+
+  /**
+   * Stores normalized content with its upload, numbers the message in the supergroup's box, and
+   * publishes it.
+   */
   #storeMessage(
-    input: Parameters<SupergroupMessageStore['addSupergroupTextMessage']>[0],
-  ): SupergroupTextMessage {
-    const storedMessage = this.#messages.addSupergroupTextMessage(input);
-    this.#messageBoxes.assignMessageId(input.chatId, storedMessage.id);
+    { chatId, author, content, replyToMessageId, inlineKeyboard, isContentProtected }: {
+      readonly chatId: number;
+      readonly author: SupergroupMessageAuthor;
+      readonly content: NormalizedOutgoingContent;
+      readonly replyToMessageId?: CanonicalMessageId;
+      readonly inlineKeyboard?: InlineKeyboard;
+      readonly isContentProtected?: boolean;
+    },
+  ): SupergroupMessage {
+    const storedMessage = this.#messages.addSupergroupMessage({
+      chatId,
+      author,
+      sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
+      content: storeOutgoingContent(content, this.#files),
+      replyToMessageId,
+      inlineKeyboard,
+      isContentProtected,
+    });
+    this.#messageBoxes.assignMessageId(chatId, storedMessage.id);
     this.#events.publish({ type: 'message_created', message: storedMessage });
     return storedMessage;
   }

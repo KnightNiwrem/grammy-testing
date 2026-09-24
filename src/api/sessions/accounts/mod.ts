@@ -71,21 +71,56 @@ const createAccountRequestSchema = z.strictObject({
   language_code: z.string().min(1).optional(),
 });
 
-const sendMessageRequestSchema = z.strictObject({
+/** A file's content, which JSON carries as base64 text. */
+const base64ContentSchema = z.string().transform((base64Text, context) => {
+  try {
+    return Uint8Array.fromBase64(base64Text);
+  } catch {
+    context.issues.push({ code: 'custom', message: 'Expected base64 text', input: base64Text });
+    return z.NEVER;
+  }
+});
+
+const sentMessageTargetShape = {
   to: chatSchema,
-  text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH),
   /** The replied message's ID as the chat's bots see it, which is how these routes show messages. */
   reply_to_message_id: z.int().positive().optional(),
-});
+};
+
+/** A caption, which Telegram's service limits, so its length is checked when sending. */
+const captionSchema = z.string().default('');
+
+/** A text message, a photo, or a document, each with an optional caption. */
+const sendMessageRequestSchema = z.union([
+  z.strictObject({
+    ...sentMessageTargetShape,
+    text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH),
+  }),
+  z.strictObject({
+    ...sentMessageTargetShape,
+    photo: z.strictObject({ content_base64: base64ContentSchema }),
+    caption: captionSchema,
+  }),
+  z.strictObject({
+    ...sentMessageTargetShape,
+    document: z.strictObject({
+      content_base64: base64ContentSchema,
+      file_name: z.string().min(1),
+    }),
+    caption: captionSchema,
+  }),
+]);
 
 const createSupergroupRequestSchema = z.strictObject({
   title: z.string().min(1),
   description: z.string().min(1).optional(),
 });
 
-const editMessageRequestSchema = z.strictObject({
-  text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH),
-});
+/** New text for a text message, or a new caption for a photo or document; empty removes it. */
+const editMessageRequestSchema = z.union([
+  z.strictObject({ text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH) }),
+  z.strictObject({ caption: z.string() }),
+]);
 
 const pressReplyKeyboardButtonRequestSchema = z.strictObject({
   chat: z.strictObject({
@@ -105,7 +140,8 @@ const pressCallbackButtonRequestSchema = z.strictObject({
 
 /**
  * Account-facing routes. Private messages they return are shown as the conversation's bot sees
- * them, whichever participant wrote them. Supergroup messages look the same to every member.
+ * them, whichever participant wrote them. Supergroup messages are shown as the requesting account
+ * sees them, which differs from what other members see only in the `file_id` of a file.
  */
 export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   const accountRoutes = new Hono<SessionRouteContextTypes>();
@@ -155,22 +191,26 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 400);
     }
 
-    const { privateMessaging, supergroupMessaging, botMessageViews } = context.get(
+    const { privateMessaging, supergroupMessaging, botMessageViews, mediaFiles } = context.get(
       'emulationSession',
     );
-    const { to, text, reply_to_message_id: replyToMessageId } = parsedRequest.data;
+    const content = readAccountMessageContent(parsedRequest.data, mediaFiles);
+    if (content === undefined) {
+      return context.body(null, 400);
+    }
+    const { to, reply_to_message_id: replyToMessageId } = parsedRequest.data;
     if (to.type === 'supergroup') {
       const result = supergroupMessaging.sendAccountMessage({
         fromAccountId: accountId.data,
         chatId: to.chatId,
-        text,
+        content,
         replyToMessageId,
       });
       if (!result.sent) {
         return context.body(null, supergroupMemberFailureStatus(result.reason));
       }
       return context.json(
-        { message: botMessageViews.viewSupergroupTextMessage(result.message) },
+        { message: botMessageViews.viewSupergroupMessage(result.message, accountId.data) },
         201,
       );
     }
@@ -178,7 +218,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     const result = privateMessaging.sendAccountMessage({
       fromAccountId: accountId.data,
       to,
-      text,
+      content,
       replyToBotMessageId: replyToMessageId,
     });
     if (!result.sent) {
@@ -186,7 +226,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     }
 
     return context.json(
-      { message: botMessageViews.viewPrivateTextMessageForBot(result.message) },
+      { message: botMessageViews.viewPrivateMessageForBot(result.message) },
       201,
     );
   });
@@ -284,7 +324,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     }
     return context.json({
       messages: result.messages.map((message) =>
-        botMessageViews.viewSupergroupTextMessage(message)
+        botMessageViews.viewSupergroupMessage(message, accountId.data)
       ),
     });
   });
@@ -319,12 +359,14 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       fromAccountId: accountId.data,
       chatId: chatId.data,
       messageId: messageId.data,
-      text: parsedRequest.data.text,
+      edit: readAccountMessageEdit(parsedRequest.data),
     });
     if (!result.edited) {
       return context.body(null, supergroupMemberFailureStatus(result.reason));
     }
-    return context.json({ message: botMessageViews.viewSupergroupTextMessage(result.message) });
+    return context.json({
+      message: botMessageViews.viewSupergroupMessage(result.message, accountId.data),
+    });
   });
 
   accountRoutes.get(PRIVATE_MESSAGE_HISTORY_PATH, (context) => {
@@ -346,9 +388,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     }
 
     return context.json({
-      messages: result.messages.map((message) =>
-        botMessageViews.viewPrivateTextMessageForBot(message)
-      ),
+      messages: result.messages.map((message) => botMessageViews.viewPrivateMessageForBot(message)),
     });
   });
 
@@ -380,14 +420,14 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       fromAccountId: accountId.data,
       chat: { type: 'private', botId: botId.data },
       botMessageId: messageId.data,
-      text: parsedRequest.data.text,
+      edit: readAccountMessageEdit(parsedRequest.data),
     });
     if (!result.edited) {
       const isNotFound = result.reason === 'account_not_found' ||
         result.reason === 'bot_not_found' || result.reason === 'message_not_found';
       return context.body(null, isNotFound ? 404 : 400);
     }
-    return context.json({ message: botMessageViews.viewPrivateTextMessageForBot(result.message) });
+    return context.json({ message: botMessageViews.viewPrivateMessageForBot(result.message) });
   });
 
   accountRoutes.put(BLOCKED_BOT_PATH, (context) => {
@@ -461,7 +501,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     const { shownReplyInterface } = result;
     return context.json({
       reply_interface: shownReplyInterface === undefined ? null : presentReplyInterfaceForAccount(
-        botMessageViews.viewPrivateTextMessageForBot(shownReplyInterface.message).message_id,
+        botMessageViews.viewPrivateMessageForBot(shownReplyInterface.message).message_id,
         shownReplyInterface.replyInterface,
       ),
     });
@@ -496,7 +536,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, accountMessageFailureStatus(result.reason));
     }
     return context.json(
-      { message: botMessageViews.viewPrivateTextMessageForBot(result.message) },
+      { message: botMessageViews.viewPrivateMessageForBot(result.message) },
       201,
     );
   });
@@ -567,6 +607,44 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   return accountRoutes;
+}
+
+type AccountMessageContent = Parameters<
+  EmulationSession['privateMessaging']['sendAccountMessage']
+>[0]['content'];
+
+/**
+ * Reads the content of an account's message, checking an uploaded photo as Telegram does; returns
+ * `undefined` for a file Telegram would not send.
+ */
+function readAccountMessageContent(
+  request: z.infer<typeof sendMessageRequestSchema>,
+  mediaFiles: EmulationSession['mediaFiles'],
+): AccountMessageContent | undefined {
+  if ('text' in request) {
+    return { kind: 'text', text: request.text };
+  }
+  const preparation = 'photo' in request
+    ? mediaFiles.preparePhotoUpload(request.photo.content_base64)
+    : mediaFiles.prepareDocumentUpload(
+      request.document.content_base64,
+      request.document.file_name,
+    );
+  return preparation.prepared
+    ? { kind: 'media', upload: preparation.upload, caption: request.caption }
+    : undefined;
+}
+
+type AccountMessageEdit = Parameters<
+  EmulationSession['privateMessaging']['editAccountMessage']
+>[0]['edit'];
+
+function readAccountMessageEdit(
+  request: z.infer<typeof editMessageRequestSchema>,
+): AccountMessageEdit {
+  return 'text' in request
+    ? { kind: 'text', text: request.text }
+    : { kind: 'caption', caption: request.caption };
 }
 
 /** Why an account's message, sent directly or by pressing a reply keyboard button, failed. */

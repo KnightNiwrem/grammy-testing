@@ -6,6 +6,7 @@ import { BotCommandRepository } from '../repositories/bot_command.ts';
 import { BotUpdateRepository } from '../repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../repositories/bot_update_subscription.ts';
 import { CallbackQueryRepository } from '../repositories/callback_query.ts';
+import { FileRepository } from '../repositories/file.ts';
 import { MessageRepository } from '../repositories/message.ts';
 import { PrivateConversationRepository } from '../repositories/private_conversation.ts';
 import { SharedChatRepository } from '../repositories/shared_chat.ts';
@@ -18,6 +19,7 @@ import { BotMessageViewService } from '../services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../services/bot_update_polling.ts';
 import { CallbackQueryService } from '../services/callback_query.ts';
+import { MediaFileService } from '../services/media_file.ts';
 import { PrivateMessagingService } from '../services/private_messaging.ts';
 import { SharedChatAdministrationService } from '../services/shared_chat_administration.ts';
 import { SupergroupMessagingService } from '../services/supergroup_messaging.ts';
@@ -30,6 +32,7 @@ export function createEmulationSession(id: string): EmulationSession {
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const sharedChats = new SharedChatRepository();
   const messages = new MessageRepository();
+  const files = new FileRepository();
   const messageBoxes = new MessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
@@ -39,6 +42,7 @@ export function createEmulationSession(id: string): EmulationSession {
     sharedChats,
     messageBoxes,
     messages,
+    files,
   });
   const botUpdateDelivery = new BotUpdateDeliveryService({
     botMessageViews,
@@ -64,6 +68,7 @@ export function createEmulationSession(id: string): EmulationSession {
     bots,
     privateConversations,
     messages,
+    files,
     messageBoxes,
     blockedUsers,
     events: botUpdateDelivery,
@@ -74,10 +79,12 @@ export function createEmulationSession(id: string): EmulationSession {
     bots,
     sharedChats,
     messages,
+    files,
     messageBoxes,
     events: botUpdateDelivery,
     currentUnixTimeSeconds,
   });
+  const mediaFiles = new MediaFileService({ files });
   const botBlocking = new BotBlockingService({
     accounts,
     bots,
@@ -111,6 +118,7 @@ export function createEmulationSession(id: string): EmulationSession {
     botMessages: privateMessaging,
     supergroupBotMessages: supergroupMessaging,
     botMessageViews,
+    mediaFiles,
     callbackQueries,
     botCommands,
   });
@@ -125,6 +133,7 @@ export function createEmulationSession(id: string): EmulationSession {
     callbackQueries,
     botCommands,
     botMessageViews,
+    mediaFiles,
     botApi,
     end: () => botUpdatePolling.endLongPolling(),
   };

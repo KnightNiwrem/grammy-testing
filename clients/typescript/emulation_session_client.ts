@@ -16,10 +16,13 @@ import {
 } from './schemas.ts';
 import type {
   AccountBotCommandsInput,
+  AccountEditMessageCaptionInput,
   AccountEditMessageInput,
   AccountMessageHistoryInput,
   AccountReplyInterfaceInput,
+  AccountSendDocumentInput,
   AccountSendMessageInput,
+  AccountSendPhotoInput,
   AddChatMemberInput,
   BotBlockInput,
   BotCommand,
@@ -30,18 +33,18 @@ import type {
   CreateVirtualAccountInput,
   CreateVirtualBotInput,
   EmulationSession,
+  MessageIn,
   MessageTarget,
   PressCallbackButtonInput,
   PressReplyKeyboardButtonInput,
-  PrivateTextMessage,
+  PrivateMessage,
   ReplyInterface,
   Supergroup,
-  TextMessageIn,
   VirtualAccountClient,
   VirtualAccountProfile,
   VirtualBotProfile,
 } from './types.ts';
-import { normalizeUrlRoot, requestEmptyResponse, requestJson } from './utils.ts';
+import { normalizeUrlRoot, requestBytes, requestEmptyResponse, requestJson } from './utils.ts';
 
 export interface EmulationSessionClient extends EmulationSession {
   /** Ends the session and discards all state owned by it. */
@@ -50,6 +53,11 @@ export interface EmulationSessionClient extends EmulationSession {
   createAccount(input: CreateVirtualAccountInput): Promise<CreatedVirtualAccount>;
   /** Calls the emulated Bot API getMe method with a virtual bot token. */
   getMe(botToken: string): Promise<VirtualBotProfile>;
+  /**
+   * Returns the content of a photo or document of the session's messages by its
+   * `file_unique_id`, which, unlike `file_id`, is the same for every user.
+   */
+  downloadFile(fileUniqueId: string): Promise<Uint8Array>;
 }
 
 export function createEmulationSessionClient(
@@ -125,6 +133,14 @@ class HttpEmulationSessionClient implements EmulationSessionClient {
     });
     return response.result;
   }
+
+  downloadFile(fileUniqueId: string): Promise<Uint8Array> {
+    return requestBytes(this.#fetch, {
+      method: 'GET',
+      url: `${this.#sessionUrl}/files/${encodeURIComponent(fileUniqueId)}`,
+      expectedStatus: HTTP_STATUS_OK,
+    });
+  }
 }
 
 function createVirtualAccountClient(
@@ -136,7 +152,7 @@ function createVirtualAccountClient(
     ...profile,
     async sendMessage<Target extends MessageTarget>(
       input: AccountSendMessageInput<Target>,
-    ): Promise<TextMessageIn<Target>> {
+    ): Promise<MessageIn<Target>> {
       const response = await requestJson(fetchImplementation, {
         method: 'POST',
         url: `${accountUrl}/messages`,
@@ -146,9 +162,38 @@ function createVirtualAccountClient(
       });
       return response.message;
     },
+    async sendPhoto<Target extends MessageTarget>(
+      { to, photo, caption, reply_to_message_id }: AccountSendPhotoInput<Target>,
+    ): Promise<MessageIn<Target>> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'POST',
+        url: `${accountUrl}/messages`,
+        expectedStatus: HTTP_STATUS_CREATED,
+        responseSchema: messageResponseSchemasFor(to).sent,
+        body: { to, photo: { content_base64: photo.toBase64() }, caption, reply_to_message_id },
+      });
+      return response.message;
+    },
+    async sendDocument<Target extends MessageTarget>(
+      { to, document, file_name, caption, reply_to_message_id }: AccountSendDocumentInput<Target>,
+    ): Promise<MessageIn<Target>> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'POST',
+        url: `${accountUrl}/messages`,
+        expectedStatus: HTTP_STATUS_CREATED,
+        responseSchema: messageResponseSchemasFor(to).sent,
+        body: {
+          to,
+          document: { content_base64: document.toBase64(), file_name },
+          caption,
+          reply_to_message_id,
+        },
+      });
+      return response.message;
+    },
     async editMessage<Target extends MessageTarget>(
       input: AccountEditMessageInput<Target>,
-    ): Promise<TextMessageIn<Target>> {
+    ): Promise<MessageIn<Target>> {
       const messageId = encodeURIComponent(input.message_id);
       const response = await requestJson(fetchImplementation, {
         method: 'PATCH',
@@ -156,6 +201,19 @@ function createVirtualAccountClient(
         expectedStatus: HTTP_STATUS_OK,
         responseSchema: messageResponseSchemasFor(input.chat).sent,
         body: { text: input.text },
+      });
+      return response.message;
+    },
+    async editMessageCaption<Target extends MessageTarget>(
+      input: AccountEditMessageCaptionInput<Target>,
+    ): Promise<MessageIn<Target>> {
+      const messageId = encodeURIComponent(input.message_id);
+      const response = await requestJson(fetchImplementation, {
+        method: 'PATCH',
+        url: `${conversationUrl(accountUrl, input.chat)}/messages/${messageId}`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: messageResponseSchemasFor(input.chat).sent,
+        body: { caption: input.caption },
       });
       return response.message;
     },
@@ -194,7 +252,7 @@ function createVirtualAccountClient(
     },
     async getMessages<Target extends MessageTarget>(
       input: AccountMessageHistoryInput<Target>,
-    ): Promise<readonly TextMessageIn<Target>[]> {
+    ): Promise<readonly MessageIn<Target>[]> {
       const response = await requestJson(fetchImplementation, {
         method: 'GET',
         url: `${conversationUrl(accountUrl, input.chat)}/messages`,
@@ -244,7 +302,7 @@ function createVirtualAccountClient(
     },
     async pressReplyKeyboardButton(
       input: PressReplyKeyboardButtonInput,
-    ): Promise<PrivateTextMessage> {
+    ): Promise<PrivateMessage> {
       const response = await requestJson(fetchImplementation, {
         method: 'POST',
         url: `${accountUrl}/reply-keyboard-presses`,
@@ -265,8 +323,8 @@ function conversationUrl(accountUrl: string, chat: MessageTarget): string {
 }
 
 interface MessageResponseSchemas<Target extends MessageTarget> {
-  readonly sent: z.ZodType<{ readonly message: TextMessageIn<Target> }>;
-  readonly history: z.ZodType<{ readonly messages: readonly TextMessageIn<Target>[] }>;
+  readonly sent: z.ZodType<{ readonly message: MessageIn<Target> }>;
+  readonly history: z.ZodType<{ readonly messages: readonly MessageIn<Target>[] }>;
 }
 
 /**

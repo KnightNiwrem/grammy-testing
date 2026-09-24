@@ -9,7 +9,8 @@ interface JsonRequest<T> extends RequestDetails {
   readonly body?: unknown;
 }
 
-interface EmptyResponseRequest extends RequestDetails {
+/** A request whose response is read as it is, rather than as JSON. */
+interface RawResponseRequest extends RequestDetails {
   readonly expectedStatus: number;
 }
 
@@ -49,9 +50,30 @@ export async function requestJson<T>(
   return parsedResponse.data;
 }
 
+/** Requests binary content, such as a file's, and returns it as bytes. */
+export async function requestBytes(
+  fetchImplementation: typeof globalThis.fetch,
+  request: RawResponseRequest,
+): Promise<Uint8Array> {
+  const response = await sendRequest(fetchImplementation, request);
+  if (response.status !== request.expectedStatus) {
+    const responseBody = await readResponseBody(response, request);
+    assertResponseStatus(response, responseBody, request);
+  }
+  try {
+    return new Uint8Array(await response.arrayBuffer());
+  } catch (cause) {
+    throw new EmulationClientError(
+      `Could not read the response from ${formatRequest(request)}`,
+      { ...request, status: response.status },
+      { cause },
+    );
+  }
+}
+
 export async function requestEmptyResponse(
   fetchImplementation: typeof globalThis.fetch,
-  request: EmptyResponseRequest,
+  request: RawResponseRequest,
 ): Promise<void> {
   const response = await sendRequest(fetchImplementation, request);
   if (response.status === request.expectedStatus) {
@@ -128,7 +150,7 @@ async function readResponseBody(response: Response, request: RequestDetails): Pr
 function assertResponseStatus(
   response: Response,
   responseBody: string,
-  request: JsonRequest<unknown> | EmptyResponseRequest,
+  request: JsonRequest<unknown> | RawResponseRequest,
 ): void {
   if (response.status !== request.expectedStatus) {
     throw new EmulationClientError(

@@ -3,6 +3,7 @@ import type { BotBlockingService } from '../services/bot_blocking.ts';
 import type { BotCommandService } from '../services/bot_command.ts';
 import type { BotMessageViewService } from '../services/bot_message_view.ts';
 import type { CallbackQueryService } from '../services/callback_query.ts';
+import type { MediaFileService } from '../services/media_file.ts';
 import type { PrivateMessagingService } from '../services/private_messaging.ts';
 import type { SharedChatAdministrationService } from '../services/shared_chat_administration.ts';
 import type { SupergroupMessagingService } from '../services/supergroup_messaging.ts';
@@ -23,6 +24,7 @@ export interface EmulationSession {
   readonly callbackQueries: CallbackQueryService;
   readonly botCommands: BotCommandService;
   readonly botMessageViews: BotMessageViewService;
+  readonly mediaFiles: MediaFileService;
   readonly botApi: BotApiService;
   /**
    * Stops the session from keeping requests waiting: held long polls are answered and later ones

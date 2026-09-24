@@ -1,5 +1,6 @@
 import type { InlineKeyboard } from './inline_keyboard.ts';
 import type { ReplyInterface } from './reply_interface.ts';
+import type { StoredFileId } from './stored_file.ts';
 import type { PrivateConversationKey, PrivateConversationRole } from './virtual_chat.ts';
 
 export const MAX_TEXT_MESSAGE_LENGTH = 4_096;
@@ -67,15 +68,56 @@ export type TextEntity =
   | TextMentionEntity
   | CustomEmojiEntity;
 
-/** Canonical text stored in a private conversation, written by either participant. */
-export interface PrivateTextMessage {
-  readonly kind: 'private_text';
+/** Text with the entities that mark spans of it. */
+export interface FormattedText {
+  readonly text: string;
+  readonly entities: readonly TextEntity[];
+}
+
+/** The most UTF-16 code units of a caption that Telegram accepts from bots and non-premium users. */
+export const MAX_CAPTION_LENGTH = 1_024;
+
+export interface TextMessageContent extends FormattedText {
+  readonly kind: 'text';
+}
+
+export interface PhotoMessageContent {
+  readonly kind: 'photo';
+  readonly fileId: StoredFileId;
+  /** Empty for a photo without a caption. */
+  readonly caption: FormattedText;
+  /** Whether clients cover the photo until the user reveals it. */
+  readonly hasSpoiler: boolean;
+  /** Whether clients show the caption above the photo, which matters only with a caption. */
+  readonly showsCaptionAboveMedia: boolean;
+}
+
+export interface DocumentMessageContent {
+  readonly kind: 'document';
+  readonly fileId: StoredFileId;
+  /** Empty for a document without a caption. */
+  readonly caption: FormattedText;
+}
+
+/** What a message shows: text, or a file with a caption. */
+export type MessageContent = TextMessageContent | PhotoMessageContent | DocumentMessageContent;
+
+/**
+ * The text a message's content carries: the text of a text message, or the caption of a media
+ * message, which is empty when it has none.
+ */
+export function getContentText(content: MessageContent): FormattedText {
+  return content.kind === 'text' ? content : content.caption;
+}
+
+/** A canonical message of a private conversation, written by either participant. */
+export interface PrivateMessage {
+  readonly kind: 'private_message';
   readonly id: CanonicalMessageId;
   readonly conversation: PrivateConversationKey;
   readonly authorRole: PrivateConversationRole;
   readonly sentAtUnixSeconds: number;
-  readonly text: string;
-  readonly entities: readonly TextEntity[];
+  readonly content: MessageContent;
   /** The message of the same conversation this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
   /** Omitted when the message has no inline keyboard. Only bots attach inline keyboards. */
@@ -85,8 +127,11 @@ export interface PrivateTextMessage {
    * bots send one, and never with an inline keyboard. Edits leave it unchanged.
    */
   readonly replyInterface?: ReplyInterface;
-  /** When the text was last edited; omitted for a message whose text was never edited. */
-  readonly textEditedAtUnixSeconds?: number;
+  /**
+   * When the text or caption was last edited; omitted for a message whose content was never
+   * edited.
+   */
+  readonly contentEditedAtUnixSeconds?: number;
   /** Whether the sender protected the message from forwarding and saving. Only bots protect. */
   readonly isContentProtected: boolean;
 }
@@ -96,24 +141,26 @@ export type SupergroupMessageAuthor =
   | { readonly kind: 'account'; readonly accountId: number }
   | { readonly kind: 'bot'; readonly botId: number };
 
-/** Canonical text stored in a supergroup, written by one of its members. */
-export interface SupergroupTextMessage {
-  readonly kind: 'supergroup_text';
+/** A canonical message of a supergroup, written by one of its members. */
+export interface SupergroupMessage {
+  readonly kind: 'supergroup_message';
   readonly id: CanonicalMessageId;
   readonly chatId: number;
   readonly author: SupergroupMessageAuthor;
   readonly sentAtUnixSeconds: number;
-  readonly text: string;
-  readonly entities: readonly TextEntity[];
+  readonly content: MessageContent;
   /** The message of the same supergroup this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
   /** Omitted when the message has no inline keyboard. Only bots attach inline keyboards. */
   readonly inlineKeyboard?: InlineKeyboard;
-  /** When the text was last edited; omitted for a message whose text was never edited. */
-  readonly textEditedAtUnixSeconds?: number;
+  /**
+   * When the text or caption was last edited; omitted for a message whose content was never
+   * edited.
+   */
+  readonly contentEditedAtUnixSeconds?: number;
   /** Whether the sender protected the message from forwarding and saving. Only bots protect. */
   readonly isContentProtected: boolean;
 }
 
-/** Canonical text of any chat the emulator supports. */
-export type TextMessage = PrivateTextMessage | SupergroupTextMessage;
+/** A canonical message of any chat the emulator supports. */
+export type ChatMessage = PrivateMessage | SupergroupMessage;

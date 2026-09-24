@@ -68,42 +68,99 @@ export interface BotApiInlineKeyboardMarkup {
   readonly inline_keyboard: readonly (readonly BotApiInlineKeyboardButton[])[];
 }
 
-/** A text message in a chat of the given type, in the field order Telegram uses. */
-interface BotApiTextMessageInChat<Chat> {
+/** A file as the Bot API shows it, in the field order Telegram uses. */
+export interface BotApiFile {
+  /** The observing user's own identifier of the file, which it can send and download. */
+  readonly file_id: string;
+  /** The same for every user; it can neither send nor download the file. */
+  readonly file_unique_id: string;
+  readonly file_size: number;
+}
+
+/** A file whose download path `getFile` reported. */
+export interface BotApiDownloadableFile extends BotApiFile {
+  readonly file_path: string;
+}
+
+export interface BotApiPhotoSize extends BotApiFile {
+  readonly width: number;
+  readonly height: number;
+}
+
+/** A document as the Bot API shows it: its name and type precede its file fields. */
+export interface BotApiDocument extends BotApiFile {
+  readonly file_name: string;
+  readonly mime_type: string;
+}
+
+/** A caption's fields, which Telegram omits for a media message without a caption. */
+interface BotApiCaption {
+  readonly caption?: string;
+  /** Omitted when the caption has no entities. */
+  readonly caption_entities?: readonly BotApiMessageEntity[];
+}
+
+/** The fields that show what a message is, which follow its reply. */
+export type BotApiMessageContent =
+  | {
+    readonly text: string;
+    /** Omitted when the text has no entities, as Telegram does. */
+    readonly entities?: readonly BotApiMessageEntity[];
+  }
+  | (BotApiCaption & {
+    /** The photo's sizes, smallest first; the emulator keeps a single size. */
+    readonly photo: readonly BotApiPhotoSize[];
+    /** Present only for a caption that clients show above the photo. */
+    readonly show_caption_above_media?: true;
+    /** Present only for a photo that clients cover until the user reveals it. */
+    readonly has_media_spoiler?: true;
+  })
+  | (BotApiCaption & { readonly document: BotApiDocument });
+
+interface BotApiMessageHeader<Chat> {
   readonly message_id: number;
   readonly from: BotApiUser;
   readonly chat: Chat;
   readonly date: number;
-  /** Omitted for a message whose text was never edited. */
+  /** Omitted for a message whose content was never edited. */
   readonly edit_date?: number;
-  /**
-   * The replied message, without its own reply; omitted when the message is no reply or the
-   * replied message was deleted.
-   */
-  readonly reply_to_message?: Omit<BotApiTextMessageInChat<Chat>, 'reply_to_message'>;
-  readonly text: string;
-  /** Omitted when the text has no entities, as Telegram does. */
-  readonly entities?: readonly BotApiMessageEntity[];
+}
+
+interface BotApiMessageTrailer {
   /** Omitted when the message has no inline keyboard. */
   readonly reply_markup?: BotApiInlineKeyboardMarkup;
   /** Present only for a message its sender protected from forwarding and saving. */
   readonly has_protected_content?: true;
 }
 
-export type BotApiPrivateTextMessage = BotApiTextMessageInChat<BotApiPrivateChat>;
-
-export type BotApiSupergroupTextMessage = BotApiTextMessageInChat<BotApiSupergroupChat>;
-
-export type BotApiTextMessage = BotApiPrivateTextMessage | BotApiSupergroupTextMessage;
-
 /** A message as a reply shows it: Telegram never nests the replied message's own reply. */
-export type BotApiRepliedPrivateTextMessage = Omit<BotApiPrivateTextMessage, 'reply_to_message'>;
+type BotApiRepliedMessageInChat<Chat> =
+  & BotApiMessageHeader<Chat>
+  & BotApiMessageContent
+  & BotApiMessageTrailer;
 
-/** A message as a reply shows it: Telegram never nests the replied message's own reply. */
-export type BotApiRepliedSupergroupTextMessage = Omit<
-  BotApiSupergroupTextMessage,
-  'reply_to_message'
->;
+/** A message in a chat of the given type, in the field order Telegram uses. */
+type BotApiMessageInChat<Chat> =
+  & BotApiMessageHeader<Chat>
+  & {
+    /**
+     * The replied message, without its own reply; omitted when the message is no reply or the
+     * replied message was deleted.
+     */
+    readonly reply_to_message?: BotApiRepliedMessageInChat<Chat>;
+  }
+  & BotApiMessageContent
+  & BotApiMessageTrailer;
+
+export type BotApiPrivateMessage = BotApiMessageInChat<BotApiPrivateChat>;
+
+export type BotApiSupergroupMessage = BotApiMessageInChat<BotApiSupergroupChat>;
+
+export type BotApiMessage = BotApiPrivateMessage | BotApiSupergroupMessage;
+
+export type BotApiRepliedPrivateMessage = BotApiRepliedMessageInChat<BotApiPrivateChat>;
+
+export type BotApiRepliedSupergroupMessage = BotApiRepliedMessageInChat<BotApiSupergroupChat>;
 
 /** A bot command as the Bot API shows it. */
 export interface BotApiBotCommand {
@@ -116,7 +173,7 @@ export interface BotApiBotCommand {
 export interface BotApiCallbackQuery {
   readonly id: string;
   readonly from: VirtualAccountProfile;
-  readonly message: BotApiTextMessage;
+  readonly message: BotApiMessage;
   readonly chat_instance: string;
   readonly data: string;
 }
@@ -150,12 +207,12 @@ export type BotApiMyChatMemberUpdated =
 
 export interface BotApiMessageUpdate {
   readonly update_id: number;
-  readonly message: BotApiTextMessage;
+  readonly message: BotApiMessage;
 }
 
 export interface BotApiEditedMessageUpdate {
   readonly update_id: number;
-  readonly edited_message: BotApiTextMessage;
+  readonly edited_message: BotApiMessage;
 }
 
 export interface BotApiCallbackQueryUpdate {

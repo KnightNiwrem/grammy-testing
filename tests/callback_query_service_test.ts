@@ -2,6 +2,7 @@ import { AccountRepository } from '../src/repositories/account.ts';
 import { BlockedUserRepository } from '../src/repositories/blocked_user.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
+import { FileRepository } from '../src/repositories/file.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
 import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
@@ -69,13 +70,13 @@ Deno.test('CallbackQueryService presses buttons on bot messages in a supergroup 
   const accountMessage = supergroupMessaging.sendAccountMessage({
     fromAccountId: chat.account.profile.id,
     chatId: supergroup.id,
-    text: 'Hello',
+    content: { kind: 'text', text: 'Hello' },
   });
   const botMessage = supergroupMessaging.sendBotMessage({
     fromBotId: chat.bot.profile.id,
     chatId: supergroup.id,
-    text: 'Vote',
     inlineKeyboard: [[{ kind: 'callback', text: 'Yes', callbackData: 'yes' }]],
+    content: { kind: 'text', text: 'Vote' },
   });
   if (!accountMessage.sent || !botMessage.sent) {
     throw new Error('Expected the supergroup messages to be sent');
@@ -340,6 +341,7 @@ function createCallbackQueryFixture() {
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const privateConversations = new PrivateConversationRepository();
   const messages = new MessageRepository();
+  const files = new FileRepository();
   const messageBoxes = new MessageBoxRepository();
   const sharedChats = new SharedChatRepository();
   const publishedEvents: ChatDomainEvent[] = [];
@@ -349,6 +351,7 @@ function createCallbackQueryFixture() {
     bots,
     privateConversations,
     messages,
+    files,
     messageBoxes,
     blockedUsers: new BlockedUserRepository(),
     events,
@@ -359,6 +362,7 @@ function createCallbackQueryFixture() {
     bots,
     sharedChats,
     messages,
+    files,
     messageBoxes,
     events,
     currentUnixTimeSeconds: () => 1_700_000_000,
@@ -379,17 +383,17 @@ function createCallbackQueryFixture() {
   const accountMessage = privateMessaging.sendAccountMessage({
     fromAccountId: account.profile.id,
     to: { type: 'private', botId: bot.profile.id },
-    text: '/start',
+    content: { kind: 'text', text: '/start' },
   });
   const botMessage = privateMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     to: { type: 'private', accountId: account.profile.id },
-    text: 'Continue?',
     inlineKeyboard: [[
       { kind: 'callback', text: 'Yes', callbackData: 'yes' },
       { kind: 'callback', text: 'No', callbackData: 'no' },
       { kind: 'url', text: 'Help', url: 'https://grammy.dev' },
     ]],
+    content: { kind: 'text', text: 'Continue?' },
   });
   if (!accountMessage.sent || !botMessage.sent) {
     throw new Error('Expected the fixture conversation to be created');

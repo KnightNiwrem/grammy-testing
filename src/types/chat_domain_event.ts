@@ -1,18 +1,18 @@
 import type { CallbackQuery } from './callback_query.ts';
 import type { SharedChat } from './virtual_chat.ts';
-import type { TextMessage } from './virtual_message.ts';
+import type { ChatMessage } from './virtual_message.ts';
 
 /** A canonical message was stored and numbered in the message boxes that hold it. */
 export interface MessageCreatedEvent {
   readonly type: 'message_created';
-  readonly message: TextMessage;
+  readonly message: ChatMessage;
 }
 
-/** The author of a stored message changed its text. */
+/** The author of a stored message edited it. */
 export interface MessageEditedEvent {
   readonly type: 'message_edited';
   /** The message as the edit left it. */
-  readonly message: TextMessage;
+  readonly message: ChatMessage;
 }
 
 /** An account pressed a callback button on a message from the bot. */
@@ -20,7 +20,7 @@ export interface CallbackQueryCreatedEvent {
   readonly type: 'callback_query_created';
   readonly callbackQuery: CallbackQuery;
   /** The message carrying the pressed button, as it was when the button was pressed. */
-  readonly message: TextMessage;
+  readonly message: ChatMessage;
 }
 
 /** An account blocked a bot, which Telegram calls stopping it, or unblocked it. */

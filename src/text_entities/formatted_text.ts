@@ -1,4 +1,4 @@
-import type { TextEntity } from '../types/virtual_message.ts';
+import type { FormattedText, TextEntity } from '../types/virtual_message.ts';
 import { findBotCommandEntities } from './bot_command.ts';
 import {
   isRemovedCharacter,
@@ -15,14 +15,17 @@ import { compareTextEntities } from './text_entity_order.ts';
  * Failures carry TDLib's own error message.
  */
 
-export interface FormattedText {
-  readonly text: string;
-  readonly entities: readonly TextEntity[];
-}
-
 export type FormattedTextFixing =
   | { readonly fixed: true; readonly formattedText: FormattedText }
   | { readonly fixed: false; readonly error: string };
+
+/**
+ * How text without visible content is treated. Message text must have some. A caption may be
+ * empty: text with nothing but spaces and line breaks becomes an empty caption, and so does text of
+ * only invisible characters, such as zero-width spaces, from an account; from a bot, such text is
+ * kept, as TDLib's `allow_empty_string` keeps it for bots.
+ */
+export type EmptyTextTreatment = 'reject' | 'clear' | 'keep_invisible_characters';
 
 export interface FormattedTextFixingContext {
   /** Whether a user a text mention names can be mentioned. */
@@ -55,6 +58,7 @@ export function fixFormattedText(
   text: string,
   inputEntities: readonly TextEntity[],
   context: FormattedTextFixingContext,
+  emptyTextTreatment: EmptyTextTreatment = 'reject',
 ): FormattedTextFixing {
   const argumentValidation = validateEntityArguments(inputEntities, context);
   if (!argumentValidation.valid) {
@@ -85,7 +89,9 @@ export function fixFormattedText(
   entities = removeEmptyEntities(cleaning.entities);
   const lastVisibleIndex = findLastVisibleCodeUnitIndex(cleanedText);
   if (lastVisibleIndex === -1) {
-    return { fixed: false, error: 'Text must be non-empty' };
+    return emptyTextTreatment === 'reject'
+      ? { fixed: false, error: 'Text must be non-empty' }
+      : { fixed: true, formattedText: { text: '', entities: [] } };
   }
   entities = fixEntities(entities);
 
@@ -113,7 +119,18 @@ export function fixFormattedText(
   entities = entities.map((entity) => ({ ...entity, offset: entity.offset - trimmedStart }));
 
   if (EMPTY_TEXT_PATTERN.test(fixedText)) {
-    return { fixed: false, error: 'Text must be non-empty' };
+    switch (emptyTextTreatment) {
+      case 'reject':
+        return { fixed: false, error: 'Text must be non-empty' };
+      case 'clear':
+        return { fixed: true, formattedText: { text: '', entities: [] } };
+      case 'keep_invisible_characters':
+        break;
+      default: {
+        const unhandledTreatment: never = emptyTextTreatment;
+        throw new Error(`Unhandled empty text treatment: ${unhandledTreatment}`);
+      }
+    }
   }
 
   return {

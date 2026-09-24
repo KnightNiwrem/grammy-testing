@@ -1,5 +1,6 @@
 import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
+import { FileRepository } from '../src/repositories/file.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
@@ -11,18 +12,21 @@ Deno.test('BotMessageViewService shows an account message in its bot private cha
   const { virtualUsers, messages, messageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
-  const message = messages.addPrivateTextMessage({
+  const message = messages.addPrivateMessage({
     conversation: { accountId: account.profile.id, botId: bot.profile.id },
     authorRole: 'account',
     sentAtUnixSeconds: 1_700_000_000,
-    text: '/start',
-    entities: [{ type: 'bot_command', offset: 0, length: 6 }],
+    content: {
+      kind: 'text',
+      text: '/start',
+      entities: [{ type: 'bot_command', offset: 0, length: 6 }],
+    },
   });
   messageBoxes.assignMessageId(account.profile.id, message.id);
   messageBoxes.assignMessageId(bot.profile.id, 'unrelated-message');
   messageBoxes.assignMessageId(bot.profile.id, message.id);
 
-  const view = botMessageViews.viewPrivateTextMessageForBot(message);
+  const view = botMessageViews.viewPrivateMessageForBot(message);
 
   const expectedView = {
     message_id: 2,
@@ -41,12 +45,11 @@ Deno.test('BotMessageViewService shows a bot message, then its edit date and key
   const { virtualUsers, messages, messageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
-  const sentMessage = messages.addPrivateTextMessage({
+  const sentMessage = messages.addPrivateMessage({
     conversation: { accountId: account.profile.id, botId: bot.profile.id },
     authorRole: 'bot',
     sentAtUnixSeconds: 1_700_000_000,
-    text: 'Continue?',
-    entities: [],
+    content: { kind: 'text', text: 'Continue?', entities: [] },
   });
   messageBoxes.assignMessageId(bot.profile.id, sentMessage.id);
   const botSender = {
@@ -55,7 +58,7 @@ Deno.test('BotMessageViewService shows a bot message, then its edit date and key
     first_name: 'Test Bot',
     username: 'test_bot',
   };
-  const sentView = botMessageViews.viewPrivateTextMessageForBot(sentMessage);
+  const sentView = botMessageViews.viewPrivateMessageForBot(sentMessage);
   if (
     JSON.stringify(sentView) !== JSON.stringify({
       message_id: 1,
@@ -70,17 +73,20 @@ Deno.test('BotMessageViewService shows a bot message, then its edit date and key
     );
   }
 
-  const message = messages.editPrivateTextMessage(sentMessage.id, {
-    text: 'Try /help',
-    entities: [{ type: 'bot_command', offset: 4, length: 5 }],
+  const message = messages.editPrivateMessage(sentMessage.id, {
     inlineKeyboard: [[
       { kind: 'callback', text: 'Yes', callbackData: 'yes' },
       { kind: 'url', text: 'Docs', url: 'https://grammy.dev' },
     ]],
-    textEditedAtUnixSeconds: 1_700_000_005,
+    contentEditedAtUnixSeconds: 1_700_000_005,
+    content: {
+      kind: 'text',
+      text: 'Try /help',
+      entities: [{ type: 'bot_command', offset: 4, length: 5 }],
+    },
   });
 
-  const view = botMessageViews.viewPrivateTextMessageForBot(message);
+  const view = botMessageViews.viewPrivateMessageForBot(message);
 
   const expectedView = {
     message_id: 1,
@@ -109,38 +115,34 @@ Deno.test('BotMessageViewService shows the current replied message until it is d
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
   const conversation = { accountId: account.profile.id, botId: bot.profile.id };
-  const question = messages.addPrivateTextMessage({
+  const question = messages.addPrivateMessage({
     conversation,
     authorRole: 'bot',
     sentAtUnixSeconds: 1_700_000_000,
-    text: 'Your name?',
-    entities: [],
+    content: { kind: 'text', text: 'Your name?', entities: [] },
   });
   messageBoxes.assignMessageId(bot.profile.id, question.id);
-  const answer = messages.addPrivateTextMessage({
+  const answer = messages.addPrivateMessage({
     conversation,
     authorRole: 'account',
     sentAtUnixSeconds: 1_700_000_001,
-    text: 'Ada',
-    entities: [],
     replyToMessageId: question.id,
+    content: { kind: 'text', text: 'Ada', entities: [] },
   });
   messageBoxes.assignMessageId(bot.profile.id, answer.id);
-  const confirmation = messages.addPrivateTextMessage({
+  const confirmation = messages.addPrivateMessage({
     conversation,
     authorRole: 'bot',
     sentAtUnixSeconds: 1_700_000_002,
-    text: 'Saved',
-    entities: [],
     replyToMessageId: answer.id,
     isContentProtected: true,
+    content: { kind: 'text', text: 'Saved', entities: [] },
   });
   messageBoxes.assignMessageId(bot.profile.id, confirmation.id);
-  messages.editPrivateTextMessage(question.id, {
-    text: 'Your first name?',
-    entities: [],
+  messages.editPrivateMessage(question.id, {
     inlineKeyboard: undefined,
-    textEditedAtUnixSeconds: 1_700_000_003,
+    contentEditedAtUnixSeconds: 1_700_000_003,
+    content: { kind: 'text', text: 'Your first name?', entities: [] },
   });
   const botSender = {
     id: bot.profile.id,
@@ -150,8 +152,8 @@ Deno.test('BotMessageViewService shows the current replied message until it is d
   };
   const chat = { id: account.profile.id, type: 'private', first_name: 'Ada' };
 
-  const answerView = botMessageViews.viewPrivateTextMessageForBot(answer);
-  const confirmationView = botMessageViews.viewPrivateTextMessageForBot(confirmation);
+  const answerView = botMessageViews.viewPrivateMessageForBot(answer);
+  const confirmationView = botMessageViews.viewPrivateMessageForBot(confirmation);
 
   const expectedAnswerView = {
     message_id: 2,
@@ -196,8 +198,8 @@ Deno.test('BotMessageViewService shows the current replied message until it is d
     );
   }
 
-  messages.deletePrivateTextMessage(question.id);
-  const answerViewAfterDeletion = botMessageViews.viewPrivateTextMessageForBot(answer);
+  messages.deletePrivateMessage(question.id);
+  const answerViewAfterDeletion = botMessageViews.viewPrivateMessageForBot(answer);
   if ('reply_to_message' in answerViewAfterDeletion) {
     throw new Error('Expected a reply to a deleted message to omit reply_to_message');
   }
@@ -207,13 +209,12 @@ Deno.test('BotMessageViewService shows a callback query with its message as the 
   const { virtualUsers, messages, messageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
-  const message = messages.addPrivateTextMessage({
+  const message = messages.addPrivateMessage({
     conversation: { accountId: account.profile.id, botId: bot.profile.id },
     authorRole: 'bot',
     sentAtUnixSeconds: 1_700_000_000,
-    text: 'Continue?',
-    entities: [],
     inlineKeyboard: [[{ kind: 'callback', text: 'Yes', callbackData: 'yes' }]],
+    content: { kind: 'text', text: 'Continue?', entities: [] },
   });
   messageBoxes.assignMessageId(bot.profile.id, message.id);
 
@@ -229,7 +230,7 @@ Deno.test('BotMessageViewService shows a callback query with its message as the 
   const expectedView = {
     id: '7',
     from: account.profile,
-    message: botMessageViews.viewPrivateTextMessageForBot(message),
+    message: botMessageViews.viewPrivateMessageForBot(message),
     chat_instance: '-42',
     data: 'yes',
   };
@@ -240,22 +241,105 @@ Deno.test('BotMessageViewService shows a callback query with its message as the 
   }
 });
 
+Deno.test('BotMessageViewService shows photos and documents in Telegram order with observer file IDs', () => {
+  const { virtualUsers, messages, files, messageBoxes, botMessageViews } = createViewFixture();
+  const account = createAccount(virtualUsers);
+  const bot = createBot(virtualUsers);
+  const document = files.addFile({
+    type: 'document',
+    content: new Uint8Array([1, 2, 3]),
+    fileName: 'report.pdf',
+    mimeType: 'application/pdf',
+  });
+  const photo = files.addFile({
+    type: 'photo',
+    content: new Uint8Array(13),
+    imageFormat: 'png',
+    width: 640,
+    height: 480,
+  });
+  const documentMessage = messages.addPrivateMessage({
+    conversation: { accountId: account.profile.id, botId: bot.profile.id },
+    authorRole: 'account',
+    sentAtUnixSeconds: 1_700_000_000,
+    content: { kind: 'document', fileId: document.id, caption: { text: '', entities: [] } },
+  });
+  const photoMessage = messages.addPrivateMessage({
+    conversation: { accountId: account.profile.id, botId: bot.profile.id },
+    authorRole: 'bot',
+    sentAtUnixSeconds: 1_700_000_001,
+    content: {
+      kind: 'photo',
+      fileId: photo.id,
+      caption: { text: 'Chart', entities: [{ type: 'bold', offset: 0, length: 5 }] },
+      hasSpoiler: true,
+      showsCaptionAboveMedia: true,
+    },
+    replyToMessageId: documentMessage.id,
+    isContentProtected: true,
+  });
+  messageBoxes.assignMessageId(bot.profile.id, documentMessage.id);
+  messageBoxes.assignMessageId(bot.profile.id, photoMessage.id);
+
+  const view = botMessageViews.viewPrivateMessageForBot(photoMessage);
+
+  const expectedDocument = {
+    file_name: 'report.pdf',
+    mime_type: 'application/pdf',
+    file_id: files.getOrAssignObserverFileId(bot.profile.id, document.id),
+    file_unique_id: document.uniqueId,
+    file_size: 3,
+  };
+  const expectedView = {
+    message_id: 2,
+    from: { id: bot.profile.id, is_bot: true, first_name: 'Test Bot', username: 'test_bot' },
+    chat: { id: account.profile.id, type: 'private', first_name: 'Ada' },
+    date: 1_700_000_001,
+    reply_to_message: {
+      message_id: 1,
+      from: account.profile,
+      chat: { id: account.profile.id, type: 'private', first_name: 'Ada' },
+      date: 1_700_000_000,
+      document: expectedDocument,
+    },
+    photo: [{
+      file_id: files.getOrAssignObserverFileId(bot.profile.id, photo.id),
+      file_unique_id: photo.uniqueId,
+      file_size: 13,
+      width: 640,
+      height: 480,
+    }],
+    caption: 'Chart',
+    caption_entities: [{ type: 'bold', offset: 0, length: 5 }],
+    show_caption_above_media: true,
+    has_media_spoiler: true,
+    has_protected_content: true,
+  };
+  if (JSON.stringify(view) !== JSON.stringify(expectedView)) {
+    throw new Error(`Expected the bot's view of the photo, received ${JSON.stringify(view)}`);
+  }
+  if (
+    files.getOrAssignObserverFileId(account.profile.id, photo.id) === expectedView.photo[0].file_id
+  ) {
+    throw new Error('Expected another observer to know the photo by another file ID');
+  }
+});
+
 Deno.test('BotMessageViewService rejects a message missing from the bot message box', () => {
   const { virtualUsers, messages, messageBoxes, botMessageViews } = createViewFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers);
-  const message = messages.addPrivateTextMessage({
+  const message = messages.addPrivateMessage({
     conversation: { accountId: account.profile.id, botId: bot.profile.id },
     authorRole: 'account',
     sentAtUnixSeconds: 1_700_000_000,
-    text: 'Hello',
-    entities: [],
+    content: { kind: 'text', text: 'Hello', entities: [] },
   });
   messageBoxes.assignMessageId(account.profile.id, message.id);
 
   let viewError: unknown;
   try {
-    botMessageViews.viewPrivateTextMessageForBot(message);
+    botMessageViews.viewPrivateMessageForBot(message);
   } catch (error) {
     viewError = error;
   }
@@ -270,6 +354,7 @@ function createViewFixture() {
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const messages = new MessageRepository();
+  const files = new FileRepository();
   const messageBoxes = new MessageBoxRepository();
   const sharedChats = new SharedChatRepository();
   const botMessageViews = new BotMessageViewService({
@@ -278,8 +363,9 @@ function createViewFixture() {
     sharedChats,
     messageBoxes,
     messages,
+    files,
   });
-  return { virtualUsers, messages, messageBoxes, botMessageViews };
+  return { virtualUsers, messages, files, messageBoxes, botMessageViews };
 }
 
 function createAccount(virtualUsers: VirtualUserService) {

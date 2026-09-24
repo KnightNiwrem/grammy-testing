@@ -14,9 +14,9 @@ import type {
 } from '../types/virtual_chat.ts';
 import type {
   CanonicalMessageId,
-  PrivateTextMessage,
-  SupergroupTextMessage,
-  TextMessage,
+  ChatMessage,
+  PrivateMessage,
+  SupergroupMessage,
 } from '../types/virtual_message.ts';
 
 /**
@@ -84,10 +84,10 @@ interface PrivateConversationLookup {
 }
 
 interface PrivateMessageLookup {
-  getPrivateTextMessageByBotMessageId(
+  getPrivateMessageByBotMessageId(
     conversation: PrivateConversationKey,
     botMessageId: number,
-  ): PrivateTextMessage | undefined;
+  ): PrivateMessage | undefined;
 }
 
 interface SupergroupLookup {
@@ -96,7 +96,7 @@ interface SupergroupLookup {
 }
 
 interface SupergroupMessageLookup {
-  getMessageByChatMessageId(chatId: number, messageId: number): SupergroupTextMessage | undefined;
+  getMessageByChatMessageId(chatId: number, messageId: number): SupergroupMessage | undefined;
 }
 
 interface CallbackQueryStore {
@@ -131,7 +131,7 @@ interface CallbackQueryServiceDependencies {
 type PressedMessageResolution =
   | {
     readonly resolved: true;
-    readonly message: TextMessage;
+    readonly message: ChatMessage;
     readonly botId: number;
     readonly chatInstance: string;
   }
@@ -259,7 +259,7 @@ export class CallbackQueryService {
     const conversation = this.#privateConversations.getPrivateConversation(conversationKey);
     const message = conversation === undefined
       ? undefined
-      : this.#privateMessages.getPrivateTextMessageByBotMessageId(conversationKey, botMessageId);
+      : this.#privateMessages.getPrivateMessageByBotMessageId(conversationKey, botMessageId);
     if (conversation === undefined || message === undefined) {
       return { resolved: false, reason: 'message_not_found' };
     }

@@ -1,5 +1,6 @@
 import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
+import { FileRepository } from '../src/repositories/file.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { MessageBoxRepository } from '../src/repositories/message_box.ts';
 import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
@@ -8,7 +9,7 @@ import { SharedChatAdministrationService } from '../src/services/shared_chat_adm
 import { SupergroupMessagingService } from '../src/services/supergroup_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
-import type { SupergroupTextMessage } from '../src/types/virtual_message.ts';
+import { getContentText, type SupergroupMessage } from '../src/types/virtual_message.ts';
 
 Deno.test('SupergroupMessagingService numbers messages once for the supergroup and publishes them', () => {
   const { supergroupMessaging, messageBoxes, publishedEvents, owner, bot, supergroup } =
@@ -17,25 +18,25 @@ Deno.test('SupergroupMessagingService numbers messages once for the supergroup a
   const accountMessage = expectSent(supergroupMessaging.sendAccountMessage({
     fromAccountId: owner.profile.id,
     chatId: supergroup.id,
-    text: '  /start  ',
+    content: { kind: 'text', text: '  /start  ' },
   }));
   const botMessage = expectSent(supergroupMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     chatId: supergroup.id,
-    text: 'Welcome',
     replyTo: { messageId: 1, allowSendingWithoutReply: false },
     isContentProtected: true,
+    content: { kind: 'text', text: 'Welcome' },
   }));
   const replyToMissing = expectSent(supergroupMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     chatId: supergroup.id,
-    text: 'Anyone?',
     replyTo: { messageId: 99, allowSendingWithoutReply: true },
+    content: { kind: 'text', text: 'Anyone?' },
   }));
 
   if (
-    accountMessage.text !== '/start' ||
-    JSON.stringify(accountMessage.entities) !==
+    getContentText(accountMessage.content).text !== '/start' ||
+    JSON.stringify(getContentText(accountMessage.content).entities) !==
       JSON.stringify([{ type: 'bot_command', offset: 0, length: 6 }]) ||
     botMessage.replyToMessageId !== accountMessage.id || !botMessage.isContentProtected ||
     replyToMissing.replyToMessageId !== undefined
@@ -71,63 +72,67 @@ Deno.test('SupergroupMessagingService lets only members write and read', () => {
     supergroupMessaging.sendAccountMessage({
       fromAccountId: 999,
       chatId: supergroup.id,
-      text: 'Hi',
+      content: { kind: 'text', text: 'Hi' },
     }),
     supergroupMessaging.sendAccountMessage({
       fromAccountId: owner.profile.id,
       chatId: -1_000_000_009_999,
-      text: 'Hi',
+      content: { kind: 'text', text: 'Hi' },
     }),
     supergroupMessaging.sendAccountMessage({
       fromAccountId: stranger.profile.id,
       chatId: supergroup.id,
-      text: 'Hi',
+      content: { kind: 'text', text: 'Hi' },
     }),
     supergroupMessaging.sendAccountMessage({
       fromAccountId: owner.profile.id,
       chatId: supergroup.id,
-      text: '',
+      content: { kind: 'text', text: '' },
     }),
     supergroupMessaging.sendAccountMessage({
       fromAccountId: owner.profile.id,
       chatId: supergroup.id,
-      text: 'x'.repeat(4_097),
+      content: { kind: 'text', text: 'x'.repeat(4_097) },
     }),
     supergroupMessaging.sendAccountMessage({
       fromAccountId: owner.profile.id,
       chatId: supergroup.id,
-      text: 'Hi',
       replyToMessageId: 1,
+      content: { kind: 'text', text: 'Hi' },
     }),
   ].map((result) => result.sent ? 'sent' : result.reason);
   const botFailures = [
-    supergroupMessaging.sendBotMessage({ fromBotId: 999, chatId: supergroup.id, text: 'Hi' }),
+    supergroupMessaging.sendBotMessage({
+      fromBotId: 999,
+      chatId: supergroup.id,
+      content: { kind: 'text', text: 'Hi' },
+    }),
     supergroupMessaging.sendBotMessage({
       fromBotId: bot.profile.id,
       chatId: supergroup.id,
-      text: '',
+      content: { kind: 'text', text: '' },
     }),
     supergroupMessaging.sendBotMessage({
       fromBotId: strangerBot.profile.id,
       chatId: supergroup.id,
-      text: 'Hi',
+      content: { kind: 'text', text: 'Hi' },
     }),
     supergroupMessaging.sendBotMessage({
       fromBotId: bot.profile.id,
       chatId: supergroup.id,
-      text: 'Hi',
       replyTo: { messageId: 1, allowSendingWithoutReply: false },
+      content: { kind: 'text', text: 'Hi' },
     }),
     supergroupMessaging.sendBotMessage({
       fromBotId: bot.profile.id,
       chatId: supergroup.id,
-      text: '   ',
+      content: { kind: 'text', text: '   ' },
     }),
     supergroupMessaging.sendBotMessage({
       fromBotId: bot.profile.id,
       chatId: supergroup.id,
-      text: 'Pick',
       inlineKeyboard: [[{ kind: 'callback', text: 'A', callbackData: 'a'.repeat(65) }]],
+      content: { kind: 'text', text: 'Pick' },
     }),
   ].map((result) => result.sent ? 'sent' : result.reason);
   const otherFailures = [
@@ -189,12 +194,12 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
   expectSent(supergroupMessaging.sendAccountMessage({
     fromAccountId: owner.profile.id,
     chatId: supergroup.id,
-    text: 'Hello',
+    content: { kind: 'text', text: 'Hello' },
   }));
   expectSent(supergroupMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     chatId: supergroup.id,
-    text: 'Menu',
+    content: { kind: 'text', text: 'Menu' },
   }));
 
   const editFailures = [
@@ -225,13 +230,13 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
       fromAccountId: owner.profile.id,
       chatId: supergroup.id,
       messageId: 2,
-      text: 'Changed',
+      edit: { kind: 'text', text: 'Changed' },
     }),
     supergroupMessaging.editAccountMessage({
       fromAccountId: owner.profile.id,
       chatId: supergroup.id,
       messageId: 1,
-      text: 'Hello',
+      edit: { kind: 'text', text: 'Hello' },
     }),
   ].map((result) => result.edited ? 'edited' : result.reason);
   const deletionFailures = [
@@ -268,7 +273,7 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
     fromAccountId: owner.profile.id,
     chatId: supergroup.id,
     messageId: 1,
-    text: 'Hello /help',
+    edit: { kind: 'text', text: 'Hello /help' },
   });
   const deletion = supergroupMessaging.deleteMessagesByBot({
     fromBotId: bot.profile.id,
@@ -280,11 +285,12 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
     chatId: supergroup.id,
   });
   if (
-    !accountEdit.edited || accountEdit.message.textEditedAtUnixSeconds !== 1_700_000_000 ||
+    !accountEdit.edited || accountEdit.message.contentEditedAtUnixSeconds !== 1_700_000_000 ||
     publishedEvents.at(-1)?.type !== 'message_edited' ||
     publishedEvents.length !== publishedEventCount + 1 ||
     !deletion.deleted || deletion.deletedMessageCount !== 1 ||
-    !history.found || JSON.stringify(history.messages.map(({ text }) => text)) !==
+    !history.found ||
+    JSON.stringify(history.messages.map(({ content }) => getContentText(content).text)) !==
       JSON.stringify(['Hello /help'])
   ) {
     throw new Error('Expected the account edit to be published and the bot message deleted');
@@ -314,6 +320,7 @@ function createSupergroupMessagingFixture() {
     bots,
     sharedChats,
     messages: new MessageRepository(),
+    files: new FileRepository(),
     messageBoxes,
     events,
     currentUnixTimeSeconds,
@@ -352,9 +359,9 @@ function createSupergroupMessagingFixture() {
 
 function expectSent(
   result:
-    | { readonly sent: true; readonly message: SupergroupTextMessage }
+    | { readonly sent: true; readonly message: SupergroupMessage }
     | { readonly sent: false; readonly reason: string },
-): SupergroupTextMessage {
+): SupergroupMessage {
   if (!result.sent) {
     throw new Error(`Expected the message to be sent, received ${result.reason}`);
   }

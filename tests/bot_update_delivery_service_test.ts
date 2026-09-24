@@ -2,6 +2,7 @@ import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
+import { FileRepository } from '../src/repositories/file.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
@@ -9,7 +10,7 @@ import { MessageBoxRepository } from '../src/repositories/message_box.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
-import type { BotApiTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
+import type { BotApiMessage, BotApiUpdate } from '../src/types/bot_api.ts';
 
 Deno.test('BotUpdateDeliveryService delivers a private message to its conversation bot', () => {
   const { virtualUsers, messages, messageBoxes, botUpdates, botUpdateDelivery } =
@@ -17,12 +18,15 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
   const account = createAccount(virtualUsers);
   const targetBot = createBot(virtualUsers, 'target_bot');
   const otherBot = createBot(virtualUsers, 'other_bot');
-  const message = messages.addPrivateTextMessage({
+  const message = messages.addPrivateMessage({
     conversation: { accountId: account.profile.id, botId: targetBot.profile.id },
     authorRole: 'account',
     sentAtUnixSeconds: 1_700_000_000,
-    text: '/start',
-    entities: [{ type: 'bot_command', offset: 0, length: 6 }],
+    content: {
+      kind: 'text',
+      text: '/start',
+      entities: [{ type: 'bot_command', offset: 0, length: 6 }],
+    },
   });
   messageBoxes.assignMessageId(targetBot.profile.id, 'unrelated-message');
   messageBoxes.assignMessageId(targetBot.profile.id, message.id);
@@ -38,8 +42,8 @@ Deno.test('BotUpdateDeliveryService delivers a private message to its conversati
     messageFromUpdate(targetBotUpdates[0])?.chat.id !== account.profile.id ||
     messageFromUpdate(targetBotUpdates[0])?.from.id !== account.profile.id ||
     messageFromUpdate(targetBotUpdates[0])?.date !== 1_700_000_000 ||
-    messageFromUpdate(targetBotUpdates[0])?.text !== '/start' ||
-    JSON.stringify(messageFromUpdate(targetBotUpdates[0])?.entities) !==
+    textContentOf(messageFromUpdate(targetBotUpdates[0]))?.text !== '/start' ||
+    JSON.stringify(textContentOf(messageFromUpdate(targetBotUpdates[0]))?.entities) !==
       JSON.stringify([{ type: 'bot_command', offset: 0, length: 6 }])
   ) {
     throw new Error("Expected one update projected with the bot's own message ID");
@@ -57,12 +61,11 @@ Deno.test('BotUpdateDeliveryService does not deliver a bot its own message', () 
     createDeliveryFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers, 'test_bot');
-  const message = messages.addPrivateTextMessage({
+  const message = messages.addPrivateMessage({
     conversation: { accountId: account.profile.id, botId: bot.profile.id },
     authorRole: 'bot',
     sentAtUnixSeconds: 1_700_000_000,
-    text: 'Welcome!',
-    entities: [],
+    content: { kind: 'text', text: 'Welcome!', entities: [] },
   });
   messageBoxes.assignMessageId(bot.profile.id, message.id);
 
@@ -78,13 +81,12 @@ Deno.test('BotUpdateDeliveryService delivers a callback query to the bot whose b
     createDeliveryFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers, 'test_bot');
-  const message = messages.addPrivateTextMessage({
+  const message = messages.addPrivateMessage({
     conversation: { accountId: account.profile.id, botId: bot.profile.id },
     authorRole: 'bot',
     sentAtUnixSeconds: 1_700_000_000,
-    text: 'Continue?',
-    entities: [],
     inlineKeyboard: [[{ kind: 'callback', text: 'Yes', callbackData: 'yes' }]],
+    content: { kind: 'text', text: 'Continue?', entities: [] },
   });
   messageBoxes.assignMessageId(bot.profile.id, message.id);
 
@@ -132,20 +134,18 @@ Deno.test('BotUpdateDeliveryService skips update types excluded by the bot subsc
   } = createDeliveryFixture();
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers, 'test_bot');
-  const botMessage = messages.addPrivateTextMessage({
+  const botMessage = messages.addPrivateMessage({
     conversation: { accountId: account.profile.id, botId: bot.profile.id },
     authorRole: 'bot',
     sentAtUnixSeconds: 1_700_000_000,
-    text: 'Continue?',
-    entities: [],
     inlineKeyboard: [[{ kind: 'callback', text: 'Yes', callbackData: 'yes' }]],
+    content: { kind: 'text', text: 'Continue?', entities: [] },
   });
-  const accountMessage = messages.addPrivateTextMessage({
+  const accountMessage = messages.addPrivateMessage({
     conversation: botMessage.conversation,
     authorRole: 'account',
     sentAtUnixSeconds: 1_700_000_001,
-    text: 'Hello',
-    entities: [],
+    content: { kind: 'text', text: 'Hello', entities: [] },
   });
   messageBoxes.assignMessageId(bot.profile.id, botMessage.id);
   messageBoxes.assignMessageId(bot.profile.id, accountMessage.id);
@@ -185,31 +185,39 @@ Deno.test('BotUpdateDeliveryService delivers an account edit, but not its own, t
   const account = createAccount(virtualUsers);
   const bot = createBot(virtualUsers, 'test_bot');
   const conversation = { accountId: account.profile.id, botId: bot.profile.id };
-  const accountMessage = messages.addPrivateTextMessage({
+  const accountMessage = messages.addPrivateMessage({
     conversation,
     authorRole: 'account',
     sentAtUnixSeconds: 1_700_000_000,
-    text: 'Hello',
-    entities: [],
+    content: { kind: 'text', text: 'Hello', entities: [] },
   });
-  const botMessage = messages.addPrivateTextMessage({
+  const botMessage = messages.addPrivateMessage({
     conversation,
     authorRole: 'bot',
     sentAtUnixSeconds: 1_700_000_001,
-    text: 'Hi',
-    entities: [],
+    content: { kind: 'text', text: 'Hi', entities: [] },
   });
   messageBoxes.assignMessageId(bot.profile.id, accountMessage.id);
   messageBoxes.assignMessageId(bot.profile.id, botMessage.id);
-  const edit = { entities: [], inlineKeyboard: undefined, textEditedAtUnixSeconds: 1_700_000_005 };
+  const edit = {
+    entities: [],
+    inlineKeyboard: undefined,
+    contentEditedAtUnixSeconds: 1_700_000_005,
+  };
 
   botUpdateDelivery.publish({
     type: 'message_edited',
-    message: messages.editPrivateTextMessage(botMessage.id, { ...edit, text: 'Hi there' }),
+    message: messages.editPrivateMessage(botMessage.id, {
+      ...edit,
+      content: { kind: 'text', text: 'Hi there', entities: [] },
+    }),
   });
   botUpdateDelivery.publish({
     type: 'message_edited',
-    message: messages.editPrivateTextMessage(accountMessage.id, { ...edit, text: 'Hello!' }),
+    message: messages.editPrivateMessage(accountMessage.id, {
+      ...edit,
+      content: { kind: 'text', text: 'Hello!', entities: [] },
+    }),
   });
 
   const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
@@ -334,19 +342,17 @@ Deno.test('BotUpdateDeliveryService delivers supergroup additions and edits to t
       addedAtUnixSeconds: 1_700_000_000,
     });
   }
-  const message = messages.addSupergroupTextMessage({
+  const message = messages.addSupergroupMessage({
     chatId: supergroup.id,
     author: { kind: 'account', accountId: owner.profile.id },
     sentAtUnixSeconds: 1_700_000_001,
-    text: 'Hello',
-    entities: [],
+    content: { kind: 'text', text: 'Hello', entities: [] },
   });
   messageBoxes.assignMessageId(supergroup.id, message.id);
-  const editedMessage = messages.editSupergroupTextMessage(message.id, {
-    text: 'Hello again',
-    entities: [],
+  const editedMessage = messages.editSupergroupMessage(message.id, {
     inlineKeyboard: undefined,
-    textEditedAtUnixSeconds: 1_700_000_002,
+    contentEditedAtUnixSeconds: 1_700_000_002,
+    content: { kind: 'text', text: 'Hello again', entities: [] },
   });
   botUpdateDelivery.publish({ type: 'message_edited', message: editedMessage });
 
@@ -374,12 +380,96 @@ Deno.test('BotUpdateDeliveryService delivers supergroup additions and edits to t
   }
 });
 
+Deno.test('BotUpdateDeliveryService addresses supergroup media by caption and per-bot file IDs', () => {
+  const {
+    virtualUsers,
+    sharedChats,
+    messages,
+    files,
+    messageBoxes,
+    botUpdates,
+    botUpdateDelivery,
+  } = createDeliveryFixture();
+  const owner = createAccount(virtualUsers);
+  const privacyModeBot = createBot(virtualUsers, 'privacy_bot');
+  const readerBotResult = virtualUsers.createBot({
+    first_name: 'Reader Bot',
+    username: 'reader_bot',
+    can_read_all_group_messages: true,
+  });
+  if (!readerBotResult.created) {
+    throw new Error('Expected the reader bot to be created');
+  }
+  const readerBot = readerBotResult.bot;
+  const supergroup = {
+    kind: 'supergroup',
+    id: -1_000_000_000_001,
+    title: 'Team',
+    chatInstance: '-42',
+  } as const;
+  sharedChats.registerSupergroup(supergroup, owner.profile.id);
+  sharedChats.addChatMember(supergroup.id, privacyModeBot.profile.id);
+  sharedChats.addChatMember(supergroup.id, readerBot.profile.id);
+  const document = files.addFile({
+    type: 'document',
+    content: new Uint8Array([1]),
+    fileName: 'notes.txt',
+    mimeType: 'text/plain',
+  });
+  const publishDocument = (caption: string) => {
+    const message = messages.addSupergroupMessage({
+      chatId: supergroup.id,
+      author: { kind: 'account', accountId: owner.profile.id },
+      sentAtUnixSeconds: 1_700_000_001,
+      content: {
+        kind: 'document',
+        fileId: document.id,
+        caption: {
+          text: caption,
+          entities: caption.startsWith('/')
+            ? [{ type: 'bot_command', offset: 0, length: caption.indexOf(' ') }]
+            : [],
+        },
+      },
+    });
+    messageBoxes.assignMessageId(supergroup.id, message.id);
+    botUpdateDelivery.publish({ type: 'message_created', message });
+  };
+
+  publishDocument('Meeting notes');
+  publishDocument('/summarize@privacy_bot please');
+
+  const documentsOf = (botId: number) =>
+    botUpdates.confirmAndReadPendingUpdates(botId, { limit: 100 }).map((update) =>
+      'message' in update && 'document' in update.message ? update.message : undefined
+    );
+  const readerDocuments = documentsOf(readerBot.profile.id);
+  const privacyModeDocuments = documentsOf(privacyModeBot.profile.id);
+  const readerFileId = readerDocuments[0]?.document.file_id;
+  const privacyModeFileId = privacyModeDocuments[0]?.document.file_id;
+  if (
+    readerDocuments.length !== 2 || privacyModeDocuments.length !== 1 ||
+    privacyModeDocuments[0]?.caption !== '/summarize@privacy_bot please' ||
+    readerDocuments[1]?.document.file_id !== readerFileId ||
+    readerFileId === undefined || privacyModeFileId === undefined ||
+    readerFileId === privacyModeFileId ||
+    readerDocuments[0]?.document.file_unique_id !== privacyModeDocuments[0]?.document.file_unique_id
+  ) {
+    throw new Error(
+      `Expected the addressed caption to reach the privacy-mode bot with its own file ID, received ${
+        JSON.stringify({ readerDocuments, privacyModeDocuments })
+      }`,
+    );
+  }
+});
+
 function createDeliveryFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const messages = new MessageRepository();
+  const files = new FileRepository();
   const messageBoxes = new MessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
@@ -391,6 +481,7 @@ function createDeliveryFixture() {
       sharedChats,
       messageBoxes,
       messages,
+      files,
     }),
     botUpdates,
     updateSubscriptions,
@@ -402,6 +493,7 @@ function createDeliveryFixture() {
     virtualUsers,
     sharedChats,
     messages,
+    files,
     messageBoxes,
     botUpdates,
     updateSubscriptions,
@@ -425,6 +517,15 @@ function createBot(virtualUsers: VirtualUserService, username: string) {
   return result.bot;
 }
 
-function messageFromUpdate(update: BotApiUpdate | undefined): BotApiTextMessage | undefined {
+function messageFromUpdate(update: BotApiUpdate | undefined): BotApiMessage | undefined {
   return update !== undefined && 'message' in update ? update.message : undefined;
+}
+
+/** The text and entities of a Bot API text message; `undefined` for any other message. */
+function textContentOf(
+  message: BotApiMessage | undefined,
+): { readonly text: string; readonly entities?: readonly unknown[] } | undefined {
+  return message !== undefined && 'text' in message
+    ? { text: message.text, entities: message.entities }
+    : undefined;
 }

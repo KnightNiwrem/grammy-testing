@@ -39,11 +39,26 @@ actions such as typing with `sendChatAction`, which the emulator checks but does
 Telegram does in private chats with bots, the emulator marks bot commands such as `/start` with
 `bot_command` entities, so framework command handlers match them; other entity types that Telegram
 detects, such as URLs and mentions, are not detected yet, and date and time entities are not
-supported. Bot API requests follow Telegram's conventions: GET or POST, case-insensitive method
-names, and parameters in the query string or a JSON, URL-encoded, or multipart body. Bot API
-failures, including calls to methods the emulator does not implement, return Telegram-shaped JSON
-errors that clients report as API errors. The session creation response identifies its Bot API root.
-Other routes described in `openapi.yaml` are not implemented yet.
+supported.
+
+Bots and accounts also exchange photos and documents with captions. A bot sends them with
+`sendPhoto` and `sendDocument`, uploading a file as a multipart part, directly or through
+`attach://`, or reusing one by its `file_id`; `editMessageCaption` edits a caption. As on Telegram,
+each bot knows a file by its own `file_id`, and a bot downloads a file through the `file_path` that
+`getFile` returns, under `<botApiRoot>/file/bot<token>/`. An account sends a photo or document as
+base64 content, and a test reads any file of the session by its `file_unique_id`. The emulator reads
+the dimensions of JPEG, PNG, GIF, WebP, and BMP photos, rejects other content with Telegram's
+`IMAGE_PROCESS_FAILED` error, and keeps each photo in the one size and format it was sent in,
+whereas Telegram converts photos to JPEG in several sizes. A document's MIME type follows its file
+name's extension; unlike Telegram, the emulator never turns a video, audio file, or GIF sent as a
+document into other media. Files sent by URL, thumbnails, and other media types, such as videos,
+voice messages, and stickers, are not supported yet.
+
+Bot API requests follow Telegram's conventions: GET or POST, case-insensitive method names, and
+parameters in the query string or a JSON, URL-encoded, or multipart body. Bot API failures,
+including calls to methods the emulator does not implement, return Telegram-shaped JSON errors that
+clients report as API errors. The session creation response identifies its Bot API root. Other
+routes described in `openapi.yaml` are not implemented yet.
 
 Bots can also take part in supergroups. An account creates a supergroup and adds accounts and bots
 to it, and each added bot receives a `my_chat_member` update. The Bot API methods above accept a
@@ -107,6 +122,19 @@ try {
       chat: { type: 'private', botId: bot.id },
       text: replyInterface.keyboard[0][0].text,
     });
+  }
+
+  // Send the bot a photo, then read the bytes of the file the bot's reply carries, if any.
+  const photo = await account.sendPhoto({
+    to: { type: 'private', botId: bot.id },
+    photo: await Deno.readFile('receipt.png'),
+    caption: 'My receipt',
+  });
+  const reply = (await account.getMessages({ chat: { type: 'private', botId: bot.id } })).at(-1);
+  const replyFile = reply?.document ?? reply?.photo?.at(-1);
+  if (replyFile !== undefined) {
+    const content = await session.downloadFile(replyFile.file_unique_id);
+    console.log(content.length, photo.photo?.[0].width);
   }
 
   // Edit the account's first message, which sends the bot an edited_message update.

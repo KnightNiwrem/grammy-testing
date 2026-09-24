@@ -17,6 +17,7 @@
           "src/types/virtual_chat.ts",
           "src/types/chat_membership.ts",
           "src/types/virtual_message.ts",
+          "src/types/stored_file.ts",
           "src/types/chat_domain_event.ts",
           "src/types/callback_query.ts",
           "src/types/inline_keyboard.ts",
@@ -54,6 +55,12 @@
         "name": "message-repository",
         "patterns": [
           "src/repositories/message.ts"
+        ]
+      },
+      {
+        "name": "file-repository",
+        "patterns": [
+          "src/repositories/file.ts"
         ]
       },
       {
@@ -123,12 +130,19 @@
         ]
       },
       {
+        "name": "media-inspection",
+        "patterns": [
+          "src/media/**/*.ts"
+        ]
+      },
+      {
         "name": "domain-services",
         "patterns": [
           "src/services/callback_query.ts",
           "src/services/private_messaging.ts",
           "src/services/supergroup_messaging.ts",
           "src/services/message_content.ts",
+          "src/services/media_file.ts",
           "src/services/shared_chat_administration.ts",
           "src/services/virtual_user.ts",
           "src/services/bot_command.ts",
@@ -217,6 +231,12 @@
         ]
       },
       {
+        "from": "file-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "message-box-repository",
         "allow": [
           "domain"
@@ -287,10 +307,17 @@
         ]
       },
       {
+        "from": "media-inspection",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "domain-services",
         "allow": [
           "domain",
-          "text-entity-detection"
+          "text-entity-detection",
+          "media-inspection"
         ],
         "allowTypeOnly": [
           "account-repository",
@@ -322,10 +349,12 @@
         "from": "bot-api-service",
         "allow": [
           "domain",
-          "text-entity-detection"
+          "text-entity-detection",
+          "media-inspection"
         ],
         "allowTypeOnly": [
-          "update-polling"
+          "update-polling",
+          "domain-services"
         ]
       },
       {
@@ -344,6 +373,7 @@
           "private-conversation-repository",
           "shared-chat-repository",
           "message-repository",
+          "file-repository",
           "message-box-repository",
           "bot-update-repository",
           "bot-update-subscription-repository",

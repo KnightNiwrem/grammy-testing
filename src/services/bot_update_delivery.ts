@@ -1,9 +1,9 @@
 import type {
   BotApiCallbackQuery,
+  BotApiMessage,
   BotApiMyChatMemberUpdated,
-  BotApiPrivateTextMessage,
-  BotApiSupergroupTextMessage,
-  BotApiTextMessage,
+  BotApiPrivateMessage,
+  BotApiSupergroupMessage,
   BotApiUpdateType,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
@@ -14,27 +14,28 @@ import type {
   ChatMemberAddedEvent,
 } from '../types/chat_domain_event.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
-import type {
-  CanonicalMessageId,
-  PrivateTextMessage,
-  SupergroupTextMessage,
-  TextMessage,
+import {
+  type CanonicalMessageId,
+  type ChatMessage,
+  getContentText,
+  type PrivateMessage,
+  type SupergroupMessage,
 } from '../types/virtual_message.ts';
 
 interface BotMessageViews {
-  viewPrivateTextMessageForBot(message: PrivateTextMessage): BotApiPrivateTextMessage;
-  viewSupergroupTextMessage(message: SupergroupTextMessage): BotApiSupergroupTextMessage;
+  viewPrivateMessageForBot(message: PrivateMessage): BotApiPrivateMessage;
+  viewSupergroupMessage(message: SupergroupMessage, observerId: number): BotApiSupergroupMessage;
   viewCallbackQueryForBot(
     callbackQuery: CallbackQuery,
-    message: TextMessage,
+    message: ChatMessage,
   ): BotApiCallbackQuery;
   viewBotBlockChangeForBot(event: BotBlockChangedEvent): BotApiMyChatMemberUpdated;
   viewBotJoinedGroupForBot(event: ChatMemberAddedEvent): BotApiMyChatMemberUpdated;
 }
 
 interface BotUpdateMailboxes {
-  enqueueMessageUpdate(botId: number, message: BotApiTextMessage): void;
-  enqueueEditedMessageUpdate(botId: number, editedMessage: BotApiTextMessage): void;
+  enqueueMessageUpdate(botId: number, message: BotApiMessage): void;
+  enqueueEditedMessageUpdate(botId: number, editedMessage: BotApiMessage): void;
   enqueueCallbackQueryUpdate(botId: number, callbackQuery: BotApiCallbackQuery): void;
   enqueueMyChatMemberUpdate(botId: number, myChatMember: BotApiMyChatMemberUpdated): void;
 }
@@ -52,7 +53,7 @@ interface ChatMemberLookup {
 }
 
 interface SupergroupMessageLookup {
-  getSupergroupTextMessage(messageId: CanonicalMessageId): SupergroupTextMessage | undefined;
+  getSupergroupMessage(messageId: CanonicalMessageId): SupergroupMessage | undefined;
 }
 
 interface BotUpdateDeliveryServiceDependencies {
@@ -119,13 +120,13 @@ export class BotUpdateDeliveryService {
     }
   }
 
-  #deliverMessage(message: TextMessage, updateType: MessageUpdateType): void {
+  #deliverMessage(message: ChatMessage, updateType: MessageUpdateType): void {
     switch (message.kind) {
-      case 'private_text':
-        this.#deliverPrivateTextMessage(message, updateType);
+      case 'private_message':
+        this.#deliverPrivateMessage(message, updateType);
         return;
-      case 'supergroup_text':
-        this.#deliverSupergroupTextMessage(message, updateType);
+      case 'supergroup_message':
+        this.#deliverSupergroupMessage(message, updateType);
         return;
       default: {
         const unhandledMessage: never = message;
@@ -138,7 +139,7 @@ export class BotUpdateDeliveryService {
    * A private message, and each edit of it, is observed only by the bot of its conversation,
    * which, as on Telegram, receives no update for its own message or edit.
    */
-  #deliverPrivateTextMessage(message: PrivateTextMessage, updateType: MessageUpdateType): void {
+  #deliverPrivateMessage(message: PrivateMessage, updateType: MessageUpdateType): void {
     const observingBotId = message.conversation.botId;
     if (message.authorRole === 'bot' || !this.#isSubscribed(observingBotId, updateType)) {
       return;
@@ -147,7 +148,7 @@ export class BotUpdateDeliveryService {
     this.#enqueueMessage(
       observingBotId,
       updateType,
-      this.#botMessageViews.viewPrivateTextMessageForBot(message),
+      this.#botMessageViews.viewPrivateMessageForBot(message),
     );
   }
 
@@ -156,8 +157,8 @@ export class BotUpdateDeliveryService {
    * it. As on Telegram, bots never observe messages of bots, their own included, and a bot in
    * privacy mode observes only messages addressed to it.
    */
-  #deliverSupergroupTextMessage(
-    message: SupergroupTextMessage,
+  #deliverSupergroupMessage(
+    message: SupergroupMessage,
     updateType: MessageUpdateType,
   ): void {
     if (message.author.kind === 'bot') {
@@ -165,8 +166,7 @@ export class BotUpdateDeliveryService {
     }
     const repliedMessage = message.replyToMessageId === undefined
       ? undefined
-      : this.#messages.getSupergroupTextMessage(message.replyToMessageId);
-    let view: BotApiSupergroupTextMessage | undefined;
+      : this.#messages.getSupergroupMessage(message.replyToMessageId);
     for (const memberId of this.#sharedChats.getChatMemberIds(message.chatId)) {
       const bot = this.#bots.getById(memberId)?.profile;
       if (
@@ -175,12 +175,15 @@ export class BotUpdateDeliveryService {
       ) {
         continue;
       }
-      view ??= this.#botMessageViews.viewSupergroupTextMessage(message);
-      this.#enqueueMessage(bot.id, updateType, view);
+      this.#enqueueMessage(
+        bot.id,
+        updateType,
+        this.#botMessageViews.viewSupergroupMessage(message, bot.id),
+      );
     }
   }
 
-  #enqueueMessage(botId: number, updateType: MessageUpdateType, message: BotApiTextMessage): void {
+  #enqueueMessage(botId: number, updateType: MessageUpdateType, message: BotApiMessage): void {
     if (updateType === 'message') {
       this.#botUpdates.enqueueMessageUpdate(botId, message);
     } else {
@@ -238,15 +241,15 @@ export class BotUpdateDeliveryService {
 
 /**
  * Whether an account's supergroup message is addressed to a bot in privacy mode, which then
- * receives it: a command at the start of the text that is not addressed to another bot, a reply
- * to one of the bot's messages, or a mention of the bot.
+ * receives it: a command at the start of the text or caption that is not addressed to another bot,
+ * a reply to one of the bot's messages, or a mention of the bot.
  *
  * Telegram documents that a command without a bot's username reaches only the bot that last wrote
  * to the group; the emulator delivers it to every bot in privacy mode.
  */
 function isAddressedToBot(
-  message: SupergroupTextMessage,
-  repliedMessage: SupergroupTextMessage | undefined,
+  message: SupergroupMessage,
+  repliedMessage: SupergroupMessage | undefined,
   bot: VirtualBotProfile,
 ): boolean {
   const isReplyToBot = repliedMessage?.author.kind === 'bot' &&
@@ -254,24 +257,26 @@ function isAddressedToBot(
   return isReplyToBot || startsWithCommandForBot(message, bot) || mentionsBot(message, bot);
 }
 
-function startsWithCommandForBot(message: SupergroupTextMessage, bot: VirtualBotProfile): boolean {
-  const leadingCommand = message.entities.find((entity) =>
+function startsWithCommandForBot(message: SupergroupMessage, bot: VirtualBotProfile): boolean {
+  const { text, entities } = getContentText(message.content);
+  const leadingCommand = entities.find((entity) =>
     entity.type === 'bot_command' && entity.offset === 0
   );
   if (leadingCommand === undefined) {
     return false;
   }
-  const [, addressedUsername] = message.text.slice(0, leadingCommand.length).split('@');
+  const [, addressedUsername] = text.slice(0, leadingCommand.length).split('@');
   return addressedUsername === undefined ||
     addressedUsername.toLowerCase() === bot.username.toLowerCase();
 }
 
 /** Mentions by username are matched as Telegram clients mark them, ignoring letter case. */
-function mentionsBot(message: SupergroupTextMessage, bot: VirtualBotProfile): boolean {
-  const mentionsById = message.entities.some((entity) =>
+function mentionsBot(message: SupergroupMessage, bot: VirtualBotProfile): boolean {
+  const { text, entities } = getContentText(message.content);
+  const mentionsById = entities.some((entity) =>
     entity.type === 'text_mention' && entity.userId === bot.id
   );
   // Usernames consist of letters, digits, and underscores, which need no escaping.
   const usernameMention = new RegExp(`(?<![\\p{L}\\p{N}_])@${bot.username}(?![A-Za-z0-9_])`, 'iu');
-  return mentionsById || usernameMention.test(message.text);
+  return mentionsById || usernameMention.test(text);
 }

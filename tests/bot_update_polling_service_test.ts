@@ -5,8 +5,8 @@ import {
   type GetUpdatesResult,
 } from '../src/services/bot_update_polling.ts';
 import {
-  type BotApiPrivateTextMessage,
-  type BotApiTextMessage,
+  type BotApiMessage,
+  type BotApiPrivateMessage,
   type BotApiUpdate,
   type BotApiUpdateType,
   DEFAULT_ALLOWED_UPDATE_TYPES,
@@ -63,7 +63,7 @@ Deno.test('BotUpdatePollingService keeps updates that arrive during a negative o
 
   queueMicrotask(() => {
     for (const messageId of [1, 2, 3]) {
-      botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(messageId));
+      botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(messageId));
     }
   });
 
@@ -88,7 +88,7 @@ Deno.test('BotUpdatePollingService does not terminate a held long poll for an im
     throw new Error('Expected the immediate request to find no updates');
   }
 
-  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
   if (expectRetrievedUpdates(await heldResult).length !== 1) {
     throw new Error('Expected the held long poll to survive a request answered immediately');
   }
@@ -102,8 +102,8 @@ Deno.test('BotUpdatePollingService holds long polls for different bots independe
     timeoutSeconds: 50,
   });
 
-  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
-  botUpdates.enqueueMessageUpdate(OTHER_BOT_ID, createPrivateTextMessage(2));
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
+  botUpdates.enqueueMessageUpdate(OTHER_BOT_ID, createPrivateMessage(2));
 
   if (messageFromUpdate(expectRetrievedUpdates(await firstResult)[0])?.message_id !== 1) {
     throw new Error("Expected the first bot's long poll to receive its update");
@@ -128,7 +128,7 @@ Deno.test('BotUpdatePollingService ends a cancelled long poll without terminatin
   }
 
   const laterResult = botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 });
-  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
   if (expectRetrievedUpdates(await laterResult).length !== 1) {
     throw new Error('Expected a long poll after cancellation to receive the next update');
   }
@@ -159,7 +159,7 @@ Deno.test('BotUpdatePollingService answers held and later long polls at once whe
     throw new Error('Expected the unheld long poll to find no updates');
   }
 
-  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateTextMessage(1));
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
   const pendingUpdates = expectRetrievedUpdates(
     await botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 }),
   );
@@ -175,7 +175,7 @@ function createPollingFixture() {
   return { botUpdates, updateSubscriptions, botUpdatePolling };
 }
 
-function createPrivateTextMessage(messageId: number): BotApiPrivateTextMessage {
+function createPrivateMessage(messageId: number): BotApiPrivateMessage {
   const author = { id: 1, is_bot: false as const, first_name: 'Ada' };
   return {
     message_id: messageId,
@@ -223,6 +223,6 @@ function assertAllowedUpdateTypes(
   }
 }
 
-function messageFromUpdate(update: BotApiUpdate | undefined): BotApiTextMessage | undefined {
+function messageFromUpdate(update: BotApiUpdate | undefined): BotApiMessage | undefined {
   return update !== undefined && 'message' in update ? update.message : undefined;
 }

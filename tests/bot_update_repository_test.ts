@@ -1,5 +1,5 @@
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
-import type { BotApiPrivateTextMessage } from '../src/types/bot_api.ts';
+import type { BotApiPrivateMessage } from '../src/types/bot_api.ts';
 
 Deno.test('BotUpdateRepository sequences and confirms each bot mailbox independently', () => {
   const botUpdates = new BotUpdateRepository();
@@ -133,7 +133,7 @@ Deno.test('BotUpdateRepository discards pending updates without restarting the s
   }
 });
 
-function createMessage(text: string): BotApiPrivateTextMessage {
+function createMessage(text: string): BotApiPrivateMessage {
   return {
     message_id: 1,
     from: { id: 1, is_bot: false, first_name: 'Ada' },

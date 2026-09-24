@@ -1,32 +1,35 @@
 import {
+  type ObservedFile,
   projectBotAsUser,
   projectBotBlockChangeForBot,
   projectBotJoinedGroupForBot,
   projectCallbackQueryForBot,
-  projectPrivateTextMessageForBot,
-  projectSupergroupTextMessage,
+  projectPrivateMessageForBot,
+  projectSupergroupMessage,
 } from '../projections/bot_api_message.ts';
 import type {
   BotApiCallbackQuery,
+  BotApiMessage,
   BotApiMyChatMemberUpdated,
-  BotApiPrivateTextMessage,
-  BotApiRepliedPrivateTextMessage,
-  BotApiRepliedSupergroupTextMessage,
-  BotApiSupergroupTextMessage,
-  BotApiTextMessage,
+  BotApiPrivateMessage,
+  BotApiRepliedPrivateMessage,
+  BotApiRepliedSupergroupMessage,
+  BotApiSupergroupMessage,
   BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
+import type { StoredFile, StoredFileId } from '../types/stored_file.ts';
 import type { BotBlockChangedEvent, ChatMemberAddedEvent } from '../types/chat_domain_event.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { SharedChat } from '../types/virtual_chat.ts';
-import type {
-  CanonicalMessageId,
-  PrivateTextMessage,
-  SupergroupMessageAuthor,
-  SupergroupTextMessage,
-  TextMessage,
+import {
+  type CanonicalMessageId,
+  type ChatMessage,
+  getContentText,
+  type PrivateMessage,
+  type SupergroupMessage,
+  type SupergroupMessageAuthor,
 } from '../types/virtual_message.ts';
 
 interface AccountLookup {
@@ -42,12 +45,17 @@ interface MessageIdLookup {
 }
 
 interface MessageLookup {
-  getPrivateTextMessage(messageId: CanonicalMessageId): PrivateTextMessage | undefined;
-  getSupergroupTextMessage(messageId: CanonicalMessageId): SupergroupTextMessage | undefined;
+  getPrivateMessage(messageId: CanonicalMessageId): PrivateMessage | undefined;
+  getSupergroupMessage(messageId: CanonicalMessageId): SupergroupMessage | undefined;
 }
 
 interface SharedChatLookup {
   getSharedChat(chatId: number): SharedChat | undefined;
+}
+
+interface ObserverFileIdentities {
+  getFile(fileId: StoredFileId): StoredFile | undefined;
+  getOrAssignObserverFileId(observerId: number, fileId: StoredFileId): string;
 }
 
 interface BotMessageViewServiceDependencies {
@@ -56,6 +64,7 @@ interface BotMessageViewServiceDependencies {
   readonly sharedChats: SharedChatLookup;
   readonly messageBoxes: MessageIdLookup;
   readonly messages: MessageLookup;
+  readonly files: ObserverFileIdentities;
 }
 
 /**
@@ -63,7 +72,8 @@ interface BotMessageViewServiceDependencies {
  * membership in its chats, as the Bot API shows them to an observing bot.
  *
  * It reads the participants' profiles, the chats, and the observer's message numbering; it never
- * creates messages or decides whether sending one is permitted.
+ * creates messages or decides whether sending one is permitted. As on Telegram, each observer
+ * knows a file by a `file_id` of its own, which a view assigns when the observer first sees it.
  */
 export class BotMessageViewService {
   readonly #accounts: AccountLookup;
@@ -71,24 +81,30 @@ export class BotMessageViewService {
   readonly #sharedChats: SharedChatLookup;
   readonly #messageBoxes: MessageIdLookup;
   readonly #messages: MessageLookup;
+  readonly #files: ObserverFileIdentities;
 
   constructor(
-    { accounts, bots, sharedChats, messageBoxes, messages }: BotMessageViewServiceDependencies,
+    { accounts, bots, sharedChats, messageBoxes, messages, files }:
+      BotMessageViewServiceDependencies,
   ) {
     this.#accounts = accounts;
     this.#bots = bots;
     this.#sharedChats = sharedChats;
     this.#messageBoxes = messageBoxes;
     this.#messages = messages;
+    this.#files = files;
   }
 
-  /** Returns a committed message of any chat as a bot of that chat sees it. */
-  viewTextMessageForBot(message: TextMessage): BotApiTextMessage {
+  /**
+   * Returns a committed message of any chat as a bot of that chat sees it: in a private chat, the
+   * bot of its conversation.
+   */
+  viewMessageForBot(message: ChatMessage, botId: number): BotApiMessage {
     switch (message.kind) {
-      case 'private_text':
-        return this.viewPrivateTextMessageForBot(message);
-      case 'supergroup_text':
-        return this.viewSupergroupTextMessage(message);
+      case 'private_message':
+        return this.viewPrivateMessageForBot(message);
+      case 'supergroup_message':
+        return this.viewSupergroupMessage(message, botId);
       default: {
         const unhandledMessage: never = message;
         throw new Error(`Unhandled message: ${JSON.stringify(unhandledMessage)}`);
@@ -97,32 +113,36 @@ export class BotMessageViewService {
   }
 
   /**
-   * Returns a private text message as the bot of its conversation sees it, with the current state
+   * Returns a private message as the bot of its conversation sees it, with the current state
    * of the message it replies to unless that message was deleted. The message must be committed:
    * its participants exist and it is numbered in the bot's message box.
    */
-  viewPrivateTextMessageForBot(message: PrivateTextMessage): BotApiPrivateTextMessage {
+  viewPrivateMessageForBot(message: PrivateMessage): BotApiPrivateMessage {
     const repliedMessage = message.replyToMessageId === undefined
       ? undefined
-      : this.#messages.getPrivateTextMessage(message.replyToMessageId);
-    return this.#viewPrivateTextMessage(
+      : this.#messages.getPrivateMessage(message.replyToMessageId);
+    return this.#viewPrivateMessage(
       message,
-      repliedMessage === undefined ? undefined : this.#viewPrivateTextMessage(repliedMessage),
+      repliedMessage === undefined ? undefined : this.#viewPrivateMessage(repliedMessage),
     );
   }
 
   /**
-   * Returns a supergroup text message, with the current state of the message it replies to unless
-   * that message was deleted. Every member, bot or account, sees the same message. The message
-   * must be committed: its supergroup and author exist and it is numbered in the supergroup's box.
+   * Returns a supergroup message as a member, bot or account, sees it, with the current state of
+   * the message it replies to unless that message was deleted. Members see the same message, apart
+   * from the `file_id` of its file. The message must be committed: its supergroup and author exist
+   * and it is numbered in the supergroup's box.
    */
-  viewSupergroupTextMessage(message: SupergroupTextMessage): BotApiSupergroupTextMessage {
+  viewSupergroupMessage(message: SupergroupMessage, observerId: number): BotApiSupergroupMessage {
     const repliedMessage = message.replyToMessageId === undefined
       ? undefined
-      : this.#messages.getSupergroupTextMessage(message.replyToMessageId);
-    return this.#viewSupergroupTextMessage(
+      : this.#messages.getSupergroupMessage(message.replyToMessageId);
+    return this.#viewSupergroupMessage(
       message,
-      repliedMessage === undefined ? undefined : this.#viewSupergroupTextMessage(repliedMessage),
+      observerId,
+      repliedMessage === undefined
+        ? undefined
+        : this.#viewSupergroupMessage(repliedMessage, observerId),
     );
   }
 
@@ -132,7 +152,7 @@ export class BotMessageViewService {
    */
   viewCallbackQueryForBot(
     callbackQuery: CallbackQuery,
-    message: TextMessage,
+    message: ChatMessage,
   ): BotApiCallbackQuery {
     const { accountId } = callbackQuery;
     const account = this.#accounts.getById(accountId);
@@ -143,7 +163,7 @@ export class BotMessageViewService {
     return projectCallbackQueryForBot({
       callbackQuery,
       account: account.profile,
-      message: this.viewTextMessageForBot(message),
+      message: this.viewMessageForBot(message, callbackQuery.botId),
     });
   }
 
@@ -181,10 +201,11 @@ export class BotMessageViewService {
   }
 
   /** Projects a supergroup message with the given view of the message it replies to, if any. */
-  #viewSupergroupTextMessage(
-    message: SupergroupTextMessage,
-    repliedMessage?: BotApiRepliedSupergroupTextMessage,
-  ): BotApiSupergroupTextMessage {
+  #viewSupergroupMessage(
+    message: SupergroupMessage,
+    observerId: number,
+    repliedMessage?: BotApiRepliedSupergroupMessage,
+  ): BotApiSupergroupMessage {
     const supergroup = this.#sharedChats.getSharedChat(message.chatId);
     if (supergroup?.kind !== 'supergroup') {
       throw new Error(`Supergroup ${message.chatId} of message ${message.id} does not exist`);
@@ -194,12 +215,12 @@ export class BotMessageViewService {
       throw new Error(`Supergroup message ${message.id} is not numbered in its supergroup`);
     }
 
-    return projectSupergroupTextMessage({
+    return projectSupergroupMessage({
       message,
       supergroup,
       author: this.#findSupergroupMessageAuthor(message.author, message.id),
       messageId,
-      mentionedUsers: this.#findMentionedUsers(message),
+      context: this.#resolveProjectionContext(message, observerId),
       repliedMessage,
     });
   }
@@ -223,10 +244,10 @@ export class BotMessageViewService {
   }
 
   /** Projects a message with the given view of the message it replies to, if any. */
-  #viewPrivateTextMessage(
-    message: PrivateTextMessage,
-    repliedMessage?: BotApiRepliedPrivateTextMessage,
-  ): BotApiPrivateTextMessage {
+  #viewPrivateMessage(
+    message: PrivateMessage,
+    repliedMessage?: BotApiRepliedPrivateMessage,
+  ): BotApiPrivateMessage {
     const { accountId, botId: observingBotId } = message.conversation;
     const account = this.#accounts.getById(accountId);
     if (account === undefined) {
@@ -241,20 +262,43 @@ export class BotMessageViewService {
       throw new Error(`Private message ${message.id} was not delivered to bot ${observingBotId}`);
     }
 
-    return projectPrivateTextMessageForBot({
+    return projectPrivateMessageForBot({
       message,
       account: account.profile,
       bot: bot.profile,
       observerMessageId,
-      mentionedUsers: this.#findMentionedUsers(message),
+      context: this.#resolveProjectionContext(message, observingBotId),
       repliedMessage,
     });
   }
 
+  /** Resolves the users a message mentions and its file, as the observer sees them. */
+  #resolveProjectionContext(message: ChatMessage, observerId: number) {
+    const { content } = message;
+    return {
+      mentionedUsers: this.#findMentionedUsers(message),
+      ...(content.kind === 'text'
+        ? {}
+        : { contentFile: this.#observeFile(content.fileId, observerId, message.id) }),
+    };
+  }
+
+  #observeFile(
+    fileId: StoredFileId,
+    observerId: number,
+    messageId: CanonicalMessageId,
+  ): ObservedFile {
+    const file = this.#files.getFile(fileId);
+    if (file === undefined) {
+      throw new Error(`File ${fileId} of message ${messageId} does not exist`);
+    }
+    return { file, observerFileId: this.#files.getOrAssignObserverFileId(observerId, fileId) };
+  }
+
   /** Looks up the users a message mentions, which sending the message verified exist. */
-  #findMentionedUsers(message: TextMessage): ReadonlyMap<number, BotApiUser> {
+  #findMentionedUsers(message: ChatMessage): ReadonlyMap<number, BotApiUser> {
     const mentionedUsers = new Map<number, BotApiUser>();
-    for (const entity of message.entities) {
+    for (const entity of getContentText(message.content).entities) {
       if (entity.type !== 'text_mention') {
         continue;
       }

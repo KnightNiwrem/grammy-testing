@@ -1,22 +1,28 @@
+import { cleanUploadedFileName } from '../media/document_file.ts';
 import { isParseMode, parseMarkup } from '../text_entities/parse_mode.ts';
 import type {
   BotApiBotCommand,
-  BotApiPrivateTextMessage,
-  BotApiSupergroupTextMessage,
-  BotApiTextMessage,
+  BotApiDownloadableFile,
+  BotApiMessage,
+  BotApiPrivateMessage,
+  BotApiSupergroupMessage,
 } from '../types/bot_api.ts';
 import type { BotCommand, BotCommandLanguageCode, BotCommandScope } from '../types/bot_command.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
+import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { ChatAction } from '../types/virtual_chat.ts';
-import type {
-  PrivateTextMessage,
-  SupergroupTextMessage,
-  TextEntity,
-} from '../types/virtual_message.ts';
+import type { PrivateMessage, SupergroupMessage, TextEntity } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
+import type {
+  ContentNormalizationFailure,
+  OutgoingDocument,
+  OutgoingMessageContent,
+  OutgoingPhoto,
+  TextInvalidFailure,
+} from './message_content.ts';
 
 export interface DeleteWebhookRequest {
   readonly dropPendingUpdates: boolean;
@@ -39,7 +45,7 @@ export interface SpecifiedFormattedText {
 }
 
 export interface ReadFormattedTextRequest {
-  /** Nonempty message text, which may be written in markup. */
+  /** Message text or a caption, which may be written in markup. */
   readonly text: string;
   /** The `parse_mode` parameter, matched case-insensitively. */
   readonly parseMode?: string;
@@ -63,12 +69,6 @@ export type ReadFormattedTextResult =
     readonly markupError: string;
   };
 
-/** Telegram rejected the text or its entities; `textError` is TDLib's own description. */
-interface TextInvalidFailure {
-  readonly reason: 'text_invalid';
-  readonly textError: string;
-}
-
 /** The message of the chat that a sent message replies to, as `reply_parameters` specify it. */
 export interface ReplyTarget {
   /** The message's ID in the bot's chat. */
@@ -77,8 +77,11 @@ export interface ReplyTarget {
   readonly allowSendingWithoutReply: boolean;
 }
 
-/** The request's reply markup is an inline keyboard or a change of the reply interface. */
-export type SendMessageRequest = SpecifiedFormattedText & BotMessageReplyMarkup & {
+/**
+ * Where and how every send method sends its message. The reply markup is an inline keyboard or a
+ * change of the reply interface.
+ */
+export type SendRequestOptions = BotMessageReplyMarkup & {
   /**
    * The Bot API `chat_id`: for a private chat, the other user's ID, which is positive; for a
    * supergroup, its negative chat ID.
@@ -90,34 +93,86 @@ export type SendMessageRequest = SpecifiedFormattedText & BotMessageReplyMarkup 
   readonly isContentProtected?: boolean;
 };
 
-export type SendMessageFailureReason =
+export type SendMessageRequest = SpecifiedFormattedText & SendRequestOptions;
+
+/**
+ * A file a request sends: one the bot knows by its `file_id`, or a file uploaded with the request
+ * under the name its sender gave it.
+ */
+export type BotApiInputFile =
+  | { readonly kind: 'file_id'; readonly fileId: string }
+  | {
+    readonly kind: 'upload';
+    readonly fileName: string;
+    readonly content: Uint8Array<ArrayBuffer>;
+  };
+
+export type SendPhotoRequest = SendRequestOptions & {
+  readonly photo: BotApiInputFile;
+  /** Empty text for no caption. */
+  readonly caption: SpecifiedFormattedText;
+  /** The Bot API `has_spoiler`. */
+  readonly hasSpoiler: boolean;
+  /** The Bot API `show_caption_above_media`. */
+  readonly showsCaptionAboveMedia: boolean;
+};
+
+export type SendDocumentRequest = SendRequestOptions & {
+  readonly document: BotApiInputFile;
+  /** Empty text for no caption. */
+  readonly caption: SpecifiedFormattedText;
+};
+
+export type SendFailureReason =
   | 'message_text_empty'
   | 'chat_not_found'
   | 'reply_message_not_found'
   | 'message_text_too_long'
+  | 'caption_too_long'
   | 'callback_data_invalid'
   | 'bot_blocked'
-  | 'reply_interface_unsupported_in_groups';
+  | 'reply_interface_unsupported_in_groups'
+  | 'file_empty'
+  | 'image_invalid'
+  | 'photo_dimensions_invalid'
+  | 'file_id_invalid';
 
-export type SendMessageResult =
-  | { readonly sent: true; readonly message: BotApiTextMessage }
+/** The file a `file_id` identifies is of another type than the method sends. */
+export interface FileTypeMismatchFailure {
+  readonly reason: 'file_type_mismatch';
+  readonly expectedFileType: StoredFile['type'];
+  readonly actualFileType: StoredFile['type'];
+}
+
+export type SendResult =
+  | { readonly sent: true; readonly message: BotApiMessage }
   | (
     & { readonly sent: false }
     & (
-      | { readonly reason: SendMessageFailureReason }
+      | { readonly reason: SendFailureReason }
       | TextInvalidFailure
+      | FileTypeMismatchFailure
     )
   );
 
 /** A message of one of the bot's chats, as Bot API methods address it. */
 interface MessageTarget {
-  /** The Bot API `chat_id`, as `SendMessageRequest` describes it. */
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
   readonly chatId: number;
   /** The message's ID in the bot's chat. */
   readonly messageId: number;
 }
 
 export interface EditMessageTextRequest extends MessageTarget, SpecifiedFormattedText {
+  /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
+  readonly inlineKeyboard?: InlineKeyboard;
+}
+
+export interface EditMessageCaptionRequest extends MessageTarget {
+  /** Empty text removes the caption. */
+  readonly caption: SpecifiedFormattedText;
+  /** The Bot API `show_caption_above_media`, which only a photo honors. */
+  readonly showsCaptionAboveMedia: boolean;
   /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
   readonly inlineKeyboard?: InlineKeyboard;
 }
@@ -137,18 +192,32 @@ export type EditMessageReplyMarkupFailureReason =
 export type EditMessageTextFailureReason =
   | EditMessageReplyMarkupFailureReason
   | 'message_text_empty'
+  | 'message_has_no_text'
   | 'message_text_too_long';
 
+export type EditMessageCaptionFailureReason =
+  | EditMessageReplyMarkupFailureReason
+  | 'message_has_no_caption'
+  | 'caption_too_long';
+
 export type EditMessageResult<FailureReason extends string> =
-  | { readonly edited: true; readonly message: BotApiTextMessage }
+  | { readonly edited: true; readonly message: BotApiMessage }
   | { readonly edited: false; readonly reason: FailureReason };
 
 export type EditMessageTextResult =
   | EditMessageResult<EditMessageTextFailureReason>
   | ({ readonly edited: false } & TextInvalidFailure);
 
+export type EditMessageCaptionResult =
+  | EditMessageResult<EditMessageCaptionFailureReason>
+  | ({ readonly edited: false } & TextInvalidFailure);
+
+export type GetFileResult =
+  | { readonly found: true; readonly file: BotApiDownloadableFile }
+  | { readonly found: false; readonly reason: 'file_id_invalid' | 'file_too_big' };
+
 export interface SendChatActionRequest {
-  /** The Bot API `chat_id`, as `SendMessageRequest` describes it. */
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
   readonly chatId: number;
   readonly action: ChatAction;
 }
@@ -167,7 +236,7 @@ export type DeleteMessageResult =
   };
 
 export interface DeleteMessagesRequest {
-  /** The Bot API `chat_id`, as `SendMessageRequest` describes it. */
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
   readonly chatId: number;
   /** The messages' IDs in the bot's chat. */
   readonly messageIds: readonly number[];
@@ -206,7 +275,7 @@ interface BotPrivateChat {
 }
 
 type BotMessageSendingResult =
-  | { readonly sent: true; readonly message: PrivateTextMessage }
+  | { readonly sent: true; readonly message: PrivateMessage }
   | {
     readonly sent: false;
     readonly reason:
@@ -215,13 +284,12 @@ type BotMessageSendingResult =
       | 'account_not_found'
       | 'conversation_not_started'
       | 'reply_message_not_found'
-      | 'message_text_too_long'
       | 'callback_data_invalid'
       | 'bot_blocked';
   }
-  | ({ readonly sent: false } & TextInvalidFailure);
+  | ({ readonly sent: false } & ContentNormalizationFailure);
 
-/** Why an edit of either kind can fail, apart from failures about the text. */
+/** Why an edit of any kind can fail, apart from failures about the new content. */
 type BotMessageEditFailureReason =
   | 'bot_not_found'
   | 'account_not_found'
@@ -232,16 +300,23 @@ type BotMessageEditFailureReason =
   | 'message_not_modified';
 
 type BotMessageEditingResult<FailureReason extends string> =
-  | { readonly edited: true; readonly message: PrivateTextMessage }
+  | { readonly edited: true; readonly message: PrivateMessage }
   | { readonly edited: false; readonly reason: FailureReason };
+
+/** A caption edit as the messaging services take it. */
+interface CaptionEdit {
+  readonly caption: string;
+  readonly captionEntities?: readonly TextEntity[];
+  readonly showsCaptionAboveMedia: boolean;
+  readonly inlineKeyboard?: InlineKeyboard;
+}
 
 interface BotMessaging {
   sendBotMessage(
     input: BotMessageReplyMarkup & {
       readonly fromBotId: number;
       readonly to: BotPrivateChat;
-      readonly text: string;
-      readonly entities?: readonly TextEntity[];
+      readonly content: OutgoingMessageContent;
       readonly replyTo?: {
         readonly botMessageId: number;
         readonly allowSendingWithoutReply: boolean;
@@ -258,7 +333,21 @@ interface BotMessaging {
     readonly inlineKeyboard?: InlineKeyboard;
   }):
     | BotMessageEditingResult<
-      BotMessageEditFailureReason | 'message_text_empty' | 'message_text_too_long'
+      | BotMessageEditFailureReason
+      | 'message_text_empty'
+      | 'message_has_no_text'
+      | 'message_text_too_long'
+    >
+    | ({ readonly edited: false } & TextInvalidFailure);
+  editBotMessageCaption(
+    input: CaptionEdit & {
+      readonly fromBotId: number;
+      readonly chat: BotPrivateChat;
+      readonly botMessageId: number;
+    },
+  ):
+    | BotMessageEditingResult<
+      BotMessageEditFailureReason | 'message_has_no_caption' | 'caption_too_long'
     >
     | ({ readonly edited: false } & TextInvalidFailure);
   editBotMessageInlineKeyboard(input: {
@@ -294,10 +383,10 @@ interface BotMessaging {
 }
 
 type SupergroupBotMessageEditingResult<FailureReason extends string> =
-  | { readonly edited: true; readonly message: SupergroupTextMessage }
+  | { readonly edited: true; readonly message: SupergroupMessage }
   | { readonly edited: false; readonly reason: FailureReason };
 
-/** Why an edit of either kind can fail in a supergroup, apart from failures about the text. */
+/** Why an edit of any kind can fail in a supergroup, apart from failures about the content. */
 type SupergroupBotMessageEditFailureReason =
   | 'bot_not_found'
   | 'chat_not_found'
@@ -310,13 +399,12 @@ interface SupergroupBotMessaging {
   sendBotMessage(input: {
     readonly fromBotId: number;
     readonly chatId: number;
-    readonly text: string;
-    readonly entities?: readonly TextEntity[];
+    readonly content: OutgoingMessageContent;
     readonly inlineKeyboard?: InlineKeyboard;
     readonly replyTo?: { readonly messageId: number; readonly allowSendingWithoutReply: boolean };
     readonly isContentProtected?: boolean;
   }):
-    | { readonly sent: true; readonly message: SupergroupTextMessage }
+    | { readonly sent: true; readonly message: SupergroupMessage }
     | {
       readonly sent: false;
       readonly reason:
@@ -324,10 +412,9 @@ interface SupergroupBotMessaging {
         | 'message_text_empty'
         | 'chat_not_found'
         | 'reply_message_not_found'
-        | 'message_text_too_long'
         | 'callback_data_invalid';
     }
-    | ({ readonly sent: false } & TextInvalidFailure);
+    | ({ readonly sent: false } & ContentNormalizationFailure);
   editBotMessageText(input: {
     readonly fromBotId: number;
     readonly chatId: number;
@@ -337,7 +424,21 @@ interface SupergroupBotMessaging {
     readonly inlineKeyboard?: InlineKeyboard;
   }):
     | SupergroupBotMessageEditingResult<
-      SupergroupBotMessageEditFailureReason | 'message_text_empty' | 'message_text_too_long'
+      | SupergroupBotMessageEditFailureReason
+      | 'message_text_empty'
+      | 'message_has_no_text'
+      | 'message_text_too_long'
+    >
+    | ({ readonly edited: false } & TextInvalidFailure);
+  editBotMessageCaption(
+    input: CaptionEdit & {
+      readonly fromBotId: number;
+      readonly chatId: number;
+      readonly messageId: number;
+    },
+  ):
+    | SupergroupBotMessageEditingResult<
+      SupergroupBotMessageEditFailureReason | 'message_has_no_caption' | 'caption_too_long'
     >
     | ({ readonly edited: false } & TextInvalidFailure);
   editBotMessageInlineKeyboard(input: {
@@ -363,6 +464,30 @@ interface SupergroupBotMessaging {
       readonly deleted: false;
       readonly reason: 'bot_not_found' | 'chat_not_found' | 'message_not_deletable';
     };
+}
+
+interface MediaFiles {
+  preparePhotoUpload(content: Uint8Array<ArrayBuffer>):
+    | { readonly prepared: true; readonly upload: PhotoUpload }
+    | {
+      readonly prepared: false;
+      readonly reason: 'file_empty' | 'image_invalid' | 'photo_dimensions_invalid';
+    };
+  prepareDocumentUpload(content: Uint8Array<ArrayBuffer>, fileName: string):
+    | { readonly prepared: true; readonly upload: DocumentUpload }
+    | { readonly prepared: false; readonly reason: 'file_empty' };
+  findObserverFile(observerId: number, fileId: string): StoredFile | undefined;
+  getBotFile(botId: number, fileId: string):
+    | {
+      readonly found: true;
+      readonly downloadableFile: {
+        readonly file: StoredFile;
+        readonly fileId: string;
+        readonly filePath: string;
+      };
+    }
+    | { readonly found: false; readonly reason: 'file_id_invalid' | 'file_too_big' };
+  findBotFileByPath(botId: number, filePath: string): StoredFile | undefined;
 }
 
 /** A command list of the bot, addressed as the command methods address it. */
@@ -445,8 +570,8 @@ interface CallbackQueryAnswering {
 }
 
 interface BotMessageViews {
-  viewPrivateTextMessageForBot(message: PrivateTextMessage): BotApiPrivateTextMessage;
-  viewSupergroupTextMessage(message: SupergroupTextMessage): BotApiSupergroupTextMessage;
+  viewPrivateMessageForBot(message: PrivateMessage): BotApiPrivateMessage;
+  viewSupergroupMessage(message: SupergroupMessage, observerId: number): BotApiSupergroupMessage;
 }
 
 interface BotApiServiceDependencies {
@@ -456,6 +581,7 @@ interface BotApiServiceDependencies {
   readonly botMessages: BotMessaging;
   readonly supergroupBotMessages: SupergroupBotMessaging;
   readonly botMessageViews: BotMessageViews;
+  readonly mediaFiles: MediaFiles;
   readonly callbackQueries: CallbackQueryAnswering;
   readonly botCommands: BotCommandLists;
 }
@@ -475,6 +601,7 @@ export class BotApiService {
   readonly #botMessages: BotMessaging;
   readonly #supergroupBotMessages: SupergroupBotMessaging;
   readonly #botMessageViews: BotMessageViews;
+  readonly #mediaFiles: MediaFiles;
   readonly #callbackQueries: CallbackQueryAnswering;
   readonly #botCommands: BotCommandLists;
 
@@ -486,6 +613,7 @@ export class BotApiService {
       botMessages,
       supergroupBotMessages,
       botMessageViews,
+      mediaFiles,
       callbackQueries,
       botCommands,
     }: BotApiServiceDependencies,
@@ -496,6 +624,7 @@ export class BotApiService {
     this.#botMessages = botMessages;
     this.#supergroupBotMessages = supergroupBotMessages;
     this.#botMessageViews = botMessageViews;
+    this.#mediaFiles = mediaFiles;
     this.#callbackQueries = callbackQueries;
     this.#botCommands = botCommands;
   }
@@ -566,22 +695,102 @@ export class BotApiService {
    * account's reply interface. Telegram also shows a reply interface to chosen members of a group,
    * which the emulator does not support.
    */
-  sendMessage(authenticatedBot: VirtualBotProfile, request: SendMessageRequest): SendMessageResult {
-    return isUserId(request.chatId)
-      ? this.#sendPrivateMessage(authenticatedBot, request)
-      : this.#sendSupergroupMessage(authenticatedBot, request);
+  sendMessage(
+    authenticatedBot: VirtualBotProfile,
+    { text, entities, ...options }: SendMessageRequest,
+  ): SendResult {
+    return this.#send(authenticatedBot, { kind: 'text', text, entities }, options);
+  }
+
+  /**
+   * Sends a photo with an optional caption, as `sendMessage` sends text. The photo is uploaded
+   * with the request or reused by the `file_id` the bot knows it by.
+   *
+   * The file is resolved before the chat, while Telegram looks at the chat first; a request with
+   * both an unknown chat and an unusable file fails for its file.
+   */
+  sendPhoto(
+    authenticatedBot: VirtualBotProfile,
+    { photo, caption, hasSpoiler, showsCaptionAboveMedia, ...options }: SendPhotoRequest,
+  ): SendResult {
+    const photoResolution = this.#resolvePhoto(authenticatedBot, photo);
+    if (!photoResolution.resolved) {
+      return { sent: false, ...photoResolution.failure };
+    }
+    return this.#send(authenticatedBot, {
+      kind: 'photo',
+      photo: photoResolution.file,
+      caption: caption.text,
+      captionEntities: caption.entities,
+      hasSpoiler,
+      showsCaptionAboveMedia,
+    }, options);
+  }
+
+  /**
+   * Sends a file as a document with an optional caption, as `sendPhoto` sends a photo. Telegram
+   * sends some files, such as videos and GIF animations, as other media unless the request
+   * disables content type detection; the emulator always sends a document.
+   */
+  sendDocument(
+    authenticatedBot: VirtualBotProfile,
+    { document, caption, ...options }: SendDocumentRequest,
+  ): SendResult {
+    const documentResolution = this.#resolveDocument(authenticatedBot, document);
+    if (!documentResolution.resolved) {
+      return { sent: false, ...documentResolution.failure };
+    }
+    return this.#send(authenticatedBot, {
+      kind: 'document',
+      document: documentResolution.file,
+      caption: caption.text,
+      captionEntities: caption.entities,
+    }, options);
+  }
+
+  /** Returns a file the bot knows by its `file_id`, with the `file_path` to download it from. */
+  getFile(authenticatedBot: VirtualBotProfile, fileId: string): GetFileResult {
+    const result = this.#mediaFiles.getBotFile(authenticatedBot.id, fileId);
+    if (!result.found) {
+      return result;
+    }
+    const { file, filePath } = result.downloadableFile;
+    return {
+      found: true,
+      file: {
+        file_id: result.downloadableFile.fileId,
+        file_unique_id: file.uniqueId,
+        file_size: file.content.length,
+        file_path: filePath,
+      },
+    };
+  }
+
+  /** Returns the file at a `file_path` that `getFile` gave the bot, for download. */
+  downloadFile(authenticatedBot: VirtualBotProfile, filePath: string): StoredFile | undefined {
+    return this.#mediaFiles.findBotFileByPath(authenticatedBot.id, filePath);
+  }
+
+  #send(
+    authenticatedBot: VirtualBotProfile,
+    content: OutgoingMessageContent,
+    options: SendRequestOptions,
+  ): SendResult {
+    return isUserId(options.chatId)
+      ? this.#sendPrivateMessage(authenticatedBot, content, options)
+      : this.#sendSupergroupMessage(authenticatedBot, content, options);
   }
 
   #sendPrivateMessage(
     authenticatedBot: VirtualBotProfile,
-    { chatId, text, entities, replyTo, isContentProtected, ...replyMarkup }: SendMessageRequest,
-  ): SendMessageResult {
+    content: OutgoingMessageContent,
+    { chatId, replyTo, isContentProtected, ...replyMarkup }: SendRequestOptions,
+  ): SendResult {
     const result = this.#botMessages.sendBotMessage({
       ...replyMarkup,
       fromBotId: authenticatedBot.id,
       to: { type: 'private', accountId: chatId },
-      text,
-      entities,
+      content,
       replyTo: replyTo === undefined ? undefined : {
         botMessageId: replyTo.messageId,
         allowSendingWithoutReply: replyTo.allowSendingWithoutReply,
@@ -591,7 +800,7 @@ export class BotApiService {
     if (result.sent) {
       return {
         sent: true,
-        message: this.#botMessageViews.viewPrivateTextMessageForBot(result.message),
+        message: this.#botMessageViews.viewPrivateMessageForBot(result.message),
       };
     }
 
@@ -601,6 +810,7 @@ export class BotApiService {
       case 'message_text_empty':
       case 'reply_message_not_found':
       case 'message_text_too_long':
+      case 'caption_too_long':
       case 'callback_data_invalid':
       case 'bot_blocked':
         return { sent: false, reason: result.reason };
@@ -620,17 +830,17 @@ export class BotApiService {
 
   #sendSupergroupMessage(
     authenticatedBot: VirtualBotProfile,
-    { chatId, text, entities, replyTo, isContentProtected, inlineKeyboard, replyInterfaceMarkup }:
-      SendMessageRequest,
-  ): SendMessageResult {
+    content: OutgoingMessageContent,
+    { chatId, replyTo, isContentProtected, inlineKeyboard, replyInterfaceMarkup }:
+      SendRequestOptions,
+  ): SendResult {
     if (replyInterfaceMarkup !== undefined) {
       return { sent: false, reason: 'reply_interface_unsupported_in_groups' };
     }
     const result = this.#supergroupBotMessages.sendBotMessage({
       fromBotId: authenticatedBot.id,
       chatId,
-      text,
-      entities,
+      content,
       inlineKeyboard,
       replyTo,
       isContentProtected,
@@ -638,7 +848,7 @@ export class BotApiService {
     if (result.sent) {
       return {
         sent: true,
-        message: this.#botMessageViews.viewSupergroupTextMessage(result.message),
+        message: this.#botMessageViews.viewSupergroupMessage(result.message, authenticatedBot.id),
       };
     }
 
@@ -649,6 +859,7 @@ export class BotApiService {
       case 'chat_not_found':
       case 'reply_message_not_found':
       case 'message_text_too_long':
+      case 'caption_too_long':
       case 'callback_data_invalid':
         return { sent: false, reason: result.reason };
       case 'bot_not_found':
@@ -658,6 +869,46 @@ export class BotApiService {
         throw new Error(`Unhandled bot message failure: ${JSON.stringify(unhandledFailure)}`);
       }
     }
+  }
+
+  /** Resolves the photo a request sends: an upload, or a photo the bot knows by `file_id`. */
+  #resolvePhoto(authenticatedBot: VirtualBotProfile, input: BotApiInputFile): FileResolution<
+    OutgoingPhoto
+  > {
+    if (input.kind === 'file_id') {
+      const file = this.#mediaFiles.findObserverFile(authenticatedBot.id, input.fileId);
+      if (file?.type === 'photo') {
+        return { resolved: true, file: { kind: 'stored', file } };
+      }
+      return { resolved: false, failure: fileIdFailure(file, 'photo') };
+    }
+    const preparation = this.#mediaFiles.preparePhotoUpload(input.content);
+    return preparation.prepared
+      ? { resolved: true, file: { kind: 'upload', upload: preparation.upload } }
+      : { resolved: false, failure: { reason: preparation.reason } };
+  }
+
+  /**
+   * Resolves the document a request sends: an upload, whose name the Bot API server cleans, or a
+   * document the bot knows by `file_id`.
+   */
+  #resolveDocument(authenticatedBot: VirtualBotProfile, input: BotApiInputFile): FileResolution<
+    OutgoingDocument
+  > {
+    if (input.kind === 'file_id') {
+      const file = this.#mediaFiles.findObserverFile(authenticatedBot.id, input.fileId);
+      if (file?.type === 'document') {
+        return { resolved: true, file: { kind: 'stored', file } };
+      }
+      return { resolved: false, failure: fileIdFailure(file, 'document') };
+    }
+    const preparation = this.#mediaFiles.prepareDocumentUpload(
+      input.content,
+      cleanUploadedFileName(input.fileName),
+    );
+    return preparation.prepared
+      ? { resolved: true, file: { kind: 'upload', upload: preparation.upload } }
+      : { resolved: false, failure: { reason: preparation.reason } };
   }
 
   /** Shows a chat action, such as typing, in a private chat or a supergroup. */
@@ -700,7 +951,7 @@ export class BotApiService {
     }
   }
 
-  /** Replaces the text, entities, and inline keyboard of a message the bot sent. */
+  /** Replaces the text, entities, and inline keyboard of a text message the bot sent. */
   editMessageText(
     authenticatedBot: VirtualBotProfile,
     { chatId, messageId, text, entities, inlineKeyboard }: EditMessageTextRequest,
@@ -714,14 +965,17 @@ export class BotApiService {
         entities,
         inlineKeyboard,
       }))
-      : this.#presentSupergroupEdit(this.#supergroupBotMessages.editBotMessageText({
-        fromBotId: authenticatedBot.id,
-        chatId,
-        messageId,
-        text,
-        entities,
-        inlineKeyboard,
-      }));
+      : this.#presentSupergroupEdit(
+        authenticatedBot,
+        this.#supergroupBotMessages.editBotMessageText({
+          fromBotId: authenticatedBot.id,
+          chatId,
+          messageId,
+          text,
+          entities,
+          inlineKeyboard,
+        }),
+      );
     if (result.edited) {
       return result;
     }
@@ -730,7 +984,57 @@ export class BotApiService {
       case 'text_invalid':
         return result;
       case 'message_text_empty':
+      case 'message_has_no_text':
       case 'message_text_too_long':
+        return { edited: false, reason: result.reason };
+      default:
+        return {
+          edited: false,
+          reason: toEditMessageFailureReason(authenticatedBot, result.reason),
+        };
+    }
+  }
+
+  /**
+   * Replaces the caption, its entities, and the inline keyboard of a photo or document the bot
+   * sent; empty caption text removes the caption.
+   */
+  editMessageCaption(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, messageId, caption, showsCaptionAboveMedia, inlineKeyboard }:
+      EditMessageCaptionRequest,
+  ): EditMessageCaptionResult {
+    const captionEdit: CaptionEdit = {
+      caption: caption.text,
+      captionEntities: caption.entities,
+      showsCaptionAboveMedia,
+      inlineKeyboard,
+    };
+    const result = isUserId(chatId)
+      ? this.#presentPrivateEdit(this.#botMessages.editBotMessageCaption({
+        ...captionEdit,
+        fromBotId: authenticatedBot.id,
+        chat: { type: 'private', accountId: chatId },
+        botMessageId: messageId,
+      }))
+      : this.#presentSupergroupEdit(
+        authenticatedBot,
+        this.#supergroupBotMessages.editBotMessageCaption({
+          ...captionEdit,
+          fromBotId: authenticatedBot.id,
+          chatId,
+          messageId,
+        }),
+      );
+    if (result.edited) {
+      return result;
+    }
+
+    switch (result.reason) {
+      case 'text_invalid':
+        return result;
+      case 'message_has_no_caption':
+      case 'caption_too_long':
         return { edited: false, reason: result.reason };
       default:
         return {
@@ -752,12 +1056,15 @@ export class BotApiService {
         botMessageId: messageId,
         inlineKeyboard,
       }))
-      : this.#presentSupergroupEdit(this.#supergroupBotMessages.editBotMessageInlineKeyboard({
-        fromBotId: authenticatedBot.id,
-        chatId,
-        messageId,
-        inlineKeyboard,
-      }));
+      : this.#presentSupergroupEdit(
+        authenticatedBot,
+        this.#supergroupBotMessages.editBotMessageInlineKeyboard({
+          fromBotId: authenticatedBot.id,
+          chatId,
+          messageId,
+          inlineKeyboard,
+        }),
+      );
     if (result.edited) {
       return result;
     }
@@ -909,23 +1216,51 @@ export class BotApiService {
   }
 
   #presentPrivateEdit<Failure extends { readonly edited: false }>(
-    result: { readonly edited: true; readonly message: PrivateTextMessage } | Failure,
-  ): { readonly edited: true; readonly message: BotApiTextMessage } | Failure {
+    result: { readonly edited: true; readonly message: PrivateMessage } | Failure,
+  ): { readonly edited: true; readonly message: BotApiMessage } | Failure {
     return result.edited
       ? {
         edited: true,
-        message: this.#botMessageViews.viewPrivateTextMessageForBot(result.message),
+        message: this.#botMessageViews.viewPrivateMessageForBot(result.message),
       }
       : result;
   }
 
   #presentSupergroupEdit<Failure extends { readonly edited: false }>(
-    result: { readonly edited: true; readonly message: SupergroupTextMessage } | Failure,
-  ): { readonly edited: true; readonly message: BotApiTextMessage } | Failure {
+    authenticatedBot: VirtualBotProfile,
+    result: { readonly edited: true; readonly message: SupergroupMessage } | Failure,
+  ): { readonly edited: true; readonly message: BotApiMessage } | Failure {
     return result.edited
-      ? { edited: true, message: this.#botMessageViews.viewSupergroupTextMessage(result.message) }
+      ? {
+        edited: true,
+        message: this.#botMessageViews.viewSupergroupMessage(result.message, authenticatedBot.id),
+      }
       : result;
   }
+}
+
+/** A file a send method resolved to send, or why it cannot be sent. */
+type FileResolution<File> =
+  | { readonly resolved: true; readonly file: File }
+  | {
+    readonly resolved: false;
+    readonly failure:
+      | { readonly reason: 'file_empty' | 'image_invalid' | 'photo_dimensions_invalid' }
+      | { readonly reason: 'file_id_invalid' }
+      | FileTypeMismatchFailure;
+  };
+
+/**
+ * Why a `file_id` cannot send a file of the expected type. As on Telegram, an unknown `file_id`,
+ * including one another bot knows a file by, identifies no file.
+ */
+function fileIdFailure(
+  file: StoredFile | undefined,
+  expectedFileType: StoredFile['type'],
+): { readonly reason: 'file_id_invalid' } | FileTypeMismatchFailure {
+  return file === undefined
+    ? { reason: 'file_id_invalid' }
+    : { reason: 'file_type_mismatch', expectedFileType, actualFileType: file.type };
 }
 
 /**

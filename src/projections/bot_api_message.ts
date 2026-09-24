@@ -1,117 +1,210 @@
 import type {
   BotApiBotUser,
   BotApiCallbackQuery,
+  BotApiDocument,
   BotApiGroupChat,
   BotApiGroupChatBotMember,
   BotApiInlineKeyboardButton,
   BotApiInlineKeyboardMarkup,
+  BotApiMessage,
+  BotApiMessageContent,
   BotApiMessageEntity,
   BotApiMyChatMemberUpdated,
+  BotApiPhotoSize,
   BotApiPrivateChat,
   BotApiPrivateChatBotMember,
-  BotApiPrivateTextMessage,
-  BotApiRepliedPrivateTextMessage,
-  BotApiRepliedSupergroupTextMessage,
+  BotApiPrivateMessage,
+  BotApiRepliedPrivateMessage,
+  BotApiRepliedSupergroupMessage,
   BotApiSupergroupChat,
-  BotApiSupergroupTextMessage,
-  BotApiTextMessage,
+  BotApiSupergroupMessage,
   BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
 import type { BotBlockChangedEvent, ChatMemberAddedEvent } from '../types/chat_domain_event.ts';
 import type { InlineKeyboard, InlineKeyboardButton } from '../types/inline_keyboard.ts';
+import type { StoredFile } from '../types/stored_file.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
 import type { VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { BasicGroup, Supergroup } from '../types/virtual_chat.ts';
 import type {
-  PrivateTextMessage,
-  SupergroupTextMessage,
+  ChatMessage,
+  FormattedText,
+  MessageContent,
+  PrivateMessage,
+  SupergroupMessage,
   TextEntity,
-  TextMessage,
 } from '../types/virtual_message.ts';
 
-export interface PrivateTextMessageForBotProjectionInput {
-  readonly message: PrivateTextMessage;
+/** A stored file with the `file_id` by which the observer of a projection knows it. */
+export interface ObservedFile {
+  readonly file: StoredFile;
+  readonly observerFileId: string;
+}
+
+/** What a projection shows beyond the message itself, resolved for the observer. */
+interface MessageProjectionContext {
+  /** Every user the message's text or caption mentions, by ID. */
+  readonly mentionedUsers: ReadonlyMap<number, BotApiUser>;
+  /** The file of a photo or document message; omitted for a text message. */
+  readonly contentFile?: ObservedFile;
+}
+
+export interface PrivateMessageForBotProjectionInput {
+  readonly message: PrivateMessage;
   /** The conversation's account, which is the observing bot's private-chat peer. */
   readonly account: VirtualAccountProfile;
   /** The conversation's bot, which observes the message. */
   readonly bot: VirtualBotProfile;
   /** The message's ID in the observing bot's message box. */
   readonly observerMessageId: number;
-  /** Every user the message's text mentions, by ID. */
-  readonly mentionedUsers: ReadonlyMap<number, BotApiUser>;
+  readonly context: MessageProjectionContext;
   /** The replied message as the observing bot sees it; omitted when there is none to show. */
-  readonly repliedMessage?: BotApiRepliedPrivateTextMessage;
+  readonly repliedMessage?: BotApiRepliedPrivateMessage;
 }
 
 /**
- * Projects a canonical private text message as seen by the bot of its conversation, in the field
+ * Projects a canonical private message as seen by the bot of its conversation, in the field
  * order Telegram uses.
  *
  * The chat is always the account, whoever wrote the message; the sender follows the author.
  */
-export function projectPrivateTextMessageForBot(
-  { message, account, bot, observerMessageId, mentionedUsers, repliedMessage }:
-    PrivateTextMessageForBotProjectionInput,
-): BotApiPrivateTextMessage {
+export function projectPrivateMessageForBot(
+  { message, account, bot, observerMessageId, context, repliedMessage }:
+    PrivateMessageForBotProjectionInput,
+): BotApiPrivateMessage {
   return {
     message_id: observerMessageId,
     from: message.authorRole === 'account' ? account : projectBotAsUser(bot),
     chat: projectPrivateChat(account),
     date: message.sentAtUnixSeconds,
-    ...projectTextMessageContent(message, mentionedUsers, repliedMessage),
+    ...projectMessageBody(message, context, repliedMessage),
   };
 }
 
-export interface SupergroupTextMessageProjectionInput {
-  readonly message: SupergroupTextMessage;
+export interface SupergroupMessageProjectionInput {
+  readonly message: SupergroupMessage;
   readonly supergroup: Supergroup;
   /** The member who wrote the message. */
   readonly author: BotApiUser;
   /** The message's ID in the supergroup's message box, which every member sees. */
   readonly messageId: number;
-  /** Every user the message's text mentions, by ID. */
-  readonly mentionedUsers: ReadonlyMap<number, BotApiUser>;
+  readonly context: MessageProjectionContext;
   /** The replied message; omitted when there is none to show. */
-  readonly repliedMessage?: BotApiRepliedSupergroupTextMessage;
+  readonly repliedMessage?: BotApiRepliedSupergroupMessage;
 }
 
 /**
- * Projects a canonical supergroup text message, in the field order Telegram uses. A supergroup
- * numbers its messages once, so every member sees the same projection.
+ * Projects a canonical supergroup message, in the field order Telegram uses. A supergroup numbers
+ * its messages once, so members see the same projection, apart from the `file_id` of its file.
  */
-export function projectSupergroupTextMessage(
-  { message, supergroup, author, messageId, mentionedUsers, repliedMessage }:
-    SupergroupTextMessageProjectionInput,
-): BotApiSupergroupTextMessage {
+export function projectSupergroupMessage(
+  { message, supergroup, author, messageId, context, repliedMessage }:
+    SupergroupMessageProjectionInput,
+): BotApiSupergroupMessage {
   return {
     message_id: messageId,
     from: author,
     chat: projectSupergroupChat(supergroup),
     date: message.sentAtUnixSeconds,
-    ...projectTextMessageContent(message, mentionedUsers, repliedMessage),
+    ...projectMessageBody(message, context, repliedMessage),
   };
 }
 
 /** Projects the fields that follow a message's date, which every chat type shows alike. */
-function projectTextMessageContent<RepliedMessage>(
-  message: TextMessage,
-  mentionedUsers: ReadonlyMap<number, BotApiUser>,
+function projectMessageBody<RepliedMessage>(
+  message: ChatMessage,
+  context: MessageProjectionContext,
   repliedMessage: RepliedMessage | undefined,
 ) {
   return {
-    ...(message.textEditedAtUnixSeconds === undefined
+    ...(message.contentEditedAtUnixSeconds === undefined
       ? {}
-      : { edit_date: message.textEditedAtUnixSeconds }),
+      : { edit_date: message.contentEditedAtUnixSeconds }),
     ...(repliedMessage === undefined ? {} : { reply_to_message: repliedMessage }),
-    text: message.text,
-    ...(message.entities.length === 0 ? {} : {
-      entities: message.entities.map((entity) => projectTextEntity(entity, mentionedUsers)),
-    }),
+    ...projectMessageContent(message.content, context),
     ...(message.inlineKeyboard === undefined
       ? {}
       : { reply_markup: projectInlineKeyboardMarkup(message.inlineKeyboard) }),
     ...(message.isContentProtected ? { has_protected_content: true as const } : {}),
+  };
+}
+
+function projectMessageContent(
+  content: MessageContent,
+  { mentionedUsers, contentFile }: MessageProjectionContext,
+): BotApiMessageContent {
+  switch (content.kind) {
+    case 'text':
+      return {
+        text: content.text,
+        ...(content.entities.length === 0 ? {} : {
+          entities: content.entities.map((entity) => projectTextEntity(entity, mentionedUsers)),
+        }),
+      };
+    case 'photo': {
+      const hasCaption = content.caption.text.length > 0;
+      return {
+        photo: [projectPhotoSize(contentFile)],
+        ...projectCaption(content.caption, mentionedUsers),
+        ...(hasCaption && content.showsCaptionAboveMedia
+          ? { show_caption_above_media: true as const }
+          : {}),
+        ...(content.hasSpoiler ? { has_media_spoiler: true as const } : {}),
+      };
+    }
+    case 'document':
+      return {
+        document: projectDocument(contentFile),
+        ...projectCaption(content.caption, mentionedUsers),
+      };
+    default: {
+      const unhandledContent: never = content;
+      throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
+    }
+  }
+}
+
+/** Telegram omits the caption fields of a media message without a caption. */
+function projectCaption(caption: FormattedText, mentionedUsers: ReadonlyMap<number, BotApiUser>) {
+  if (caption.text.length === 0) {
+    return {};
+  }
+  return {
+    caption: caption.text,
+    ...(caption.entities.length === 0 ? {} : {
+      caption_entities: caption.entities.map((entity) => projectTextEntity(entity, mentionedUsers)),
+    }),
+  };
+}
+
+/** Shows a photo in its one kept size; the observed file must be the message's photo. */
+function projectPhotoSize(contentFile: ObservedFile | undefined): BotApiPhotoSize {
+  const file = contentFile?.file;
+  if (contentFile === undefined || file?.type !== 'photo') {
+    throw new Error('Expected the photo of the message to be provided');
+  }
+  return {
+    file_id: contentFile.observerFileId,
+    file_unique_id: file.uniqueId,
+    file_size: file.content.length,
+    width: file.width,
+    height: file.height,
+  };
+}
+
+/** Shows a document; the observed file must be the message's document. */
+function projectDocument(contentFile: ObservedFile | undefined): BotApiDocument {
+  const file = contentFile?.file;
+  if (contentFile === undefined || file?.type !== 'document') {
+    throw new Error('Expected the document of the message to be provided');
+  }
+  return {
+    file_name: file.fileName,
+    mime_type: file.mimeType,
+    file_id: contentFile.observerFileId,
+    file_unique_id: file.uniqueId,
+    file_size: file.content.length,
   };
 }
 
@@ -120,7 +213,7 @@ export interface CallbackQueryForBotProjectionInput {
   /** The account that pressed the button. */
   readonly account: VirtualAccountProfile;
   /** The message carrying the pressed button, as the observing bot currently sees it. */
-  readonly message: BotApiTextMessage;
+  readonly message: BotApiMessage;
 }
 
 /** Projects a callback query as the bot that owns the pressed button receives it. */

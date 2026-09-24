@@ -14,10 +14,10 @@ import type {
   MessageEntity,
   MessageSenderBot,
   PlainMessageEntityType,
-  PrivateTextMessage,
+  PrivateMessage,
   ReplyInterface,
   Supergroup,
-  SupergroupTextMessage,
+  SupergroupMessage,
   VirtualAccountProfile,
   VirtualBotProfile,
 } from './types.ts';
@@ -165,45 +165,87 @@ function messageHeaderShape<Chat extends z.ZodType>(chat: Chat) {
   };
 }
 
-const messageContentShape = {
+const messageFileShape = {
+  file_id: z.string().min(1),
+  file_unique_id: z.string().min(1),
+  file_size: z.number().int().positive(),
+};
+
+const photoSizeSchema = z.strictObject({
+  ...messageFileShape,
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+});
+
+const documentSchema = z.strictObject({
+  file_name: z.string().min(1),
+  mime_type: z.string().min(1),
+  ...messageFileShape,
+});
+
+const captionShape = {
+  caption: z.string().min(1).optional(),
+  caption_entities: z.array(messageEntitySchema).min(1).optional(),
+};
+
+const textContentShape = {
   text: z.string(),
   entities: z.array(messageEntitySchema).min(1).optional(),
+};
+
+const photoContentShape = {
+  photo: z.array(photoSizeSchema).min(1),
+  ...captionShape,
+  show_caption_above_media: z.literal(true).optional(),
+  has_media_spoiler: z.literal(true).optional(),
+};
+
+const documentContentShape = { document: documentSchema, ...captionShape };
+
+const messageTrailerShape = {
   reply_markup: inlineKeyboardMarkupSchema.optional(),
   has_protected_content: z.literal(true).optional(),
 };
 
-/** Fields in the order the server sends them, with a reply between header and content. */
-function textMessageSchema<Chat extends z.ZodType>(chat: Chat) {
-  return z.strictObject({
-    ...messageHeaderShape(chat),
-    reply_to_message: z.strictObject({ ...messageHeaderShape(chat), ...messageContentShape })
-      .optional(),
-    ...messageContentShape,
-  });
+/**
+ * A message of each content kind, with fields in the order the server sends them and a reply,
+ * which shows no reply of its own, between header and content.
+ */
+function messageSchema<Chat extends z.ZodType>(chat: Chat) {
+  const header = messageHeaderShape(chat);
+  const repliedMessage = z.union([
+    z.strictObject({ ...header, ...textContentShape, ...messageTrailerShape }),
+    z.strictObject({ ...header, ...photoContentShape, ...messageTrailerShape }),
+    z.strictObject({ ...header, ...documentContentShape, ...messageTrailerShape }),
+  ]);
+  const reply = { reply_to_message: repliedMessage.optional() };
+  return z.union([
+    z.strictObject({ ...header, ...reply, ...textContentShape, ...messageTrailerShape }),
+    z.strictObject({ ...header, ...reply, ...photoContentShape, ...messageTrailerShape }),
+    z.strictObject({ ...header, ...reply, ...documentContentShape, ...messageTrailerShape }),
+  ]);
 }
 
-export const privateTextMessageSchema: z.ZodType<PrivateTextMessage> = textMessageSchema(
-  privateChatSchema,
-);
+export const privateMessageSchema: z.ZodType<PrivateMessage> = messageSchema(privateChatSchema);
 
-const supergroupTextMessageSchema: z.ZodType<SupergroupTextMessage> = textMessageSchema(
+const supergroupMessageSchema: z.ZodType<SupergroupMessage> = messageSchema(
   supergroupChatSchema,
 );
 
 export const sentMessageResponseSchema = z.strictObject({
-  message: privateTextMessageSchema,
+  message: privateMessageSchema,
 });
 
 export const messageHistoryResponseSchema = z.strictObject({
-  messages: z.array(privateTextMessageSchema),
+  messages: z.array(privateMessageSchema),
 });
 
 export const sentSupergroupMessageResponseSchema = z.strictObject({
-  message: supergroupTextMessageSchema,
+  message: supergroupMessageSchema,
 });
 
 export const supergroupMessageHistoryResponseSchema = z.strictObject({
-  messages: z.array(supergroupTextMessageSchema),
+  messages: z.array(supergroupMessageSchema),
 });
 
 const supergroupSchema: z.ZodType<Supergroup> = z.strictObject({

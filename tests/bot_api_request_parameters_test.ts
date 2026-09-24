@@ -82,9 +82,29 @@ Deno.test('decodeBotApiRequestParameters reads the query string, preferring it t
   assertDecodedParameters(decoding, { offset: '5', limit: '1' });
 });
 
+Deno.test('decodeBotApiRequestParameters keeps the first multipart file of each name', async () => {
+  const body = new FormData();
+  body.append('chat_id', '5');
+  body.append('document', 'attach://report');
+  body.append('report', new File(['first'], 'report.pdf'));
+  body.append('report', new File(['second'], 'other.pdf'));
+
+  const decoding = await decodeBotApiRequestParameters(
+    new Request(METHOD_URL, { method: 'POST', body }),
+  );
+
+  assertDecodedParameters(decoding, { chat_id: '5', document: 'attach://report' });
+  const uploadedFile = decoding.decoded ? decoding.uploadedFiles.get('report') : undefined;
+  if (
+    decoding.decoded && decoding.uploadedFiles.size !== 1 ||
+    uploadedFile?.fileName !== 'report.pdf' ||
+    new TextDecoder().decode(uploadedFile.content) !== 'first'
+  ) {
+    throw new Error('Expected the first file of the name, with its name and content');
+  }
+});
+
 Deno.test('decodeBotApiRequestParameters rejects bodies it cannot decode', async () => {
-  const fileUploadBody = new FormData();
-  fileUploadBody.set('document', new File(['content'], 'document.txt'));
   const undecodableRequests = [
     new Request(METHOD_URL, {
       method: 'POST',
@@ -101,7 +121,6 @@ Deno.test('decodeBotApiRequestParameters rejects bodies it cannot decode', async
       headers: { 'Content-Type': 'text/plain' },
       body: 'offset=2',
     }),
-    new Request(METHOD_URL, { method: 'POST', body: fileUploadBody }),
   ];
 
   for (const request of undecodableRequests) {

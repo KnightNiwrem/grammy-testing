@@ -1,4 +1,3 @@
-import type { FormattedText } from '../text_entities/formatted_text.ts';
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type {
@@ -15,18 +14,32 @@ import type {
   PrivateConversationKey,
   PrivateConversationRole,
 } from '../types/virtual_chat.ts';
-import {
-  type CanonicalMessageId,
-  type PrivateTextMessage,
-  type TextEntity,
+import type {
+  CanonicalMessageId,
+  MessageContent,
+  PrivateMessage,
+  TextEntity,
 } from '../types/virtual_message.ts';
 import {
+  type AccountMessageContent,
+  type AccountMessageEdit,
   checkBotMessageEdit,
+  type ContentNormalizationFailure,
+  type ContentReplacement,
+  type FileUploadStore,
   hasOnlyValidCallbackData,
-  isSameFormattedText,
-  type MessageTextNormalization,
-  normalizeMessageText,
+  isSameMessageContent,
+  type NormalizedOutgoingContent,
+  normalizeOutgoingContent,
+  type OutgoingContentNormalization,
+  type OutgoingMessageContent,
+  replaceAccountMessageContent,
+  replaceMessageCaption,
+  replaceMessageText,
+  type SpecifiedCaption,
+  storeOutgoingContent,
   type TextInvalidFailure,
+  toOutgoingAccountContent,
 } from './message_content.ts';
 
 export type PrivateConversationActivationFailureReason =
@@ -49,7 +62,7 @@ export interface SendAccountMessageInput {
     readonly type: 'private';
     readonly botId: number;
   };
-  readonly text: string;
+  readonly content: AccountMessageContent;
   /** The ID, in the bot's message box, of the chat's message to reply to; omitted for no reply. */
   readonly replyToBotMessageId?: number;
 }
@@ -59,19 +72,18 @@ export type SendAccountMessageFailureReason =
   | 'bot_not_found'
   | 'bot_blocked'
   | 'message_text_empty'
-  | 'message_text_too_long'
   | 'reply_message_not_found';
 
 export type SendAccountMessageResult =
   | {
     readonly sent: true;
-    readonly message: PrivateTextMessage;
+    readonly message: PrivateMessage;
   }
   | (
     & { readonly sent: false }
     & (
       | { readonly reason: SendAccountMessageFailureReason }
-      | TextInvalidFailure
+      | ContentNormalizationFailure
     )
   );
 
@@ -92,9 +104,7 @@ export interface BotMessageReplyTarget {
 export type SendBotMessageInput = BotMessageReplyMarkup & {
   readonly fromBotId: number;
   readonly to: BotPrivateChat;
-  readonly text: string;
-  /** Formatting the bot specified, which Telegram validates and normalizes; omitted for none. */
-  readonly entities?: readonly TextEntity[];
+  readonly content: OutgoingMessageContent;
   /** Omitted for a message that replies to none. */
   readonly replyTo?: BotMessageReplyTarget;
   /** Protects the message from forwarding and saving; omitted for an unprotected message. */
@@ -107,20 +117,19 @@ export type SendBotMessageFailureReason =
   | 'account_not_found'
   | 'conversation_not_started'
   | 'reply_message_not_found'
-  | 'message_text_too_long'
   | 'callback_data_invalid'
   | 'bot_blocked';
 
 export type SendBotMessageResult =
   | {
     readonly sent: true;
-    readonly message: PrivateTextMessage;
+    readonly message: PrivateMessage;
   }
   | (
     & { readonly sent: false }
     & (
       | { readonly reason: SendBotMessageFailureReason }
-      | TextInvalidFailure
+      | ContentNormalizationFailure
     )
   );
 
@@ -139,6 +148,13 @@ export interface EditBotMessageTextInput extends EditBotMessageTarget {
   readonly inlineKeyboard?: InlineKeyboard;
 }
 
+export type EditBotMessageCaptionInput = EditBotMessageTarget & SpecifiedCaption & {
+  /** Whether a photo shows its caption above itself; a document ignores it. */
+  readonly showsCaptionAboveMedia: boolean;
+  /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
+  readonly inlineKeyboard?: InlineKeyboard;
+};
+
 export interface EditBotMessageInlineKeyboardInput extends EditBotMessageTarget {
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
@@ -156,12 +172,18 @@ export type EditBotMessageInlineKeyboardFailureReason =
 export type EditBotMessageTextFailureReason =
   | EditBotMessageInlineKeyboardFailureReason
   | 'message_text_empty'
+  | 'message_has_no_text'
   | 'message_text_too_long';
+
+export type EditBotMessageCaptionFailureReason =
+  | EditBotMessageInlineKeyboardFailureReason
+  | 'message_has_no_caption'
+  | 'caption_too_long';
 
 export type PrivateMessageEditResult<FailureReason extends string> =
   | {
     readonly edited: true;
-    readonly message: PrivateTextMessage;
+    readonly message: PrivateMessage;
   }
   | {
     readonly edited: false;
@@ -172,6 +194,10 @@ export type EditBotMessageTextResult =
   | PrivateMessageEditResult<EditBotMessageTextFailureReason>
   | ({ readonly edited: false } & TextInvalidFailure);
 
+export type EditBotMessageCaptionResult =
+  | PrivateMessageEditResult<EditBotMessageCaptionFailureReason>
+  | ({ readonly edited: false } & TextInvalidFailure);
+
 export interface EditAccountMessageInput {
   readonly fromAccountId: number;
   readonly chat: {
@@ -180,7 +206,7 @@ export interface EditAccountMessageInput {
   };
   /** The message's ID in the bot's message box. */
   readonly botMessageId: number;
-  readonly text: string;
+  readonly edit: AccountMessageEdit;
 }
 
 export type EditAccountMessageFailureReason =
@@ -189,7 +215,10 @@ export type EditAccountMessageFailureReason =
   | 'message_not_found'
   | 'message_not_editable'
   | 'message_text_empty'
+  | 'message_has_no_text'
   | 'message_text_too_long'
+  | 'message_has_no_caption'
+  | 'caption_too_long'
   | 'message_not_modified';
 
 export type EditAccountMessageResult =
@@ -238,7 +267,7 @@ export type SendBotChatActionResult =
 
 /** The message whose reply interface an account's client shows, with that interface. */
 export interface ShownReplyInterface {
-  readonly message: PrivateTextMessage;
+  readonly message: PrivateMessage;
   readonly replyInterface: ReplyInterface;
 }
 
@@ -272,7 +301,7 @@ export interface GetPrivateMessageHistoryInput {
 export type GetPrivateMessageHistoryResult =
   | {
     readonly found: true;
-    readonly messages: readonly PrivateTextMessage[];
+    readonly messages: readonly PrivateMessage[];
   }
   | {
     readonly found: false;
@@ -298,28 +327,26 @@ interface PrivateConversationStore {
 }
 
 interface PrivateMessageStore {
-  addPrivateTextMessage(input: {
+  addPrivateMessage(input: {
     readonly conversation: PrivateConversationKey;
     readonly authorRole: PrivateConversationRole;
     readonly sentAtUnixSeconds: number;
-    readonly text: string;
-    readonly entities: readonly TextEntity[];
+    readonly content: MessageContent;
     readonly replyToMessageId?: CanonicalMessageId;
     readonly inlineKeyboard?: InlineKeyboard;
     readonly replyInterface?: ReplyInterface;
     readonly isContentProtected?: boolean;
-  }): PrivateTextMessage;
-  getPrivateTextMessage(messageId: CanonicalMessageId): PrivateTextMessage | undefined;
-  editPrivateTextMessage(messageId: CanonicalMessageId, edit: {
-    readonly text: string;
-    readonly entities: readonly TextEntity[];
+  }): PrivateMessage;
+  getPrivateMessage(messageId: CanonicalMessageId): PrivateMessage | undefined;
+  editPrivateMessage(messageId: CanonicalMessageId, edit: {
+    readonly content: MessageContent;
     readonly inlineKeyboard: InlineKeyboard | undefined;
-    readonly textEditedAtUnixSeconds: number | undefined;
-  }): PrivateTextMessage;
-  deletePrivateTextMessage(messageId: CanonicalMessageId): void;
+    readonly contentEditedAtUnixSeconds: number | undefined;
+  }): PrivateMessage;
+  deletePrivateMessage(messageId: CanonicalMessageId): void;
   getPrivateConversationMessages(
     conversation: PrivateConversationKey,
-  ): readonly PrivateTextMessage[];
+  ): readonly PrivateMessage[];
 }
 
 interface MessageBoxStore {
@@ -340,6 +367,7 @@ interface PrivateMessagingServiceDependencies {
   readonly bots: BotLookup;
   readonly privateConversations: PrivateConversationStore;
   readonly messages: PrivateMessageStore;
+  readonly files: FileUploadStore;
   readonly messageBoxes: MessageBoxStore;
   readonly blockedUsers: BlockedUserLookup;
   readonly events: ChatDomainEventSink;
@@ -347,11 +375,12 @@ interface PrivateMessagingServiceDependencies {
 }
 
 /**
- * Carries out text exchanges between an account and a bot in their private conversation, and
- * commits each accepted message: stored, numbered for both participants, then published. Bots can
- * attach inline keyboards to their messages, edit them afterward, and delete messages of their
- * chats. A bot's message can also change the reply interface the account's client shows, such as
- * a reply keyboard whose buttons the account presses. An account edits the text of its messages.
+ * Carries out exchanges of text, photos, and documents between an account and a bot in their
+ * private conversation, and commits each accepted message: its upload stored, the message stored,
+ * numbered for both participants, then published. Bots can attach inline keyboards to their
+ * messages, edit them afterward, and delete messages of their chats. A bot's message can also
+ * change the reply interface the account's client shows, such as a reply keyboard whose buttons
+ * the account presses. An account edits the text or caption of its messages.
  *
  * While an account blocks a bot, neither can write to the other, as on Telegram, where the bot's
  * sends fail and a client asks the user to unblock the bot before writing to it.
@@ -364,6 +393,7 @@ export class PrivateMessagingService {
   readonly #bots: BotLookup;
   readonly #privateConversations: PrivateConversationStore;
   readonly #messages: PrivateMessageStore;
+  readonly #files: FileUploadStore;
   readonly #messageBoxes: MessageBoxStore;
   readonly #blockedUsers: BlockedUserLookup;
   readonly #events: ChatDomainEventSink;
@@ -375,6 +405,7 @@ export class PrivateMessagingService {
       bots,
       privateConversations,
       messages,
+      files,
       messageBoxes,
       blockedUsers,
       events,
@@ -385,6 +416,7 @@ export class PrivateMessagingService {
     this.#bots = bots;
     this.#privateConversations = privateConversations;
     this.#messages = messages;
+    this.#files = files;
     this.#messageBoxes = messageBoxes;
     this.#blockedUsers = blockedUsers;
     this.#events = events;
@@ -419,12 +451,15 @@ export class PrivateMessagingService {
     if (this.#blockedUsers.isBlocked(account.profile.id, bot.profile.id)) {
       return { sent: false, reason: 'bot_blocked' };
     }
-    if (input.text.length === 0) {
+    if (input.content.kind === 'text' && input.content.text.length === 0) {
       return { sent: false, reason: 'message_text_empty' };
     }
-    const textNormalization = this.#normalizeText(input.text, []);
-    if (!textNormalization.normalized) {
-      return { sent: false, ...textNormalization.failure };
+    const contentNormalization = this.#normalizeContent(
+      toOutgoingAccountContent(input.content),
+      'account',
+    );
+    if (!contentNormalization.normalized) {
+      return { sent: false, ...contentNormalization.failure };
     }
     const conversation: PrivateConversationKey = {
       accountId: account.profile.id,
@@ -432,7 +467,7 @@ export class PrivateMessagingService {
     };
     const repliedMessage = input.replyToBotMessageId === undefined
       ? undefined
-      : this.getPrivateTextMessageByBotMessageId(conversation, input.replyToBotMessageId);
+      : this.getPrivateMessageByBotMessageId(conversation, input.replyToBotMessageId);
     if (input.replyToBotMessageId !== undefined && repliedMessage === undefined) {
       return { sent: false, reason: 'reply_message_not_found' };
     }
@@ -440,32 +475,32 @@ export class PrivateMessagingService {
     this.#privateConversations.getOrCreatePrivateConversation(conversation);
     return {
       sent: true,
-      message: this.#storePrivateTextMessage({
+      message: this.#storePrivateMessage({
         account,
         bot,
         authorRole: 'account',
-        formattedText: textNormalization.formattedText,
+        content: contentNormalization.content,
         replyToMessageId: repliedMessage?.id,
       }),
     };
   }
 
   /**
-   * Sends text from a bot to an account. As on Telegram, a bot cannot initiate a private
-   * conversation, so the account must have started one with the bot.
+   * Sends text, a photo, or a document from a bot to an account. As on Telegram, a bot cannot
+   * initiate a private conversation, so the account must have started one with the bot.
    *
-   * Checks follow Telegram's order: the text is checked for emptiness before the recipient is
-   * resolved, and the replied message is looked up after it; the text is then normalized with its
-   * entities, and the result is checked for length. Callback data is checked next. A block by the
-   * account is checked last, as Telegram's servers refuse the message only after the Bot API
-   * server has checked everything it can.
+   * Checks follow Telegram's order: text is checked for emptiness before the recipient is
+   * resolved, and the replied message is looked up after it; the text or caption is then
+   * normalized with its entities, and the result is checked for length. Callback data is checked
+   * next. A block by the account is checked last, as Telegram's servers refuse the message only
+   * after the Bot API server has checked everything it can.
    */
   sendBotMessage(input: SendBotMessageInput): SendBotMessageResult {
     const bot = this.#bots.getById(input.fromBotId);
     if (bot === undefined) {
       return { sent: false, reason: 'bot_not_found' };
     }
-    if (input.text.length === 0) {
+    if (input.content.kind === 'text' && input.content.text.length === 0) {
       return { sent: false, reason: 'message_text_empty' };
     }
     const account = this.#accounts.getById(input.to.accountId);
@@ -483,9 +518,9 @@ export class PrivateMessagingService {
     if (!replyResolution.resolved) {
       return { sent: false, reason: 'reply_message_not_found' };
     }
-    const textNormalization = this.#normalizeText(input.text, input.entities ?? []);
-    if (!textNormalization.normalized) {
-      return { sent: false, ...textNormalization.failure };
+    const contentNormalization = this.#normalizeContent(input.content, 'bot');
+    if (!contentNormalization.normalized) {
+      return { sent: false, ...contentNormalization.failure };
     }
     if (input.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(input.inlineKeyboard)) {
       return { sent: false, reason: 'callback_data_invalid' };
@@ -496,11 +531,11 @@ export class PrivateMessagingService {
 
     return {
       sent: true,
-      message: this.#storePrivateTextMessage({
+      message: this.#storePrivateMessage({
         account,
         bot,
         authorRole: 'bot',
-        formattedText: textNormalization.formattedText,
+        content: contentNormalization.content,
         replyToMessageId: replyResolution.repliedMessage?.id,
         inlineKeyboard: input.inlineKeyboard,
         replyInterfaceMarkup: input.replyInterfaceMarkup,
@@ -510,8 +545,8 @@ export class PrivateMessagingService {
   }
 
   /**
-   * Replaces the text, entities, and inline keyboard of a message the bot sent. Only changed text
-   * or entities date the edit. As on Telegram, the bot receives no update for its own edit.
+   * Replaces the text, entities, and inline keyboard of a text message the bot sent. Only changed
+   * text or entities date the edit. As on Telegram, the bot receives no update for its own edit.
    *
    * Checks follow Telegram's order: the text is checked for emptiness before the message is
    * resolved; it is then normalized with its entities, and the result is checked for length.
@@ -527,26 +562,38 @@ export class PrivateMessagingService {
     if (!resolution.resolved) {
       return { edited: false, reason: resolution.reason };
     }
-    const textNormalization = this.#normalizeText(input.text, input.entities ?? []);
-    if (!textNormalization.normalized) {
-      return { edited: false, ...textNormalization.failure };
-    }
-    const { formattedText } = textNormalization;
-
     const { message } = resolution;
-    return this.#editBotMessage(message, {
-      text: formattedText.text,
-      entities: formattedText.entities,
-      inlineKeyboard: input.inlineKeyboard,
-      textEditedAtUnixSeconds: isSameFormattedText(formattedText, message)
-        ? message.textEditedAtUnixSeconds
-        : this.#currentUnixTimeSeconds(),
-    });
+    return this.#editBotMessageContent(
+      message,
+      replaceMessageText(message.content, input, this.#textFixingContext),
+      input.inlineKeyboard,
+    );
   }
 
   /**
-   * Replaces the inline keyboard of a message the bot sent, leaving its text and edit date as they
-   * are. As on Telegram, the bot receives no update for its own edit.
+   * Replaces the caption, its entities, and the inline keyboard of a photo or document the bot
+   * sent; an empty caption removes it. Only a changed caption dates the edit. As on Telegram, the
+   * bot receives no update for its own edit.
+   */
+  editBotMessageCaption(input: EditBotMessageCaptionInput): EditBotMessageCaptionResult {
+    if (this.#bots.getById(input.fromBotId) === undefined) {
+      return { edited: false, reason: 'bot_not_found' };
+    }
+    const resolution = this.#resolveEditableBotMessage(input);
+    if (!resolution.resolved) {
+      return { edited: false, reason: resolution.reason };
+    }
+    const { message } = resolution;
+    return this.#editBotMessageContent(
+      message,
+      replaceMessageCaption(message.content, input, 'bot', this.#textFixingContext),
+      input.inlineKeyboard,
+    );
+  }
+
+  /**
+   * Replaces the inline keyboard of a message the bot sent, leaving its content and edit date as
+   * they are. As on Telegram, the bot receives no update for its own edit.
    */
   editBotMessageInlineKeyboard(
     input: EditBotMessageInlineKeyboardInput,
@@ -561,17 +608,16 @@ export class PrivateMessagingService {
 
     const { message } = resolution;
     return this.#editBotMessage(message, {
-      text: message.text,
-      entities: message.entities,
+      content: message.content,
       inlineKeyboard: input.inlineKeyboard,
-      textEditedAtUnixSeconds: message.textEditedAtUnixSeconds,
+      contentEditedAtUnixSeconds: message.contentEditedAtUnixSeconds,
     });
   }
 
   /**
-   * Replaces the text of a message the account wrote to the bot, which, unlike a bot's own edit,
-   * sends the bot an `edited_message` update. As when sending, the text is normalized as a
-   * Telegram client does, which marks bot commands again.
+   * Replaces the text or caption of a message the account wrote to the bot, which, unlike a bot's
+   * own edit, sends the bot an `edited_message` update. As when sending, the text is normalized as
+   * a Telegram client does, which marks bot commands again.
    */
   editAccountMessage(input: EditAccountMessageInput): EditAccountMessageResult {
     if (this.#accounts.getById(input.fromAccountId) === undefined) {
@@ -580,7 +626,7 @@ export class PrivateMessagingService {
     if (this.#bots.getById(input.chat.botId) === undefined) {
       return { edited: false, reason: 'bot_not_found' };
     }
-    const message = this.getPrivateTextMessageByBotMessageId(
+    const message = this.getPrivateMessageByBotMessageId(
       { accountId: input.fromAccountId, botId: input.chat.botId },
       input.botMessageId,
     );
@@ -590,23 +636,22 @@ export class PrivateMessagingService {
     if (message.authorRole !== 'account') {
       return { edited: false, reason: 'message_not_editable' };
     }
-    if (input.text.length === 0) {
-      return { edited: false, reason: 'message_text_empty' };
+    const replacement = replaceAccountMessageContent(
+      message.content,
+      input.edit,
+      this.#textFixingContext,
+    );
+    if (!replacement.replaced) {
+      return { edited: false, ...replacement.failure };
     }
-    const textNormalization = this.#normalizeText(input.text, []);
-    if (!textNormalization.normalized) {
-      return { edited: false, ...textNormalization.failure };
-    }
-    const { formattedText } = textNormalization;
-    if (isSameFormattedText(formattedText, message)) {
+    if (isSameMessageContent(replacement.content, message.content)) {
       return { edited: false, reason: 'message_not_modified' };
     }
 
-    const editedMessage = this.#messages.editPrivateTextMessage(message.id, {
-      text: formattedText.text,
-      entities: formattedText.entities,
+    const editedMessage = this.#messages.editPrivateMessage(message.id, {
+      content: replacement.content,
       inlineKeyboard: message.inlineKeyboard,
-      textEditedAtUnixSeconds: this.#currentUnixTimeSeconds(),
+      contentEditedAtUnixSeconds: this.#currentUnixTimeSeconds(),
     });
     this.#events.publish({ type: 'message_edited', message: editedMessage });
     return { edited: true, message: editedMessage };
@@ -637,7 +682,7 @@ export class PrivateMessagingService {
 
     let deletedMessageCount = 0;
     for (const botMessageId of input.botMessageIds) {
-      const message = this.getPrivateTextMessageByBotMessageId(conversation, botMessageId);
+      const message = this.getPrivateMessageByBotMessageId(conversation, botMessageId);
       if (message === undefined) {
         continue;
       }
@@ -645,7 +690,7 @@ export class PrivateMessagingService {
       if (this.#privateConversations.getReplyInterfaceMessageId(conversation) === message.id) {
         this.#privateConversations.setReplyInterfaceMessageId(conversation, undefined);
       }
-      this.#messages.deletePrivateTextMessage(message.id);
+      this.#messages.deletePrivateMessage(message.id);
       deletedMessageCount++;
     }
     return { deleted: true, deletedMessageCount };
@@ -679,17 +724,17 @@ export class PrivateMessagingService {
    * Finds a message of a private conversation by its ID in the bot's message box. A bot numbers
    * the messages of all its chats in one box, so an ID from another chat finds nothing.
    */
-  getPrivateTextMessageByBotMessageId(
+  getPrivateMessageByBotMessageId(
     conversation: PrivateConversationKey,
     botMessageId: number,
-  ): PrivateTextMessage | undefined {
+  ): PrivateMessage | undefined {
     const canonicalMessageId = this.#messageBoxes.getCanonicalMessageId(
       conversation.botId,
       botMessageId,
     );
     const message = canonicalMessageId === undefined
       ? undefined
-      : this.#messages.getPrivateTextMessage(canonicalMessageId);
+      : this.#messages.getPrivateMessage(canonicalMessageId);
     if (
       message === undefined ||
       message.conversation.accountId !== conversation.accountId ||
@@ -743,7 +788,7 @@ export class PrivateMessagingService {
     return this.sendAccountMessage({
       fromAccountId: input.fromAccountId,
       to: input.chat,
-      text: input.text,
+      content: { kind: 'text', text: input.text },
     });
   }
 
@@ -770,12 +815,12 @@ export class PrivateMessagingService {
     conversation: PrivateConversationKey,
     replyTo: BotMessageReplyTarget | undefined,
   ):
-    | { readonly resolved: true; readonly repliedMessage?: PrivateTextMessage }
+    | { readonly resolved: true; readonly repliedMessage?: PrivateMessage }
     | { readonly resolved: false } {
     if (replyTo === undefined) {
       return { resolved: true };
     }
-    const repliedMessage = this.getPrivateTextMessageByBotMessageId(
+    const repliedMessage = this.getPrivateMessageByBotMessageId(
       conversation,
       replyTo.botMessageId,
     );
@@ -790,7 +835,7 @@ export class PrivateMessagingService {
     if (messageId === undefined) {
       return undefined;
     }
-    const message = this.#messages.getPrivateTextMessage(messageId);
+    const message = this.#messages.getPrivateMessage(messageId);
     if (message?.replyInterface === undefined) {
       throw new Error(`Reply interface message ${messageId} has no stored reply interface`);
     }
@@ -801,7 +846,7 @@ export class PrivateMessagingService {
   #resolveEditableBotMessage(
     { fromBotId, chat, botMessageId }: EditBotMessageTarget,
   ):
-    | { readonly resolved: true; readonly message: PrivateTextMessage }
+    | { readonly resolved: true; readonly message: PrivateMessage }
     | {
       readonly resolved: false;
       readonly reason:
@@ -817,7 +862,7 @@ export class PrivateMessagingService {
     if (this.#privateConversations.getPrivateConversation(conversation) === undefined) {
       return { resolved: false, reason: 'conversation_not_started' };
     }
-    const message = this.getPrivateTextMessageByBotMessageId(conversation, botMessageId);
+    const message = this.getPrivateMessageByBotMessageId(conversation, botMessageId);
     if (message === undefined) {
       return { resolved: false, reason: 'message_not_found' };
     }
@@ -828,15 +873,37 @@ export class PrivateMessagingService {
   }
 
   /**
+   * Applies a bot's replacement of its message's content with the given keyboard; only changed
+   * content dates the edit.
+   */
+  #editBotMessageContent<FailureReason extends string>(
+    message: PrivateMessage,
+    replacement: ContentReplacement<FailureReason>,
+    inlineKeyboard: InlineKeyboard | undefined,
+  ):
+    | PrivateMessageEditResult<FailureReason | 'callback_data_invalid' | 'message_not_modified'>
+    | ({ readonly edited: false } & TextInvalidFailure) {
+    if (!replacement.replaced) {
+      return { edited: false, ...replacement.failure };
+    }
+    return this.#editBotMessage(message, {
+      content: replacement.content,
+      inlineKeyboard,
+      contentEditedAtUnixSeconds: isSameMessageContent(replacement.content, message.content)
+        ? message.contentEditedAtUnixSeconds
+        : this.#currentUnixTimeSeconds(),
+    });
+  }
+
+  /**
    * Validates, stores, and publishes a bot's edit of its message, which must change the message.
    */
   #editBotMessage(
-    message: PrivateTextMessage,
+    message: PrivateMessage,
     edit: {
-      readonly text: string;
-      readonly entities: readonly TextEntity[];
+      readonly content: MessageContent;
       readonly inlineKeyboard: InlineKeyboard | undefined;
-      readonly textEditedAtUnixSeconds: number | undefined;
+      readonly contentEditedAtUnixSeconds: number | undefined;
     },
   ): PrivateMessageEditResult<'callback_data_invalid' | 'message_not_modified'> {
     const editFailure = checkBotMessageEdit(message, edit);
@@ -844,33 +911,41 @@ export class PrivateMessagingService {
       return { edited: false, reason: editFailure };
     }
 
-    const editedMessage = this.#messages.editPrivateTextMessage(message.id, edit);
+    const editedMessage = this.#messages.editPrivateMessage(message.id, edit);
     this.#events.publish({ type: 'message_edited', message: editedMessage });
     return { edited: true, message: editedMessage };
   }
 
-  /**
-   * Normalizes text and the entities its sender specified as Telegram does, and checks its length.
-   * A text mention may name any user of the session.
-   */
-  #normalizeText(text: string, entities: readonly TextEntity[]): MessageTextNormalization {
-    return normalizeMessageText(text, entities, {
-      isMentionableUser: (userId) =>
+  /** A text mention may name any user of the session. */
+  get #textFixingContext() {
+    return {
+      isMentionableUser: (userId: number) =>
         this.#accounts.getById(userId) !== undefined || this.#bots.getById(userId) !== undefined,
-    });
+    };
   }
 
   /**
-   * Stores normalized text written by one participant of an existing private conversation, numbers
-   * it in both participants' message boxes, applies its change of the account's reply interface,
-   * and publishes its creation.
+   * Normalizes the text or caption of new content, with the entities its sender specified, as
+   * Telegram does, and checks its length.
    */
-  #storePrivateTextMessage(
+  #normalizeContent(
+    content: OutgoingMessageContent,
+    sender: PrivateConversationRole,
+  ): OutgoingContentNormalization {
+    return normalizeOutgoingContent(content, sender, this.#textFixingContext);
+  }
+
+  /**
+   * Stores normalized content written by one participant of an existing private conversation with
+   * its upload, numbers it in both participants' message boxes, applies its change of the
+   * account's reply interface, and publishes its creation.
+   */
+  #storePrivateMessage(
     {
       account,
       bot,
       authorRole,
-      formattedText,
+      content,
       replyToMessageId,
       inlineKeyboard,
       replyInterfaceMarkup,
@@ -879,23 +954,22 @@ export class PrivateMessagingService {
       readonly account: VirtualAccount;
       readonly bot: VirtualBot;
       readonly authorRole: PrivateConversationRole;
-      readonly formattedText: FormattedText;
+      readonly content: NormalizedOutgoingContent;
       readonly replyToMessageId?: CanonicalMessageId;
       readonly inlineKeyboard?: InlineKeyboard;
       readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
       readonly isContentProtected?: boolean;
     },
-  ): PrivateTextMessage {
+  ): PrivateMessage {
     const conversation: PrivateConversationKey = {
       accountId: account.profile.id,
       botId: bot.profile.id,
     };
-    const storedMessage = this.#messages.addPrivateTextMessage({
+    const storedMessage = this.#messages.addPrivateMessage({
       conversation,
       authorRole,
       sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
-      text: formattedText.text,
-      entities: formattedText.entities,
+      content: storeOutgoingContent(content, this.#files),
       replyToMessageId,
       inlineKeyboard,
       replyInterface: replyInterfaceMarkup?.kind === 'reply_keyboard_removal'

@@ -432,6 +432,24 @@ Deno.test('fixFormattedText keeps entities consistent for random input', () => {
   }
 });
 
+Deno.test('fixFormattedText empties captions without visible content as TDLib does', () => {
+  // Captions use TDLib's `allow_empty`, and bot captions also `allow_empty_string`.
+  for (const treatment of ['clear', 'keep_invisible_characters'] as const) {
+    assertFixed(fixFormattedText('  \n ', [bold(0, 2)], context, treatment), '', []);
+    assertFixed(fixFormattedText('', [], context, treatment), '', []);
+  }
+  assertFixed(fixFormattedText(' \u200b ', [], context, 'clear'), '', []);
+  assertFixed(
+    fixFormattedText(' \u200b ', [], context, 'keep_invisible_characters'),
+    '\u200b',
+    [],
+  );
+  assertFailed(fixFormattedText(' \u200b ', [], context, 'reject'), 'Text must be non-empty');
+  assertFixed(fixFormattedText(' /start ', [], context, 'clear'), '/start', [
+    { type: 'bot_command', offset: 0, length: 6 },
+  ]);
+});
+
 function assertFixed(
   fixing: FormattedTextFixing,
   expectedText: string,

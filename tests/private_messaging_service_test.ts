@@ -3,6 +3,7 @@ import { BlockedUserRepository } from '../src/repositories/blocked_user.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
+import { FileRepository } from '../src/repositories/file.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
 import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
@@ -15,16 +16,19 @@ import {
   type DeleteMessagesByBotFailureReason,
   type EditBotMessageTextFailureReason,
   PrivateMessagingService,
-  type SendBotMessageFailureReason,
+  type SendBotMessageResult,
 } from '../src/services/private_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
-import type { BotApiTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
+import type { BotApiMessage, BotApiUpdate } from '../src/types/bot_api.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
 import type { InlineKeyboard } from '../src/types/inline_keyboard.ts';
 import type { ReplyInterfaceMarkup } from '../src/types/reply_interface.ts';
+import type { FileUpload, PhotoUpload } from '../src/types/stored_file.ts';
 import {
+  getContentText,
+  MAX_CAPTION_LENGTH,
   MAX_TEXT_MESSAGE_LENGTH,
-  type PrivateTextMessage,
+  type PrivateMessage,
   type TextEntity,
 } from '../src/types/virtual_message.ts';
 import type { VirtualBot } from '../src/types/virtual_bot.ts';
@@ -89,7 +93,7 @@ Deno.test('PrivateMessagingService sends, stores, and publishes private account 
   const firstResult = privateMessaging.sendAccountMessage({
     fromAccountId: account.profile.id,
     to: { type: 'private', botId: bot.profile.id },
-    text: 'Hello',
+    content: { kind: 'text', text: 'Hello' },
   });
   if (!firstResult.sent) {
     throw new Error(`Expected message send to succeed, received ${firstResult.reason}`);
@@ -97,7 +101,7 @@ Deno.test('PrivateMessagingService sends, stores, and publishes private account 
   const secondResult = privateMessaging.sendAccountMessage({
     fromAccountId: account.profile.id,
     to: { type: 'private', botId: bot.profile.id },
-    text: 'Again',
+    content: { kind: 'text', text: 'Again' },
   });
   if (!secondResult.sent) {
     throw new Error(`Expected message send to succeed, received ${secondResult.reason}`);
@@ -124,7 +128,7 @@ Deno.test('PrivateMessagingService sends, stores, and publishes private account 
     throw new Error('Expected the sent canonical messages to be retained in conversation history');
   }
   if (
-    firstResult.message.text !== 'Hello' ||
+    getContentText(firstResult.message.content).text !== 'Hello' ||
     firstResult.message.authorRole !== 'account' ||
     firstResult.message.sentAtUnixSeconds !== 1_700_000_000 ||
     firstResult.message.conversation.accountId !== account.profile.id ||
@@ -156,8 +160,8 @@ Deno.test('PrivateMessagingService sends, stores, and publishes private account 
   const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
   if (
     updates.length !== 2 ||
-    messageFromUpdate(updates[0])?.text !== 'Hello' ||
-    messageFromUpdate(updates[1])?.text !== 'Again'
+    textContentOf(messageFromUpdate(updates[0]))?.text !== 'Hello' ||
+    textContentOf(messageFromUpdate(updates[1]))?.text !== 'Again'
   ) {
     throw new Error('Expected each sent message to enqueue one update for the target bot');
   }
@@ -206,22 +210,22 @@ Deno.test('PrivateMessagingService validates private messages before changing st
     privateMessaging.sendAccountMessage({
       fromAccountId: 999,
       to: { type: 'private', botId: bot.profile.id },
-      text: 'Hello',
+      content: { kind: 'text', text: 'Hello' },
     }),
     privateMessaging.sendAccountMessage({
       fromAccountId: account.profile.id,
       to: { type: 'private', botId: 999 },
-      text: 'Hello',
+      content: { kind: 'text', text: 'Hello' },
     }),
     privateMessaging.sendAccountMessage({
       fromAccountId: account.profile.id,
       to: { type: 'private', botId: bot.profile.id },
-      text: '',
+      content: { kind: 'text', text: '' },
     }),
     privateMessaging.sendAccountMessage({
       fromAccountId: account.profile.id,
       to: { type: 'private', botId: bot.profile.id },
-      text: 'x'.repeat(MAX_TEXT_MESSAGE_LENGTH + 1),
+      content: { kind: 'text', text: 'x'.repeat(MAX_TEXT_MESSAGE_LENGTH + 1) },
     }),
   ];
   const expectedReasons = [
@@ -268,7 +272,7 @@ Deno.test('PrivateMessagingService stores a bot reply in the private conversatio
   const replyResult = privateMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     to: { type: 'private', accountId: account.profile.id },
-    text: 'See /help',
+    content: { kind: 'text', text: 'See /help' },
   });
   if (!replyResult.sent) {
     throw new Error(`Expected the bot reply to succeed, received ${replyResult.reason}`);
@@ -280,7 +284,7 @@ Deno.test('PrivateMessagingService stores a bot reply in the private conversatio
     reply.conversation.accountId !== account.profile.id ||
     reply.conversation.botId !== bot.profile.id ||
     reply.sentAtUnixSeconds !== 1_700_000_000 ||
-    JSON.stringify(reply.entities) !==
+    JSON.stringify(getContentText(reply.content).entities) !==
       JSON.stringify([{ type: 'bot_command', offset: 4, length: 5 }])
   ) {
     throw new Error("Expected the result to carry the bot's canonical reply with its entities");
@@ -335,7 +339,7 @@ Deno.test('PrivateMessagingService validates bot messages in Telegram order befo
     accountId: number;
     text: string;
     replyTo?: BotMessageReplyTarget;
-    expectedReason: SendBotMessageFailureReason;
+    expectedReason: Extract<SendBotMessageResult, { readonly sent: false }>['reason'];
   }[] = [
     { fromBotId: 999, accountId: 999, text: '', expectedReason: 'bot_not_found' },
     { fromBotId: bot.profile.id, accountId: 999, text: '', expectedReason: 'message_text_empty' },
@@ -371,8 +375,8 @@ Deno.test('PrivateMessagingService validates bot messages in Telegram order befo
     const result = privateMessaging.sendBotMessage({
       fromBotId,
       to: { type: 'private', accountId },
-      text,
       replyTo,
+      content: { kind: 'text', text },
     });
     if (result.sent || result.reason !== expectedReason) {
       throw new Error(`Expected the bot message to fail with ${expectedReason}`);
@@ -397,15 +401,15 @@ Deno.test('PrivateMessagingService stores replies only to messages of the same c
   const botReply = privateMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     to: { type: 'private', accountId: account.profile.id },
-    text: 'Hi',
     replyTo: { botMessageId: questionId, allowSendingWithoutReply: false },
     isContentProtected: true,
+    content: { kind: 'text', text: 'Hi' },
   });
   const accountReply = privateMessaging.sendAccountMessage({
     fromAccountId: account.profile.id,
     to: { type: 'private', botId: bot.profile.id },
-    text: 'Thanks',
     replyToBotMessageId: 3,
+    content: { kind: 'text', text: 'Thanks' },
   });
   if (
     !botReply.sent || botReply.message.replyToMessageId !== question.id ||
@@ -420,14 +424,14 @@ Deno.test('PrivateMessagingService stores replies only to messages of the same c
   const botReplyToOtherChat = privateMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     to: { type: 'private', accountId: account.profile.id },
-    text: 'Hi',
     replyTo: { botMessageId: otherChatMessageId, allowSendingWithoutReply: false },
+    content: { kind: 'text', text: 'Hi' },
   });
   const accountReplyToMissingMessage = privateMessaging.sendAccountMessage({
     fromAccountId: account.profile.id,
     to: { type: 'private', botId: bot.profile.id },
-    text: 'Thanks',
     replyToBotMessageId: 99,
+    content: { kind: 'text', text: 'Thanks' },
   });
   if (
     botReplyToOtherChat.sent || botReplyToOtherChat.reason !== 'reply_message_not_found' ||
@@ -446,15 +450,15 @@ Deno.test('PrivateMessagingService stores replies only to messages of the same c
   const replyToDeletedMessage = privateMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     to: { type: 'private', accountId: account.profile.id },
-    text: 'Still there?',
     replyTo: { botMessageId: questionId, allowSendingWithoutReply: true },
+    content: { kind: 'text', text: 'Still there?' },
   });
   if (!replyToDeletedMessage.sent || replyToDeletedMessage.message.replyToMessageId !== undefined) {
     throw new Error(
       'Expected allowSendingWithoutReply to send a reply to a deleted message as none',
     );
   }
-  if (messages.getPrivateTextMessage(otherChatMessage.id) !== otherChatMessage) {
+  if (messages.getPrivateMessage(otherChatMessage.id) !== otherChatMessage) {
     throw new Error("Expected the other chat's message to be unaffected");
   }
 });
@@ -469,8 +473,8 @@ Deno.test('PrivateMessagingService shows the reply interface the latest bot mess
     const result = privateMessaging.sendBotMessage({
       fromBotId: bot.profile.id,
       to: { type: 'private', accountId: account.profile.id },
-      text: 'Choose',
       replyInterfaceMarkup,
+      content: { kind: 'text', text: 'Choose' },
     });
     if (!result.sent) {
       throw new Error(`Expected the bot message to be sent, received ${result.reason}`);
@@ -502,7 +506,8 @@ Deno.test('PrivateMessagingService shows the reply interface the latest bot mess
   const press = pressButton('Red');
   const pressOfMissingButton = pressButton('Blue');
   if (
-    !press.sent || press.message.authorRole !== 'account' || press.message.text !== 'Red' ||
+    !press.sent || press.message.authorRole !== 'account' ||
+    getContentText(press.message.content).text !== 'Red' ||
     pressOfMissingButton.sent || pressOfMissingButton.reason !== 'reply_keyboard_button_not_found'
   ) {
     throw new Error("Expected only the keyboard's buttons to send their text");
@@ -561,8 +566,8 @@ Deno.test('PrivateMessagingService stores an inline keyboard whose callback data
     privateMessaging.sendBotMessage({
       fromBotId: bot.profile.id,
       to: { type: 'private', accountId: account.profile.id },
-      text: 'Choose',
       inlineKeyboard,
+      content: { kind: 'text', text: 'Choose' },
     });
   // 32 two-byte characters fill the 64-byte callback data limit exactly.
   const inlineKeyboard: InlineKeyboard = [
@@ -576,7 +581,7 @@ Deno.test('PrivateMessagingService stores an inline keyboard whose callback data
   }
   if (
     JSON.stringify(result.message.inlineKeyboard) !== JSON.stringify(inlineKeyboard) ||
-    messages.getPrivateTextMessage(result.message.id) !== result.message
+    messages.getPrivateMessage(result.message.id) !== result.message
   ) {
     throw new Error('Expected the stored bot message to carry its inline keyboard');
   }
@@ -611,9 +616,9 @@ Deno.test('PrivateMessagingService edits the text and keyboard of a bot message'
   if (
     textEdit.message.id !== botMessage.id ||
     textEdit.message.sentAtUnixSeconds !== 1_700_000_000 ||
-    textEdit.message.textEditedAtUnixSeconds !== 1_700_000_005 ||
-    textEdit.message.text !== 'Chosen: /yes' ||
-    JSON.stringify(textEdit.message.entities) !==
+    textEdit.message.contentEditedAtUnixSeconds !== 1_700_000_005 ||
+    getContentText(textEdit.message.content).text !== 'Chosen: /yes' ||
+    JSON.stringify(getContentText(textEdit.message.content).entities) !==
       JSON.stringify([{ type: 'bot_command', offset: 8, length: 4 }]) ||
     textEdit.message.inlineKeyboard !== undefined
   ) {
@@ -631,8 +636,8 @@ Deno.test('PrivateMessagingService edits the text and keyboard of a bot message'
     throw new Error(`Expected the keyboard edit to succeed, received ${keyboardEdit.reason}`);
   }
   if (
-    keyboardEdit.message.text !== 'Chosen: /yes' ||
-    keyboardEdit.message.textEditedAtUnixSeconds !== 1_700_000_005 ||
+    getContentText(keyboardEdit.message.content).text !== 'Chosen: /yes' ||
+    keyboardEdit.message.contentEditedAtUnixSeconds !== 1_700_000_005 ||
     JSON.stringify(keyboardEdit.message.inlineKeyboard) !== JSON.stringify(YES_NO_KEYBOARD)
   ) {
     throw new Error('Expected a keyboard edit to keep the text and its edit date');
@@ -646,7 +651,7 @@ Deno.test('PrivateMessagingService edits the text and keyboard of a bot message'
   });
   if (
     !sameTextEdit.edited ||
-    sameTextEdit.message.textEditedAtUnixSeconds !== 1_700_000_005 ||
+    sameTextEdit.message.contentEditedAtUnixSeconds !== 1_700_000_005 ||
     sameTextEdit.message.inlineKeyboard !== undefined
   ) {
     throw new Error('Expected an unchanged text to keep its edit date while the keyboard goes');
@@ -746,7 +751,7 @@ Deno.test('PrivateMessagingService validates bot message edits in Telegram order
       fromBotId: bot.profile.id,
       accountId: account.profile.id,
       botMessageId,
-      text: botMessage.text,
+      text: getContentText(botMessage.content).text,
       inlineKeyboard: invalidKeyboard,
       expectedReason: 'callback_data_invalid',
     },
@@ -754,7 +759,7 @@ Deno.test('PrivateMessagingService validates bot message edits in Telegram order
       fromBotId: bot.profile.id,
       accountId: account.profile.id,
       botMessageId,
-      text: botMessage.text,
+      text: getContentText(botMessage.content).text,
       inlineKeyboard: YES_NO_KEYBOARD,
       expectedReason: 'message_not_modified',
     },
@@ -783,7 +788,7 @@ Deno.test('PrivateMessagingService validates bot message edits in Telegram order
   if (keyboardEdit.edited || keyboardEdit.reason !== 'message_not_modified') {
     throw new Error('Expected an identical keyboard edit to be rejected as not modified');
   }
-  if (messages.getPrivateTextMessage(botMessage.id) !== botMessage) {
+  if (messages.getPrivateMessage(botMessage.id) !== botMessage) {
     throw new Error('Expected rejected edits to leave the message unchanged');
   }
 });
@@ -820,7 +825,7 @@ Deno.test('PrivateMessagingService lets a bot delete messages of its private cha
   if (history.length !== 1 || history[0] !== keptMessage) {
     throw new Error('Expected only the undeleted message to remain in the history');
   }
-  if (messages.getPrivateTextMessage(otherChatMessage.id) !== otherChatMessage) {
+  if (messages.getPrivateMessage(otherChatMessage.id) !== otherChatMessage) {
     throw new Error("Expected a message of the bot's other chat to be kept");
   }
   if (publishedEvents.length !== publishedEventCount) {
@@ -885,7 +890,7 @@ Deno.test('PrivateMessagingService validates message deletions before changing s
       throw new Error(`Expected the deletion to fail with ${expectedReason}`);
     }
   }
-  if (messages.getPrivateTextMessage(message.id) !== message) {
+  if (messages.getPrivateMessage(message.id) !== message) {
     throw new Error('Expected rejected deletions to keep the message');
   }
 });
@@ -899,12 +904,15 @@ Deno.test('PrivateMessagingService normalizes bot text and entities as Telegram 
   const result = privateMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     to: { type: 'private', accountId: account.profile.id },
-    text: '\n Hi Ada, see\tsite /help  \r\n',
-    entities: [
-      { type: 'text_mention', offset: 5, length: 3, userId: account.profile.id },
-      { type: 'text_link', offset: 14, length: 4, url: 'Example.com' },
-      { type: 'bold', offset: 2, length: 20 },
-    ],
+    content: {
+      kind: 'text',
+      text: '\n Hi Ada, see\tsite /help  \r\n',
+      entities: [
+        { type: 'text_mention', offset: 5, length: 3, userId: account.profile.id },
+        { type: 'text_link', offset: 14, length: 4, url: 'Example.com' },
+        { type: 'bold', offset: 2, length: 20 },
+      ],
+    },
   });
   if (!result.sent) {
     throw new Error(
@@ -925,8 +933,9 @@ Deno.test('PrivateMessagingService normalizes bot text and entities as Telegram 
     { type: 'bold', offset: 17, length: 3 },
   ];
   if (
-    result.message.text !== 'Hi Ada, see site /help' ||
-    JSON.stringify(result.message.entities) !== JSON.stringify(expectedEntities)
+    getContentText(result.message.content).text !== 'Hi Ada, see site /help' ||
+    JSON.stringify(getContentText(result.message.content).entities) !==
+      JSON.stringify(expectedEntities)
   ) {
     throw new Error(
       `Expected normalized text and entities, received ${JSON.stringify(result.message)}`,
@@ -944,8 +953,7 @@ Deno.test('PrivateMessagingService rejects bot text Telegram cannot normalize af
     privateMessaging.sendBotMessage({
       fromBotId: bot.profile.id,
       to: { type: 'private', accountId },
-      text,
-      entities,
+      content: { kind: 'text', text, entities },
     });
   const unknownUserMention: TextEntity = {
     type: 'text_mention',
@@ -1005,13 +1013,13 @@ Deno.test('PrivateMessagingService normalizes account text as a Telegram client 
     privateMessaging.sendAccountMessage({
       fromAccountId: account.profile.id,
       to: { type: 'private', botId: bot.profile.id },
-      text,
+      content: { kind: 'text', text },
     });
 
   const result = send('  /start\r\n');
   if (
-    !result.sent || result.message.text !== '/start' ||
-    JSON.stringify(result.message.entities) !==
+    !result.sent || getContentText(result.message.content).text !== '/start' ||
+    JSON.stringify(getContentText(result.message.content).entities) !==
       JSON.stringify([{ type: 'bot_command', offset: 0, length: 6 }])
   ) {
     throw new Error(`Expected trimmed text with its command, received ${JSON.stringify(result)}`);
@@ -1038,15 +1046,15 @@ Deno.test('PrivateMessagingService treats changed entities as an edit of the tex
       fromBotId: bot.profile.id,
       chat: { type: 'private', accountId: account.profile.id },
       botMessageId,
-      text: botMessage.text,
+      text: getContentText(botMessage.content).text,
       entities,
     });
   advanceClockSeconds(5);
 
   const boldEdit = editText([{ type: 'bold', offset: 0, length: 8 }]);
   if (
-    !boldEdit.edited || boldEdit.message.textEditedAtUnixSeconds !== 1_700_000_005 ||
-    JSON.stringify(boldEdit.message.entities) !==
+    !boldEdit.edited || boldEdit.message.contentEditedAtUnixSeconds !== 1_700_000_005 ||
+    JSON.stringify(getContentText(boldEdit.message.content).entities) !==
       JSON.stringify([{ type: 'bold', offset: 0, length: 8 }])
   ) {
     throw new Error(
@@ -1099,6 +1107,245 @@ Deno.test('PrivateMessagingService lets a bot show chat actions only in started 
   }
 });
 
+Deno.test('PrivateMessagingService sends photos and documents with normalized captions', () => {
+  const { virtualUsers, files, botUpdates, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+
+  const accountPhoto = privateMessaging.sendAccountMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    content: { kind: 'media', upload: photoUpload(), caption: '  /start now \n' },
+  });
+  if (!accountPhoto.sent || accountPhoto.message.content.kind !== 'photo') {
+    throw new Error(
+      `Expected the account photo to be sent, received ${JSON.stringify(accountPhoto)}`,
+    );
+  }
+  const storedPhoto = files.getFile(accountPhoto.message.content.fileId);
+  const photoUpdate = messageFromUpdate(
+    botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 })[0],
+  );
+  if (
+    storedPhoto?.type !== 'photo' ||
+    JSON.stringify(accountPhoto.message.content.caption) !==
+      JSON.stringify({
+        text: '/start now',
+        entities: [{ type: 'bot_command', offset: 0, length: 6 }],
+      }) ||
+    photoUpdate === undefined || !('photo' in photoUpdate) ||
+    photoUpdate.photo[0].file_unique_id !== storedPhoto.uniqueId ||
+    photoUpdate.photo[0].width !== 4 || photoUpdate.caption !== '/start now'
+  ) {
+    throw new Error(
+      `Expected the bot to receive the captioned photo, received ${JSON.stringify(photoUpdate)}`,
+    );
+  }
+
+  const botDocument = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    content: {
+      kind: 'document',
+      document: {
+        kind: 'upload',
+        upload: {
+          type: 'document',
+          content: new Uint8Array([1, 2]),
+          fileName: 'report.pdf',
+          mimeType: 'application/pdf',
+        },
+      },
+      caption: 'Report',
+      captionEntities: [{ type: 'bold', offset: 0, length: 6 }],
+    },
+  });
+  const reusedPhoto = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    content: {
+      kind: 'photo',
+      photo: { kind: 'stored', file: storedPhoto },
+      caption: ' \n ',
+      hasSpoiler: true,
+      showsCaptionAboveMedia: true,
+    },
+  });
+  if (
+    !botDocument.sent || botDocument.message.content.kind !== 'document' ||
+    files.getFile(botDocument.message.content.fileId)?.type !== 'document' ||
+    JSON.stringify(botDocument.message.content.caption.entities) !==
+      JSON.stringify([{ type: 'bold', offset: 0, length: 6 }]) ||
+    !reusedPhoto.sent ||
+    JSON.stringify(reusedPhoto.message.content) !==
+      JSON.stringify({
+        kind: 'photo',
+        fileId: storedPhoto.id,
+        caption: { text: '', entities: [] },
+        hasSpoiler: true,
+        showsCaptionAboveMedia: true,
+      })
+  ) {
+    throw new Error('Expected the bot to send an uploaded document and a stored photo');
+  }
+});
+
+Deno.test('PrivateMessagingService limits captions and stores no upload of a refused message', () => {
+  const { virtualUsers, storedUploads, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const sendCaptionedPhoto = (caption: string) =>
+    privateMessaging.sendBotMessage({
+      fromBotId: bot.profile.id,
+      to: { type: 'private', accountId: account.profile.id },
+      content: {
+        kind: 'photo',
+        photo: { kind: 'upload', upload: photoUpload() },
+        caption,
+        hasSpoiler: false,
+        showsCaptionAboveMedia: false,
+      },
+    });
+
+  const tooLong = sendCaptionedPhoto('x'.repeat(MAX_CAPTION_LENGTH + 1));
+  // TDLib counts characters, so a caption of astral emoji may exceed the limit in UTF-16.
+  const longestEmoji = sendCaptionedPhoto('📷'.repeat(MAX_CAPTION_LENGTH));
+  if (
+    tooLong.sent || tooLong.reason !== 'caption_too_long' ||
+    !longestEmoji.sent || longestEmoji.message.content.kind !== 'photo'
+  ) {
+    throw new Error('Expected captions to be limited by their characters');
+  }
+
+  const unknownChatPhoto = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: 999 },
+    content: {
+      kind: 'photo',
+      photo: { kind: 'upload', upload: photoUpload() },
+      caption: '',
+      hasSpoiler: false,
+      showsCaptionAboveMedia: false,
+    },
+  });
+  if (unknownChatPhoto.sent || storedUploads.length !== 1) {
+    throw new Error('Expected only the accepted photo to be stored');
+  }
+});
+
+Deno.test('PrivateMessagingService edits captions and refuses edits of the other content kind', () => {
+  const { virtualUsers, messageBoxes, botUpdates, privateMessaging, advanceClockSeconds } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const botText = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    content: { kind: 'text', text: 'Hi' },
+  });
+  const photo = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: { type: 'private', accountId: account.profile.id },
+    content: {
+      kind: 'photo',
+      photo: { kind: 'upload', upload: photoUpload() },
+      caption: 'Old',
+      hasSpoiler: false,
+      showsCaptionAboveMedia: false,
+    },
+  });
+  if (!botText.sent || !photo.sent) {
+    throw new Error('Expected the text and the photo to be sent');
+  }
+  const chat = { type: 'private', accountId: account.profile.id } as const;
+  const photoId = expectBotMessageId(messageBoxes, bot, photo.message.id);
+  const editCaption = (caption: string, showsCaptionAboveMedia: boolean, botMessageId = photoId) =>
+    privateMessaging.editBotMessageCaption({
+      fromBotId: bot.profile.id,
+      chat,
+      botMessageId,
+      caption,
+      showsCaptionAboveMedia,
+    });
+  advanceClockSeconds(5);
+
+  const textEdit = privateMessaging.editBotMessageText({
+    fromBotId: bot.profile.id,
+    chat,
+    botMessageId: photoId,
+    text: 'New',
+  });
+  const captionOfText = editCaption(
+    'New',
+    false,
+    expectBotMessageId(messageBoxes, bot, botText.message.id),
+  );
+  const captionEdit = editCaption('New', false);
+  const repeatedEdit = editCaption('New', false);
+  advanceClockSeconds(5);
+  const placementEdit = editCaption('New', true);
+  const removal = editCaption('', true);
+  if (
+    textEdit.edited || textEdit.reason !== 'message_has_no_text' ||
+    captionOfText.edited || captionOfText.reason !== 'message_has_no_caption' ||
+    !captionEdit.edited || captionEdit.message.contentEditedAtUnixSeconds !== 1_700_000_005 ||
+    getContentText(captionEdit.message.content).text !== 'New' ||
+    repeatedEdit.edited || repeatedEdit.reason !== 'message_not_modified' ||
+    !placementEdit.edited || placementEdit.message.contentEditedAtUnixSeconds !== 1_700_000_010 ||
+    !removal.edited || getContentText(removal.message.content).text !== ''
+  ) {
+    throw new Error('Expected caption edits to follow Telegram checks');
+  }
+
+  const accountDocument = privateMessaging.sendAccountMessage({
+    fromAccountId: account.profile.id,
+    to: { type: 'private', botId: bot.profile.id },
+    content: {
+      kind: 'media',
+      upload: {
+        type: 'document',
+        content: new Uint8Array([1]),
+        fileName: 'notes.txt',
+        mimeType: 'text/plain',
+      },
+      caption: 'Notes',
+    },
+  });
+  if (!accountDocument.sent) {
+    throw new Error(`Expected the document to be sent, received ${accountDocument.reason}`);
+  }
+  const documentId = expectBotMessageId(messageBoxes, bot, accountDocument.message.id);
+  const editAccountMessage = (
+    edit: Parameters<typeof privateMessaging.editAccountMessage>[0]['edit'],
+  ) =>
+    privateMessaging.editAccountMessage({
+      fromAccountId: account.profile.id,
+      chat: { type: 'private', botId: bot.profile.id },
+      botMessageId: documentId,
+      edit,
+    });
+  const accountTextEdit = editAccountMessage({ kind: 'text', text: 'Notes' });
+  const unchangedCaption = editAccountMessage({ kind: 'caption', caption: ' Notes ' });
+  const accountCaptionEdit = editAccountMessage({ kind: 'caption', caption: '/help notes' });
+  const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
+  const editUpdate = updates.at(-1);
+  if (
+    accountTextEdit.edited || accountTextEdit.reason !== 'message_has_no_text' ||
+    unchangedCaption.edited || unchangedCaption.reason !== 'message_not_modified' ||
+    !accountCaptionEdit.edited || editUpdate === undefined || !('edited_message' in editUpdate) ||
+    !('document' in editUpdate.edited_message) ||
+    editUpdate.edited_message.caption !== '/help notes' ||
+    JSON.stringify(editUpdate.edited_message.caption_entities) !==
+      JSON.stringify([{ type: 'bot_command', offset: 0, length: 5 }])
+  ) {
+    throw new Error(
+      `Expected the account caption edit to reach the bot, received ${JSON.stringify(updates)}`,
+    );
+  }
+});
+
 Deno.test('PrivateMessagingService edits the text of an account message and publishes the edit', () => {
   const {
     virtualUsers,
@@ -1118,7 +1365,7 @@ Deno.test('PrivateMessagingService edits the text of an account message and publ
     fromAccountId: account.profile.id,
     chat: { type: 'private', botId: bot.profile.id },
     botMessageId,
-    text: '  Hello /help  ',
+    edit: { kind: 'text', text: '  Hello /help  ' },
   });
   if (!result.edited) {
     throw new Error(`Expected the edit to succeed, received ${result.reason}`);
@@ -1126,9 +1373,9 @@ Deno.test('PrivateMessagingService edits the text of an account message and publ
   if (
     result.message.id !== accountMessage.id ||
     result.message.sentAtUnixSeconds !== 1_700_000_000 ||
-    result.message.textEditedAtUnixSeconds !== 1_700_000_005 ||
-    result.message.text !== 'Hello /help' ||
-    JSON.stringify(result.message.entities) !==
+    result.message.contentEditedAtUnixSeconds !== 1_700_000_005 ||
+    getContentText(result.message.content).text !== 'Hello /help' ||
+    JSON.stringify(getContentText(result.message.content).entities) !==
       JSON.stringify([{ type: 'bot_command', offset: 6, length: 5 }])
   ) {
     throw new Error('Expected a dated edit whose text is normalized as when sending');
@@ -1145,7 +1392,7 @@ Deno.test('PrivateMessagingService edits the text of an account message and publ
     updates.length !== 2 || lastUpdate === undefined || !('edited_message' in lastUpdate) ||
     lastUpdate.edited_message.message_id !== botMessageId ||
     lastUpdate.edited_message.edit_date !== 1_700_000_005 ||
-    lastUpdate.edited_message.text !== 'Hello /help'
+    textContentOf(lastUpdate.edited_message)?.text !== 'Hello /help'
   ) {
     throw new Error(`Expected an edited_message update, received ${JSON.stringify(updates)}`);
   }
@@ -1173,7 +1420,7 @@ Deno.test('PrivateMessagingService validates account message edits before changi
       fromAccountId,
       chat: { type: 'private', botId },
       botMessageId,
-      text,
+      edit: { kind: 'text', text },
     });
   const publishedEventCount = publishedEvents.length;
 
@@ -1217,7 +1464,7 @@ Deno.test('PrivateMessagingService validates account message edits before changi
     }
   }
   if (
-    messages.getPrivateTextMessage(accountMessage.id) !== accountMessage ||
+    messages.getPrivateMessage(accountMessage.id) !== accountMessage ||
     publishedEvents.length !== publishedEventCount
   ) {
     throw new Error('Expected rejected edits to leave the message unchanged and unpublished');
@@ -1237,10 +1484,10 @@ Deno.test('PrivateMessagingService refuses writing either way while the account 
     privateMessaging.sendBotMessage({
       fromBotId: bot.profile.id,
       to: { type: 'private', accountId: account.profile.id },
-      text,
       replyTo: replyToBotMessageId === undefined
         ? undefined
         : { botMessageId: replyToBotMessageId, allowSendingWithoutReply: false },
+      content: { kind: 'text', text },
     });
 
   const cases = [
@@ -1248,7 +1495,7 @@ Deno.test('PrivateMessagingService refuses writing either way while the account 
       privateMessaging.sendAccountMessage({
         fromAccountId: account.profile.id,
         to: { type: 'private', botId: bot.profile.id },
-        text: 'Hello again',
+        content: { kind: 'text', text: 'Hello again' },
       }),
       'bot_blocked',
     ],
@@ -1284,7 +1531,7 @@ Deno.test('PrivateMessagingService refuses writing either way while the account 
     fromAccountId: account.profile.id,
     chat: { type: 'private', botId: bot.profile.id },
     botMessageId: expectBotMessageId(messageBoxes, bot, accountMessage.id),
-    text: 'Bye',
+    edit: { kind: 'text', text: 'Bye' },
   });
   if (!botEdit.edited || !accountEdit.edited) {
     throw new Error('Expected a block to leave existing messages editable');
@@ -1314,12 +1561,12 @@ function sendBotMessage(
   accountId: number,
   bot: VirtualBot,
   inlineKeyboard?: InlineKeyboard,
-): PrivateTextMessage {
+): PrivateMessage {
   const result = privateMessaging.sendBotMessage({
     fromBotId: bot.profile.id,
     to: { type: 'private', accountId },
-    text: 'Continue?',
     inlineKeyboard,
+    content: { kind: 'text', text: 'Continue?' },
   });
   if (!result.sent) {
     throw new Error(`Expected the bot message to be sent, received ${result.reason}`);
@@ -1346,6 +1593,7 @@ function createPrivateMessagingFixture() {
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const privateConversations = new PrivateConversationRepository();
   const messages = new MessageRepository();
+  const files = new FileRepository();
   const messageBoxes = new MessageBoxRepository();
   const botUpdates = new BotUpdateRepository();
   const sharedChats = new SharedChatRepository();
@@ -1356,6 +1604,7 @@ function createPrivateMessagingFixture() {
       sharedChats,
       messageBoxes,
       messages,
+      files,
     }),
     botUpdates,
     updateSubscriptions: new BotUpdateSubscriptionRepository(),
@@ -1366,11 +1615,18 @@ function createPrivateMessagingFixture() {
   const publishedEvents: ChatDomainEvent[] = [];
   let currentUnixTimeSeconds = 1_700_000_000;
   const blockedUsers = new BlockedUserRepository();
+  const storedUploads: FileUpload[] = [];
   const privateMessaging = new PrivateMessagingService({
     accounts,
     bots,
     privateConversations,
     messages,
+    files: {
+      addFile: (upload) => {
+        storedUploads.push(upload);
+        return files.addFile(upload);
+      },
+    },
     messageBoxes,
     blockedUsers,
     events: {
@@ -1388,6 +1644,8 @@ function createPrivateMessagingFixture() {
     virtualUsers,
     privateConversations,
     messages,
+    files,
+    storedUploads,
     messageBoxes,
     botUpdates,
     blockedUsers,
@@ -1397,15 +1655,23 @@ function createPrivateMessagingFixture() {
   };
 }
 
+/** A photo upload of a 4 by 3 GIF image, whose header is all the emulator reads. */
+function photoUpload(): PhotoUpload {
+  const content = new Uint8Array(13);
+  content.set(new TextEncoder().encode('GIF89a'));
+  content.set([4, 0, 3, 0], 6);
+  return { type: 'photo', content, imageFormat: 'gif', width: 4, height: 3 };
+}
+
 function sendPrivateText(
   privateMessaging: PrivateMessagingService,
   accountId: number,
   bot: VirtualBot,
-): PrivateTextMessage {
+): PrivateMessage {
   const result = privateMessaging.sendAccountMessage({
     fromAccountId: accountId,
     to: { type: 'private', botId: bot.profile.id },
-    text: 'Hello',
+    content: { kind: 'text', text: 'Hello' },
   });
   if (!result.sent) {
     throw new Error(`Expected message send to succeed, received ${result.reason}`);
@@ -1429,6 +1695,15 @@ function createBot(virtualUsers: VirtualUserService, firstName: string, username
   return result.bot;
 }
 
-function messageFromUpdate(update: BotApiUpdate | undefined): BotApiTextMessage | undefined {
+function messageFromUpdate(update: BotApiUpdate | undefined): BotApiMessage | undefined {
   return update !== undefined && 'message' in update ? update.message : undefined;
+}
+
+/** The text and entities of a Bot API text message; `undefined` for any other message. */
+function textContentOf(
+  message: BotApiMessage | undefined,
+): { readonly text: string; readonly entities?: readonly unknown[] } | undefined {
+  return message !== undefined && 'text' in message
+    ? { text: message.text, entities: message.entities }
+    : undefined;
 }

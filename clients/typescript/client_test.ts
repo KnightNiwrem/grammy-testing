@@ -373,6 +373,74 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
   throw new Error('Expected a non-member to be refused the supergroup history');
 });
 
+Deno.test('TypeScript client sends, edits, and downloads photos and documents', async () => {
+  const publicOrigin = 'http://emulator.example:9000';
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin,
+  });
+  const client = new TelegramEmulationClient(publicOrigin, {
+    fetch: createInProcessFetch(api.fetch),
+  });
+  const session = await client.createSession();
+  const { token, bot } = await session.createBot({ first_name: 'Test Bot', username: 'test_bot' });
+  const { account } = await session.createAccount({ first_name: 'Ada' });
+  const to = { type: 'private', botId: bot.id } as const;
+  const image = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 2, 0, 1, 0, 0, 0, 0]);
+
+  const photo = await account.sendPhoto({ to, photo: image, caption: 'Receipt' });
+  const document = await account.sendDocument({
+    to,
+    document: new TextEncoder().encode('notes'),
+    file_name: 'notes.txt',
+    reply_to_message_id: photo.message_id,
+  });
+  const editedDocument = await account.editMessageCaption({
+    chat: to,
+    message_id: document.message_id,
+    caption: 'My notes',
+  });
+  const downloadedPhoto = await session.downloadFile(photo.photo?.[0].file_unique_id ?? '');
+  if (
+    photo.caption !== 'Receipt' || photo.photo?.[0].width !== 2 ||
+    document.document?.mime_type !== 'text/plain' ||
+    document.reply_to_message?.photo?.[0].height !== 1 ||
+    editedDocument.caption !== 'My notes' || editedDocument.edit_date === undefined ||
+    downloadedPhoto.toBase64() !== image.toBase64()
+  ) {
+    throw new Error('Expected the client to send, edit, and download media');
+  }
+
+  const botReply = await api.request(`/sessions/${session.id}/bot-api/bot${token}/sendDocument`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: account.id,
+      document: document.document?.file_id,
+      caption: 'Back to you',
+    }),
+  });
+  const history = await account.getMessages({ chat: to });
+  if (
+    botReply.status !== 200 ||
+    history.at(-1)?.document?.file_unique_id !== document.document?.file_unique_id ||
+    history.at(-1)?.caption !== 'Back to you'
+  ) {
+    throw new Error('Expected the bot to resend the document by its file ID');
+  }
+
+  try {
+    await account.sendPhoto({ to, photo: new TextEncoder().encode('not an image') });
+  } catch (error) {
+    if (error instanceof EmulationClientError && error.status === 400) {
+      await session.end();
+      return;
+    }
+    throw error;
+  }
+  throw new Error('Expected content that is not an image to be refused as a photo');
+});
+
 Deno.test('TypeScript client reports HTTP failures with request details', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({

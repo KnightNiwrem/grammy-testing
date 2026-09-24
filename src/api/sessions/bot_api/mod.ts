@@ -10,6 +10,7 @@ import { MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH } from '../../../types/callback_q
 import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { VirtualBotProfile } from '../../../types/virtual_bot.ts';
 import type { ChatAction } from '../../../types/virtual_chat.ts';
+import { fileDownloadResponse } from '../file_download.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 import {
   botCommandScopeParameter,
@@ -21,6 +22,7 @@ import {
   messageEntitiesParameter,
   readMessageEntitiesParameter,
 } from './message_entities_parameter.ts';
+import { readInputFileParameter } from './input_file_parameter.ts';
 import { linkPreviewOptionsParameter } from './link_preview_options_parameter.ts';
 import {
   replyParametersParameter,
@@ -33,6 +35,7 @@ import {
 import {
   booleanParameter,
   type BotApiRequestParameters,
+  type BotApiUploadedFiles,
   decodeBotApiRequestParameters,
   integerParameter,
   jsonParameter,
@@ -45,6 +48,10 @@ const BOT_API_SUBRESOURCE_PATH = `${BOT_TOKEN_PATH}/*` as const;
 const BOT_API_METHOD_NAME_PARAMETER = 'methodName';
 /** Everything after the token is the method name, as in the official Bot API server. */
 const BOT_API_METHOD_PATH = `${BOT_TOKEN_PATH}/:${BOT_API_METHOD_NAME_PARAMETER}{.*}` as const;
+const FILE_PATH_PARAMETER = 'filePath';
+/** Where bots download files, as Telegram serves them: `/file/bot<token>/<file_path>`. */
+const BOT_FILE_DOWNLOAD_PATH =
+  `/file/:${BOT_TOKEN_PATH_PARAMETER}{${BOT_TOKEN_PATH_PREFIX}[^/]+}/:${FILE_PATH_PARAMETER}{.+}` as const;
 
 /** Telegram's wording, from `abort_long_poll` in the official Bot API server. */
 const TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION =
@@ -75,6 +82,24 @@ const CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION =
 const GROUP_REPLY_INTERFACE_UNSUPPORTED_DESCRIPTION =
   'Bad Request: reply keyboards, keyboard removals, and forced replies are not supported in groups';
 
+/** Telegram's descriptions for files a message cannot send. */
+const FILE_EMPTY_DESCRIPTION = 'Bad Request: file must be non-empty';
+const IMAGE_INVALID_DESCRIPTION = 'Bad Request: IMAGE_PROCESS_FAILED';
+const PHOTO_DIMENSIONS_INVALID_DESCRIPTION = 'Bad Request: PHOTO_INVALID_DIMENSIONS';
+const FILE_ID_INVALID_DESCRIPTION = 'Bad Request: wrong file identifier/HTTP URL specified';
+const CAPTION_TOO_LONG_DESCRIPTION = 'Bad Request: message caption is too long';
+
+/** TDLib's names of file types in its errors about a file of the wrong type. */
+const TDLIB_FILE_TYPE_NAMES = { photo: 'Photo', document: 'Document' } as const;
+
+/** The emulator's description for a file sent by URL, which Telegram downloads itself. */
+const FILE_URL_UNSUPPORTED_DESCRIPTION = 'Bad Request: sending files by URL is not supported';
+
+/** Telegram's descriptions for rejected getFile requests. */
+const FILE_ID_NOT_SPECIFIED_DESCRIPTION = 'Bad Request: file_id not specified';
+const GET_FILE_ID_INVALID_DESCRIPTION = 'Bad Request: invalid file_id';
+const FILE_TOO_BIG_DESCRIPTION = 'Bad Request: file is too big';
+
 /** Telegram's descriptions for message text or formatting it cannot read. */
 const FORMATTED_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: text is too long';
 const PARSE_MODE_UNSUPPORTED_DESCRIPTION = 'Bad Request: unsupported parse_mode';
@@ -84,6 +109,9 @@ const TEXT_ENCODING_INVALID_DESCRIPTION = 'Bad Request: text must be encoded in 
 const MESSAGE_IDENTIFIER_NOT_SPECIFIED_DESCRIPTION =
   'Bad Request: message identifier is not specified';
 const MESSAGE_TO_EDIT_NOT_FOUND_DESCRIPTION = 'Bad Request: message to edit not found';
+const MESSAGE_HAS_NO_TEXT_DESCRIPTION = 'Bad Request: there is no text in the message to edit';
+const MESSAGE_HAS_NO_CAPTION_DESCRIPTION =
+  'Bad Request: there is no caption in the message to edit';
 const MESSAGE_NOT_EDITABLE_DESCRIPTION = "Bad Request: message can't be edited";
 const MESSAGE_NOT_MODIFIED_DESCRIPTION =
   'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message';
@@ -163,24 +191,52 @@ const linkPreviewParametersShape = {
   disable_web_page_preview: booleanParameter().optional(),
 };
 
-// Telegram treats a missing parameter as empty text. It also accepts an `@username` chat_id,
-// which it resolves only for bots and public supergroups and channels; the emulator's supergroups
-// have no usernames, so it accepts only numeric chat IDs. `reply_to_message_id` and
-// `allow_sending_without_reply` are the older form of `reply_parameters`, which Telegram still
-// accepts. The account's client does not model notifications, so `disable_notification` is
-// validated and ignored.
-const sendMessageParametersSchema = z.strictObject({
+// Telegram also accepts an `@username` chat_id, which it resolves only for bots and public
+// supergroups and channels; the emulator's supergroups have no usernames, so it accepts only
+// numeric chat IDs. `reply_to_message_id` and `allow_sending_without_reply` are the older form of
+// `reply_parameters`, which Telegram still accepts. The account's client does not model
+// notifications, so `disable_notification` is validated and ignored.
+const sendOptionsParametersShape = {
   chat_id: integerParameter(z.int()).optional(),
-  text: z.string().default(''),
-  parse_mode: z.string().optional(),
-  entities: messageEntitiesParameter().optional(),
-  ...linkPreviewParametersShape,
   disable_notification: booleanParameter().optional(),
   protect_content: booleanParameter().default(false),
   reply_parameters: replyParametersParameter().optional(),
   reply_to_message_id: integerParameter(z.int()).optional(),
   allow_sending_without_reply: booleanParameter().default(false),
   reply_markup: messageReplyMarkupParameter().default({}),
+};
+
+/** A caption and its formatting; Telegram treats a missing caption as none. */
+const captionParametersShape = {
+  caption: z.string().default(''),
+  parse_mode: z.string().optional(),
+  caption_entities: messageEntitiesParameter().optional(),
+};
+
+// Telegram treats a missing parameter as empty text.
+const sendMessageParametersSchema = z.strictObject({
+  ...sendOptionsParametersShape,
+  text: z.string().default(''),
+  parse_mode: z.string().optional(),
+  entities: messageEntitiesParameter().optional(),
+  ...linkPreviewParametersShape,
+});
+
+const sendPhotoParametersSchema = z.strictObject({
+  ...sendOptionsParametersShape,
+  photo: z.string().optional(),
+  ...captionParametersShape,
+  show_caption_above_media: booleanParameter().default(false),
+  has_spoiler: booleanParameter().default(false),
+});
+
+// The emulator never detects other media types in documents, so `disable_content_type_detection`
+// is validated and ignored. Document thumbnails are not supported.
+const sendDocumentParametersSchema = z.strictObject({
+  ...sendOptionsParametersShape,
+  document: z.string().optional(),
+  ...captionParametersShape,
+  disable_content_type_detection: booleanParameter().optional(),
 });
 
 // Editing messages sent through inline mode, which `inline_message_id` identifies, is not
@@ -192,6 +248,14 @@ const editMessageTextParametersSchema = z.strictObject({
   parse_mode: z.string().optional(),
   entities: messageEntitiesParameter().optional(),
   ...linkPreviewParametersShape,
+  reply_markup: inlineKeyboardMarkupParameter().optional(),
+});
+
+const editMessageCaptionParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  message_id: integerParameter(z.int()).optional(),
+  ...captionParametersShape,
+  show_caption_above_media: booleanParameter().default(false),
   reply_markup: inlineKeyboardMarkupParameter().optional(),
 });
 
@@ -242,6 +306,10 @@ const myCommandsTargetParametersSchema = z.strictObject({
   language_code: z.string().default(''),
 });
 
+const getFileParametersSchema = z.strictObject({
+  file_id: z.string().default(''),
+});
+
 const getUpdatesParametersSchema = z.strictObject({
   offset: integerParameter(z.int()).optional(),
   limit: integerParameter(z.int().min(1).max(100)).default(100),
@@ -262,10 +330,23 @@ interface BotApiRouteContextTypes {
 
 type BotApiRouteContext = Context<BotApiRouteContextTypes>;
 
-/** The outcome of either edit method; editMessageReplyMarkup fails for a subset of the reasons. */
-type MessageEditResult = ReturnType<EmulationSession['botApi']['editMessageText']>;
+/** The outcome of any edit method; each fails for a subset of the reasons. */
+type MessageEditResult =
+  | ReturnType<EmulationSession['botApi']['editMessageText']>
+  | ReturnType<EmulationSession['botApi']['editMessageCaption']>;
 
-type SendMessageResult = ReturnType<EmulationSession['botApi']['sendMessage']>;
+type SendResult = ReturnType<EmulationSession['botApi']['sendMessage']>;
+
+/** Removes properties from each member of a union, which keeps the union's alternatives apart. */
+type OmitFromEach<Type, Key extends PropertyKey> = Type extends unknown ? Omit<Type, Key> : never;
+
+/** Where and how a send method sends its message, which every send method takes alike. */
+type SendRequestOptions = OmitFromEach<
+  Parameters<EmulationSession['botApi']['sendMessage']>[1],
+  'text' | 'entities'
+>;
+
+type SendOptionsParameters = z.infer<z.ZodObject<typeof sendOptionsParametersShape>>;
 
 type MyCommandsTarget = Parameters<EmulationSession['botApi']['getMyCommands']>[1];
 
@@ -284,6 +365,7 @@ type SpecifiedFormattedTextReading =
 type BotApiMethodHandler = (
   context: BotApiRouteContext,
   parameters: BotApiRequestParameters,
+  uploadedFiles: BotApiUploadedFiles,
 ) => Response | Promise<Response>;
 
 /** Keyed by lowercase name, because Telegram matches method names case-insensitively. */
@@ -293,18 +375,37 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['deletemessages', handleDeleteMessages],
   ['deletemycommands', handleDeleteMyCommands],
   ['deletewebhook', handleDeleteWebhook],
+  ['editmessagecaption', handleEditMessageCaption],
   ['editmessagereplymarkup', handleEditMessageReplyMarkup],
   ['editmessagetext', handleEditMessageText],
+  ['getfile', handleGetFile],
   ['getme', handleGetMe],
   ['getmycommands', handleGetMyCommands],
   ['getupdates', handleGetUpdates],
   ['sendchataction', handleSendChatAction],
+  ['senddocument', handleSendDocument],
   ['sendmessage', handleSendMessage],
+  ['sendphoto', handleSendPhoto],
   ['setmycommands', handleSetMyCommands],
 ]);
 
 export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
   const botApiRoutes = new Hono<BotApiRouteContextTypes>();
+
+  // Telegram answers a download with an unknown token or path as not found.
+  botApiRoutes.get(BOT_FILE_DOWNLOAD_PATH, (context) => {
+    const botTokenPathSegment = context.req.param(BOT_TOKEN_PATH_PARAMETER);
+    const { botApi } = context.get('emulationSession');
+    const authenticatedBot = botApi.authenticate(
+      botTokenPathSegment.slice(BOT_TOKEN_PATH_PREFIX.length),
+    );
+    const file = authenticatedBot === undefined
+      ? undefined
+      : botApi.downloadFile(authenticatedBot, context.req.param(FILE_PATH_PARAMETER));
+    return file === undefined
+      ? botApiError(context, 404, 'Not Found')
+      : fileDownloadResponse(context, file);
+  });
 
   // Telegram rejects a path without a method segment before it checks the token.
   botApiRoutes.all(BOT_TOKEN_PATH, (context) => botApiError(context, 404, 'Not Found'));
@@ -335,7 +436,11 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
     if (!parametersDecoding.decoded) {
       return botApiError(context, 400, parametersDecoding.description);
     }
-    return methodHandler(context, parametersDecoding.parameters);
+    return methodHandler(
+      context,
+      parametersDecoding.parameters,
+      parametersDecoding.uploadedFiles,
+    );
   });
 
   // Telegram answers every other path in its Bot API namespace with a Bot API error.
@@ -406,14 +511,7 @@ function handleSendMessage(
   if (!parsedParameters.success) {
     return botApiError(context, 400, invalidParametersDescription);
   }
-  const {
-    chat_id: chatId,
-    text,
-    parse_mode: parseMode,
-    entities,
-    protect_content: isContentProtected,
-    reply_markup: replyMarkup,
-  } = parsedParameters.data;
+  const { text, parse_mode: parseMode, entities } = parsedParameters.data;
   // Telegram reads the text and its formatting before it looks at the chat.
   const formattedTextReading = readSpecifiedFormattedText(
     context,
@@ -423,34 +521,140 @@ function handleSendMessage(
   if (!formattedTextReading.read) {
     return formattedTextReading.response;
   }
-  if (chatId === undefined) {
-    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
-  }
-  const replyTarget = selectSpecifiedReplyTarget(parsedParameters.data);
-  // Telegram can reply to a message of another chat, which the emulator does not support.
-  if (replyTarget?.chatId !== undefined && replyTarget.chatId !== chatId) {
-    return botApiError(context, 400, CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION);
+  const optionsReading = readSendOptions(context, parsedParameters.data);
+  if (!optionsReading.read) {
+    return optionsReading.response;
   }
 
-  return sendMessageResponse(
+  return sendResponse(
     context,
-    context.get('emulationSession').botApi.sendMessage(
-      context.get('authenticatedBot'),
-      {
-        ...replyMarkup,
-        chatId,
-        ...formattedTextReading.formattedText,
-        replyTo: replyTarget === undefined ? undefined : {
-          messageId: replyTarget.messageId,
-          allowSendingWithoutReply: replyTarget.allowSendingWithoutReply,
-        },
-        isContentProtected,
-      },
-    ),
+    context.get('emulationSession').botApi.sendMessage(context.get('authenticatedBot'), {
+      ...optionsReading.options,
+      ...formattedTextReading.formattedText,
+    }),
   );
 }
 
-function sendMessageResponse(context: BotApiRouteContext, result: SendMessageResult): Response {
+function handleSendPhoto(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+  uploadedFiles: BotApiUploadedFiles,
+): Response {
+  const invalidParametersDescription = 'Bad Request: invalid sendPhoto parameters';
+  const parsedParameters = sendPhotoParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, invalidParametersDescription);
+  }
+  const { data } = parsedParameters;
+  // Telegram reads the file, then the caption and its formatting, before it looks at the chat.
+  const photoReading = readInputFileParameter('photo', data.photo, uploadedFiles);
+  if (!photoReading.read) {
+    return inputFileError(context, photoReading.reason, 'photo');
+  }
+  const captionReading = readSpecifiedCaption(context, data, invalidParametersDescription);
+  if (!captionReading.read) {
+    return captionReading.response;
+  }
+  const optionsReading = readSendOptions(context, data);
+  if (!optionsReading.read) {
+    return optionsReading.response;
+  }
+
+  return sendResponse(
+    context,
+    context.get('emulationSession').botApi.sendPhoto(context.get('authenticatedBot'), {
+      ...optionsReading.options,
+      photo: photoReading.inputFile,
+      caption: captionReading.formattedText,
+      hasSpoiler: data.has_spoiler,
+      showsCaptionAboveMedia: data.show_caption_above_media,
+    }),
+  );
+}
+
+function handleSendDocument(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+  uploadedFiles: BotApiUploadedFiles,
+): Response {
+  const invalidParametersDescription = 'Bad Request: invalid sendDocument parameters';
+  const parsedParameters = sendDocumentParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, invalidParametersDescription);
+  }
+  const { data } = parsedParameters;
+  // Telegram reads the file, then the caption and its formatting, before it looks at the chat.
+  const documentReading = readInputFileParameter('document', data.document, uploadedFiles);
+  if (!documentReading.read) {
+    return inputFileError(context, documentReading.reason, 'document');
+  }
+  const captionReading = readSpecifiedCaption(context, data, invalidParametersDescription);
+  if (!captionReading.read) {
+    return captionReading.response;
+  }
+  const optionsReading = readSendOptions(context, data);
+  if (!optionsReading.read) {
+    return optionsReading.response;
+  }
+
+  return sendResponse(
+    context,
+    context.get('emulationSession').botApi.sendDocument(context.get('authenticatedBot'), {
+      ...optionsReading.options,
+      document: documentReading.inputFile,
+      caption: captionReading.formattedText,
+    }),
+  );
+}
+
+/**
+ * Reads where and how a send method sends its message. A reply to a message of another chat,
+ * which Telegram supports, is rejected as unsupported.
+ */
+function readSendOptions(
+  context: BotApiRouteContext,
+  parameters: SendOptionsParameters,
+):
+  | { readonly read: true; readonly options: SendRequestOptions }
+  | { readonly read: false; readonly response: Response } {
+  const { chat_id: chatId, protect_content: isContentProtected, reply_markup: replyMarkup } =
+    parameters;
+  if (chatId === undefined) {
+    return { read: false, response: botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION) };
+  }
+  const replyTarget = selectSpecifiedReplyTarget(parameters);
+  if (replyTarget?.chatId !== undefined && replyTarget.chatId !== chatId) {
+    return {
+      read: false,
+      response: botApiError(context, 400, CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION),
+    };
+  }
+  return {
+    read: true,
+    options: {
+      ...replyMarkup,
+      chatId,
+      replyTo: replyTarget === undefined ? undefined : {
+        messageId: replyTarget.messageId,
+        allowSendingWithoutReply: replyTarget.allowSendingWithoutReply,
+      },
+      isContentProtected,
+    },
+  };
+}
+
+/** The error for a file parameter that names no uploaded file or holds a URL. */
+function inputFileError(
+  context: BotApiRouteContext,
+  reason: 'file_missing' | 'url_unsupported',
+  parameterName: 'photo' | 'document',
+): Response {
+  return reason === 'file_missing'
+    ? botApiError(context, 400, `Bad Request: there is no ${parameterName} in the request`)
+    : botApiError(context, 400, FILE_URL_UNSUPPORTED_DESCRIPTION);
+}
+
+function sendResponse(context: BotApiRouteContext, result: SendResult): Response {
   if (result.sent) {
     return context.json({ ok: true as const, result: result.message });
   }
@@ -465,15 +669,33 @@ function sendMessageResponse(context: BotApiRouteContext, result: SendMessageRes
       return botApiError(context, 400, REPLY_MESSAGE_NOT_FOUND_DESCRIPTION);
     case 'message_text_too_long':
       return botApiError(context, 400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
+    case 'caption_too_long':
+      return botApiError(context, 400, CAPTION_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':
       return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
     case 'bot_blocked':
       return botApiError(context, 403, BOT_BLOCKED_DESCRIPTION);
     case 'reply_interface_unsupported_in_groups':
       return botApiError(context, 400, GROUP_REPLY_INTERFACE_UNSUPPORTED_DESCRIPTION);
+    case 'file_empty':
+      return botApiError(context, 400, FILE_EMPTY_DESCRIPTION);
+    case 'image_invalid':
+      return botApiError(context, 400, IMAGE_INVALID_DESCRIPTION);
+    case 'photo_dimensions_invalid':
+      return botApiError(context, 400, PHOTO_DIMENSIONS_INVALID_DESCRIPTION);
+    case 'file_id_invalid':
+      return botApiError(context, 400, FILE_ID_INVALID_DESCRIPTION);
+    case 'file_type_mismatch':
+      return botApiError(
+        context,
+        400,
+        `Bad Request: can't use file of type ${TDLIB_FILE_TYPE_NAMES[result.actualFileType]} as ${
+          TDLIB_FILE_TYPE_NAMES[result.expectedFileType]
+        }`,
+      );
     default: {
       const unhandledFailure: never = result;
-      throw new Error(`Unhandled sendMessage failure: ${JSON.stringify(unhandledFailure)}`);
+      throw new Error(`Unhandled send failure: ${JSON.stringify(unhandledFailure)}`);
     }
   }
 }
@@ -519,6 +741,37 @@ function handleEditMessageText(
   );
 }
 
+function handleEditMessageCaption(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const invalidParametersDescription = 'Bad Request: invalid editMessageCaption parameters';
+  const parsedParameters = editMessageCaptionParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, invalidParametersDescription);
+  }
+  const { data } = parsedParameters;
+  // Telegram reads the caption and its formatting before it looks for the message.
+  const captionReading = readSpecifiedCaption(context, data, invalidParametersDescription);
+  if (!captionReading.read) {
+    return captionReading.response;
+  }
+  if (data.chat_id === undefined) {
+    return botApiError(context, 400, missingChatIdDescription(data.message_id));
+  }
+
+  return editMessageResponse(
+    context,
+    context.get('emulationSession').botApi.editMessageCaption(context.get('authenticatedBot'), {
+      chatId: data.chat_id,
+      messageId: messageIdOrNone(data.message_id),
+      caption: captionReading.formattedText,
+      showsCaptionAboveMedia: data.show_caption_above_media,
+      inlineKeyboard: data.reply_markup,
+    }),
+  );
+}
+
 function handleEditMessageReplyMarkup(
   context: BotApiRouteContext,
   parameters: BotApiRequestParameters,
@@ -545,11 +798,50 @@ function handleEditMessageReplyMarkup(
 /**
  * Reads nonempty message text with its `parse_mode` or `entities`, answering Telegram's error for
  * text or formatting it cannot read.
+ */
+function readSpecifiedFormattedText(
+  context: BotApiRouteContext,
+  specifiedText: {
+    readonly text: string;
+    readonly parseMode: string | undefined;
+    readonly entities: readonly unknown[] | undefined;
+  },
+  invalidParametersDescription: string,
+): SpecifiedFormattedTextReading {
+  if (specifiedText.text.length === 0) {
+    return { read: false, response: botApiError(context, 400, MESSAGE_TEXT_EMPTY_DESCRIPTION) };
+  }
+  return readFormattedTextParameters(context, specifiedText, invalidParametersDescription);
+}
+
+/**
+ * Reads a caption with its `parse_mode` or `caption_entities`, as message text is read; an empty
+ * caption is none.
+ */
+function readSpecifiedCaption(
+  context: BotApiRouteContext,
+  { caption, parse_mode: parseMode, caption_entities: captionEntities }: {
+    readonly caption: string;
+    readonly parse_mode?: string;
+    readonly caption_entities?: readonly unknown[];
+  },
+  invalidParametersDescription: string,
+): SpecifiedFormattedTextReading {
+  return readFormattedTextParameters(
+    context,
+    { text: caption, parseMode, entities: captionEntities },
+    invalidParametersDescription,
+  );
+}
+
+/**
+ * Reads text with the parse mode or entities that format it, answering Telegram's error for text
+ * or formatting it cannot read.
  *
  * Entities are decoded even alongside a parse mode, which makes Telegram ignore them, so malformed
  * entities are rejected in either case to surface the bot's mistake in tests.
  */
-function readSpecifiedFormattedText(
+function readFormattedTextParameters(
   context: BotApiRouteContext,
   { text, parseMode, entities }: {
     readonly text: string;
@@ -562,9 +854,6 @@ function readSpecifiedFormattedText(
     read: false,
     response: botApiError(context, 400, description),
   });
-  if (text.length === 0) {
-    return failure(MESSAGE_TEXT_EMPTY_DESCRIPTION);
-  }
   const entitiesReading = readMessageEntitiesParameter(
     entities ?? [],
     invalidParametersDescription,
@@ -628,8 +917,14 @@ function editMessageResponse(context: BotApiRouteContext, result: MessageEditRes
       return botApiError(context, 400, MESSAGE_TO_EDIT_NOT_FOUND_DESCRIPTION);
     case 'message_not_editable':
       return botApiError(context, 400, MESSAGE_NOT_EDITABLE_DESCRIPTION);
+    case 'message_has_no_text':
+      return botApiError(context, 400, MESSAGE_HAS_NO_TEXT_DESCRIPTION);
+    case 'message_has_no_caption':
+      return botApiError(context, 400, MESSAGE_HAS_NO_CAPTION_DESCRIPTION);
     case 'message_text_too_long':
       return botApiError(context, 400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
+    case 'caption_too_long':
+      return botApiError(context, 400, CAPTION_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':
       return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
     case 'message_not_modified':
@@ -714,6 +1009,38 @@ function handleDeleteMessages(
     default: {
       const unhandledReason: never = result.reason;
       throw new Error(`Unhandled deleteMessages failure: ${unhandledReason}`);
+    }
+  }
+}
+
+function handleGetFile(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = getFileParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid getFile parameters');
+  }
+  const { file_id: fileId } = parsedParameters.data;
+  if (fileId.length === 0) {
+    return botApiError(context, 400, FILE_ID_NOT_SPECIFIED_DESCRIPTION);
+  }
+
+  const result = context.get('emulationSession').botApi.getFile(
+    context.get('authenticatedBot'),
+    fileId,
+  );
+  if (result.found) {
+    return context.json({ ok: true as const, result: result.file });
+  }
+  switch (result.reason) {
+    case 'file_id_invalid':
+      return botApiError(context, 400, GET_FILE_ID_INVALID_DESCRIPTION);
+    case 'file_too_big':
+      return botApiError(context, 400, FILE_TOO_BIG_DESCRIPTION);
+    default: {
+      const unhandledReason: never = result.reason;
+      throw new Error(`Unhandled getFile failure: ${unhandledReason}`);
     }
   }
 }

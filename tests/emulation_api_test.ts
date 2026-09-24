@@ -3,6 +3,7 @@ import {
   InlineKeyboard,
   Keyboard,
 } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/convenience/keyboard.ts';
+import { InputFile } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/types.ts';
 import { GrammyError } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/core/error.ts';
 
 import { createEmulationApi } from '../src/api/mod.ts';
@@ -588,7 +589,7 @@ Deno.test('sendMessage replies only in private chats the account has started', a
     status !== 200 ||
     typeof body !== 'object' || body === null ||
     !('ok' in body) || body.ok !== true ||
-    !('result' in body) || !isPrivateTextMessage(body.result)
+    !('result' in body) || !isPrivateMessage(body.result)
   ) {
     throw new Error(`Expected sendMessage to succeed, received ${status}`);
   }
@@ -2029,7 +2030,7 @@ Deno.test('a grammY bot asks a question in a reply and reads the account reply t
   const history = isMessageHistoryResponse(historyBody)
     ? historyBody.messages.map((message) => {
       const { text, reply_to_message, has_protected_content } = message as
-        & TestPrivateTextMessage
+        & TestPrivateMessage
         & {
           reply_to_message?: { text: string };
           has_protected_content?: true;
@@ -2403,7 +2404,7 @@ Deno.test('PATCH on an account message edits it and sends the bot an edited_mess
   if (response.status !== 200 || !isSentMessageResponse(responseBody)) {
     throw new Error(`Expected the edit to succeed, received ${response.status}`);
   }
-  const editedMessage = responseBody.message as TestPrivateTextMessage & { edit_date?: number };
+  const editedMessage = responseBody.message as TestPrivateMessage & { edit_date?: number };
   if (
     editedMessage.message_id !== 1 || editedMessage.text !== 'Hello /help' ||
     editedMessage.edit_date === undefined ||
@@ -2959,6 +2960,391 @@ Deno.test('a grammY bot runs a vote with an inline keyboard in a supergroup', as
   }
 });
 
+Deno.test('sendPhoto and sendDocument upload files, reuse file IDs, and follow Telegram checks', async () => {
+  const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
+  await sendText('/start');
+  const chatId = createdAccount.account.id;
+
+  const uploadedPhoto = await callBotApiWithFiles(api, `${botApiPath}/sendPhoto`, {
+    chat_id: String(chatId),
+    caption: '<b>Chart</b>',
+    parse_mode: 'HTML',
+    has_spoiler: 'true',
+  }, { photo: new File([gifImage(640, 480)], 'chart.gif') });
+  const photo = botApiResult(uploadedPhoto.body);
+  const photoSize = Array.isArray(photo?.photo) ? photo.photo[0] : undefined;
+  if (
+    uploadedPhoto.status !== 200 || photo?.caption !== 'Chart' ||
+    JSON.stringify(photo.caption_entities) !==
+      JSON.stringify([{ type: 'bold', offset: 0, length: 5 }]) ||
+    photo.has_media_spoiler !== true || photoSize?.width !== 640 || photoSize.height !== 480
+  ) {
+    throw new Error(`Expected an uploaded photo, received ${JSON.stringify(uploadedPhoto.body)}`);
+  }
+
+  const uploadedDocument = await callBotApiWithFiles(api, `${botApiPath}/sendDocument`, {
+    chat_id: String(chatId),
+    document: 'attach://attachment',
+  }, { attachment: new File(['a,b\n'], 'folder/report?.csv') });
+  const document = botApiResult(uploadedDocument.body)?.document as
+    | Record<string, unknown>
+    | undefined;
+  if (
+    uploadedDocument.status !== 200 || document?.file_name !== 'report.csv' ||
+    document.mime_type !== 'text/csv' || document.file_size !== 4 ||
+    typeof document.file_id !== 'string'
+  ) {
+    throw new Error(
+      `Expected an attached document, received ${JSON.stringify(uploadedDocument.body)}`,
+    );
+  }
+
+  const reusedPhoto = await callBotApi(api, `${botApiPath}/sendPhoto`, {
+    chat_id: chatId,
+    photo: photoSize.file_id,
+  });
+  const reusedPhotoSize = (botApiResult(reusedPhoto.body)?.photo as unknown[] | undefined)?.[0];
+  if (
+    reusedPhoto.status !== 200 ||
+    JSON.stringify(reusedPhotoSize) !== JSON.stringify(photoSize)
+  ) {
+    throw new Error(`Expected the photo to be sent again, received ${JSON.stringify(reusedPhoto)}`);
+  }
+
+  const failures: {
+    method: string;
+    parameters: Record<string, string | number>;
+    files: Record<string, File>;
+  }[] = [
+    { method: 'sendPhoto', parameters: { chat_id: chatId }, files: {} },
+    { method: 'sendPhoto', parameters: { chat_id: chatId, photo: 'attach://missing' }, files: {} },
+    { method: 'sendDocument', parameters: { chat_id: chatId }, files: {} },
+    {
+      method: 'sendPhoto',
+      parameters: { chat_id: chatId, photo: 'https://example.com/chart.png' },
+      files: {},
+    },
+    {
+      method: 'sendPhoto',
+      parameters: { chat_id: chatId },
+      files: { photo: new File(['not an image'], 'chart.png') },
+    },
+    {
+      method: 'sendPhoto',
+      parameters: { chat_id: chatId },
+      files: { photo: new File([gifImage(5_001, 5_000)], 'huge.gif') },
+    },
+    { method: 'sendPhoto', parameters: { chat_id: chatId }, files: { photo: new File([], 'a') } },
+    {
+      method: 'sendPhoto',
+      parameters: { chat_id: chatId, photo: 'AgACAgIAAxkBAAIBdGZ' },
+      files: {},
+    },
+    { method: 'sendPhoto', parameters: { chat_id: chatId, photo: document.file_id }, files: {} },
+    {
+      method: 'sendDocument',
+      parameters: { chat_id: chatId, document: photoSize.file_id },
+      files: {},
+    },
+    {
+      method: 'sendPhoto',
+      parameters: { chat_id: chatId, photo: photoSize.file_id, caption: 'x'.repeat(1_025) },
+      files: {},
+    },
+    {
+      method: 'sendPhoto',
+      parameters: {
+        chat_id: chatId,
+        photo: photoSize.file_id,
+        caption: 'Done.',
+        parse_mode: 'MarkdownV2',
+      },
+      files: {},
+    },
+    { method: 'sendPhoto', parameters: { photo: photoSize.file_id }, files: {} },
+  ];
+  const descriptions = [];
+  for (const { method, parameters, files } of failures) {
+    const { status, body } = await callBotApiWithFiles(
+      api,
+      `${botApiPath}/${method}`,
+      Object.fromEntries(Object.entries(parameters).map(([name, value]) => [name, String(value)])),
+      files,
+    );
+    descriptions.push(status === 400 && isBadRequestResponse(body) ? body.description : status);
+  }
+  const expectedDescriptions = [
+    'Bad Request: there is no photo in the request',
+    'Bad Request: there is no photo in the request',
+    'Bad Request: there is no document in the request',
+    'Bad Request: sending files by URL is not supported',
+    'Bad Request: IMAGE_PROCESS_FAILED',
+    'Bad Request: PHOTO_INVALID_DIMENSIONS',
+    'Bad Request: file must be non-empty',
+    'Bad Request: wrong file identifier/HTTP URL specified',
+    "Bad Request: can't use file of type Document as Photo",
+    "Bad Request: can't use file of type Photo as Document",
+    'Bad Request: message caption is too long',
+    "Bad Request: can't parse entities: Character '.' is reserved and must be escaped with the preceding '\\'",
+    'Bad Request: chat_id is empty',
+  ];
+  if (JSON.stringify(descriptions) !== JSON.stringify(expectedDescriptions)) {
+    throw new Error(
+      `Expected Telegram's errors, received ${JSON.stringify(descriptions, null, 2)}`,
+    );
+  }
+});
+
+Deno.test('a bot downloads the files it knows with getFile, and tests read any by unique ID', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount } =
+    await createPrivateConversationFixture();
+  const image = gifImage(32, 16);
+  const sentResponse = await api.request(
+    `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
+    jsonRequest('POST', {
+      to: { type: 'private', botId: createdBot.bot.id },
+      photo: { content_base64: image.toBase64() },
+      caption: 'My receipt',
+    }),
+  );
+  const sentPhoto = (await sentResponse.json()).message?.photo?.[0];
+  const updates = await callBotApi(api, `${botApiPath}/getUpdates`, {});
+  const receivedPhoto = photoSizeOf(updateMessages(updates.body)[0]);
+  if (
+    sentResponse.status !== 201 || receivedPhoto === undefined ||
+    receivedPhoto.file_id !== sentPhoto?.file_id ||
+    receivedPhoto.file_unique_id !== sentPhoto.file_unique_id
+  ) {
+    throw new Error(
+      `Expected the bot to receive the account photo, received ${JSON.stringify(updates.body)}`,
+    );
+  }
+
+  const fileResponse = await callBotApi(api, `${botApiPath}/getFile`, {
+    file_id: receivedPhoto.file_id,
+  });
+  const file = botApiResult(fileResponse.body);
+  if (
+    JSON.stringify(file) !== JSON.stringify({
+      file_id: receivedPhoto.file_id,
+      file_unique_id: receivedPhoto.file_unique_id,
+      file_size: image.length,
+      file_path: 'photos/file_0.gif',
+    })
+  ) {
+    throw new Error(`Expected the file with its path, received ${JSON.stringify(fileResponse)}`);
+  }
+  const download = await api.request(
+    `${sessionPath}/bot-api/file/bot${createdBot.token}/photos/file_0.gif`,
+  );
+  const downloadedContent = new Uint8Array(await download.arrayBuffer());
+  const sessionDownload = await api.request(
+    `${sessionPath}/files/${receivedPhoto.file_unique_id}`,
+  );
+  const sessionDownloadedContent = new Uint8Array(await sessionDownload.arrayBuffer());
+  if (
+    download.status !== 200 || download.headers.get('Content-Type') !== 'image/gif' ||
+    downloadedContent.toBase64() !== image.toBase64() ||
+    sessionDownload.status !== 200 || sessionDownloadedContent.toBase64() !== image.toBase64()
+  ) {
+    throw new Error('Expected both downloads to return the photo as sent');
+  }
+
+  const getFileFailures = await Promise.all(
+    [{}, { file_id: 'unknown' }].map(async (parameters) => {
+      const { status, body } = await callBotApi(api, `${botApiPath}/getFile`, parameters);
+      return status === 400 && isBadRequestResponse(body) ? body.description : status;
+    }),
+  );
+  const missingDownloads = await Promise.all([
+    api.request(`${sessionPath}/bot-api/file/bot${createdBot.token}/photos/file_1.gif`),
+    api.request(`${sessionPath}/bot-api/file/bot123:unknown/photos/file_0.gif`),
+  ]);
+  const missingSessionDownload = await api.request(`${sessionPath}/files/unknown`);
+  if (
+    JSON.stringify(getFileFailures) !==
+      JSON.stringify(['Bad Request: file_id not specified', 'Bad Request: invalid file_id']) ||
+    !(await Promise.all(
+      missingDownloads.map(async (response) =>
+        response.status === 404 && isNotFoundResponse(await response.json(), 'Not Found')
+      ),
+    )).every(Boolean) ||
+    missingSessionDownload.status !== 404
+  ) {
+    throw new Error('Expected unknown files to be refused as Telegram does');
+  }
+});
+
+Deno.test('editMessageCaption follows Telegram checks', async () => {
+  const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
+  await sendText('/start');
+  const chatId = createdAccount.account.id;
+  const sentPhoto = await callBotApiWithFiles(api, `${botApiPath}/sendPhoto`, {
+    chat_id: String(chatId),
+    caption: 'Pick one',
+    reply_markup: JSON.stringify({ inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] }),
+  }, { photo: new File([gifImage(8, 8)], 'menu.gif') });
+  const photoMessageId = botApiResult(sentPhoto.body)?.message_id;
+  const sentText = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: chatId,
+    text: 'Plain',
+  });
+  const textMessageId = botApiResult(sentText.body)?.message_id;
+  if (typeof photoMessageId !== 'number' || typeof textMessageId !== 'number') {
+    throw new Error('Expected the photo and the text to be sent');
+  }
+
+  const edit = await callBotApi(api, `${botApiPath}/editMessageCaption`, {
+    chat_id: chatId,
+    message_id: photoMessageId,
+    caption: '*Picked*',
+    parse_mode: 'MarkdownV2',
+    show_caption_above_media: true,
+  });
+  const editedPhoto = botApiResult(edit.body);
+  if (
+    edit.status !== 200 || editedPhoto?.caption !== 'Picked' ||
+    editedPhoto.show_caption_above_media !== true || typeof editedPhoto.edit_date !== 'number' ||
+    'reply_markup' in editedPhoto
+  ) {
+    throw new Error(`Expected the caption to be edited, received ${JSON.stringify(edit.body)}`);
+  }
+
+  const failures = [
+    ['editMessageText', { chat_id: chatId, message_id: photoMessageId, text: 'New' }],
+    ['editMessageCaption', { chat_id: chatId, message_id: textMessageId, caption: 'New' }],
+    [
+      'editMessageCaption',
+      {
+        chat_id: chatId,
+        message_id: photoMessageId,
+        caption: 'Picked',
+        caption_entities: [{ type: 'bold', offset: 0, length: 6 }],
+        show_caption_above_media: true,
+      },
+    ],
+    ['editMessageCaption', { caption: 'New' }],
+    ['editMessageCaption', { chat_id: chatId, message_id: 999, caption: 'New' }],
+  ] as const;
+  const descriptions = [];
+  for (const [method, parameters] of failures) {
+    const { status, body } = await callBotApi(api, `${botApiPath}/${method}`, parameters);
+    descriptions.push(status === 400 && isBadRequestResponse(body) ? body.description : status);
+  }
+  if (
+    JSON.stringify(descriptions) !== JSON.stringify([
+      'Bad Request: there is no text in the message to edit',
+      'Bad Request: there is no caption in the message to edit',
+      'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message',
+      'Bad Request: message identifier is not specified',
+      'Bad Request: message to edit not found',
+    ])
+  ) {
+    throw new Error(`Expected Telegram's errors, received ${JSON.stringify(descriptions)}`);
+  }
+});
+
+Deno.test('account message routes send and edit photos and documents', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount } =
+    await createPrivateConversationFixture();
+  const accountPath = `${sessionPath}/accounts/${createdAccount.account.id}`;
+  const to = { type: 'private', botId: createdBot.bot.id };
+  const sendAccountMessage = async (body: unknown) => {
+    const response = await api.request(`${accountPath}/messages`, jsonRequest('POST', body));
+    return {
+      status: response.status,
+      body: response.status === 201 ? await response.json() : null,
+    };
+  };
+
+  const sentDocument = await sendAccountMessage({
+    to,
+    document: { content_base64: new TextEncoder().encode('notes').toBase64(), file_name: 'a.txt' },
+  });
+  const rejectedStatuses = await Promise.all([
+    { to, photo: { content_base64: 'not base64!' } },
+    { to, photo: { content_base64: new TextEncoder().encode('text').toBase64() } },
+    { to, photo: { content_base64: '' } },
+    { to, text: 'Hello', photo: { content_base64: gifImage(1, 1).toBase64() } },
+    { to, document: { content_base64: 'AA==', file_name: '' } },
+  ].map(async (body) => (await sendAccountMessage(body)).status));
+  const documentMessage = sentDocument.body?.message;
+  if (
+    sentDocument.status !== 201 || documentMessage?.document?.mime_type !== 'text/plain' ||
+    'caption' in documentMessage ||
+    JSON.stringify(rejectedStatuses) !== JSON.stringify([400, 400, 400, 400, 400])
+  ) {
+    throw new Error(
+      `Expected a document and rejected invalid media, received ${
+        JSON.stringify({ sentDocument, rejectedStatuses })
+      }`,
+    );
+  }
+
+  const messagePath =
+    `${accountPath}/conversations/private/${createdBot.bot.id}/messages/${documentMessage.message_id}`;
+  const textEdit = await api.request(messagePath, jsonRequest('PATCH', { text: 'Notes' }));
+  const captionEdit = await api.request(messagePath, jsonRequest('PATCH', { caption: '/help' }));
+  const editedDocument = (await captionEdit.json()).message;
+  const updates = await callBotApi(api, `${botApiPath}/getUpdates`, {});
+  const lastUpdateMessage = updateMessages(updates.body).at(-1);
+  if (
+    textEdit.status !== 400 || captionEdit.status !== 200 || editedDocument.caption !== '/help' ||
+    lastUpdateMessage?.caption !== '/help' ||
+    JSON.stringify(lastUpdateMessage.document) !== JSON.stringify(documentMessage.document)
+  ) {
+    throw new Error(`Expected a caption edit, received ${JSON.stringify(updates.body)}`);
+  }
+});
+
+Deno.test('a grammY bot downloads a document from an account and replies with a photo', async () => {
+  const { api, sessionPath, createdBot, createdAccount } = await createPrivateConversationFixture();
+  const csv = 'item,price\ncoffee,3\n';
+  const sentResponse = await api.request(
+    `${sessionPath}/accounts/${createdAccount.account.id}/messages`,
+    jsonRequest('POST', {
+      to: { type: 'private', botId: createdBot.bot.id },
+      document: { content_base64: new TextEncoder().encode(csv).toBase64(), file_name: 'a.csv' },
+      caption: 'Please chart this',
+    }),
+  );
+  if (sentResponse.status !== 201) {
+    throw new Error(`Expected the document to be sent, received ${sentResponse.status}`);
+  }
+
+  const apiRoot = `http://emulator.example:9000${sessionPath}/bot-api`;
+  const fetch = createInProcessFetch(api.fetch);
+  const grammyBot = new Bot(createdBot.token, { client: { apiRoot, fetch } });
+  const downloadedTexts: string[] = [];
+  const replied = Promise.withResolvers<void>();
+  grammyBot.on('message:document', async (context) => {
+    const file = await context.getFile();
+    const download = await fetch(`${apiRoot}/file/bot${createdBot.token}/${file.file_path}`);
+    downloadedTexts.push(await download.text());
+    await context.replyWithPhoto(new InputFile(gifImage(300, 200), 'chart.gif'), {
+      caption: `Chart of ${context.msg.document.file_name}`,
+      reply_parameters: { message_id: context.msg.message_id },
+    });
+    replied.resolve();
+  });
+  const polling = grammyBot.start();
+  await Promise.race([replied.promise, polling]);
+  await grammyBot.stop();
+  await polling;
+
+  const historyBody = await (await api.request(
+    `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/messages`,
+  )).json();
+  const reply = historyBody.messages.at(-1);
+  if (
+    JSON.stringify(downloadedTexts) !== JSON.stringify([csv]) ||
+    reply?.caption !== 'Chart of a.csv' || reply.photo?.[0]?.width !== 300 ||
+    reply.reply_to_message?.document?.file_name !== 'a.csv'
+  ) {
+    throw new Error(`Expected the bot to reply with a chart, received ${JSON.stringify(reply)}`);
+  }
+});
+
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,
@@ -3215,6 +3601,62 @@ async function callBotApi(
   return { status: response.status, body: await response.json() };
 }
 
+/**
+ * Calls a Bot API method with a multipart body of text parameters and uploaded files, as bots send
+ * files, and returns the status and decoded body.
+ */
+async function callBotApiWithFiles(
+  api: ReturnType<typeof createEmulationApi>,
+  methodPath: string,
+  parameters: Record<string, string>,
+  files: Record<string, File>,
+): Promise<{ status: number; body: unknown }> {
+  const body = new FormData();
+  for (const [name, value] of Object.entries(parameters)) {
+    body.append(name, value);
+  }
+  for (const [name, file] of Object.entries(files)) {
+    body.append(name, file);
+  }
+  const response = await api.request(methodPath, { method: 'POST', body });
+  return { status: response.status, body: await response.json() };
+}
+
+/** Returns the messages and edited messages of a successful getUpdates response. */
+function updateMessages(body: unknown): Record<string, unknown>[] {
+  if (typeof body !== 'object' || body === null) {
+    return [];
+  }
+  const { ok, result } = body as Record<string, unknown>;
+  if (ok !== true || !Array.isArray(result)) {
+    return [];
+  }
+  return result.flatMap((update: Record<string, unknown>) => {
+    const message = update.message ?? update.edited_message;
+    return typeof message === 'object' && message !== null
+      ? [message as Record<string, unknown>]
+      : [];
+  });
+}
+
+/** Returns the one size of a message's photo. */
+function photoSizeOf(
+  message: Record<string, unknown> | undefined,
+): { file_id: string; file_unique_id: string } | undefined {
+  const photo = message?.photo;
+  return Array.isArray(photo) ? photo[0] : undefined;
+}
+
+/** The header of a GIF image, which is all the emulator reads of a photo. */
+function gifImage(width: number, height: number): Uint8Array<ArrayBuffer> {
+  const image = new Uint8Array(13);
+  image.set(new TextEncoder().encode('GIF89a'));
+  const view = new DataView(image.buffer);
+  view.setUint16(6, width, true);
+  view.setUint16(8, height, true);
+  return image;
+}
+
 /** Returns the message a successful Bot API message method returned, if it did. */
 function botApiResult(body: unknown): Record<string, unknown> | undefined {
   if (typeof body !== 'object' || body === null) {
@@ -3277,30 +3719,30 @@ function isTerminatedByOtherLongPollResponse(value: unknown): value is {
 }
 
 function isSentMessageResponse(value: unknown): value is {
-  message: TestPrivateTextMessage;
+  message: TestPrivateMessage;
 } {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
   const { message } = value as Record<string, unknown>;
-  return isPrivateTextMessage(message);
+  return isPrivateMessage(message);
 }
 
 function isMessageHistoryResponse(value: unknown): value is {
-  messages: Array<TestPrivateTextMessage>;
+  messages: Array<TestPrivateMessage>;
 } {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
   const { messages } = value as Record<string, unknown>;
-  return Array.isArray(messages) && messages.every(isPrivateTextMessage);
+  return Array.isArray(messages) && messages.every(isPrivateMessage);
 }
 
 function isGetUpdatesResponse(value: unknown): value is {
   ok: true;
   result: Array<{
     update_id: number;
-    message: TestPrivateTextMessage;
+    message: TestPrivateMessage;
   }>;
 } {
   if (typeof value !== 'object' || value === null) {
@@ -3312,12 +3754,12 @@ function isGetUpdatesResponse(value: unknown): value is {
       return false;
     }
     const candidate = update as Record<string, unknown>;
-    return typeof candidate.update_id === 'number' && isPrivateTextMessage(candidate.message);
+    return typeof candidate.update_id === 'number' && isPrivateMessage(candidate.message);
   });
 }
 
 /** The parts of a Bot API message these tests check. */
-interface TestPrivateTextMessage {
+interface TestPrivateMessage {
   message_id: number;
   from: { id: number };
   chat: { id: number; type: string };
@@ -3329,7 +3771,7 @@ interface TestPrivateTextMessage {
   reply_markup?: unknown;
 }
 
-function isPrivateTextMessage(value: unknown): value is TestPrivateTextMessage {
+function isPrivateMessage(value: unknown): value is TestPrivateMessage {
   if (typeof value !== 'object' || value === null) {
     return false;
   }

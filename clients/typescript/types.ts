@@ -67,13 +67,34 @@ export interface SupergroupMessageTarget {
 export type MessageTarget = PrivateMessageTarget | SupergroupMessageTarget;
 
 /** The messages a chat holds: private messages for a private chat, or supergroup messages. */
-export type TextMessageIn<Target extends MessageTarget> = Target extends SupergroupMessageTarget
-  ? SupergroupTextMessage
-  : PrivateTextMessage;
+export type MessageIn<Target extends MessageTarget> = Target extends SupergroupMessageTarget
+  ? SupergroupMessage
+  : PrivateMessage;
 
 export interface AccountSendMessageInput<Target extends MessageTarget = MessageTarget> {
   readonly to: Target;
   readonly text: string;
+  /** The ID of the chat's message to reply to, as message history shows it. */
+  readonly reply_to_message_id?: number;
+}
+
+export interface AccountSendPhotoInput<Target extends MessageTarget = MessageTarget> {
+  readonly to: Target;
+  /** A JPEG, PNG, GIF, WebP, or BMP image. */
+  readonly photo: Uint8Array;
+  /** Omitted or empty for no caption. */
+  readonly caption?: string;
+  /** The ID of the chat's message to reply to, as message history shows it. */
+  readonly reply_to_message_id?: number;
+}
+
+export interface AccountSendDocumentInput<Target extends MessageTarget = MessageTarget> {
+  readonly to: Target;
+  readonly document: Uint8Array;
+  /** The file name, whose extension decides the document's MIME type. */
+  readonly file_name: string;
+  /** Omitted or empty for no caption. */
+  readonly caption?: string;
   /** The ID of the chat's message to reply to, as message history shows it. */
   readonly reply_to_message_id?: number;
 }
@@ -104,6 +125,14 @@ export interface AccountEditMessageInput<Target extends MessageTarget = MessageT
   readonly message_id: number;
   /** The new text, which must differ from the message's current text. */
   readonly text: string;
+}
+
+export interface AccountEditMessageCaptionInput<Target extends MessageTarget = MessageTarget> {
+  readonly chat: Target;
+  /** The ID of the account's photo or document to edit, as message history shows it. */
+  readonly message_id: number;
+  /** The new caption, which must differ from the current one; empty removes the caption. */
+  readonly caption: string;
 }
 
 export interface BotBlockInput {
@@ -195,53 +224,119 @@ export interface InlineKeyboardMarkup {
   readonly inline_keyboard: readonly (readonly InlineKeyboardButton[])[];
 }
 
+/** A file of a message: a photo size or a document. */
+interface MessageFile {
+  /**
+   * The identifier by which the message's observer knows the file. As on Telegram, each user
+   * knows a file by a `file_id` of its own.
+   */
+  readonly file_id: string;
+  /** The same for every user; `downloadFile` reads the file by it. */
+  readonly file_unique_id: string;
+  readonly file_size: number;
+}
+
+/** A photo in one size. The emulator keeps a photo in the one size it was sent in. */
+export interface PhotoSize extends MessageFile {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface Document extends MessageFile {
+  readonly file_name: string;
+  readonly mime_type: string;
+}
+
+/**
+ * The fields that show what a message is: text, a photo, or a document. Each kind declares the
+ * others' fields absent, so that any of them can be read from a message of unknown kind.
+ */
+export type MessageContent =
+  | {
+    readonly text: string;
+    readonly entities?: readonly MessageEntity[];
+    readonly photo?: never;
+    readonly document?: never;
+    readonly caption?: never;
+    readonly caption_entities?: never;
+  }
+  | {
+    readonly text?: never;
+    readonly entities?: never;
+    /** The photo's sizes, smallest first. */
+    readonly photo: readonly PhotoSize[];
+    readonly document?: never;
+    /** Omitted for a photo without a caption. */
+    readonly caption?: string;
+    readonly caption_entities?: readonly MessageEntity[];
+    /** Present when clients show the caption above the photo. */
+    readonly show_caption_above_media?: true;
+    /** Present when clients cover the photo until the user reveals it. */
+    readonly has_media_spoiler?: true;
+  }
+  | {
+    readonly text?: never;
+    readonly entities?: never;
+    readonly photo?: never;
+    readonly document: Document;
+    /** Omitted for a document without a caption. */
+    readonly caption?: string;
+    readonly caption_entities?: readonly MessageEntity[];
+  };
+
+/** The fields that precede a message's reply and content. */
+interface MessageHeader<Chat> {
+  readonly message_id: number;
+  readonly from: VirtualAccountProfile | MessageSenderBot;
+  readonly chat: Chat;
+  readonly date: number;
+  /** Present once the message's author has edited its text or caption. */
+  readonly edit_date?: number;
+}
+
+/** The fields that follow a message's content. */
+interface MessageTrailer {
+  /** The inline keyboard a bot attached to its message. */
+  readonly reply_markup?: InlineKeyboardMarkup;
+  /** Present when the bot protected its message from forwarding and saving. */
+  readonly has_protected_content?: true;
+}
+
+/** A message as a reply shows it, without its own reply. */
+export type RepliedPrivateMessage = MessageHeader<PrivateChat> & MessageContent & MessageTrailer;
+
 /**
  * A private-chat message as the conversation's bot sees it: numbered in the bot's message box,
  * with the account as its chat, whichever participant wrote it.
  */
-export interface PrivateTextMessage {
-  readonly message_id: number;
-  readonly from: VirtualAccountProfile | MessageSenderBot;
-  readonly chat: PrivateChat;
-  readonly date: number;
-  /** Present once the message's author has edited its text. */
-  readonly edit_date?: number;
-  /** The message this one replies to, unless it was deleted; it never shows its own reply. */
-  readonly reply_to_message?: RepliedPrivateTextMessage;
-  readonly text: string;
-  readonly entities?: readonly MessageEntity[];
-  /** The inline keyboard a bot attached to its message. */
-  readonly reply_markup?: InlineKeyboardMarkup;
-  /** Present when the bot protected its message from forwarding and saving. */
-  readonly has_protected_content?: true;
-}
+export type PrivateMessage =
+  & MessageHeader<PrivateChat>
+  & {
+    /** The message this one replies to, unless it was deleted; it never shows its own reply. */
+    readonly reply_to_message?: RepliedPrivateMessage;
+  }
+  & MessageContent
+  & MessageTrailer;
 
 /** A message as a reply shows it, without its own reply. */
-export type RepliedPrivateTextMessage = Omit<PrivateTextMessage, 'reply_to_message'>;
+export type RepliedSupergroupMessage =
+  & MessageHeader<SupergroupChat>
+  & MessageContent
+  & MessageTrailer;
 
 /**
- * A supergroup message, which every member sees alike: numbered once by the supergroup, and
- * written by an account or a bot.
+ * A supergroup message as the requesting account sees it: numbered once by the supergroup, and
+ * written by an account or a bot. Members see the same message, apart from the `file_id` of its
+ * file.
  */
-export interface SupergroupTextMessage {
-  readonly message_id: number;
-  readonly from: VirtualAccountProfile | MessageSenderBot;
-  readonly chat: SupergroupChat;
-  readonly date: number;
-  /** Present once the message's author has edited its text. */
-  readonly edit_date?: number;
-  /** The message this one replies to, unless it was deleted; it never shows its own reply. */
-  readonly reply_to_message?: RepliedSupergroupTextMessage;
-  readonly text: string;
-  readonly entities?: readonly MessageEntity[];
-  /** The inline keyboard a bot attached to its message. */
-  readonly reply_markup?: InlineKeyboardMarkup;
-  /** Present when the bot protected its message from forwarding and saving. */
-  readonly has_protected_content?: true;
-}
-
-/** A message as a reply shows it, without its own reply. */
-export type RepliedSupergroupTextMessage = Omit<SupergroupTextMessage, 'reply_to_message'>;
+export type SupergroupMessage =
+  & MessageHeader<SupergroupChat>
+  & {
+    /** The message this one replies to, unless it was deleted; it never shows its own reply. */
+    readonly reply_to_message?: RepliedSupergroupMessage;
+  }
+  & MessageContent
+  & MessageTrailer;
 
 /** A reply keyboard button, which sends its text to the chat when pressed. */
 export interface ReplyKeyboardButton {
@@ -320,14 +415,29 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    */
   sendMessage<Target extends MessageTarget>(
     input: AccountSendMessageInput<Target>,
-  ): Promise<TextMessageIn<Target>>;
+  ): Promise<MessageIn<Target>>;
+  /**
+   * Sends a photo, with an optional caption, as this account, as `sendMessage` sends text. The
+   * emulator reads the image's dimensions and rejects content that is not an image.
+   */
+  sendPhoto<Target extends MessageTarget>(
+    input: AccountSendPhotoInput<Target>,
+  ): Promise<MessageIn<Target>>;
+  /** Sends a file as a document, with an optional caption, as `sendMessage` sends text. */
+  sendDocument<Target extends MessageTarget>(
+    input: AccountSendDocumentInput<Target>,
+  ): Promise<MessageIn<Target>>;
   /**
    * Edits the text of a message this account sent, which sends the chat's bots an
    * `edited_message` update as they received the message. Returns the edited message.
    */
   editMessage<Target extends MessageTarget>(
     input: AccountEditMessageInput<Target>,
-  ): Promise<TextMessageIn<Target>>;
+  ): Promise<MessageIn<Target>>;
+  /** Edits the caption of a photo or document this account sent, as `editMessage` edits text. */
+  editMessageCaption<Target extends MessageTarget>(
+    input: AccountEditMessageCaptionInput<Target>,
+  ): Promise<MessageIn<Target>>;
   /** Creates a supergroup that this account owns. */
   createSupergroup(input: CreateSupergroupInput): Promise<Supergroup>;
   /**
@@ -353,7 +463,7 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    */
   getMessages<Target extends MessageTarget>(
     input: AccountMessageHistoryInput<Target>,
-  ): Promise<readonly TextMessageIn<Target>[]>;
+  ): Promise<readonly MessageIn<Target>[]>;
   /**
    * Presses a callback button on a bot's message, in a private chat or a supergroup, which sends
    * the bot a callback query. The bot answers asynchronously; read the answer with
@@ -377,7 +487,7 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    * Presses a button of the reply keyboard the chat shows, which sends the button's text to the
    * bot as this account's message. Fails when the chat shows no keyboard with such a button.
    */
-  pressReplyKeyboardButton(input: PressReplyKeyboardButtonInput): Promise<PrivateTextMessage>;
+  pressReplyKeyboardButton(input: PressReplyKeyboardButtonInput): Promise<PrivateMessage>;
 }
 
 export interface AccountBotCommandsInput {

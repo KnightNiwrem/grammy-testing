@@ -5,6 +5,7 @@ import { BotCommandRepository } from '../src/repositories/bot_command.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
+import { FileRepository } from '../src/repositories/file.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
 import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
@@ -13,6 +14,7 @@ import { MessageBoxRepository } from '../src/repositories/message_box.ts';
 import { BotApiService } from '../src/services/bot_api.ts';
 import { BotCommandService } from '../src/services/bot_command.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
+import { MediaFileService } from '../src/services/media_file.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../src/services/bot_update_polling.ts';
 import { CallbackQueryService } from '../src/services/callback_query.ts';
@@ -28,7 +30,7 @@ Deno.test('BotApiService translates private messaging failures into Bot API reas
   privateMessaging.sendAccountMessage({
     fromAccountId: account.profile.id,
     to: { type: 'private', botId: bot.profile.id },
-    text: '/start',
+    content: { kind: 'text', text: '/start' },
   });
   // Any user who has not written to the bot is, like an unknown chat, not found.
   const chatId = strangerAccount.profile.id;
@@ -138,6 +140,7 @@ function createBotApiFixture() {
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const messageBoxes = new MessageBoxRepository();
   const messages = new MessageRepository();
+  const files = new FileRepository();
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
   const sharedChats = new SharedChatRepository();
@@ -147,6 +150,7 @@ function createBotApiFixture() {
     sharedChats,
     messageBoxes,
     messages,
+    files,
   });
   const events = new BotUpdateDeliveryService({
     botMessageViews,
@@ -163,6 +167,7 @@ function createBotApiFixture() {
     bots,
     privateConversations,
     messages,
+    files,
     messageBoxes,
     blockedUsers,
     events,
@@ -173,6 +178,7 @@ function createBotApiFixture() {
     bots,
     sharedChats,
     messages,
+    files,
     messageBoxes,
     events,
     currentUnixTimeSeconds: () => 1_700_000_000,
@@ -194,6 +200,7 @@ function createBotApiFixture() {
     botMessages: privateMessaging,
     supergroupBotMessages: supergroupMessaging,
     botMessageViews,
+    mediaFiles: new MediaFileService({ files }),
     callbackQueries,
     botCommands: new BotCommandService({
       accounts,

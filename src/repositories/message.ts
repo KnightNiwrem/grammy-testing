@@ -3,18 +3,17 @@ import type { ReplyInterface } from '../types/reply_interface.ts';
 import type { PrivateConversationKey, PrivateConversationRole } from '../types/virtual_chat.ts';
 import type {
   CanonicalMessageId,
-  PrivateTextMessage,
+  MessageContent,
+  PrivateMessage,
+  SupergroupMessage,
   SupergroupMessageAuthor,
-  SupergroupTextMessage,
-  TextEntity,
 } from '../types/virtual_message.ts';
 
-export interface AddPrivateTextMessageInput {
+export interface AddPrivateMessageInput {
   readonly conversation: PrivateConversationKey;
   readonly authorRole: PrivateConversationRole;
   readonly sentAtUnixSeconds: number;
-  readonly text: string;
-  readonly entities: readonly TextEntity[];
+  readonly content: MessageContent;
   /** The message of the same conversation this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
   readonly inlineKeyboard?: InlineKeyboard;
@@ -23,12 +22,11 @@ export interface AddPrivateTextMessageInput {
   readonly isContentProtected?: boolean;
 }
 
-export interface AddSupergroupTextMessageInput {
+export interface AddSupergroupMessageInput {
   readonly chatId: number;
   readonly author: SupergroupMessageAuthor;
   readonly sentAtUnixSeconds: number;
-  readonly text: string;
-  readonly entities: readonly TextEntity[];
+  readonly content: MessageContent;
   /** The message of the same supergroup this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
   readonly inlineKeyboard?: InlineKeyboard;
@@ -36,30 +34,28 @@ export interface AddSupergroupTextMessageInput {
   readonly isContentProtected?: boolean;
 }
 
-/** The editable content of a text message, replaced as a whole by an edit. */
-export interface TextMessageEdit {
-  readonly text: string;
-  readonly entities: readonly TextEntity[];
+/** The editable parts of a message, replaced as a whole by an edit. */
+export interface MessageEdit {
+  readonly content: MessageContent;
   readonly inlineKeyboard: InlineKeyboard | undefined;
-  readonly textEditedAtUnixSeconds: number | undefined;
+  readonly contentEditedAtUnixSeconds: number | undefined;
 }
 
 /** Stores canonical messages under opaque identities, independent of Telegram message IDs. */
 export class MessageRepository {
-  readonly #privateMessagesById = new Map<CanonicalMessageId, PrivateTextMessage>();
+  readonly #privateMessagesById = new Map<CanonicalMessageId, PrivateMessage>();
   readonly #privateMessageIdsByAccountId = new Map<number, Map<number, CanonicalMessageId[]>>();
-  readonly #supergroupMessagesById = new Map<CanonicalMessageId, SupergroupTextMessage>();
+  readonly #supergroupMessagesById = new Map<CanonicalMessageId, SupergroupMessage>();
   readonly #supergroupMessageIdsByChatId = new Map<number, CanonicalMessageId[]>();
 
-  addPrivateTextMessage(input: AddPrivateTextMessageInput): PrivateTextMessage {
-    const message: PrivateTextMessage = {
-      kind: 'private_text',
+  addPrivateMessage(input: AddPrivateMessageInput): PrivateMessage {
+    const message: PrivateMessage = {
+      kind: 'private_message',
       id: crypto.randomUUID(),
       conversation: { ...input.conversation },
       authorRole: input.authorRole,
       sentAtUnixSeconds: input.sentAtUnixSeconds,
-      text: input.text,
-      entities: copyEntities(input.entities),
+      content: copyContent(input.content),
       ...(input.replyToMessageId === undefined ? {} : { replyToMessageId: input.replyToMessageId }),
       ...(input.inlineKeyboard === undefined
         ? {}
@@ -82,15 +78,15 @@ export class MessageRepository {
     return message;
   }
 
-  getPrivateTextMessage(messageId: CanonicalMessageId): PrivateTextMessage | undefined {
+  getPrivateMessage(messageId: CanonicalMessageId): PrivateMessage | undefined {
     return this.#privateMessagesById.get(messageId);
   }
 
   /** Replaces a stored message's editable content and returns the edited message. */
-  editPrivateTextMessage(
+  editPrivateMessage(
     messageId: CanonicalMessageId,
-    edit: TextMessageEdit,
-  ): PrivateTextMessage {
+    edit: MessageEdit,
+  ): PrivateMessage {
     const storedMessage = this.#privateMessagesById.get(messageId);
     if (storedMessage === undefined) {
       throw new Error(`Private message ${messageId} does not exist`);
@@ -106,22 +102,21 @@ export class MessageRepository {
       replyInterface,
       isContentProtected,
     } = storedMessage;
-    const editedMessage: PrivateTextMessage = {
+    const editedMessage: PrivateMessage = {
       kind,
       id,
       conversation,
       authorRole,
       sentAtUnixSeconds,
-      text: edit.text,
-      entities: copyEntities(edit.entities),
+      content: copyContent(edit.content),
       ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
       ...(edit.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
       ...(replyInterface === undefined ? {} : { replyInterface }),
-      ...(edit.textEditedAtUnixSeconds === undefined
+      ...(edit.contentEditedAtUnixSeconds === undefined
         ? {}
-        : { textEditedAtUnixSeconds: edit.textEditedAtUnixSeconds }),
+        : { contentEditedAtUnixSeconds: edit.contentEditedAtUnixSeconds }),
       isContentProtected,
     };
     this.#privateMessagesById.set(messageId, editedMessage);
@@ -129,7 +124,7 @@ export class MessageRepository {
   }
 
   /** Removes a stored message from the store and from its conversation's history. */
-  deletePrivateTextMessage(messageId: CanonicalMessageId): void {
+  deletePrivateMessage(messageId: CanonicalMessageId): void {
     const storedMessage = this.#privateMessagesById.get(messageId);
     if (storedMessage === undefined) {
       throw new Error(`Private message ${messageId} does not exist`);
@@ -147,7 +142,7 @@ export class MessageRepository {
 
   getPrivateConversationMessages(
     conversation: PrivateConversationKey,
-  ): readonly PrivateTextMessage[] {
+  ): readonly PrivateMessage[] {
     const messageIds =
       this.#privateMessageIdsByAccountId.get(conversation.accountId)?.get(conversation.botId) ??
         [];
@@ -160,15 +155,14 @@ export class MessageRepository {
     });
   }
 
-  addSupergroupTextMessage(input: AddSupergroupTextMessageInput): SupergroupTextMessage {
-    const message: SupergroupTextMessage = {
-      kind: 'supergroup_text',
+  addSupergroupMessage(input: AddSupergroupMessageInput): SupergroupMessage {
+    const message: SupergroupMessage = {
+      kind: 'supergroup_message',
       id: crypto.randomUUID(),
       chatId: input.chatId,
       author: { ...input.author },
       sentAtUnixSeconds: input.sentAtUnixSeconds,
-      text: input.text,
-      entities: copyEntities(input.entities),
+      content: copyContent(input.content),
       ...(input.replyToMessageId === undefined ? {} : { replyToMessageId: input.replyToMessageId }),
       ...(input.inlineKeyboard === undefined
         ? {}
@@ -184,15 +178,15 @@ export class MessageRepository {
     return message;
   }
 
-  getSupergroupTextMessage(messageId: CanonicalMessageId): SupergroupTextMessage | undefined {
+  getSupergroupMessage(messageId: CanonicalMessageId): SupergroupMessage | undefined {
     return this.#supergroupMessagesById.get(messageId);
   }
 
   /** Replaces a stored supergroup message's editable content and returns the edited message. */
-  editSupergroupTextMessage(
+  editSupergroupMessage(
     messageId: CanonicalMessageId,
-    edit: TextMessageEdit,
-  ): SupergroupTextMessage {
+    edit: MessageEdit,
+  ): SupergroupMessage {
     const storedMessage = this.#supergroupMessagesById.get(messageId);
     if (storedMessage === undefined) {
       throw new Error(`Supergroup message ${messageId} does not exist`);
@@ -200,21 +194,20 @@ export class MessageRepository {
 
     const { id, kind, chatId, author, sentAtUnixSeconds, replyToMessageId, isContentProtected } =
       storedMessage;
-    const editedMessage: SupergroupTextMessage = {
+    const editedMessage: SupergroupMessage = {
       kind,
       id,
       chatId,
       author,
       sentAtUnixSeconds,
-      text: edit.text,
-      entities: copyEntities(edit.entities),
+      content: copyContent(edit.content),
       ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
       ...(edit.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
-      ...(edit.textEditedAtUnixSeconds === undefined
+      ...(edit.contentEditedAtUnixSeconds === undefined
         ? {}
-        : { textEditedAtUnixSeconds: edit.textEditedAtUnixSeconds }),
+        : { contentEditedAtUnixSeconds: edit.contentEditedAtUnixSeconds }),
       isContentProtected,
     };
     this.#supergroupMessagesById.set(messageId, editedMessage);
@@ -222,7 +215,7 @@ export class MessageRepository {
   }
 
   /** Removes a stored message from the store and from its supergroup's history. */
-  deleteSupergroupTextMessage(messageId: CanonicalMessageId): void {
+  deleteSupergroupMessage(messageId: CanonicalMessageId): void {
     const storedMessage = this.#supergroupMessagesById.get(messageId);
     if (storedMessage === undefined) {
       throw new Error(`Supergroup message ${messageId} does not exist`);
@@ -237,7 +230,7 @@ export class MessageRepository {
     this.#supergroupMessagesById.delete(messageId);
   }
 
-  getSupergroupMessages(chatId: number): readonly SupergroupTextMessage[] {
+  getSupergroupMessages(chatId: number): readonly SupergroupMessage[] {
     const messageIds = this.#supergroupMessageIdsByChatId.get(chatId) ?? [];
     return messageIds.map((messageId) => {
       const message = this.#supergroupMessagesById.get(messageId);
@@ -249,8 +242,24 @@ export class MessageRepository {
   }
 }
 
-function copyEntities(entities: readonly TextEntity[]): readonly TextEntity[] {
-  return entities.map((entity): TextEntity => ({ ...entity }));
+function copyContent(content: MessageContent): MessageContent {
+  switch (content.kind) {
+    case 'text':
+      return { ...content, entities: content.entities.map((entity) => ({ ...entity })) };
+    case 'photo':
+    case 'document':
+      return {
+        ...content,
+        caption: {
+          text: content.caption.text,
+          entities: content.caption.entities.map((entity) => ({ ...entity })),
+        },
+      };
+    default: {
+      const unhandledContent: never = content;
+      throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
+    }
+  }
 }
 
 function copyInlineKeyboard(inlineKeyboard: InlineKeyboard): InlineKeyboard {

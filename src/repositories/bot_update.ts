@@ -1,7 +1,7 @@
 import type {
   BotApiCallbackQuery,
+  BotApiMessage,
   BotApiMyChatMemberUpdated,
-  BotApiTextMessage,
   BotApiUpdate,
 } from '../types/bot_api.ts';
 
@@ -36,11 +36,11 @@ export class BotUpdateRepository {
   readonly #mailboxesByBotId = new Map<number, BotUpdateMailbox>();
   readonly #waitersByBotId = new Map<number, Set<() => void>>();
 
-  enqueueMessageUpdate(botId: number, message: BotApiTextMessage): BotApiUpdate {
+  enqueueMessageUpdate(botId: number, message: BotApiMessage): BotApiUpdate {
     return this.#enqueueUpdate(botId, (update_id) => ({ update_id, message }));
   }
 
-  enqueueEditedMessageUpdate(botId: number, editedMessage: BotApiTextMessage): BotApiUpdate {
+  enqueueEditedMessageUpdate(botId: number, editedMessage: BotApiMessage): BotApiUpdate {
     return this.#enqueueUpdate(
       botId,
       (update_id) => ({ update_id, edited_message: editedMessage }),

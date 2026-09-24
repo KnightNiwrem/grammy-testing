@@ -6,8 +6,21 @@ import { z } from 'zod';
  */
 export type BotApiRequestParameters = Readonly<Record<string, string>>;
 
+/** A file uploaded in a multipart request, under the name its sender gave it. */
+export interface BotApiUploadedFile {
+  readonly fileName: string;
+  readonly content: Uint8Array<ArrayBuffer>;
+}
+
+/** Files uploaded in a multipart request, by the name of the part that carries each. */
+export type BotApiUploadedFiles = ReadonlyMap<string, BotApiUploadedFile>;
+
 export type BotApiRequestParametersDecoding =
-  | { readonly decoded: true; readonly parameters: BotApiRequestParameters }
+  | {
+    readonly decoded: true;
+    readonly parameters: BotApiRequestParameters;
+    readonly uploadedFiles: BotApiUploadedFiles;
+  }
   | { readonly decoded: false; readonly description: string };
 
 const JSON_MEDIA_TYPE = 'application/json';
@@ -26,6 +39,9 @@ const FALSE_BOOLEAN_TEXTS = ['false', 'no', '0'] as const;
  *
  * A JSON string value is used as-is; any other JSON value is kept as its JSON text, so `2` and
  * `"2"` are equivalent, as are `["message"]` and `"[\"message\"]"`.
+ *
+ * A multipart body can also upload files, which methods that send files read by part name; as on
+ * Telegram, the first file of a name counts, and other methods ignore files.
  *
  * Telegram ignores a body it cannot parse or whose content type it does not decode; rejecting it
  * instead surfaces the bot's mistake in tests.
@@ -49,12 +65,22 @@ export async function decodeBotApiRequestParameters(
       parameters.set(name, value);
     }
   }
-  return { decoded: true, parameters: Object.fromEntries(parameters) };
+  return {
+    decoded: true,
+    parameters: Object.fromEntries(parameters),
+    uploadedFiles: bodyDecoding.uploadedFiles,
+  };
 }
 
 type BodyParameterEntriesDecoding =
-  | { readonly decoded: true; readonly parameterEntries: ReadonlyArray<readonly [string, string]> }
+  | {
+    readonly decoded: true;
+    readonly parameterEntries: ReadonlyArray<readonly [string, string]>;
+    readonly uploadedFiles: BotApiUploadedFiles;
+  }
   | { readonly decoded: false; readonly description: string };
+
+const NO_UPLOADED_FILES: BotApiUploadedFiles = new Map();
 
 async function decodeBodyParameterEntries(
   request: Request,
@@ -69,22 +95,30 @@ async function decodeBodyParameterEntries(
       return { decoded: false, description: 'Bad Request: invalid multipart/form-data body' };
     }
     const parameterEntries: Array<readonly [string, string]> = [];
+    const uploadedFiles = new Map<string, BotApiUploadedFile>();
     for (const [name, value] of formData) {
-      // No implemented method accepts a file.
-      if (typeof value !== 'string') {
-        return { decoded: false, description: 'Bad Request: file uploads are not supported' };
+      if (typeof value === 'string') {
+        parameterEntries.push([name, value]);
+      } else if (!uploadedFiles.has(name)) {
+        uploadedFiles.set(name, {
+          fileName: value.name,
+          content: new Uint8Array(await value.arrayBuffer()),
+        });
       }
-      parameterEntries.push([name, value]);
     }
-    return { decoded: true, parameterEntries };
+    return { decoded: true, parameterEntries, uploadedFiles };
   }
 
   const body = await request.text();
   if (body.length === 0) {
-    return { decoded: true, parameterEntries: [] };
+    return { decoded: true, parameterEntries: [], uploadedFiles: NO_UPLOADED_FILES };
   }
   if (mediaType === URL_ENCODED_FORM_MEDIA_TYPE) {
-    return { decoded: true, parameterEntries: [...new URLSearchParams(body)] };
+    return {
+      decoded: true,
+      parameterEntries: [...new URLSearchParams(body)],
+      uploadedFiles: NO_UPLOADED_FILES,
+    };
   }
   if (mediaType === JSON_MEDIA_TYPE) {
     return decodeJsonObjectParameterEntries(body);
@@ -112,6 +146,7 @@ function decodeJsonObjectParameterEntries(body: string): BodyParameterEntriesDec
       name,
       typeof value === 'string' ? value : JSON.stringify(value),
     ]),
+    uploadedFiles: NO_UPLOADED_FILES,
   };
 }
 
