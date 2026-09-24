@@ -354,3 +354,36 @@ const OPT_IN_UPDATE_TYPES: readonly BotApiUpdateType[] = [
 export const DEFAULT_ALLOWED_UPDATE_TYPES: ReadonlySet<BotApiUpdateType> = new Set(
   BOT_API_UPDATE_TYPES.filter((updateType) => !OPT_IN_UPDATE_TYPES.includes(updateType)),
 );
+
+/**
+ * Interprets `allowed_updates` as Telegram's `get_allowed_update_types` does: names match
+ * case-insensitively, unrecognized names are ignored, and a list with no recognized name selects
+ * the default subscription.
+ */
+export function resolveAllowedUpdateTypes(
+  requestedUpdateTypeNames: readonly string[],
+): ReadonlySet<BotApiUpdateType> {
+  const requestedNames = new Set(requestedUpdateTypeNames.map((name) => name.toLowerCase()));
+  const allowedUpdateTypes = new Set(
+    BOT_API_UPDATE_TYPES.filter((updateType) => requestedNames.has(updateType)),
+  );
+  return allowedUpdateTypes.size === 0 ? DEFAULT_ALLOWED_UPDATE_TYPES : allowedUpdateTypes;
+}
+
+/**
+ * A bot's webhook as `getWebhookInfo` reports it, with fields in the official Bot API server's
+ * order. Telegram also reports the IP address it resolved the webhook host to, which the emulator
+ * does not resolve. The emulator accepts no custom certificate, so it never reports one.
+ */
+export interface BotApiWebhookInfo {
+  /** Empty when the bot has no webhook. */
+  readonly url: string;
+  readonly has_custom_certificate: false;
+  readonly pending_update_count: number;
+  readonly last_error_date?: number;
+  readonly last_error_message?: string;
+  /** Reported only while a webhook is set. */
+  readonly max_connections?: number;
+  /** Reported only for a subscription other than the default. */
+  readonly allowed_updates?: readonly BotApiUpdateType[];
+}

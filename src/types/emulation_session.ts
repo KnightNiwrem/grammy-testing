@@ -27,8 +27,9 @@ export interface EmulationSession {
   readonly mediaFiles: MediaFileService;
   readonly botApi: BotApiService;
   /**
-   * Stops the session from keeping requests waiting: held long polls are answered and later ones
-   * are not held. Requests that are already running complete against the session's state.
+   * Stops the session from keeping requests waiting and from delivering updates: held long polls
+   * are answered, later ones are not held, and webhooks stop, including requests in flight.
+   * Requests that are already running complete against the session's state.
    */
   end(): void;
 }

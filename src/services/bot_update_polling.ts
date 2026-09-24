@@ -1,8 +1,7 @@
 import {
-  BOT_API_UPDATE_TYPES,
   type BotApiUpdate,
   type BotApiUpdateType,
-  DEFAULT_ALLOWED_UPDATE_TYPES,
+  resolveAllowedUpdateTypes,
 } from '../types/bot_api.ts';
 
 export interface GetUpdatesRequest {
@@ -14,9 +13,12 @@ export interface GetUpdatesRequest {
   readonly signal?: AbortSignal;
 }
 
+/** Why a held long poll ended without reading updates. */
+type LongPollTerminationReason = 'terminated_by_other_long_poll' | 'terminated_by_webhook';
+
 export type GetUpdatesResult =
   | { readonly retrieved: true; readonly updates: readonly BotApiUpdate[] }
-  | { readonly retrieved: false; readonly reason: 'terminated_by_other_long_poll' };
+  | { readonly retrieved: false; readonly reason: LongPollTerminationReason };
 
 interface PendingUpdateQueue {
   resolveFirstUnconfirmedUpdateId(botId: number, offset: number | undefined): number | undefined;
@@ -34,6 +36,12 @@ interface BotUpdateSubscriptionStore {
   setAllowedUpdateTypes(botId: number, allowedUpdateTypes: ReadonlySet<BotApiUpdateType>): void;
 }
 
+interface HeldLongPoll {
+  /** Aborted to terminate the long poll. */
+  readonly controller: AbortController;
+  terminationReason?: LongPollTerminationReason;
+}
+
 interface BotUpdatePollingServiceDependencies {
   readonly botUpdates: PendingUpdateQueue;
   readonly updateSubscriptions: BotUpdateSubscriptionStore;
@@ -46,8 +54,7 @@ interface BotUpdatePollingServiceDependencies {
 export class BotUpdatePollingService {
   readonly #botUpdates: PendingUpdateQueue;
   readonly #updateSubscriptions: BotUpdateSubscriptionStore;
-  /** Aborting a bot's controller terminates the long poll it holds. */
-  readonly #heldLongPollsByBotId = new Map<number, AbortController>();
+  readonly #heldLongPollsByBotId = new Map<number, HeldLongPoll>();
   /**
    * Aborted when long polling ends. Kept apart from the held long poll controllers so that the end
    * of polling is never reported as a conflict with another long poll.
@@ -97,7 +104,7 @@ export class BotUpdatePollingService {
     }
 
     const heldLongPoll = this.#holdLongPoll(botId);
-    const waitEndingSignals = [heldLongPoll.signal, this.#longPollingEnd.signal];
+    const waitEndingSignals = [heldLongPoll.controller.signal, this.#longPollingEnd.signal];
     if (signal !== undefined) {
       waitEndingSignals.push(signal);
     }
@@ -112,8 +119,8 @@ export class BotUpdatePollingService {
       }
     }
 
-    if (heldLongPoll.signal.aborted) {
-      return { retrieved: false, reason: 'terminated_by_other_long_poll' };
+    if (heldLongPoll.terminationReason !== undefined) {
+      return { retrieved: false, reason: heldLongPoll.terminationReason };
     }
     return {
       retrieved: true,
@@ -132,26 +139,25 @@ export class BotUpdatePollingService {
     this.#longPollingEnd.abort();
   }
 
+  /** Terminates the bot's held long poll, as setting a webhook does on Telegram. */
+  terminateLongPollForWebhook(botId: number): void {
+    this.#terminateHeldLongPoll(botId, 'terminated_by_webhook');
+  }
+
   /** Terminates the bot's previously held long poll and makes the returned one current. */
-  #holdLongPoll(botId: number): AbortController {
-    this.#heldLongPollsByBotId.get(botId)?.abort();
-    const heldLongPoll = new AbortController();
+  #holdLongPoll(botId: number): HeldLongPoll {
+    this.#terminateHeldLongPoll(botId, 'terminated_by_other_long_poll');
+    const heldLongPoll: HeldLongPoll = { controller: new AbortController() };
     this.#heldLongPollsByBotId.set(botId, heldLongPoll);
     return heldLongPoll;
   }
-}
 
-/**
- * Interprets `allowed_updates` as Telegram's `get_allowed_update_types` does: names match
- * case-insensitively, unrecognized names are ignored, and a list with no recognized name selects
- * the default subscription.
- */
-function resolveAllowedUpdateTypes(
-  requestedUpdateTypeNames: readonly string[],
-): ReadonlySet<BotApiUpdateType> {
-  const requestedNames = new Set(requestedUpdateTypeNames.map((name) => name.toLowerCase()));
-  const allowedUpdateTypes = new Set(
-    BOT_API_UPDATE_TYPES.filter((updateType) => requestedNames.has(updateType)),
-  );
-  return allowedUpdateTypes.size === 0 ? DEFAULT_ALLOWED_UPDATE_TYPES : allowedUpdateTypes;
+  #terminateHeldLongPoll(botId: number, reason: LongPollTerminationReason): void {
+    const heldLongPoll = this.#heldLongPollsByBotId.get(botId);
+    if (heldLongPoll !== undefined) {
+      heldLongPoll.terminationReason = reason;
+      heldLongPoll.controller.abort();
+      this.#heldLongPollsByBotId.delete(botId);
+    }
+  }
 }

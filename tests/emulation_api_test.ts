@@ -5,6 +5,7 @@ import {
 } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/convenience/keyboard.ts';
 import { InputFile } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/types.ts';
 import { GrammyError } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/core/error.ts';
+import { webhookCallback } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/convenience/webhook.ts';
 
 import { createEmulationApi } from '../src/api/mod.ts';
 import { createSessionLifecycleService } from '../src/composition/session_lifecycle.ts';
@@ -549,6 +550,198 @@ Deno.test('deleteWebhook answers as Telegram does for a bot without a webhook', 
   const malformedAnswer = await deleteWebhook({ drop_pending_updates: 'maybe' });
   if (malformedAnswer.status !== 400 || !isBadRequestResponse(malformedAnswer.body)) {
     throw new Error('Expected a malformed drop_pending_updates to be rejected');
+  }
+});
+
+Deno.test('setWebhook, getWebhookInfo, and deleteWebhook follow Telegram checks', async () => {
+  const { api, sessionPath, botApiPath } = await createPrivateConversationFixture();
+  const webhookUrl = 'https://bot.example/webhook';
+  const expectAnswer = (
+    answer: { status: number; body: unknown },
+    expected: { status: number; body: unknown },
+    failureMessage: string,
+  ) => {
+    if (JSON.stringify(answer) !== JSON.stringify(expected)) {
+      throw new Error(`${failureMessage}, received ${JSON.stringify(answer)}`);
+    }
+  };
+  const success = (description: string) => ({
+    status: 200,
+    body: { ok: true, result: true, description },
+  });
+  const failure = (status: number, description: string) => ({
+    status,
+    body: { ok: false, error_code: status, description },
+  });
+
+  try {
+    const heldPoll = callBotApi(api, `${botApiPath}/getUpdates`, { timeout: 50 });
+    expectAnswer(
+      await callBotApi(api, `${botApiPath}/setWebhook`, {
+        url: webhookUrl,
+        secret_token: 'webhook_secret',
+        allowed_updates: ['message'],
+      }),
+      success('Webhook was set'),
+      'Expected setWebhook to set the webhook',
+    );
+    expectAnswer(
+      await heldPoll,
+      failure(409, 'Conflict: terminated by setWebhook request'),
+      'Expected setWebhook to terminate the held long poll',
+    );
+    expectAnswer(
+      await callBotApi(api, `${botApiPath}/getUpdates`, {}),
+      failure(
+        409,
+        "Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first",
+      ),
+      'Expected getUpdates to fail while the webhook is set',
+    );
+    expectAnswer(
+      await callBotApi(api, `${botApiPath}/setWebhook`, {
+        url: webhookUrl,
+        secret_token: 'webhook_secret',
+      }),
+      success('Webhook is already set'),
+      'Expected an unchanged webhook to be already set',
+    );
+    expectAnswer(
+      await callBotApi(api, `${botApiPath}/getWebhookInfo`, {}),
+      {
+        status: 200,
+        body: {
+          ok: true,
+          result: {
+            url: webhookUrl,
+            has_custom_certificate: false,
+            pending_update_count: 0,
+            max_connections: 40,
+            allowed_updates: ['message'],
+          },
+        },
+      },
+      'Expected getWebhookInfo to report the webhook and its subscription',
+    );
+
+    const rejections: Array<[Record<string, unknown>, string]> = [
+      [{ url: 'ftp://bot.example/webhook' }, 'Bad Request: invalid webhook URL specified'],
+      [
+        { url: webhookUrl, secret_token: 'not allowed' },
+        'Bad Request: secret token contains illegal characters',
+      ],
+      [
+        { url: webhookUrl, ip_address: '203.0.113.1' },
+        'Bad Request: webhook IP addresses are not supported',
+      ],
+      [{ url: webhookUrl, max_connections: 'many' }, 'Bad Request: invalid setWebhook parameters'],
+    ];
+    for (const [parameters, description] of rejections) {
+      expectAnswer(
+        await callBotApi(api, `${botApiPath}/setWebhook`, parameters),
+        failure(400, description),
+        `Expected setWebhook to reject ${JSON.stringify(parameters)}`,
+      );
+    }
+    expectAnswer(
+      await callBotApiWithFiles(api, `${botApiPath}/setWebhook`, { url: webhookUrl }, {
+        certificate: new File(['certificate'], 'certificate.pem'),
+      }),
+      failure(400, 'Bad Request: custom webhook certificates are not supported'),
+      'Expected setWebhook to reject a custom certificate',
+    );
+
+    // Telegram clamps max_connections to its range.
+    await callBotApi(api, `${botApiPath}/setWebhook`, { url: webhookUrl, max_connections: 1000 });
+    const { body: clampedInfo } = await callBotApi(api, `${botApiPath}/getWebhookInfo`, {});
+    if (botApiResult(clampedInfo)?.max_connections !== 100) {
+      throw new Error('Expected max_connections to be clamped to 100');
+    }
+
+    expectAnswer(
+      await callBotApi(api, `${botApiPath}/deleteWebhook`, {}),
+      success('Webhook was deleted'),
+      'Expected deleteWebhook to delete the webhook',
+    );
+    expectAnswer(
+      await callBotApi(api, `${botApiPath}/deleteWebhook`, {}),
+      success('Webhook is already deleted'),
+      'Expected a second deleteWebhook to find no webhook',
+    );
+    const { status: pollingStatus } = await callBotApi(api, `${botApiPath}/getUpdates`, {});
+    if (pollingStatus !== 200) {
+      throw new Error(`Expected getUpdates to work after deleteWebhook, received ${pollingStatus}`);
+    }
+  } finally {
+    await api.request(sessionPath, { method: 'DELETE' });
+  }
+});
+
+Deno.test('a grammY bot receives updates through its webhook and replies', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const firstReply = Promise.withResolvers<void>();
+  grammyBot.command('start', async (context) => {
+    await context.reply(`Hello, ${context.from?.first_name}!`);
+    firstReply.resolve();
+  });
+  const handleWebhookRequest = webhookCallback(grammyBot, 'std/http', {
+    secretToken: 'webhook_secret',
+  });
+  // Deno.serve passes no request to a handler that declares no parameter, as grammY's does.
+  const webhookServer = Deno.serve(
+    { hostname: '127.0.0.1', port: 0, onListen: () => {} },
+    (request) => handleWebhookRequest(request),
+  );
+  const webhookUrl = `http://127.0.0.1:${webhookServer.addr.port}/webhook`;
+
+  try {
+    await grammyBot.api.setWebhook(webhookUrl, { secret_token: 'webhook_secret' });
+    await sendText('/start');
+    await expectSettlementWithin(
+      firstReply.promise,
+      5_000,
+      'Expected the bot to reply to a command delivered to its webhook',
+    );
+    const historyBody: unknown = await (await api.request(
+      `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/messages`,
+    )).json();
+    if (
+      !isMessageHistoryResponse(historyBody) ||
+      JSON.stringify(historyBody.messages.map(({ text }) => text)) !==
+        JSON.stringify(['/start', 'Hello, Ada!'])
+    ) {
+      throw new Error('Expected history to hold the command and the bot reply');
+    }
+
+    // The bot rejects updates without its secret token, which the test reads from getWebhookInfo.
+    await grammyBot.api.setWebhook(webhookUrl, { secret_token: 'other_secret' });
+    await sendText('/start again');
+    const lastErrorMessage = await expectSettlementWithin(
+      (async () => {
+        for (;;) {
+          const { last_error_message } = await grammyBot.api.getWebhookInfo();
+          if (last_error_message !== undefined) {
+            return last_error_message;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      })(),
+      1_000,
+      'Expected the rejected update to be reported',
+    );
+    if (lastErrorMessage !== 'Wrong response from the webhook: 401 Unauthorized') {
+      throw new Error(`Expected the bot to reject the wrong secret, received ${lastErrorMessage}`);
+    }
+  } finally {
+    await api.request(sessionPath, { method: 'DELETE' });
+    await webhookServer.shutdown();
   }
 });
 

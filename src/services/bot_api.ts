@@ -7,6 +7,7 @@ import type {
   BotApiMessage,
   BotApiPrivateMessage,
   BotApiSupergroupMessage,
+  BotApiWebhookInfo,
 } from '../types/bot_api.ts';
 import type { BotCommand, BotCommandLanguageCode, BotCommandScope } from '../types/bot_command.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
@@ -23,6 +24,12 @@ import type { ChatAction } from '../types/virtual_chat.ts';
 import type { PrivateMessage, SupergroupMessage, TextEntity } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
 import type {
+  DeleteWebhookOutcome,
+  DeleteWebhookRequest,
+  SetWebhookRequest,
+  SetWebhookResult,
+} from './bot_webhook.ts';
+import type {
   BanChatMemberResult,
   GetChatAdministratorsResult,
   GetChatMemberCountResult,
@@ -37,10 +44,6 @@ import type {
   OutgoingPhoto,
   TextInvalidFailure,
 } from './message_content.ts';
-
-export interface DeleteWebhookRequest {
-  readonly dropPendingUpdates: boolean;
-}
 
 /** The most UTF-8 bytes of text the Bot API reads before applying its formatting. */
 const MAX_FORMATTED_TEXT_BYTES = 1 << 15;
@@ -386,11 +389,20 @@ interface BotCredentialLookup {
 
 interface BotUpdatePolling {
   getUpdates(botId: number, request: GetUpdatesRequest): Promise<GetUpdatesResult>;
+  terminateLongPollForWebhook(botId: number): void;
 }
 
-interface PendingBotUpdates {
-  discardPendingUpdates(botId: number): void;
+interface BotWebhooks {
+  hasWebhook(botId: number): boolean;
+  setWebhook(botId: number, request: SetWebhookRequest): SetWebhookResult;
+  deleteWebhook(botId: number, request: DeleteWebhookRequest): DeleteWebhookOutcome;
+  getWebhookInfo(botId: number): BotApiWebhookInfo;
 }
+
+/** The result of `getUpdates`, which fails while the bot has a webhook. */
+export type BotApiGetUpdatesResult =
+  | GetUpdatesResult
+  | { readonly retrieved: false; readonly reason: 'webhook_active' };
 
 interface BotPrivateChat {
   readonly type: 'private';
@@ -740,7 +752,7 @@ interface BotMessageViews {
 interface BotApiServiceDependencies {
   readonly bots: BotCredentialLookup;
   readonly updatePolling: BotUpdatePolling;
-  readonly pendingUpdates: PendingBotUpdates;
+  readonly webhooks: BotWebhooks;
   readonly botMessages: BotMessaging;
   readonly supergroupBotMessages: SupergroupBotMessaging;
   readonly chatMemberships: ChatMemberships;
@@ -761,7 +773,7 @@ interface BotApiServiceDependencies {
 export class BotApiService {
   readonly #bots: BotCredentialLookup;
   readonly #updatePolling: BotUpdatePolling;
-  readonly #pendingUpdates: PendingBotUpdates;
+  readonly #webhooks: BotWebhooks;
   readonly #botMessages: BotMessaging;
   readonly #supergroupBotMessages: SupergroupBotMessaging;
   readonly #chatMemberships: ChatMemberships;
@@ -774,7 +786,7 @@ export class BotApiService {
     {
       bots,
       updatePolling,
-      pendingUpdates,
+      webhooks,
       botMessages,
       supergroupBotMessages,
       chatMemberships,
@@ -786,7 +798,7 @@ export class BotApiService {
   ) {
     this.#bots = bots;
     this.#updatePolling = updatePolling;
-    this.#pendingUpdates = pendingUpdates;
+    this.#webhooks = webhooks;
     this.#botMessages = botMessages;
     this.#supergroupBotMessages = supergroupBotMessages;
     this.#chatMemberships = chatMemberships;
@@ -801,25 +813,42 @@ export class BotApiService {
     return this.#bots.getByToken(token)?.profile;
   }
 
-  /** Polls the authenticated bot's pending updates. */
-  getUpdates(
+  /**
+   * Polls the authenticated bot's pending updates. As on Telegram, a bot with a webhook cannot
+   * poll, and its subscription is left unchanged.
+   */
+  async getUpdates(
     authenticatedBot: VirtualBotProfile,
     request: GetUpdatesRequest,
-  ): Promise<GetUpdatesResult> {
-    return this.#updatePolling.getUpdates(authenticatedBot.id, request);
+  ): Promise<BotApiGetUpdatesResult> {
+    if (this.#webhooks.hasWebhook(authenticatedBot.id)) {
+      return { retrieved: false, reason: 'webhook_active' };
+    }
+    return await this.#updatePolling.getUpdates(authenticatedBot.id, request);
   }
 
   /**
-   * Bots here never have a webhook, so, as on Telegram when none is set, this only discards
-   * pending updates when asked to. A held long poll is left running, as Telegram does.
+   * Sets the authenticated bot's webhook, or deletes it for an empty URL. As on Telegram, setting
+   * a new webhook terminates the bot's held long poll.
    */
+  setWebhook(authenticatedBot: VirtualBotProfile, request: SetWebhookRequest): SetWebhookResult {
+    const result = this.#webhooks.setWebhook(authenticatedBot.id, request);
+    if (result.accepted && result.outcome === 'webhook_set') {
+      this.#updatePolling.terminateLongPollForWebhook(authenticatedBot.id);
+    }
+    return result;
+  }
+
+  /** Deletes the authenticated bot's webhook. A held long poll is left running, as on Telegram. */
   deleteWebhook(
     authenticatedBot: VirtualBotProfile,
-    { dropPendingUpdates }: DeleteWebhookRequest,
-  ): void {
-    if (dropPendingUpdates) {
-      this.#pendingUpdates.discardPendingUpdates(authenticatedBot.id);
-    }
+    request: DeleteWebhookRequest,
+  ): DeleteWebhookOutcome {
+    return this.#webhooks.deleteWebhook(authenticatedBot.id, request);
+  }
+
+  getWebhookInfo(authenticatedBot: VirtualBotProfile): BotApiWebhookInfo {
+    return this.#webhooks.getWebhookInfo(authenticatedBot.id);
   }
 
   /**

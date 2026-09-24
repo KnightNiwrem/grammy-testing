@@ -41,6 +41,19 @@ Telegram does in private chats with bots, the emulator marks bot commands such a
 detects, such as URLs and mentions, are not detected yet, and date and time entities are not
 supported.
 
+Bots can receive updates through a webhook instead of `getUpdates`, as bots deployed with grammY's
+`webhookCallback` do. After `setWebhook`, the emulator posts each update to the webhook URL as JSON,
+with the `X-Telegram-Bot-Api-Secret-Token` header when the bot set a `secret_token`, and confirms
+the update once the webhook answers with a 2xx status. As on Telegram, a failed update is sent again
+at once and then after growing delays, `getWebhookInfo` reports the pending updates and the latest
+failure, such as `Wrong response from the webhook: 500 Internal Server Error`, `getUpdates` fails
+with `409 Conflict` while a webhook is set, and setting one ends the bot's waiting long poll. Unlike
+Telegram, the emulator accepts plain HTTP URLs on any port, so a test can run the bot's webhook
+server on its own machine, and it sends one update at a time, so a failing update holds back later
+ones, where Telegram sends updates of different chats in parallel. It does not run a Bot API method
+that a webhook names in its response, as Telegram does, and does not support `ip_address` or custom
+certificates. Ending a session stops its webhooks.
+
 Bots and accounts also exchange photos and documents with captions. A bot sends them with
 `sendPhoto` and `sendDocument`, uploading a file as a multipart part, directly or through
 `attach://`, or reusing one by its `file_id`; `editMessageCaption` edits a caption. As on Telegram,

@@ -24,7 +24,8 @@
           "src/types/reply_interface.ts",
           "src/types/bot_api.ts",
           "src/types/telegram_identity.ts",
-          "src/types/bot_command.ts"
+          "src/types/bot_command.ts",
+          "src/types/bot_webhook.ts"
         ]
       },
       {
@@ -79,6 +80,12 @@
         "name": "bot-update-subscription-repository",
         "patterns": [
           "src/repositories/bot_update_subscription.ts"
+        ]
+      },
+      {
+        "name": "bot-webhook-repository",
+        "patterns": [
+          "src/repositories/bot_webhook.ts"
         ]
       },
       {
@@ -168,6 +175,12 @@
         ]
       },
       {
+        "name": "webhook-delivery",
+        "patterns": [
+          "src/services/bot_webhook.ts"
+        ]
+      },
+      {
         "name": "bot-api-service",
         "patterns": [
           "src/services/bot_api.ts"
@@ -250,6 +263,12 @@
       },
       {
         "from": "bot-update-subscription-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
+        "from": "bot-webhook-repository",
         "allow": [
           "domain"
         ]
@@ -346,6 +365,12 @@
         ]
       },
       {
+        "from": "webhook-delivery",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "bot-api-service",
         "allow": [
           "domain",
@@ -354,6 +379,7 @@
         ],
         "allowTypeOnly": [
           "update-polling",
+          "webhook-delivery",
           "domain-services"
         ]
       },
@@ -377,6 +403,7 @@
           "message-box-repository",
           "bot-update-repository",
           "bot-update-subscription-repository",
+          "bot-webhook-repository",
           "callback-query-repository",
           "bot-command-repository",
           "blocked-user-repository",
@@ -387,6 +414,7 @@
           "bot-message-view",
           "update-delivery",
           "update-polling",
+          "webhook-delivery",
           "bot-api-service",
           "application-services",
           "session",

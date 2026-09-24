@@ -5,6 +5,7 @@ import { BotRepository } from '../repositories/bot.ts';
 import { BotCommandRepository } from '../repositories/bot_command.ts';
 import { BotUpdateRepository } from '../repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../repositories/bot_update_subscription.ts';
+import { BotWebhookRepository } from '../repositories/bot_webhook.ts';
 import { CallbackQueryRepository } from '../repositories/callback_query.ts';
 import { FileRepository } from '../repositories/file.ts';
 import { MessageRepository } from '../repositories/message.ts';
@@ -18,6 +19,7 @@ import { BotCommandService } from '../services/bot_command.ts';
 import { BotMessageViewService } from '../services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../services/bot_update_polling.ts';
+import { BotWebhookService } from '../services/bot_webhook.ts';
 import { CallbackQueryService } from '../services/callback_query.ts';
 import { MediaFileService } from '../services/media_file.ts';
 import { PrivateMessagingService } from '../services/private_messaging.ts';
@@ -112,10 +114,17 @@ export function createEmulationSession(id: string): EmulationSession {
   });
 
   const botUpdatePolling = new BotUpdatePollingService({ botUpdates, updateSubscriptions });
+  const botWebhooks = new BotWebhookService({
+    webhooks: new BotWebhookRepository(),
+    pendingUpdates: botUpdates,
+    updateSubscriptions,
+    sendWebhookRequest: (request) => fetch(request),
+    currentUnixTimeSeconds,
+  });
   const botApi = new BotApiService({
     bots,
     updatePolling: botUpdatePolling,
-    pendingUpdates: botUpdates,
+    webhooks: botWebhooks,
     botMessages: privateMessaging,
     supergroupBotMessages: supergroupMessaging,
     chatMemberships: sharedChatAdministration,
@@ -137,6 +146,9 @@ export function createEmulationSession(id: string): EmulationSession {
     botMessageViews,
     mediaFiles,
     botApi,
-    end: () => botUpdatePolling.endLongPolling(),
+    end: () => {
+      botUpdatePolling.endLongPolling();
+      botWebhooks.endDelivery();
+    },
   };
 }

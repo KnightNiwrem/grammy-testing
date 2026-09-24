@@ -4,6 +4,7 @@ import { BotRepository } from '../src/repositories/bot.ts';
 import { BotCommandRepository } from '../src/repositories/bot_command.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
+import { BotWebhookRepository } from '../src/repositories/bot_webhook.ts';
 import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
 import { FileRepository } from '../src/repositories/file.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
@@ -18,6 +19,7 @@ import { MediaFileService } from '../src/services/media_file.ts';
 import { SharedChatAdministrationService } from '../src/services/shared_chat_administration.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../src/services/bot_update_polling.ts';
+import { BotWebhookService } from '../src/services/bot_webhook.ts';
 import { CallbackQueryService } from '../src/services/callback_query.ts';
 import { PrivateMessagingService } from '../src/services/private_messaging.ts';
 import { SupergroupMessagingService } from '../src/services/supergroup_messaging.ts';
@@ -197,7 +199,13 @@ function createBotApiFixture() {
   const botApi = new BotApiService({
     bots,
     updatePolling: new BotUpdatePollingService({ botUpdates, updateSubscriptions }),
-    pendingUpdates: botUpdates,
+    webhooks: new BotWebhookService({
+      webhooks: new BotWebhookRepository(),
+      pendingUpdates: botUpdates,
+      updateSubscriptions,
+      sendWebhookRequest: () => Promise.reject(new Error('Unexpected webhook request')),
+      currentUnixTimeSeconds: () => 1_700_000_000,
+    }),
     botMessages: privateMessaging,
     supergroupBotMessages: supergroupMessaging,
     chatMemberships: new SharedChatAdministrationService({

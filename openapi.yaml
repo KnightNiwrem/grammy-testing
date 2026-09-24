@@ -731,9 +731,72 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '409':
           description: >-
-            Another getUpdates request for the same bot began waiting for updates while this one
-            was waiting, and replaced it. A bot has at most one waiting request; requests answered
+            The bot has a webhook, so it cannot poll; or, while this request was waiting for
+            updates, another getUpdates request for the same bot began waiting and replaced it, or
+            the bot set a webhook. A bot has at most one waiting request; requests answered
             immediately do not replace it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/setWebhook:
+    description: >-
+      Telegram Bot API method for delivering the bot's updates to a webhook, or, with an empty URL,
+      for removing it. The emulator posts each update to the URL as JSON, with the
+      `X-Telegram-Bot-Api-Secret-Token` header when a secret token is set, one update at a time
+      and in order, and confirms it once the webhook answers with a 2xx status. A failed update
+      is sent again at once, then after delays doubling from 2 up to 60 seconds, and holds back
+      later updates. Unlike Telegram, the emulator delivers to plain HTTP URLs on any port, and
+      ignores a Bot API method that the webhook names in its response. Setting a new webhook
+      ends the bot's waiting getUpdates request with a conflict. Ending the session stops
+      delivery; undelivered updates stay pending.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: setWebhook
+      summary: Set, replace, or remove the authenticated virtual bot's webhook
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetWebhookRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SetWebhookRequest'
+            encoding:
+              allowed_updates:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SetWebhookRequest'
+            encoding:
+              allowed_updates:
+                contentType: application/json
+      responses:
+        '200':
+          description: >-
+            The webhook was set, removed, or already as requested. A request that changes no
+            webhook still applies `allowed_updates`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetWebhookResponse'
+        '400':
+          description: >-
+            The request body cannot be decoded, the parameters are invalid, the URL is not an HTTP
+            or HTTPS URL, or the secret token is too long or has characters Telegram does not
+            allow. The emulator also rejects `ip_address` and a custom `certificate`, which it
+            does not support. A rejected request leaves the webhook unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
           content:
             application/json:
               schema:
@@ -742,15 +805,15 @@ paths:
           description: No active test session has the supplied identifier.
   /sessions/{sessionId}/bot-api/bot{token}/deleteWebhook:
     description: >-
-      Telegram Bot API method for removing the bot's webhook. Virtual bots never have a webhook,
-      so the method only discards pending updates when asked to. A waiting getUpdates request is
-      not interrupted.
+      Telegram Bot API method for removing the bot's webhook, as setWebhook does with an empty
+      URL. Undelivered updates stay pending unless dropped, and a waiting getUpdates request is not
+      interrupted.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
     post:
       operationId: deleteWebhook
-      summary: Confirm that the authenticated virtual bot has no webhook
+      summary: Remove the authenticated virtual bot's webhook
       requestBody:
         required: false
         content:
@@ -772,6 +835,37 @@ paths:
                 $ref: '#/components/schemas/DeleteWebhookResponse'
         '400':
           description: The request body cannot be decoded, or the deleteWebhook parameters are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/getWebhookInfo:
+    description: >-
+      Telegram Bot API method for reading the bot's webhook, its pending updates, and the latest
+      failure to deliver to it, which a test can read to find why a bot's webhook rejects updates.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getWebhookInfo
+      summary: Return the authenticated virtual bot's webhook status
+      responses:
+        '200':
+          description: The webhook status; a bot without a webhook has an empty URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetWebhookInfoResponse'
+        '400':
+          description: The request body cannot be decoded, or getWebhookInfo received a parameter.
           content:
             application/json:
               schema:
@@ -3318,7 +3412,111 @@ components:
           const: true
         description:
           type: string
-          const: Webhook is already deleted
+          enum:
+            - Webhook was deleted
+            - Webhook is already deleted
+    SetWebhookRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+          default: ''
+          description: >-
+            Where to post updates: an HTTP or HTTPS URL, with a missing scheme meaning HTTPS.
+            Credentials in the URL are sent as a Basic `Authorization` header. An empty URL
+            removes the webhook.
+        max_connections:
+          type: integer
+          default: 40
+          description: >-
+            Reported by getWebhookInfo; values outside 1 to 100 are clamped, as on Telegram. The
+            emulator sends one update at a time regardless.
+        allowed_updates:
+          description: >-
+            Update types the bot subscribes to, as for getUpdates. Omitting it keeps the current
+            subscription.
+          type: array
+          items:
+            type: string
+        drop_pending_updates:
+          type: boolean
+          default: false
+          description: >-
+            Discards the bot's pending updates, as for deleteWebhook. A request that drops
+            updates always restarts delivery.
+        secret_token:
+          type: string
+          maxLength: 256
+          pattern: '^[A-Za-z0-9_-]*$'
+          default: ''
+          description: Sent in the `X-Telegram-Bot-Api-Secret-Token` header of every webhook request.
+    SetWebhookResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+        - description
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: boolean
+          const: true
+        description:
+          type: string
+          enum:
+            - Webhook was set
+            - Webhook is already set
+            - Webhook was deleted
+            - Webhook is already deleted
+    WebhookInfo:
+      type: object
+      additionalProperties: false
+      required:
+        - url
+        - has_custom_certificate
+        - pending_update_count
+      properties:
+        url:
+          type: string
+          description: The webhook URL as the bot specified it; empty without a webhook.
+        has_custom_certificate:
+          type: boolean
+          const: false
+        pending_update_count:
+          type: integer
+          description: Updates not yet delivered to the webhook or confirmed through getUpdates.
+        last_error_date:
+          type: integer
+          description: Unix time of the latest failure to deliver an update to the current webhook.
+        last_error_message:
+          type: string
+          description: >-
+            Telegram's description of that failure, such as `Wrong response from the webhook: 500
+            Internal Server Error` or `Can't connect to the webhook`.
+        max_connections:
+          type: integer
+          description: Present while a webhook is set.
+        allowed_updates:
+          type: array
+          items:
+            type: string
+          description: The bot's subscription, present only when it differs from Telegram's default.
+    GetWebhookInfoResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          $ref: '#/components/schemas/WebhookInfo'
     SendMessageRequest:
       type: object
       additionalProperties: false

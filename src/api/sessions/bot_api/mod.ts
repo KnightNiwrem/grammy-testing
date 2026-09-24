@@ -56,9 +56,38 @@ const BOT_FILE_DOWNLOAD_PATH =
 /** Telegram's wording, from `abort_long_poll` in the official Bot API server. */
 const TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION =
   'Conflict: terminated by other getUpdates request; make sure that only one bot instance is running';
+const TERMINATED_BY_WEBHOOK_DESCRIPTION = 'Conflict: terminated by setWebhook request';
+const WEBHOOK_ACTIVE_DESCRIPTION =
+  "Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first";
 
-/** Telegram's answer to deleteWebhook when no webhook is set, which is always so here. */
-const WEBHOOK_ALREADY_DELETED_DESCRIPTION = 'Webhook is already deleted';
+/** Telegram's answers to setWebhook and deleteWebhook, by what the request did. */
+const SET_WEBHOOK_OUTCOME_DESCRIPTIONS = {
+  webhook_set: 'Webhook was set',
+  webhook_already_set: 'Webhook is already set',
+  webhook_deleted: 'Webhook was deleted',
+  webhook_already_deleted: 'Webhook is already deleted',
+} as const;
+
+/** Telegram's descriptions for rejected setWebhook requests. */
+const SET_WEBHOOK_REJECTION_DESCRIPTIONS = {
+  url_invalid: 'Bad Request: invalid webhook URL specified',
+  secret_token_too_long: 'Bad Request: secret token is too long',
+  secret_token_invalid: 'Bad Request: secret token contains illegal characters',
+} as const;
+
+/**
+ * The emulator's descriptions for webhook options it does not support: Telegram connects to a
+ * webhook at a given IP address, or trusts its self-signed certificate.
+ */
+const WEBHOOK_IP_ADDRESS_UNSUPPORTED_DESCRIPTION =
+  'Bad Request: webhook IP addresses are not supported';
+const WEBHOOK_CERTIFICATE_UNSUPPORTED_DESCRIPTION =
+  'Bad Request: custom webhook certificates are not supported';
+
+/** Telegram's default and range for `max_connections`, to which it clamps other values. */
+const DEFAULT_WEBHOOK_MAX_CONNECTIONS = 40;
+const MIN_WEBHOOK_MAX_CONNECTIONS = 1;
+const MAX_WEBHOOK_MAX_CONNECTIONS = 100;
 
 /** Telegram's descriptions for rejected sendMessage requests. */
 const MESSAGE_TEXT_EMPTY_DESCRIPTION = 'Bad Request: message text is empty';
@@ -201,6 +230,23 @@ const getMeParametersSchema = z.strictObject({});
 const deleteWebhookParametersSchema = z.strictObject({
   drop_pending_updates: booleanParameter().default(false),
 });
+
+const setWebhookParametersSchema = z.strictObject({
+  url: z.string().default(''),
+  certificate: z.string().optional(),
+  ip_address: z.string().default(''),
+  max_connections: integerParameter(
+    z.int().transform((maxConnections) =>
+      Math.min(Math.max(maxConnections, MIN_WEBHOOK_MAX_CONNECTIONS), MAX_WEBHOOK_MAX_CONNECTIONS)
+    ),
+  ).default(DEFAULT_WEBHOOK_MAX_CONNECTIONS),
+  // As for getUpdates, a malformed value is rejected rather than ignored.
+  allowed_updates: jsonParameter(z.array(z.string())).optional(),
+  drop_pending_updates: booleanParameter().default(false),
+  secret_token: z.string().default(''),
+});
+
+const getWebhookInfoParametersSchema = z.strictObject({});
 
 /**
  * Link preview parameters, which the emulator validates and ignores because it generates no link
@@ -460,6 +506,7 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['getme', handleGetMe],
   ['getmycommands', handleGetMyCommands],
   ['getupdates', handleGetUpdates],
+  ['getwebhookinfo', handleGetWebhookInfo],
   // Telegram's older name for banChatMember.
   ['kickchatmember', handleBanChatMember],
   ['leavechat', handleLeaveChat],
@@ -468,6 +515,7 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['sendmessage', handleSendMessage],
   ['sendphoto', handleSendPhoto],
   ['setmycommands', handleSetMyCommands],
+  ['setwebhook', handleSetWebhook],
   ['unbanchatmember', handleUnbanChatMember],
 ]);
 
@@ -560,9 +608,74 @@ async function handleGetUpdates(
   if (!result.retrieved) {
     // Telegram delays a conflict by 3 seconds when another occurred within the previous 3
     // seconds; the emulator answers immediately to keep tests fast.
-    return botApiError(context, 409, TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION);
+    const { reason } = result;
+    switch (reason) {
+      case 'terminated_by_other_long_poll':
+        return botApiError(context, 409, TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION);
+      case 'terminated_by_webhook':
+        return botApiError(context, 409, TERMINATED_BY_WEBHOOK_DESCRIPTION);
+      case 'webhook_active':
+        return botApiError(context, 409, WEBHOOK_ACTIVE_DESCRIPTION);
+      default: {
+        const unhandledReason: never = reason;
+        throw new Error(`Unhandled getUpdates failure: ${unhandledReason}`);
+      }
+    }
   }
   return context.json({ ok: true as const, result: result.updates });
+}
+
+function handleSetWebhook(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+  uploadedFiles: BotApiUploadedFiles,
+): Response {
+  const parsedParameters = setWebhookParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid setWebhook parameters');
+  }
+  const { data } = parsedParameters;
+  if (data.ip_address.length > 0) {
+    return botApiError(context, 400, WEBHOOK_IP_ADDRESS_UNSUPPORTED_DESCRIPTION);
+  }
+  // Telegram reads the certificate from a part of that name or through `attach://`.
+  const specifiesCertificate = (data.certificate !== undefined && data.certificate.length > 0) ||
+    uploadedFiles.has('certificate');
+  if (specifiesCertificate) {
+    return botApiError(context, 400, WEBHOOK_CERTIFICATE_UNSUPPORTED_DESCRIPTION);
+  }
+
+  const result = context.get('emulationSession').botApi.setWebhook(
+    context.get('authenticatedBot'),
+    {
+      url: data.url,
+      secretToken: data.secret_token,
+      maxConnections: data.max_connections,
+      allowedUpdates: data.allowed_updates,
+      dropPendingUpdates: data.drop_pending_updates,
+    },
+  );
+  if (!result.accepted) {
+    return botApiError(context, 400, SET_WEBHOOK_REJECTION_DESCRIPTIONS[result.reason]);
+  }
+  return context.json({
+    ok: true as const,
+    result: true as const,
+    description: SET_WEBHOOK_OUTCOME_DESCRIPTIONS[result.outcome],
+  });
+}
+
+function handleGetWebhookInfo(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  if (!getWebhookInfoParametersSchema.safeParse(parameters).success) {
+    return botApiError(context, 400, 'Bad Request: invalid getWebhookInfo parameters');
+  }
+  return context.json({
+    ok: true as const,
+    result: context.get('emulationSession').botApi.getWebhookInfo(context.get('authenticatedBot')),
+  });
 }
 
 function handleDeleteWebhook(
@@ -574,13 +687,14 @@ function handleDeleteWebhook(
     return botApiError(context, 400, 'Bad Request: invalid deleteWebhook parameters');
   }
 
-  context.get('emulationSession').botApi.deleteWebhook(context.get('authenticatedBot'), {
-    dropPendingUpdates: parsedParameters.data.drop_pending_updates,
-  });
+  const outcome = context.get('emulationSession').botApi.deleteWebhook(
+    context.get('authenticatedBot'),
+    { dropPendingUpdates: parsedParameters.data.drop_pending_updates },
+  );
   return context.json({
     ok: true as const,
     result: true as const,
-    description: WEBHOOK_ALREADY_DELETED_DESCRIPTION,
+    description: SET_WEBHOOK_OUTCOME_DESCRIPTIONS[outcome],
   });
 }
 

@@ -94,6 +94,26 @@ Deno.test('BotUpdatePollingService does not terminate a held long poll for an im
   }
 });
 
+Deno.test('BotUpdatePollingService terminates only the held long poll of a bot setting a webhook', async () => {
+  const { botUpdates, botUpdatePolling } = createPollingFixture();
+  const heldResult = botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 });
+  const otherBotResult = botUpdatePolling.getUpdates(OTHER_BOT_ID, {
+    limit: 100,
+    timeoutSeconds: 50,
+  });
+
+  botUpdatePolling.terminateLongPollForWebhook(BOT_ID);
+  const terminatedResult = await heldResult;
+  if (terminatedResult.retrieved || terminatedResult.reason !== 'terminated_by_webhook') {
+    throw new Error('Expected the held long poll to be terminated by the webhook');
+  }
+
+  botUpdates.enqueueMessageUpdate(OTHER_BOT_ID, createPrivateMessage(1));
+  if (expectRetrievedUpdates(await otherBotResult).length !== 1) {
+    throw new Error("Expected another bot's held long poll to keep waiting");
+  }
+});
+
 Deno.test('BotUpdatePollingService holds long polls for different bots independently', async () => {
   const { botUpdates, botUpdatePolling } = createPollingFixture();
   const firstResult = botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 50 });

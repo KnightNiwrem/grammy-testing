@@ -22,7 +22,8 @@ interface ConfirmAndReadPendingUpdatesInput {
 }
 
 interface WaitForUpdateInput {
-  readonly timeoutSeconds: number;
+  /** Omitted to wait without a time limit. */
+  readonly timeoutSeconds?: number;
   readonly signal?: AbortSignal;
 }
 
@@ -99,6 +100,10 @@ export class BotUpdateRepository {
     return mailbox.updates.slice(0, limit);
   }
 
+  countPendingUpdates(botId: number): number {
+    return this.#getOrCreateMailbox(botId).updates.length;
+  }
+
   /** Forgets every pending update; later updates continue the bot's update ID sequence. */
   discardPendingUpdates(botId: number): void {
     this.#getOrCreateMailbox(botId).updates.splice(0);
@@ -126,7 +131,9 @@ export class BotUpdateRepository {
 
       waiters.add(finish);
       this.#waitersByBotId.set(botId, waiters);
-      const timeoutId = setTimeout(finish, timeoutSeconds * 1_000);
+      const timeoutId = timeoutSeconds === undefined
+        ? undefined
+        : setTimeout(finish, timeoutSeconds * 1_000);
       signal?.addEventListener('abort', finish, { once: true });
     });
   }
