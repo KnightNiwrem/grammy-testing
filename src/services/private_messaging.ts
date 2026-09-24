@@ -6,6 +6,12 @@ import {
 import { areTextEntitiesEqual } from '../text_entities/text_entity_equality.ts';
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import { type InlineKeyboard, MAX_CALLBACK_DATA_BYTES } from '../types/inline_keyboard.ts';
+import type {
+  BotMessageReplyMarkup,
+  ReplyInterface,
+  ReplyInterfaceMarkup,
+  ReplyKeyboard,
+} from '../types/reply_interface.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type {
@@ -89,7 +95,7 @@ export interface BotMessageReplyTarget {
   readonly allowSendingWithoutReply: boolean;
 }
 
-export interface SendBotMessageInput {
+export type SendBotMessageInput = BotMessageReplyMarkup & {
   readonly fromBotId: number;
   readonly to: BotPrivateChat;
   readonly text: string;
@@ -97,10 +103,9 @@ export interface SendBotMessageInput {
   readonly entities?: readonly TextEntity[];
   /** Omitted for a message that replies to none. */
   readonly replyTo?: BotMessageReplyTarget;
-  readonly inlineKeyboard?: InlineKeyboard;
   /** Protects the message from forwarding and saving; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
-}
+};
 
 export type SendBotMessageFailureReason =
   | 'bot_not_found'
@@ -208,6 +213,34 @@ export type SendBotChatActionResult =
     readonly reason: 'bot_not_found' | 'account_not_found' | 'conversation_not_started';
   };
 
+/** The message whose reply interface an account's client shows, with that interface. */
+export interface ShownReplyInterface {
+  readonly message: PrivateTextMessage;
+  readonly replyInterface: ReplyInterface;
+}
+
+export type GetPrivateChatReplyInterfaceResult =
+  | {
+    readonly found: true;
+    /** Omitted when the client shows its usual input. */
+    readonly shownReplyInterface?: ShownReplyInterface;
+  }
+  | { readonly found: false; readonly reason: 'account_not_found' | 'bot_not_found' };
+
+export interface PressReplyKeyboardButtonInput {
+  readonly fromAccountId: number;
+  readonly chat: {
+    readonly type: 'private';
+    readonly botId: number;
+  };
+  /** The text of the button to press. */
+  readonly text: string;
+}
+
+export type PressReplyKeyboardButtonResult =
+  | SendAccountMessageResult
+  | { readonly sent: false; readonly reason: 'reply_keyboard_button_not_found' };
+
 export interface GetPrivateMessageHistoryInput {
   readonly accountId: number;
   readonly botId: number;
@@ -234,6 +267,11 @@ interface BotLookup {
 interface PrivateConversationStore {
   getOrCreatePrivateConversation(key: PrivateConversationKey): PrivateConversation;
   getPrivateConversation(key: PrivateConversationKey): PrivateConversation | undefined;
+  getReplyInterfaceMessageId(key: PrivateConversationKey): CanonicalMessageId | undefined;
+  setReplyInterfaceMessageId(
+    key: PrivateConversationKey,
+    messageId: CanonicalMessageId | undefined,
+  ): void;
 }
 
 interface PrivateMessageStore {
@@ -245,6 +283,7 @@ interface PrivateMessageStore {
     readonly entities: readonly TextEntity[];
     readonly replyToMessageId?: CanonicalMessageId;
     readonly inlineKeyboard?: InlineKeyboard;
+    readonly replyInterface?: ReplyInterface;
     readonly isContentProtected?: boolean;
   }): PrivateTextMessage;
   getPrivateTextMessage(messageId: CanonicalMessageId): PrivateTextMessage | undefined;
@@ -283,7 +322,8 @@ interface PrivateMessagingServiceDependencies {
  * Carries out text exchanges between an account and a bot in their private conversation, and
  * commits each accepted message: stored, numbered for both participants, then published. Bots can
  * attach inline keyboards to their messages, edit them afterward, and delete messages of their
- * chats.
+ * chats. A bot's message can also change the reply interface the account's client shows, such as
+ * a reply keyboard whose buttons the account presses.
  *
  * Results carry canonical messages; presenting them to an observer, such as through the Bot API,
  * is left to the caller.
@@ -427,6 +467,7 @@ export class PrivateMessagingService {
         formattedText: textFixing.formattedText,
         replyToMessageId: replyResolution.repliedMessage?.id,
         inlineKeyboard: input.inlineKeyboard,
+        replyInterfaceMarkup: input.replyInterfaceMarkup,
         isContentProtected: input.isContentProtected,
       }),
     };
@@ -520,10 +561,15 @@ export class PrivateMessagingService {
     let deletedMessageCount = 0;
     for (const botMessageId of input.botMessageIds) {
       const message = this.getPrivateTextMessageByBotMessageId(conversation, botMessageId);
-      if (message !== undefined) {
-        this.#messages.deletePrivateTextMessage(message.id);
-        deletedMessageCount++;
+      if (message === undefined) {
+        continue;
       }
+      // As TDLib does, deleting the message whose reply interface the client shows removes it.
+      if (this.#privateConversations.getReplyInterfaceMessageId(conversation) === message.id) {
+        this.#privateConversations.setReplyInterfaceMessageId(conversation, undefined);
+      }
+      this.#messages.deletePrivateTextMessage(message.id);
+      deletedMessageCount++;
     }
     return { deleted: true, deletedMessageCount };
   }
@@ -574,6 +620,53 @@ export class PrivateMessagingService {
     return message;
   }
 
+  /**
+   * Returns the reply interface the account's client shows in its private chat with the bot: the
+   * one the latest message that set it asked for, unless a later message removed it or that
+   * message was deleted.
+   */
+  getPrivateChatReplyInterface(
+    { accountId, botId }: PrivateConversationKey,
+  ): GetPrivateChatReplyInterfaceResult {
+    if (this.#accounts.getById(accountId) === undefined) {
+      return { found: false, reason: 'account_not_found' };
+    }
+    if (this.#bots.getById(botId) === undefined) {
+      return { found: false, reason: 'bot_not_found' };
+    }
+    const shownReplyInterface = this.#findShownReplyInterface({ accountId, botId });
+    return shownReplyInterface === undefined
+      ? { found: true }
+      : { found: true, shownReplyInterface };
+  }
+
+  /**
+   * Presses a button of the reply keyboard the account's client shows, which, as on Telegram,
+   * sends the button's text to the bot as the account's message. The keyboard stays shown, even a
+   * one-time keyboard, which Telegram clients only hide until the user shows it again.
+   */
+  pressReplyKeyboardButton(input: PressReplyKeyboardButtonInput): PressReplyKeyboardButtonResult {
+    if (this.#accounts.getById(input.fromAccountId) === undefined) {
+      return { sent: false, reason: 'account_not_found' };
+    }
+    if (this.#bots.getById(input.chat.botId) === undefined) {
+      return { sent: false, reason: 'bot_not_found' };
+    }
+    const replyInterface = this.#findShownReplyInterface({
+      accountId: input.fromAccountId,
+      botId: input.chat.botId,
+    })?.replyInterface;
+    if (replyInterface?.kind !== 'reply_keyboard' || !hasButton(replyInterface, input.text)) {
+      return { sent: false, reason: 'reply_keyboard_button_not_found' };
+    }
+
+    return this.sendAccountMessage({
+      fromAccountId: input.fromAccountId,
+      to: input.chat,
+      text: input.text,
+    });
+  }
+
   getPrivateMessageHistory(
     input: GetPrivateMessageHistoryInput,
   ): GetPrivateMessageHistoryResult {
@@ -610,6 +703,18 @@ export class PrivateMessagingService {
       return { resolved: true, repliedMessage };
     }
     return replyTo.allowSendingWithoutReply ? { resolved: true } : { resolved: false };
+  }
+
+  #findShownReplyInterface(conversation: PrivateConversationKey): ShownReplyInterface | undefined {
+    const messageId = this.#privateConversations.getReplyInterfaceMessageId(conversation);
+    if (messageId === undefined) {
+      return undefined;
+    }
+    const message = this.#messages.getPrivateTextMessage(messageId);
+    if (message?.replyInterface === undefined) {
+      throw new Error(`Reply interface message ${messageId} has no stored reply interface`);
+    }
+    return { message, replyInterface: message.replyInterface };
   }
 
   /** Resolves the bot message an edit targets, which only the bot that sent it can edit. */
@@ -678,7 +783,8 @@ export class PrivateMessagingService {
 
   /**
    * Stores normalized text written by one participant of an existing private conversation, numbers
-   * it in both participants' message boxes, and publishes its creation.
+   * it in both participants' message boxes, applies its change of the account's reply interface,
+   * and publishes its creation.
    */
   #storePrivateTextMessage(
     {
@@ -688,6 +794,7 @@ export class PrivateMessagingService {
       formattedText,
       replyToMessageId,
       inlineKeyboard,
+      replyInterfaceMarkup,
       isContentProtected,
     }: {
       readonly account: VirtualAccount;
@@ -696,23 +803,39 @@ export class PrivateMessagingService {
       readonly formattedText: FormattedText;
       readonly replyToMessageId?: CanonicalMessageId;
       readonly inlineKeyboard?: InlineKeyboard;
+      readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
       readonly isContentProtected?: boolean;
     },
   ): PrivateTextMessage {
+    const conversation: PrivateConversationKey = {
+      accountId: account.profile.id,
+      botId: bot.profile.id,
+    };
     const storedMessage = this.#messages.addPrivateTextMessage({
-      conversation: { accountId: account.profile.id, botId: bot.profile.id },
+      conversation,
       authorRole,
       sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
       text: formattedText.text,
       entities: formattedText.entities,
       replyToMessageId,
       inlineKeyboard,
+      replyInterface: replyInterfaceMarkup?.kind === 'reply_keyboard_removal'
+        ? undefined
+        : replyInterfaceMarkup,
       isContentProtected,
     });
     // Telegram numbers a private message in each participant's message box. Only the bot's
     // numbering is projected today; the account's keeps the stored model faithful to Telegram.
     this.#userMessageBoxes.assignMessageId(account.profile.id, storedMessage.id);
     this.#userMessageBoxes.assignMessageId(bot.profile.id, storedMessage.id);
+    // As TDLib does for a private chat: a keyboard or forced reply replaces what the client shows,
+    // and a removal clears it.
+    if (replyInterfaceMarkup !== undefined) {
+      this.#privateConversations.setReplyInterfaceMessageId(
+        conversation,
+        replyInterfaceMarkup.kind === 'reply_keyboard_removal' ? undefined : storedMessage.id,
+      );
+    }
     this.#events.publish({ type: 'message_created', message: storedMessage });
 
     return storedMessage;
@@ -729,6 +852,10 @@ function hasOnlyValidCallbackData(inlineKeyboard: InlineKeyboard): boolean {
       utf8Encoder.encode(button.callbackData).length <= MAX_CALLBACK_DATA_BYTES
     )
   );
+}
+
+function hasButton(replyKeyboard: ReplyKeyboard, text: string): boolean {
+  return replyKeyboard.rows.some((row) => row.some((button) => button.text === text));
 }
 
 function isSameFormattedText(first: FormattedText, second: FormattedText): boolean {

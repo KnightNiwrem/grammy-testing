@@ -1,4 +1,5 @@
 import type { InlineKeyboard } from './inline_keyboard.ts';
+import type { ReplyInterface } from './reply_interface.ts';
 import type { PrivateConversationKey, PrivateConversationRole } from './virtual_chat.ts';
 
 export const MAX_TEXT_MESSAGE_LENGTH = 4_096;
@@ -79,6 +80,11 @@ export interface PrivateTextMessage {
   readonly replyToMessageId?: CanonicalMessageId;
   /** Omitted when the message has no inline keyboard. Only bots attach inline keyboards. */
   readonly inlineKeyboard?: InlineKeyboard;
+  /**
+   * The reply interface the message asks the account's client to show; omitted for none. Only
+   * bots send one, and never with an inline keyboard. Edits leave it unchanged.
+   */
+  readonly replyInterface?: ReplyInterface;
   /** When the text was last edited; omitted for a message whose text was never edited. */
   readonly textEditedAtUnixSeconds?: number;
   /** Whether the sender protected the message from forwarding and saving. Only bots protect. */

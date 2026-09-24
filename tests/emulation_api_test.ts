@@ -1,5 +1,8 @@
 import { Bot } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/bot.ts';
-import { InlineKeyboard } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/convenience/keyboard.ts';
+import {
+  InlineKeyboard,
+  Keyboard,
+} from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/convenience/keyboard.ts';
 import { GrammyError } from 'https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/core/error.ts';
 
 import { createEmulationApi } from '../src/api/mod.ts';
@@ -752,8 +755,6 @@ Deno.test('sendMessage attaches an inline keyboard from every request encoding',
     { inline_keyboard: [[{ text: 'Relative', url: 'grammy.dev' }]] },
     { inline_keyboard: [[{ text: 'App', web_app: { url: 'https://grammy.dev' } }]] },
     { inline_keyboard: [[]] },
-    { keyboard: [[{ text: 'Reply keyboard' }]] },
-    { remove_keyboard: true },
     'not JSON',
   ];
   for (const replyMarkup of invalidMarkups) {
@@ -2048,6 +2049,215 @@ Deno.test('a grammY bot asks a question in a reply and reads the account reply t
     throw new Error(
       `Expected the question and answer as replies, received ${JSON.stringify(history)}`,
     );
+  }
+});
+
+Deno.test("sendMessage changes the reply interface the account's client shows", async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  const accountPath = `${sessionPath}/accounts/${accountId}`;
+  const replyInterfacePath =
+    `${accountPath}/conversations/private/${createdBot.bot.id}/reply-interface`;
+  const readReplyInterface = async () => {
+    const response = await api.request(replyInterfacePath);
+    const body = await response.json() as { reply_interface: unknown };
+    return body.reply_interface;
+  };
+  const pressButton = (text: string) =>
+    api.request(`${accountPath}/reply-keyboard-presses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat: { type: 'private', botId: createdBot.bot.id }, text }),
+    });
+  const sendMarkup = (replyMarkup: unknown) =>
+    callBotApi(api, `${botApiPath}/sendMessage`, {
+      chat_id: accountId,
+      text: 'Choose',
+      reply_markup: replyMarkup,
+    });
+  await sendText('/start');
+  if (await readReplyInterface() !== null) {
+    throw new Error('Expected no reply interface before the bot sends one');
+  }
+
+  const keyboardReply = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      chat_id: String(accountId),
+      text: 'Pick a color',
+      reply_markup: JSON.stringify({
+        keyboard: [['Red', { text: 'Green' }], [{ text: 'Blue' }]],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+        input_field_placeholder: 'Color',
+        selective: true,
+      }),
+    }),
+  });
+  const keyboardReplyBody: unknown = await keyboardReply.json();
+  if (keyboardReply.status !== 200 || botApiResult(keyboardReplyBody)?.reply_markup !== undefined) {
+    throw new Error('Expected the sent message not to show its reply keyboard to the bot');
+  }
+  const expectedKeyboard = {
+    type: 'keyboard',
+    message_id: 2,
+    keyboard: [[{ text: 'Red' }, { text: 'Green' }], [{ text: 'Blue' }]],
+    is_persistent: false,
+    resize_keyboard: true,
+    one_time_keyboard: true,
+    input_field_placeholder: 'Color',
+  };
+  if (JSON.stringify(await readReplyInterface()) !== JSON.stringify(expectedKeyboard)) {
+    throw new Error(
+      `Expected the keyboard, received ${JSON.stringify(await readReplyInterface())}`,
+    );
+  }
+
+  const press = await pressButton('Green');
+  const pressBody: unknown = await press.json();
+  const pressOfMissingButton = await pressButton('Purple');
+  if (
+    press.status !== 201 || !isSentMessageResponse(pressBody) ||
+    pressBody.message.text !== 'Green' || pressBody.message.from.id !== accountId ||
+    pressOfMissingButton.status !== 400
+  ) {
+    throw new Error("Expected only the keyboard's buttons to send their text");
+  }
+  const updatesBody: unknown = await (await api.request(`${botApiPath}/getUpdates`)).json();
+  if (
+    !isGetUpdatesResponse(updatesBody) ||
+    JSON.stringify(updatesBody.result.at(-1)?.message) !== JSON.stringify(pressBody.message)
+  ) {
+    throw new Error('Expected the bot to receive the pressed button text as a message');
+  }
+
+  await sendMarkup({ force_reply: true, input_field_placeholder: 'Your name' });
+  if (
+    JSON.stringify(await readReplyInterface()) !==
+      JSON.stringify({ type: 'force_reply', message_id: 4, input_field_placeholder: 'Your name' })
+  ) {
+    throw new Error('Expected a forced reply to replace the keyboard');
+  }
+  await sendMarkup({ keyboard: [['Red']] });
+  await sendMarkup({ remove_keyboard: true });
+  if (await readReplyInterface() !== null || (await pressButton('Red')).status !== 400) {
+    throw new Error('Expected remove_keyboard to remove the keyboard');
+  }
+  await sendMarkup({ keyboard: [] });
+  if (await readReplyInterface() !== null) {
+    throw new Error('Expected a keyboard without rows to show nothing, as on Telegram');
+  }
+
+  const invalidMarkups: unknown[] = [
+    { keyboard: [[]] },
+    { keyboard: [['']] },
+    { keyboard: [[{ text: 'Share phone', request_contact: true }]] },
+    { keyboard: [['Red']], input_field_placeholder: 'x'.repeat(65) },
+    { keyboard: [['Red']], inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] },
+    { remove_keyboard: false },
+    { force_reply: true, remove_keyboard: true },
+  ];
+  for (const replyMarkup of invalidMarkups) {
+    const { status, body } = await sendMarkup(replyMarkup);
+    if (
+      status !== 400 || !isBadRequestResponse(body) ||
+      body.description !== 'Bad Request: invalid sendMessage parameters'
+    ) {
+      throw new Error(`Expected ${JSON.stringify(replyMarkup)} to be rejected`);
+    }
+  }
+  if (
+    (await api.request(
+        `${sessionPath}/accounts/999/conversations/private/${createdBot.bot.id}/reply-interface`,
+      ))
+        .status !== 404 ||
+    (await api.request(`${accountPath}/conversations/private/999/reply-interface`)).status !== 404
+  ) {
+    throw new Error('Expected unknown participants to be not found');
+  }
+});
+
+Deno.test('a grammY bot runs a menu on a reply keyboard and asks with a forced reply', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountPath = `${sessionPath}/accounts/${createdAccount.account.id}`;
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const handled = { menu: Promise.withResolvers<void>(), question: Promise.withResolvers<void>() };
+  const done = Promise.withResolvers<void>();
+  grammyBot.command('start', async (context) => {
+    await context.reply('What next?', {
+      reply_markup: new Keyboard().text('Rename').text('Quit').resized().oneTime(),
+    });
+    handled.menu.resolve();
+  });
+  grammyBot.hears('Rename', async (context) => {
+    await context.reply('New name?', {
+      reply_markup: { force_reply: true, input_field_placeholder: 'Name' },
+    });
+    handled.question.resolve();
+  });
+  grammyBot.on('message:text', async (context) => {
+    if (context.msg.reply_to_message?.text !== 'New name?') {
+      return;
+    }
+    await context.reply(`Renamed to ${context.msg.text}`, {
+      reply_markup: { remove_keyboard: true },
+    });
+    done.resolve();
+  });
+  const polling = grammyBot.start();
+  const readReplyInterface = async () => {
+    const response = await api.request(
+      `${accountPath}/conversations/private/${createdBot.bot.id}/reply-interface`,
+    );
+    return (await response.json() as { reply_interface: Record<string, unknown> | null })
+      .reply_interface;
+  };
+
+  try {
+    await sendText('/start');
+    // Polling ends only when stopped, so settling first means the bot failed.
+    await Promise.race([handled.menu.promise, polling]);
+    const menu = await readReplyInterface();
+    if (
+      JSON.stringify(menu?.keyboard) !== JSON.stringify([[{ text: 'Rename' }, { text: 'Quit' }]])
+    ) {
+      throw new Error(`Expected the menu keyboard, received ${JSON.stringify(menu)}`);
+    }
+    await api.request(`${accountPath}/reply-keyboard-presses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat: { type: 'private', botId: createdBot.bot.id }, text: 'Rename' }),
+    });
+    await Promise.race([handled.question.promise, polling]);
+    const question = await readReplyInterface();
+    if (question?.type !== 'force_reply' || question.input_field_placeholder !== 'Name') {
+      throw new Error(`Expected the forced reply, received ${JSON.stringify(question)}`);
+    }
+    await api.request(`${accountPath}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: { type: 'private', botId: createdBot.bot.id },
+        text: 'Grace',
+        reply_to_message_id: question.message_id,
+      }),
+    });
+    await Promise.race([done.promise, polling]);
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+
+  if (await readReplyInterface() !== null) {
+    throw new Error('Expected the final message to remove the reply interface');
   }
 });
 

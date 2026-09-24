@@ -162,6 +162,48 @@ export interface PrivateTextMessage {
 /** A message as a reply shows it, without its own reply. */
 export type RepliedPrivateTextMessage = Omit<PrivateTextMessage, 'reply_to_message'>;
 
+/** A reply keyboard button, which sends its text to the chat when pressed. */
+export interface ReplyKeyboardButton {
+  readonly text: string;
+}
+
+/** A custom keyboard the account's client shows in place of its letter keyboard. */
+export interface ReplyKeyboardInterface {
+  readonly type: 'keyboard';
+  /** The ID of the bot message that sent the keyboard, as message history shows it. */
+  readonly message_id: number;
+  readonly keyboard: readonly (readonly ReplyKeyboardButton[])[];
+  readonly is_persistent: boolean;
+  readonly resize_keyboard: boolean;
+  /**
+   * Whether clients hide the keyboard once it is used; the keyboard stays available, so its
+   * buttons can still be pressed.
+   */
+  readonly one_time_keyboard: boolean;
+  readonly input_field_placeholder?: string;
+}
+
+/** A reply interface to a bot message, which the account's client shows as if replying to it. */
+export interface ForceReplyInterface {
+  readonly type: 'force_reply';
+  /** The ID of the bot message to reply to, as message history shows it. */
+  readonly message_id: number;
+  readonly input_field_placeholder?: string;
+}
+
+/** What the account's client shows in place of its usual input in a chat with a bot. */
+export type ReplyInterface = ReplyKeyboardInterface | ForceReplyInterface;
+
+export interface PressReplyKeyboardButtonInput {
+  readonly chat: PrivateMessageTarget;
+  /** The text of the button to press, which the account then sends to the chat. */
+  readonly text: string;
+}
+
+export interface AccountReplyInterfaceInput {
+  readonly chat: PrivateMessageTarget;
+}
+
 /** A bot command as an account's client lists it. */
 export interface BotCommand {
   /** The command without its leading slash. */
@@ -207,6 +249,16 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    * the bot has one.
    */
   getBotCommands(input: AccountBotCommandsInput): Promise<readonly BotCommand[]>;
+  /**
+   * Returns the reply keyboard or forced reply this account's client shows in its private chat
+   * with a bot, or `null` when it shows its usual input.
+   */
+  getReplyInterface(input: AccountReplyInterfaceInput): Promise<ReplyInterface | null>;
+  /**
+   * Presses a button of the reply keyboard the chat shows, which sends the button's text to the
+   * bot as this account's message. Fails when the chat shows no keyboard with such a button.
+   */
+  pressReplyKeyboardButton(input: PressReplyKeyboardButtonInput): Promise<PrivateTextMessage>;
 }
 
 export interface AccountBotCommandsInput {

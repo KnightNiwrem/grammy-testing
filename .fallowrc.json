@@ -20,6 +20,7 @@
           "src/types/chat_domain_event.ts",
           "src/types/callback_query.ts",
           "src/types/inline_keyboard.ts",
+          "src/types/reply_interface.ts",
           "src/types/bot_api.ts",
           "src/types/telegram_identity.ts",
           "src/types/bot_command.ts"

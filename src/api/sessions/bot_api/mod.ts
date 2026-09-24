@@ -26,7 +26,10 @@ import {
   replyParametersParameter,
   selectSpecifiedReplyTarget,
 } from './reply_parameters_parameter.ts';
-import { inlineKeyboardMarkupParameter } from './reply_markup_parameter.ts';
+import {
+  inlineKeyboardMarkupParameter,
+  messageReplyMarkupParameter,
+} from './reply_markup_parameter.ts';
 import {
   booleanParameter,
   type BotApiRequestParameters,
@@ -166,7 +169,7 @@ const sendMessageParametersSchema = z.strictObject({
   reply_parameters: replyParametersParameter().optional(),
   reply_to_message_id: integerParameter(z.int()).optional(),
   allow_sending_without_reply: booleanParameter().default(false),
-  reply_markup: inlineKeyboardMarkupParameter().optional(),
+  reply_markup: messageReplyMarkupParameter().default({}),
 });
 
 // Editing messages sent through inline mode, which `inline_message_id` identifies, is not
@@ -398,7 +401,7 @@ function handleSendMessage(
     parse_mode: parseMode,
     entities,
     protect_content: isContentProtected,
-    reply_markup: inlineKeyboard,
+    reply_markup: replyMarkup,
   } = parsedParameters.data;
   // Telegram reads the text and its formatting before it looks at the chat.
   const formattedTextReading = readSpecifiedFormattedText(
@@ -423,13 +426,13 @@ function handleSendMessage(
     context.get('emulationSession').botApi.sendMessage(
       context.get('authenticatedBot'),
       {
+        ...replyMarkup,
         chatId,
         ...formattedTextReading.formattedText,
         replyTo: replyTarget === undefined ? undefined : {
           messageId: replyTarget.messageId,
           allowSendingWithoutReply: replyTarget.allowSendingWithoutReply,
         },
-        inlineKeyboard,
         isContentProtected,
       },
     ),

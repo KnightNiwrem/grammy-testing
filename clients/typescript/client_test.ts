@@ -229,6 +229,40 @@ Deno.test('TypeScript client manages all currently implemented session resources
     );
   }
 
+  const chat = { type: 'private', botId: createdBot.bot.id } as const;
+  if (await createdAccount.account.getReplyInterface({ chat }) !== null) {
+    throw new Error('Expected no reply interface before the bot sends one');
+  }
+  const keyboardResponse = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: createdAccount.account.id,
+      text: 'Pick a color',
+      reply_markup: { keyboard: [['Red', 'Green']], is_persistent: true },
+    }),
+  });
+  const keyboardMessageId = (await keyboardResponse.json()).result.message_id;
+  const replyInterface = await createdAccount.account.getReplyInterface({ chat });
+  const pressedButtonMessage = await createdAccount.account.pressReplyKeyboardButton({
+    chat,
+    text: 'Green',
+  });
+  if (
+    JSON.stringify(replyInterface) !== JSON.stringify({
+        type: 'keyboard',
+        message_id: keyboardMessageId,
+        keyboard: [[{ text: 'Red' }, { text: 'Green' }]],
+        is_persistent: true,
+        resize_keyboard: false,
+        one_time_keyboard: false,
+      }) ||
+    pressedButtonMessage.text !== 'Green' ||
+    pressedButtonMessage.from.id !== createdAccount.account.id
+  ) {
+    throw new Error('Expected the client to read and press the reply keyboard');
+  }
+
   await session.end();
 });
 

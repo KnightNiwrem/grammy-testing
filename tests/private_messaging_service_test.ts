@@ -19,6 +19,7 @@ import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { BotApiPrivateTextMessage, BotApiUpdate } from '../src/types/bot_api.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
 import type { InlineKeyboard } from '../src/types/inline_keyboard.ts';
+import type { ReplyInterfaceMarkup } from '../src/types/reply_interface.ts';
 import {
   MAX_TEXT_MESSAGE_LENGTH,
   type PrivateTextMessage,
@@ -452,6 +453,98 @@ Deno.test('PrivateMessagingService stores replies only to messages of the same c
   }
   if (messages.getPrivateTextMessage(otherChatMessage.id) !== otherChatMessage) {
     throw new Error("Expected the other chat's message to be unaffected");
+  }
+});
+
+Deno.test('PrivateMessagingService shows the reply interface the latest bot message set', () => {
+  const { virtualUsers, userMessageBoxes, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const chat = { accountId: account.profile.id, botId: bot.profile.id };
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const sendWithReplyInterfaceMarkup = (replyInterfaceMarkup: ReplyInterfaceMarkup) => {
+    const result = privateMessaging.sendBotMessage({
+      fromBotId: bot.profile.id,
+      to: { type: 'private', accountId: account.profile.id },
+      text: 'Choose',
+      replyInterfaceMarkup,
+    });
+    if (!result.sent) {
+      throw new Error(`Expected the bot message to be sent, received ${result.reason}`);
+    }
+    return result.message;
+  };
+  const shownReplyInterface = () => {
+    const result = privateMessaging.getPrivateChatReplyInterface(chat);
+    if (!result.found) {
+      throw new Error(`Expected the chat's reply interface, received ${result.reason}`);
+    }
+    return result.shownReplyInterface;
+  };
+  const pressButton = (text: string) =>
+    privateMessaging.pressReplyKeyboardButton({
+      fromAccountId: account.profile.id,
+      chat: { type: 'private', botId: bot.profile.id },
+      text,
+    });
+
+  const keyboardMessage = sendWithReplyInterfaceMarkup(COLOR_KEYBOARD);
+  sendBotMessage(privateMessaging, account.profile.id, bot, YES_NO_KEYBOARD);
+  if (
+    shownReplyInterface()?.message.id !== keyboardMessage.id ||
+    JSON.stringify(shownReplyInterface()?.replyInterface) !== JSON.stringify(COLOR_KEYBOARD)
+  ) {
+    throw new Error('Expected the keyboard to stay shown after a message with an inline keyboard');
+  }
+  const press = pressButton('Red');
+  const pressOfMissingButton = pressButton('Blue');
+  if (
+    !press.sent || press.message.authorRole !== 'account' || press.message.text !== 'Red' ||
+    pressOfMissingButton.sent || pressOfMissingButton.reason !== 'reply_keyboard_button_not_found'
+  ) {
+    throw new Error("Expected only the keyboard's buttons to send their text");
+  }
+  if (!pressButton('Green').sent || shownReplyInterface()?.message.id !== keyboardMessage.id) {
+    throw new Error('Expected a one-time keyboard to stay available after it is used');
+  }
+
+  const forcedReplyMessage = sendWithReplyInterfaceMarkup({
+    kind: 'forced_reply',
+    inputFieldPlaceholder: 'Your name',
+  });
+  if (shownReplyInterface()?.message.id !== forcedReplyMessage.id || pressButton('Red').sent) {
+    throw new Error('Expected a forced reply to replace the keyboard');
+  }
+  sendWithReplyInterfaceMarkup(COLOR_KEYBOARD);
+  sendWithReplyInterfaceMarkup({ kind: 'reply_keyboard_removal' });
+  if (shownReplyInterface() !== undefined) {
+    throw new Error('Expected a removal to clear the shown keyboard');
+  }
+
+  const replacedKeyboardMessage = sendWithReplyInterfaceMarkup(COLOR_KEYBOARD);
+  privateMessaging.deleteMessagesByBot({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageIds: [expectBotMessageId(userMessageBoxes, bot, replacedKeyboardMessage.id)],
+  });
+  if (shownReplyInterface() !== undefined) {
+    throw new Error("Expected deleting the keyboard's message to clear it");
+  }
+
+  const unknownAccount = privateMessaging.getPrivateChatReplyInterface({
+    accountId: 999,
+    botId: bot.profile.id,
+  });
+  const pressForUnknownBot = privateMessaging.pressReplyKeyboardButton({
+    fromAccountId: account.profile.id,
+    chat: { type: 'private', botId: 999 },
+    text: 'Red',
+  });
+  if (
+    unknownAccount.found || unknownAccount.reason !== 'account_not_found' ||
+    pressForUnknownBot.sent || pressForUnknownBot.reason !== 'bot_not_found'
+  ) {
+    throw new Error('Expected unknown participants to be reported');
   }
 });
 
@@ -999,6 +1092,14 @@ Deno.test('PrivateMessagingService lets a bot show chat actions only in started 
     throw new Error('Expected chat actions not to store or publish anything');
   }
 });
+
+const COLOR_KEYBOARD: ReplyInterfaceMarkup = {
+  kind: 'reply_keyboard',
+  rows: [[{ text: 'Red' }, { text: 'Green' }]],
+  isPersistent: false,
+  resizesToFit: true,
+  isOneTime: true,
+};
 
 const YES_NO_KEYBOARD: InlineKeyboard = [[
   { kind: 'callback', text: 'Yes', callbackData: 'yes' },

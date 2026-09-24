@@ -3,6 +3,7 @@ import type { BotApiBotCommand, BotApiPrivateTextMessage } from '../types/bot_ap
 import type { BotCommand, BotCommandLanguageCode, BotCommandScope } from '../types/bot_command.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
+import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { ChatAction } from '../types/virtual_chat.ts';
 import type { PrivateTextMessage, TextEntity } from '../types/virtual_message.ts';
@@ -67,15 +68,15 @@ export interface ReplyTarget {
   readonly allowSendingWithoutReply: boolean;
 }
 
-export interface SendMessageRequest extends SpecifiedFormattedText {
+/** The request's reply markup is an inline keyboard or a change of the reply interface. */
+export type SendMessageRequest = SpecifiedFormattedText & BotMessageReplyMarkup & {
   /** The Bot API `chat_id`, which for a private chat is the other user's ID. */
   readonly chatId: number;
   /** Omitted for a message that replies to none. */
   readonly replyTo?: ReplyTarget;
-  readonly inlineKeyboard?: InlineKeyboard;
   /** The Bot API `protect_content`; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
-}
+};
 
 export type SendMessageFailureReason =
   | 'message_text_empty'
@@ -217,18 +218,19 @@ type BotMessageEditingResult<FailureReason extends string> =
   | { readonly edited: false; readonly reason: FailureReason };
 
 interface BotMessaging {
-  sendBotMessage(input: {
-    readonly fromBotId: number;
-    readonly to: BotPrivateChat;
-    readonly text: string;
-    readonly entities?: readonly TextEntity[];
-    readonly replyTo?: {
-      readonly botMessageId: number;
-      readonly allowSendingWithoutReply: boolean;
-    };
-    readonly inlineKeyboard?: InlineKeyboard;
-    readonly isContentProtected?: boolean;
-  }): BotMessageSendingResult;
+  sendBotMessage(
+    input: BotMessageReplyMarkup & {
+      readonly fromBotId: number;
+      readonly to: BotPrivateChat;
+      readonly text: string;
+      readonly entities?: readonly TextEntity[];
+      readonly replyTo?: {
+        readonly botMessageId: number;
+        readonly allowSendingWithoutReply: boolean;
+      };
+      readonly isContentProtected?: boolean;
+    },
+  ): BotMessageSendingResult;
   editBotMessageText(input: {
     readonly fromBotId: number;
     readonly chat: BotPrivateChat;
@@ -460,14 +462,16 @@ export class BotApiService {
   }
 
   /**
-   * Sends text to a private chat, optionally as a reply to one of the chat's messages; other chat
-   * types are not supported yet.
+   * Sends text to a private chat, optionally as a reply to one of the chat's messages and with an
+   * inline keyboard or a change of the account's reply interface; other chat types are not
+   * supported yet.
    */
   sendMessage(
     authenticatedBot: VirtualBotProfile,
-    { chatId, text, entities, replyTo, inlineKeyboard, isContentProtected }: SendMessageRequest,
+    { chatId, text, entities, replyTo, isContentProtected, ...replyMarkup }: SendMessageRequest,
   ): SendMessageResult {
     const result = this.#botMessages.sendBotMessage({
+      ...replyMarkup,
       fromBotId: authenticatedBot.id,
       to: { type: 'private', accountId: chatId },
       text,
@@ -476,7 +480,6 @@ export class BotApiService {
         botMessageId: replyTo.messageId,
         allowSendingWithoutReply: replyTo.allowSendingWithoutReply,
       },
-      inlineKeyboard,
       isContentProtected,
     });
     if (result.sent) {

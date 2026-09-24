@@ -99,6 +99,56 @@ Deno.test('MessageRepository edits a message in place without changing its ident
   }
 });
 
+Deno.test('MessageRepository keeps what an edit cannot change', () => {
+  const messages = new MessageRepository();
+  const conversation = { accountId: 1, botId: 2 };
+  const question = messages.addPrivateTextMessage({
+    conversation,
+    authorRole: 'account',
+    sentAtUnixSeconds: 1_700_000_000,
+    text: 'Colors?',
+    entities: [],
+  });
+  const replyInterface = {
+    kind: 'reply_keyboard' as const,
+    rows: [[{ text: 'Red' }]],
+    isPersistent: true,
+    resizesToFit: false,
+    isOneTime: false,
+  };
+  const answer = messages.addPrivateTextMessage({
+    conversation,
+    authorRole: 'bot',
+    sentAtUnixSeconds: 1_700_000_001,
+    text: 'Pick one',
+    entities: [],
+    replyToMessageId: question.id,
+    replyInterface,
+    isContentProtected: true,
+  });
+  if (
+    answer.replyInterface === replyInterface ||
+    JSON.stringify(answer.replyInterface) !== JSON.stringify(replyInterface) ||
+    question.isContentProtected || 'replyToMessageId' in question || 'replyInterface' in question
+  ) {
+    throw new Error('Expected a stored copy of the reply interface only where one was sent');
+  }
+
+  const editedAnswer = messages.editPrivateTextMessage(answer.id, {
+    text: 'Pick a color',
+    entities: [],
+    inlineKeyboard: undefined,
+    textEditedAtUnixSeconds: 1_700_000_005,
+  });
+  if (
+    editedAnswer.replyToMessageId !== question.id ||
+    editedAnswer.replyInterface !== answer.replyInterface ||
+    !editedAnswer.isContentProtected
+  ) {
+    throw new Error('Expected the edit to keep the reply, reply interface, and protection');
+  }
+});
+
 Deno.test('MessageRepository deletes a message from the store and its conversation history', () => {
   const messages = new MessageRepository();
   const conversation = { accountId: 1, botId: 2 };

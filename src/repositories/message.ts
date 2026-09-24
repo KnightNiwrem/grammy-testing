@@ -1,4 +1,5 @@
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
+import type { ReplyInterface } from '../types/reply_interface.ts';
 import type { PrivateConversationKey, PrivateConversationRole } from '../types/virtual_chat.ts';
 import type {
   CanonicalMessageId,
@@ -15,6 +16,7 @@ export interface AddPrivateTextMessageInput {
   /** The message of the same conversation this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
   readonly inlineKeyboard?: InlineKeyboard;
+  readonly replyInterface?: ReplyInterface;
   /** Omitted for a message its sender did not protect. */
   readonly isContentProtected?: boolean;
 }
@@ -45,6 +47,9 @@ export class MessageRepository {
       ...(input.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(input.inlineKeyboard) }),
+      ...(input.replyInterface === undefined
+        ? {}
+        : { replyInterface: copyReplyInterface(input.replyInterface) }),
       isContentProtected: input.isContentProtected ?? false,
     };
     this.#privateMessagesById.set(message.id, message);
@@ -81,6 +86,7 @@ export class MessageRepository {
       authorRole,
       sentAtUnixSeconds,
       replyToMessageId,
+      replyInterface,
       isContentProtected,
     } = storedMessage;
     const editedMessage: PrivateTextMessage = {
@@ -95,6 +101,7 @@ export class MessageRepository {
       ...(edit.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
+      ...(replyInterface === undefined ? {} : { replyInterface }),
       ...(edit.textEditedAtUnixSeconds === undefined
         ? {}
         : { textEditedAtUnixSeconds: edit.textEditedAtUnixSeconds }),
@@ -143,4 +150,13 @@ function copyEntities(entities: readonly TextEntity[]): readonly TextEntity[] {
 
 function copyInlineKeyboard(inlineKeyboard: InlineKeyboard): InlineKeyboard {
   return inlineKeyboard.map((row) => row.map((button) => ({ ...button })));
+}
+
+function copyReplyInterface(replyInterface: ReplyInterface): ReplyInterface {
+  return replyInterface.kind === 'reply_keyboard'
+    ? {
+      ...replyInterface,
+      rows: replyInterface.rows.map((row) => row.map((button) => ({ ...button }))),
+    }
+    : { ...replyInterface };
 }

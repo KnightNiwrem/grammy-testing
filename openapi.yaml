@@ -226,6 +226,66 @@ paths:
           description: A path identifier is invalid.
         '404':
           description: The session, account, or bot does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/reply-interface:
+    description: >-
+      The reply keyboard or forced reply an account's client shows in its private chat with a bot.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      operationId: getPrivateChatReplyInterface
+      summary: Return the reply interface the account sees in its private chat with the bot
+      description: >-
+        As TDLib tracks it, the chat shows the reply interface of the latest bot message that sent
+        a reply keyboard or forced reply, until a later message removes the keyboard or that
+        message is deleted. Messages with an inline keyboard or no reply markup leave it
+        unchanged, and so do edits.
+      responses:
+        '200':
+          description: The reply interface, or `null` when the client shows its usual input.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountReplyInterface'
+        '400':
+          description: A path identifier is invalid.
+        '404':
+          description: The session, account, or bot does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/reply-keyboard-presses:
+    description: Reply keyboard buttons an account pressed.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      operationId: pressReplyKeyboardButton
+      summary: Press a button of the reply keyboard a private chat shows
+      description: >-
+        Sends the button's text to the bot as the account's message, as a Telegram client does.
+        The keyboard stays shown afterward, even a one-time keyboard, which Telegram clients only
+        hide until the user shows it again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PressReplyKeyboardButtonRequest'
+      responses:
+        '201':
+          description: >-
+            The button's text was sent as the account's message, and, unless the bot's
+            allowed_updates subscription excludes message updates, an update was enqueued for the
+            bot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentMessage'
+        '400':
+          description: >-
+            The request is invalid, or the chat shows no reply keyboard with a button of that
+            text.
+        '404':
+          description: The session, account, or bot does not exist.
   /sessions/{sessionId}/accounts/{accountId}/callback-queries:
     description: Callback queries an account created by pressing callback buttons.
     parameters:
@@ -423,11 +483,14 @@ paths:
       Telegram Bot API method for sending a text message. The emulator supports text sent to a
       private chat with an account that has written to the bot, formatted with `parse_mode` or
       `entities`, optionally as a reply to a message of the chat, protected from forwarding and
-      saving, and with an inline keyboard of callback and URL buttons. Link preview options and
-      `disable_notification` are validated and have no effect, because the emulator generates no
-      link previews and does not model notifications. As on Telegram, the text and its entities
-      are normalized before the message is stored, and the bot receives no update for its own
-      message.
+      saving, and with reply markup: an inline keyboard of callback and URL buttons, a reply
+      keyboard of text buttons, a reply keyboard removal, or a forced reply. As on Telegram, the
+      message a bot receives in the response never shows reply markup other than an inline
+      keyboard; a test reads the reply interface the account's client shows instead. Link preview
+      options and `disable_notification` are validated and have no effect, because the emulator
+      generates no link previews and does not model notifications. As on Telegram, the text and
+      its entities are normalized before the message is stored, and the bot receives no update
+      for its own message.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -1609,10 +1672,165 @@ components:
             The older form of `reply_parameters.allow_sending_without_reply`; ignored when
             `reply_parameters` is given.
         reply_markup:
-          $ref: '#/components/schemas/InlineKeyboardMarkup'
           description: >-
-            Inline keyboard to attach. Reply keyboards, keyboard removal, and forced replies are
-            not supported.
+            An inline keyboard to attach, or a change of the reply interface the account's client
+            shows. Markup that combines kinds is rejected. `selective` is accepted and, as on
+            Telegram in private chats, has no effect.
+          oneOf:
+            - $ref: '#/components/schemas/InlineKeyboardMarkup'
+            - $ref: '#/components/schemas/ReplyKeyboardMarkup'
+            - $ref: '#/components/schemas/ReplyKeyboardRemove'
+            - $ref: '#/components/schemas/ForceReply'
+    ReplyKeyboardMarkup:
+      type: object
+      additionalProperties: false
+      required:
+        - keyboard
+      properties:
+        keyboard:
+          type: array
+          description: >-
+            Rows of buttons. As on Telegram, an empty array sends no reply markup; empty rows are
+            rejected.
+          items:
+            type: array
+            minItems: 1
+            items:
+              description: >-
+                A text button, written as its text or as an object. Buttons that request a
+                contact, location, poll, users, chat, or web app are not supported.
+              oneOf:
+                - type: string
+                  minLength: 1
+                - $ref: '#/components/schemas/ReplyKeyboardButton'
+        is_persistent:
+          type: boolean
+          default: false
+        resize_keyboard:
+          type: boolean
+          default: false
+        one_time_keyboard:
+          type: boolean
+          default: false
+        input_field_placeholder:
+          type: string
+          minLength: 1
+          maxLength: 64
+        selective:
+          type: boolean
+    ReplyKeyboardButton:
+      type: object
+      additionalProperties: false
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+    ReplyKeyboardRemove:
+      type: object
+      additionalProperties: false
+      required:
+        - remove_keyboard
+      properties:
+        remove_keyboard:
+          type: boolean
+          const: true
+        selective:
+          type: boolean
+    ForceReply:
+      type: object
+      additionalProperties: false
+      required:
+        - force_reply
+      properties:
+        force_reply:
+          type: boolean
+          const: true
+        input_field_placeholder:
+          type: string
+          minLength: 1
+          maxLength: 64
+        selective:
+          type: boolean
+    AccountReplyInterface:
+      type: object
+      additionalProperties: false
+      required:
+        - reply_interface
+      properties:
+        reply_interface:
+          oneOf:
+            - $ref: '#/components/schemas/ReplyKeyboardInterface'
+            - $ref: '#/components/schemas/ForceReplyInterface'
+            - type: 'null'
+    ReplyKeyboardInterface:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - message_id
+        - keyboard
+        - is_persistent
+        - resize_keyboard
+        - one_time_keyboard
+      properties:
+        type:
+          type: string
+          const: keyboard
+        message_id:
+          type: integer
+          minimum: 1
+          description: The ID of the bot message that sent the keyboard, as the bot sees it.
+        keyboard:
+          type: array
+          minItems: 1
+          items:
+            type: array
+            minItems: 1
+            items:
+              $ref: '#/components/schemas/ReplyKeyboardButton'
+        is_persistent:
+          type: boolean
+        resize_keyboard:
+          type: boolean
+        one_time_keyboard:
+          type: boolean
+          description: >-
+            Whether clients hide the keyboard once it is used. The keyboard stays available, so
+            its buttons can still be pressed.
+        input_field_placeholder:
+          type: string
+    ForceReplyInterface:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - message_id
+      properties:
+        type:
+          type: string
+          const: force_reply
+        message_id:
+          type: integer
+          minimum: 1
+          description: >-
+            The ID of the bot message the client shows a reply interface to, as the bot sees it.
+        input_field_placeholder:
+          type: string
+    PressReplyKeyboardButtonRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat
+        - text
+      properties:
+        chat:
+          $ref: '#/components/schemas/PrivateMessageTarget'
+        text:
+          type: string
+          minLength: 1
+          description: The text of the button to press.
     ReplyParameters:
       type: object
       additionalProperties: false

@@ -10,6 +10,7 @@ import type {
   MessageSenderBot,
   PlainMessageEntityType,
   PrivateTextMessage,
+  ReplyInterface,
   VirtualAccountProfile,
   VirtualBotProfile,
 } from './types.ts';
@@ -183,6 +184,27 @@ export const botCommandsResponseSchema = z.strictObject({
     description: z.string().min(1),
     is_ephemeral: z.boolean(),
   })),
+});
+
+const replyInterfaceSchema: z.ZodType<ReplyInterface> = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('keyboard'),
+    message_id: z.number().int().positive(),
+    keyboard: z.array(z.array(z.strictObject({ text: z.string().min(1) })).min(1)).min(1),
+    is_persistent: z.boolean(),
+    resize_keyboard: z.boolean(),
+    one_time_keyboard: z.boolean(),
+    input_field_placeholder: z.string().min(1).optional(),
+  }),
+  z.strictObject({
+    type: z.literal('force_reply'),
+    message_id: z.number().int().positive(),
+    input_field_placeholder: z.string().min(1).optional(),
+  }),
+]);
+
+export const replyInterfaceResponseSchema = z.strictObject({
+  reply_interface: replyInterfaceSchema.nullable(),
 });
 
 export const callbackQueryResponseSchema = z.strictObject({

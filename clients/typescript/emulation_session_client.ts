@@ -6,11 +6,13 @@ import {
   createdVirtualBotSchema,
   getMeResponseSchema,
   messageHistoryResponseSchema,
+  replyInterfaceResponseSchema,
   sentMessageResponseSchema,
 } from './schemas.ts';
 import type {
   AccountBotCommandsInput,
   AccountMessageHistoryInput,
+  AccountReplyInterfaceInput,
   AccountSendMessageInput,
   BotCommand,
   CallbackQuery,
@@ -20,7 +22,9 @@ import type {
   CreateVirtualBotInput,
   EmulationSession,
   PressCallbackButtonInput,
+  PressReplyKeyboardButtonInput,
   PrivateTextMessage,
+  ReplyInterface,
   VirtualAccountClient,
   VirtualAccountProfile,
   VirtualBotProfile,
@@ -166,6 +170,28 @@ function createVirtualAccountClient(
         responseSchema: botCommandsResponseSchema,
       });
       return response.commands;
+    },
+    async getReplyInterface(input: AccountReplyInterfaceInput): Promise<ReplyInterface | null> {
+      const botId = encodeURIComponent(input.chat.botId);
+      const response = await requestJson(fetchImplementation, {
+        method: 'GET',
+        url: `${accountUrl}/conversations/private/${botId}/reply-interface`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: replyInterfaceResponseSchema,
+      });
+      return response.reply_interface;
+    },
+    async pressReplyKeyboardButton(
+      input: PressReplyKeyboardButtonInput,
+    ): Promise<PrivateTextMessage> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'POST',
+        url: `${accountUrl}/reply-keyboard-presses`,
+        expectedStatus: HTTP_STATUS_CREATED,
+        responseSchema: sentMessageResponseSchema,
+        body: input,
+      });
+      return response.message;
     },
   });
 }

@@ -47,3 +47,31 @@ Deno.test('PrivateConversationRepository gives each conversation a Telegram chat
     throw new Error('Expected distinct conversations to have distinct chat instances');
   }
 });
+
+Deno.test('PrivateConversationRepository records the reply interface message of a conversation', () => {
+  const privateConversations = new PrivateConversationRepository();
+  const conversationKey = { accountId: 1, botId: 2 };
+  let unknownConversationError: unknown;
+  try {
+    privateConversations.setReplyInterfaceMessageId(conversationKey, 'keyboard-message');
+  } catch (error) {
+    unknownConversationError = error;
+  }
+  if (!(unknownConversationError instanceof Error)) {
+    throw new Error('Expected a reply interface only for an existing conversation');
+  }
+
+  privateConversations.getOrCreatePrivateConversation(conversationKey);
+  privateConversations.getOrCreatePrivateConversation({ accountId: 1, botId: 3 });
+  privateConversations.setReplyInterfaceMessageId(conversationKey, 'keyboard-message');
+  if (
+    privateConversations.getReplyInterfaceMessageId(conversationKey) !== 'keyboard-message' ||
+    privateConversations.getReplyInterfaceMessageId({ accountId: 1, botId: 3 }) !== undefined
+  ) {
+    throw new Error('Expected the reply interface message only in its conversation');
+  }
+  privateConversations.setReplyInterfaceMessageId(conversationKey, undefined);
+  if (privateConversations.getReplyInterfaceMessageId(conversationKey) !== undefined) {
+    throw new Error('Expected the reply interface message to be cleared');
+  }
+});
