@@ -1,0 +1,56 @@
+type: object
+additionalProperties: false
+description: What members may do by default.
+required:
+  - can_send_messages
+  - can_send_media_messages
+  - can_send_audios
+  - can_send_documents
+  - can_send_photos
+  - can_send_videos
+  - can_send_video_notes
+  - can_send_voice_notes
+  - can_send_polls
+  - can_send_other_messages
+  - can_add_web_page_previews
+  - can_react_to_messages
+  - can_edit_tag
+  - can_change_info
+  - can_invite_users
+  - can_pin_messages
+  - can_manage_topics
+properties:
+  can_send_messages:
+    type: boolean
+  can_send_media_messages:
+    type: boolean
+  can_send_audios:
+    type: boolean
+  can_send_documents:
+    type: boolean
+  can_send_photos:
+    type: boolean
+  can_send_videos:
+    type: boolean
+  can_send_video_notes:
+    type: boolean
+  can_send_voice_notes:
+    type: boolean
+  can_send_polls:
+    type: boolean
+  can_send_other_messages:
+    type: boolean
+  can_add_web_page_previews:
+    type: boolean
+  can_react_to_messages:
+    type: boolean
+  can_edit_tag:
+    type: boolean
+  can_change_info:
+    type: boolean
+  can_invite_users:
+    type: boolean
+  can_pin_messages:
+    type: boolean
+  can_manage_topics:
+    type: boolean

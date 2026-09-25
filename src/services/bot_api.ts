@@ -3,6 +3,7 @@ import { isParseMode, parseMarkup } from '../text_entities/parse_mode.ts';
 import { checkLink, getLinkUserId } from '../text_entities/telegram_link.ts';
 import type {
   BotApiBotCommand,
+  BotApiChatFullInfo,
   BotApiChatMember,
   BotApiDefaultAdministratorRights,
   BotApiDownloadableFile,
@@ -69,6 +70,7 @@ import type {
   GetChatAdministratorsResult,
   GetChatMemberCountResult,
   GetChatMemberStatusResult,
+  GetReadableSupergroupResult,
   LeaveChatResult,
   UnbanChatMemberResult,
 } from './shared_chat_administration.ts';
@@ -639,6 +641,15 @@ export type BotApiGetChatAdministratorsResult =
     readonly reason: ChatMemberAccessFailureReason | 'private_chat_has_no_administrators';
   };
 
+export interface GetChatRequest {
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
+  readonly chatId: number;
+}
+
+export type BotApiGetChatResult =
+  | { readonly found: true; readonly chat: BotApiChatFullInfo }
+  | { readonly found: false; readonly reason: ChatMemberAccessFailureReason };
+
 export interface GetChatMemberCountRequest {
   /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
   readonly chatId: number;
@@ -993,6 +1004,9 @@ interface ChatMemberships {
   getChatMemberCount(
     input: { readonly observerBotId: number; readonly chatId: number },
   ): GetChatMemberCountResult;
+  getReadableSupergroup(
+    input: { readonly observerBotId: number; readonly chatId: number },
+  ): GetReadableSupergroupResult;
   banChatMember(input: {
     readonly actorBotId: number;
     readonly chatId: number;
@@ -1217,6 +1231,7 @@ interface BotMessageViews {
   viewPrivateMessageForBot(message: PrivateMessage): BotApiPrivateMessage;
   viewSupergroupMessage(message: SupergroupMessage, observerId: number): BotApiSupergroupMessage;
   viewChatMember(userId: number, status: ChatMemberStatus): BotApiChatMember | undefined;
+  viewChatFullInfo(chatId: number): BotApiChatFullInfo | undefined;
 }
 
 interface ChatActions {
@@ -2197,6 +2212,31 @@ export class BotApiService {
       .map(({ userId, status }) => this.#viewChatMember(userId, status))
       .filter(({ user }) => includesOtherBots || !user.is_bot || user.id === authenticatedBot.id);
     return { found: true, administrators };
+  }
+
+  /**
+   * Returns everything a bot may learn about a chat: the private chat with an account that started
+   * it, or a supergroup the bot may read, which a public one is to bots that are not members.
+   */
+  getChat(authenticatedBot: VirtualBotProfile, { chatId }: GetChatRequest): BotApiGetChatResult {
+    if (isUserId(chatId)) {
+      if (!this.#isPrivateChatKnown(authenticatedBot, chatId)) {
+        return { found: false, reason: 'chat_not_found' };
+      }
+    } else {
+      const result = this.#chatMemberships.getReadableSupergroup({
+        observerBotId: authenticatedBot.id,
+        chatId,
+      });
+      if (!result.found) {
+        return { found: false, reason: excludeMissingBotFailure(authenticatedBot, result.reason) };
+      }
+    }
+    const chat = this.#botMessageViews.viewChatFullInfo(chatId);
+    if (chat === undefined) {
+      throw new Error(`Chat ${chatId} was found but cannot be shown`);
+    }
+    return { found: true, chat };
   }
 
   /** Returns how many members a chat has: both participants of a private chat, or a supergroup's. */

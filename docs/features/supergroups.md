@@ -97,6 +97,21 @@ the pinned official [response callback][administrator-list] does. Administrator 
 `chat_member` receive changes to other members, including additions, removals, promotions,
 demotions, bans and unbans.
 
+`getChat` shows a supergroup, or the private chat with an account that has written to the bot, with
+the fields and field order of the official server's full [`JsonChat`][json-chat]. As its
+[`check_chat_access`][chat-read-access] requires for reading, a bot that is not a member may read a
+public supergroup, but not one it was removed from. Fields for data the emulator does not model,
+such as photos, bios, pins and invite links, are omitted. The remaining fields show what a chat
+nobody configured further shows:
+
+- `accent_color_id` is TDLib's default [`AccentColorId`][accent-color] of the user or channel ID,
+  modulo 7, and `max_reaction_count` is TDLib's default of 11.
+- Accounts accept every kind of gift, and supergroups none.
+- A supergroup has `has_visible_history`, since new members see earlier messages, and
+  `join_to_send_messages`, which TDLib documents as false only for discussion groups.
+- A supergroup's `permissions` grant everything, since member restrictions and default permissions
+  are a [real gap](#real-gaps).
+
 ## Intentional deviations
 
 **No automatic message deletion.** Message fixtures remain available until explicitly deleted or the
@@ -175,6 +190,9 @@ production read permissions.
 [supergroup messaging tests](../../tests/supergroup_messaging_service_test.ts).
 
 [privacy-faq]: https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
+[json-chat]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L1554-L1847
+[chat-read-access]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L8796-L8866
+[accent-color]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/AccentColorId.h#L32-L39
 [bot-to-bot]: https://core.telegram.org/api/bots/bot-to-bot
 [mention-matching]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L267-L310
 [protected-content]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8145-L8148

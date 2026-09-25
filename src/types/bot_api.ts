@@ -31,6 +31,71 @@ export interface BotApiSupergroupChat {
 /** A chat of several members that a bot can join. */
 export type BotApiGroupChat = BotApiBasicGroupChat | BotApiSupergroupChat;
 
+/** Which kinds of gifts a user or chat accepts, as `getChat` shows them. */
+export interface BotApiAcceptedGiftTypes {
+  readonly unlimited_gifts: boolean;
+  readonly limited_gifts: boolean;
+  readonly unique_gifts: boolean;
+  readonly premium_subscription: boolean;
+  readonly gifts_from_channels: boolean;
+}
+
+/** What members of a group may do by default. */
+export interface BotApiChatPermissions {
+  readonly can_send_messages: boolean;
+  readonly can_send_media_messages: boolean;
+  readonly can_send_audios: boolean;
+  readonly can_send_documents: boolean;
+  readonly can_send_photos: boolean;
+  readonly can_send_videos: boolean;
+  readonly can_send_video_notes: boolean;
+  readonly can_send_voice_notes: boolean;
+  readonly can_send_polls: boolean;
+  readonly can_send_other_messages: boolean;
+  readonly can_add_web_page_previews: boolean;
+  readonly can_react_to_messages: boolean;
+  readonly can_edit_tag: boolean;
+  readonly can_change_info: boolean;
+  readonly can_invite_users: boolean;
+  readonly can_pin_messages: boolean;
+  readonly can_manage_topics: boolean;
+}
+
+/** The fields of `getChat`'s `ChatFullInfo` that every chat has. */
+interface BotApiChatFullInfoBase {
+  readonly accepted_gift_types: BotApiAcceptedGiftTypes;
+  readonly max_reaction_count: number;
+  readonly accent_color_id: number;
+  /** Present only when true. */
+  readonly has_protected_content?: true;
+}
+
+/** A private chat with a user, as `getChat` shows it; fields for unset profile data are omitted. */
+export interface BotApiPrivateChatFullInfo extends BotApiPrivateChat, BotApiChatFullInfoBase {
+  /** Present for users other than bots. */
+  readonly can_send_gift?: true;
+  /** Present with the username. */
+  readonly active_usernames?: readonly string[];
+  /** Present only when true. */
+  readonly has_private_forwards?: true;
+}
+
+/** A supergroup, as `getChat` shows it; fields for unset settings are omitted. */
+export interface BotApiSupergroupChatFullInfo extends BotApiSupergroupChat, BotApiChatFullInfoBase {
+  /** Present with the username. */
+  readonly active_usernames?: readonly string[];
+  /** Omitted when empty. */
+  readonly description?: string;
+  /** Present only when true. */
+  readonly has_visible_history?: true;
+  readonly permissions: BotApiChatPermissions;
+  /** Present only when true. */
+  readonly join_to_send_messages?: true;
+}
+
+/** A chat with everything `getChat` tells a bot about it. */
+export type BotApiChatFullInfo = BotApiPrivateChatFullInfo | BotApiSupergroupChatFullInfo;
+
 /** A bot as a message shows it, without the capabilities that only `getMe` reports. */
 export interface BotApiBotUser {
   readonly id: number;

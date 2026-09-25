@@ -1,4 +1,8 @@
 import {
+  projectPrivateChatFullInfo,
+  projectSupergroupChatFullInfo,
+} from '../projections/bot_api_chat_full_info.ts';
+import {
   type ExternalReplyProjectionContext,
   type ObservedFile,
   projectBotAsUser,
@@ -15,6 +19,7 @@ import {
 import type {
   BotApiBotUser,
   BotApiCallbackQuery,
+  BotApiChatFullInfo,
   BotApiChatMember,
   BotApiChatMemberUpdated,
   BotApiChosenInlineResult,
@@ -36,6 +41,7 @@ import type {
 } from '../types/chat_domain_event.ts';
 import type { ChatMemberStatus } from '../types/chat_membership.ts';
 import type { InlineQuery } from '../types/inline_query.ts';
+import { isUserId } from '../types/telegram_identity.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { SharedChat, Supergroup } from '../types/virtual_chat.ts';
@@ -87,8 +93,8 @@ interface BotMessageViewServiceDependencies {
 
 /**
  * Presents committed canonical messages, callback queries on them, inline queries and the results
- * sent from their answers, the standing of users in groups, and changes of a bot's membership in
- * its chats, as the Bot API shows them to an observing bot.
+ * sent from their answers, chats, the standing of users in groups, and changes of a bot's
+ * membership in its chats, as the Bot API shows them to an observing bot.
  *
  * It reads the participants' profiles, the chats, and the observer's message numbering; it never
  * creates messages or decides whether sending one is permitted. As on Telegram, each observer
@@ -262,6 +268,19 @@ export class BotMessageViewService {
   viewChatMember(userId: number, status: ChatMemberStatus): BotApiChatMember | undefined {
     const user = this.#findUser(userId);
     return user === undefined ? undefined : projectChatMember(user, status);
+  }
+
+  /**
+   * Returns everything `getChat` shows about a chat, whose access the caller checked: the private
+   * chat with an account, or a supergroup; `undefined` for neither.
+   */
+  viewChatFullInfo(chatId: number): BotApiChatFullInfo | undefined {
+    if (isUserId(chatId)) {
+      const account = this.#accounts.getById(chatId);
+      return account === undefined ? undefined : projectPrivateChatFullInfo(account);
+    }
+    const chat = this.#sharedChats.getSharedChat(chatId);
+    return chat?.kind === 'supergroup' ? projectSupergroupChatFullInfo(chat) : undefined;
   }
 
   /** Projects a supergroup message with the given view of the message it replies to, if any. */

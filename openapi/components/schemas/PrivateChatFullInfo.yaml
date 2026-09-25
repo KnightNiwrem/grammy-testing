@@ -1,0 +1,47 @@
+type: object
+additionalProperties: false
+description: >-
+  A private chat with an account, as getChat shows it. The account has no bio, photo,
+  birthdate or business profile, so those fields are omitted.
+required:
+  - id
+  - first_name
+  - type
+  - can_send_gift
+  - accepted_gift_types
+  - max_reaction_count
+  - accent_color_id
+properties:
+  id:
+    $ref: ./TelegramUserId.yaml
+  first_name:
+    type: string
+  last_name:
+    type: string
+  username:
+    type: string
+  type:
+    type: string
+    const: private
+  can_send_gift:
+    type: boolean
+    const: true
+  active_usernames:
+    type: array
+    description: The account's username, if it has one.
+    items:
+      type: string
+  has_private_forwards:
+    type: boolean
+    const: true
+    description: Present when the account keeps forwards of its messages from linking to it.
+  accepted_gift_types:
+    $ref: ./AcceptedGiftTypes.yaml
+  max_reaction_count:
+    type: integer
+    description: How many different reactions a message may carry, 11 in every emulated chat.
+  accent_color_id:
+    type: integer
+    description: >-
+      The default accent color that TDLib derives from the user or channel identifier, as no
+      chat chooses one.

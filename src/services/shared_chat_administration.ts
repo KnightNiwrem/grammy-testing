@@ -17,6 +17,7 @@ import {
   type ChatMembership,
   type ChatMemberStatus,
   type FormerChatMemberStatus,
+  getSupergroupNonMemberFailureReason,
   holdsSupergroupAdministratorRight,
   isSameChatMemberStatus,
   LEFT_CHAT_MEMBER_STATUS,
@@ -314,6 +315,10 @@ export type GetChatAdministratorsResult =
 
 export type GetChatMemberCountResult =
   | { readonly found: true; readonly memberCount: number }
+  | { readonly found: false; readonly reason: 'bot_not_found' | SupergroupBotAccessFailureReason };
+
+export type GetReadableSupergroupResult =
+  | { readonly found: true; readonly supergroup: Supergroup }
   | { readonly found: false; readonly reason: 'bot_not_found' | SupergroupBotAccessFailureReason };
 
 /** A bot moderating a supergroup it is a member of, and the user it moderates. */
@@ -849,6 +854,31 @@ export class SharedChatAdministrationService {
     return access.resolved
       ? { found: true, memberCount: this.#sharedChats.getChatMemberIds(input.chatId).length }
       : { found: false, reason: access.reason };
+  }
+
+  /**
+   * Finds a supergroup whose information a bot reads, with the access the official Bot API server's
+   * `check_chat_access` requires for reading: a bot removed from the supergroup is turned away,
+   * and one that is not a member may read only a public supergroup.
+   */
+  getReadableSupergroup(
+    { observerBotId, chatId }: ChatMemberQueryInput,
+  ): GetReadableSupergroupResult {
+    if (this.#bots.getById(observerBotId) === undefined) {
+      return { found: false, reason: 'bot_not_found' };
+    }
+    const supergroup = this.#sharedChats.getSharedChat(chatId);
+    if (supergroup?.kind !== 'supergroup') {
+      return { found: false, reason: 'chat_not_found' };
+    }
+    if (this.#sharedChats.getChatMembership(chatId, observerBotId) !== undefined) {
+      return { found: true, supergroup };
+    }
+    const formerStatus = this.#sharedChats.getFormerMemberStatus(chatId, observerBotId);
+    if (supergroup.username !== undefined && formerStatus?.status !== 'kicked') {
+      return { found: true, supergroup };
+    }
+    return { found: false, reason: getSupergroupNonMemberFailureReason(formerStatus) };
   }
 
   /** Changes the role of a supergroup member that is not the owner, as the owner. */

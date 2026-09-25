@@ -53,6 +53,7 @@ The two legacy aliases below are also accepted.
 | Commands         | `setMyCommands`, `getMyCommands`, `deleteMyCommands`                                                                                               |
 | Bot profile      | `setMyDescription`, `getMyDescription`, `setMyShortDescription`, `getMyShortDescription`                                                           |
 | Bot settings     | `setChatMenuButton`, `getChatMenuButton`, `setMyDefaultAdministratorRights`, `getMyDefaultAdministratorRights`                                     |
+| Chat information | `getChat`                                                                                                                                          |
 | Membership       | `leaveChat`, `getChatMember`, `getChatAdministrators`, `getChatMemberCount`, `banChatMember`, `unbanChatMember`, `setChatAdministratorCustomTitle` |
 | Legacy aliases   | `getChatMembersCount` → `getChatMemberCount`, `kickChatMember` → `banChatMember`                                                                   |
 
@@ -72,7 +73,7 @@ above determines whether an individual method is available.
   are the only shared chat kind exposed by the HTTP server.
 - Media other than photos and documents, albums, stickers and sticker sets, polls, dice, locations,
   venues, contacts, games, checklists, rich messages, ephemeral messages, drafts and stories.
-- Reactions, pins, chat metadata and photos, `getChat`, invite links, join requests, member
+- Reactions, pins, chat metadata changes and photos, invite links, join requests, member
   restrictions, and promotion through the Bot API. Tests can promote supergroup members through the
   emulation API.
 - Payments, invoices, shipping, Telegram Stars, gifts, paid broadcasts and paid media.

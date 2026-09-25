@@ -16,10 +16,9 @@ make every service a dependency-free leaf. The composition root already supplies
 dependencies, and common message normalization and edit rules already have a shared implementation.
 [Sources: composition][composition], [message content rules][content], [message views][view].
 
-The remaining capability gap I identified is `getChat` for the chat types already modeled. There are
-also concrete robustness issues in recursive reply routing and the new webhook dispatcher's backlog
-handling. The architectural work should be focused: separate reusable Bot API method dispatch from
-Hono routing, rather than mechanically splitting every large class.
+There are concrete robustness issues in recursive reply routing and the new webhook dispatcher's
+backlog handling. The architectural work should be focused: separate reusable Bot API method
+dispatch from Hono routing, rather than mechanically splitting every large class.
 
 **No P0 or P1 defect was established by this review.** That is not a certification that the
 repository has no such defects. The findings below distinguish observed implementation defects,
@@ -56,7 +55,6 @@ recommendation is not a claim that an unsupported method is a severe implementat
 
 | Rank | Priority | Finding or recommendation                                                | Classification                                            |
 | ---: | :------: | ------------------------------------------------------------------------ | --------------------------------------------------------- |
-|    5 |    P2    | Add `getChat` for the chat types already modeled                         | Targeted capability recommendation                        |
 |    6 |    P2    | Replace recursive reply-address resolution with a stack-safe traversal   | Source-verified robustness defect; reduced probe executed |
 |    7 |    P2    | Separate method dispatch from HTTP routing; constrain facade growth      | Architecture / SRP recommendation                         |
 |    8 |    P2    | Extend upstream-derived fixtures into a differential conformance harness | Fidelity assurance recommendation                         |
@@ -64,38 +62,6 @@ recommendation is not a claim that an unsupported method is a severe implementat
 |   13 |    P3    | Make the development and CI dependency baseline reproducible             | Build reproducibility risk                                |
 
 ## Findings, in priority order
-
-### 5. P2 — Add `getChat` for already-supported private chats and supergroups
-
-**Context and evidence.** The method registry includes several chat membership/query methods but no
-`getChat`; unknown method names take the 404 path. The emulator already stores user profiles,
-supergroup titles/descriptions and membership state and already has projections for message-level
-chat objects. [Method registry][routes] · [administration state][administration] ·
-[existing projections][projection].
-
-**Why this is valuable.** A test bot that sends and receives ordinary messages may also query its
-chat's metadata or permissions before doing useful work. That workflow currently reaches an
-unsupported method even though much of its underlying state is already modeled. This is a
-recommendation about likely utility and implementation leverage, not a measured claim about how
-frequently all bot developers use the method.
-
-**Recommendation.** Implement numeric-ID `getChat` for the currently supported chat types first. Use
-the actual `getChat` access/error rules rather than blindly copying send permissions. Return a
-properly formed `ChatFullInfo` for the supported profile—not merely the smaller `Chat` object copied
-out of a message. Required fields need explicit, documented fixture defaults or modeled values;
-unknown optional fields should not be invented. Continue rejecting unsupported chat kinds and
-username addressing until those capabilities are deliberately added.
-[Telegram `getChat`][api-getchat] · [`ChatFullInfo` contract][api-chatfull] ·
-[C++ method handling][cpp-client].
-
-**Acceptance tests.** Query the same private chat and supergroup used by the core send/receive
-tests; verify stable identity/title/description data, relevant membership/access failures, and
-consistency with message projections. Exercise it through a real bot framework or the normal Bot API
-transport. Add separate tests for fields that are absent versus explicitly false.
-
-**Scope/cost.** Small to medium. This is a new capability, not an accusation that the existing
-implementation violates its declared scope. It should precede a wide collection of rarely tested
-optional parameters.
 
 ### 6. P2 — Deep reply chains can overflow the call stack during message publication
 
@@ -412,7 +378,6 @@ references; the C++ references are pinned to the stated comparison baseline.
 [content]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/services/message_content.ts
 [private]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/services/private_messaging.ts
 [supergroup]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/services/supergroup_messaging.ts
-[administration]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/services/shared_chat_administration.ts
 [delivery]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/services/bot_update_delivery.ts
 [polling]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/services/bot_update_polling.ts
 [update-repo]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/repositories/bot_update.ts
@@ -434,6 +399,4 @@ references; the C++ references are pinned to the stated comparison baseline.
 [cpp-client]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp
 [cpp-webhook]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp
 [cpp-entities]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp
-[api-getchat]: https://core.telegram.org/bots/api#getchat
-[api-chatfull]: https://core.telegram.org/bots/api#chatfullinfo
 [deno-lock]: https://docs.deno.com/examples/dependency_lockfile_tutorial/

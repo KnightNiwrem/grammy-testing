@@ -1,0 +1,56 @@
+type: object
+additionalProperties: false
+description: >-
+  A supergroup, as getChat shows it. New members see earlier messages, and members have no
+  default restrictions, which the emulator does not model, so every permission is granted.
+  Gifts cannot be sent to it, so it accepts none.
+required:
+  - id
+  - title
+  - type
+  - has_visible_history
+  - permissions
+  - join_to_send_messages
+  - accepted_gift_types
+  - max_reaction_count
+  - accent_color_id
+properties:
+  id:
+    $ref: ./SupergroupChatId.yaml
+  title:
+    type: string
+  username:
+    type: string
+    description: The username of a public supergroup; omitted for a private one.
+  type:
+    type: string
+    const: supergroup
+  active_usernames:
+    type: array
+    description: The username of a public supergroup.
+    items:
+      type: string
+  description:
+    type: string
+  has_visible_history:
+    type: boolean
+    const: true
+  permissions:
+    $ref: ./ChatPermissions.yaml
+  join_to_send_messages:
+    type: boolean
+    const: true
+  accepted_gift_types:
+    $ref: ./AcceptedGiftTypes.yaml
+  max_reaction_count:
+    type: integer
+    description: How many different reactions a message may carry, 11 in every emulated chat.
+  accent_color_id:
+    type: integer
+    description: >-
+      The default accent color that TDLib derives from the user or channel identifier, as no
+      chat chooses one.
+  has_protected_content:
+    type: boolean
+    const: true
+    description: Present while the owner protects the supergroup's content.

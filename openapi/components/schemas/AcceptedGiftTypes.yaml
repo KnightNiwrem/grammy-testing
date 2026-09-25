@@ -1,0 +1,20 @@
+type: object
+additionalProperties: false
+description: Which kinds of gifts the user or chat accepts.
+required:
+  - unlimited_gifts
+  - limited_gifts
+  - unique_gifts
+  - premium_subscription
+  - gifts_from_channels
+properties:
+  unlimited_gifts:
+    type: boolean
+  limited_gifts:
+    type: boolean
+  unique_gifts:
+    type: boolean
+  premium_subscription:
+    type: boolean
+  gifts_from_channels:
+    type: boolean

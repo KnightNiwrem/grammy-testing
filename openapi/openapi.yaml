@@ -159,6 +159,8 @@ paths:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_sendChatAction.yaml
   /sessions/{sessionId}/bot-api/bot{token}/leaveChat:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_leaveChat.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getChat:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getChat.yaml
   /sessions/{sessionId}/bot-api/bot{token}/getChatMember:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getChatMember.yaml
   /sessions/{sessionId}/bot-api/bot{token}/getChatAdministrators:

@@ -1,0 +1,58 @@
+description: >-
+  Telegram Bot API method for reading everything a bot may learn about a chat: the private chat
+  with an account, or a supergroup. As the official server's access check for reading does, a
+  bot that is not a member may read a public supergroup, unless it was removed from it.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getChat
+  summary: Read the full information of a chat of the authenticated virtual bot
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/GetChatRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/GetChatRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/GetChatRequest.yaml
+  responses:
+    '200':
+      description: The chat's full information.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/ChatFullInfoResultResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram
+        would reject it: `chat_id` is missing (`Bad Request: chat_id is empty`), or
+        the chat is neither a private chat with an account that has written to the
+        bot nor a supergroup the bot may read (`Bad Request: chat not found`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The bot left a private supergroup (`Forbidden: bot is not a member of the
+        supergroup chat`) or was removed from a supergroup (`Forbidden: bot was kicked
+        from the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

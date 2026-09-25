@@ -573,6 +573,10 @@ const getChatMemberCountParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
 });
 
+const getChatParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+});
+
 // Telegram always revokes a removed member's access to a supergroup's messages, and the emulator
 // shows no member a history it cannot read, so `revoke_messages` is validated and ignored.
 const banChatMemberParametersSchema = z.strictObject({
@@ -735,6 +739,7 @@ const BOT_API_METHODS: readonly BotApiMethod[] = [
   { name: 'editMessageText', handler: handleEditMessageText },
   { name: 'forwardMessage', handler: handleForwardMessage },
   { name: 'forwardMessages', handler: handleForwardMessages },
+  { name: 'getChat', handler: handleGetChat },
   { name: 'getChatAdministrators', handler: handleGetChatAdministrators },
   { name: 'getChatMember', handler: handleGetChatMember },
   {
@@ -2060,6 +2065,23 @@ function handleGetChatAdministrators(
   return result.found
     ? botApiResult(result.administrators)
     : chatMemberFailureAnswer(result.reason);
+}
+
+function handleGetChat(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const parsedParameters = getChatParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, 'Bad Request: invalid getChat parameters');
+  }
+  const { chat_id: chatId } = parsedParameters.data;
+  if (chatId === undefined) {
+    return botApiError(400, CHAT_ID_EMPTY_DESCRIPTION);
+  }
+
+  const result = context.session.botApi.getChat(context.bot, { chatId });
+  return result.found ? botApiResult(result.chat) : chatMemberFailureAnswer(result.reason);
 }
 
 function handleGetChatMemberCount(

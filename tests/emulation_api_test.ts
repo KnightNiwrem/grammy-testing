@@ -5255,6 +5255,162 @@ Deno.test('the owner promotes administrators, whom bots find with getChatMember 
   }
 });
 
+Deno.test('getChat shows private chats and supergroups as the official server does', async () => {
+  const { api, sessionPath, owner, bot, readerBot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const getChat = async (chatId: number | string, botApiPath = bot.botApiPath) => {
+    const { status, body } = await callBotApi(api, `${botApiPath}/getChat`, { chat_id: chatId });
+    return { status, body: body as { result?: unknown; description?: string } };
+  };
+  const createdAccountResponse = await api.request(
+    `${sessionPath}/accounts`,
+    jsonRequest('POST', {
+      first_name: 'Linus',
+      last_name: 'Torvalds',
+      username: 'linus',
+      has_private_forwards: true,
+    }),
+  );
+  const { account: linus } = await createdAccountResponse.json() as { account: { id: number } };
+  for (const accountId of [owner.id, linus.id]) {
+    await api.request(
+      `${sessionPath}/accounts/${accountId}/messages`,
+      jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: '/start' }),
+    );
+  }
+  const publicResponse = await api.request(
+    `${sessionPath}/accounts/${owner.id}/supergroups`,
+    jsonRequest('POST', { title: 'Open', username: 'open_team', description: 'Everyone' }),
+  );
+  const { supergroup: publicSupergroup } = await publicResponse.json() as {
+    supergroup: { id: number };
+  };
+  await api.request(`${supergroupPath(owner.id)}/content-protection`, { method: 'PUT' });
+
+  // Accent colors default to TDLib's AccentColorId of the user or channel, modulo 7.
+  const allGiftTypes = (accepted: boolean) => ({
+    unlimited_gifts: accepted,
+    limited_gifts: accepted,
+    unique_gifts: accepted,
+    premium_subscription: accepted,
+    gifts_from_channels: accepted,
+  });
+  const channelAccentColor = (chatId: number) => (-chatId - 1_000_000_000_000) % 7;
+  const everyPermission = Object.fromEntries(
+    [
+      'can_send_messages',
+      'can_send_media_messages',
+      'can_send_audios',
+      'can_send_documents',
+      'can_send_photos',
+      'can_send_videos',
+      'can_send_video_notes',
+      'can_send_voice_notes',
+      'can_send_polls',
+      'can_send_other_messages',
+      'can_add_web_page_previews',
+      'can_react_to_messages',
+      'can_edit_tag',
+      'can_change_info',
+      'can_invite_users',
+      'can_pin_messages',
+      'can_manage_topics',
+    ].map((permission) => [permission, true]),
+  );
+  const expectedChats = [
+    {
+      id: owner.id,
+      first_name: 'Ada',
+      type: 'private',
+      can_send_gift: true,
+      accepted_gift_types: allGiftTypes(true),
+      max_reaction_count: 11,
+      accent_color_id: owner.id % 7,
+    },
+    {
+      id: linus.id,
+      first_name: 'Linus',
+      last_name: 'Torvalds',
+      username: 'linus',
+      type: 'private',
+      can_send_gift: true,
+      active_usernames: ['linus'],
+      has_private_forwards: true,
+      accepted_gift_types: allGiftTypes(true),
+      max_reaction_count: 11,
+      accent_color_id: linus.id % 7,
+    },
+    {
+      id: supergroup.id,
+      title: 'Team',
+      type: 'supergroup',
+      has_visible_history: true,
+      permissions: everyPermission,
+      join_to_send_messages: true,
+      accepted_gift_types: allGiftTypes(false),
+      max_reaction_count: 11,
+      accent_color_id: channelAccentColor(supergroup.id),
+      has_protected_content: true,
+    },
+    {
+      id: publicSupergroup.id,
+      title: 'Open',
+      username: 'open_team',
+      type: 'supergroup',
+      active_usernames: ['open_team'],
+      description: 'Everyone',
+      has_visible_history: true,
+      permissions: everyPermission,
+      join_to_send_messages: true,
+      accepted_gift_types: allGiftTypes(false),
+      max_reaction_count: 11,
+      accent_color_id: channelAccentColor(publicSupergroup.id),
+    },
+  ];
+  // A public supergroup is readable by bots that are not members, also by its username.
+  const chats = await Promise.all(
+    [owner.id, linus.id, supergroup.id, '@OPEN_TEAM'].map(async (chatId) =>
+      (await getChat(chatId)).body.result
+    ),
+  );
+  if (JSON.stringify(chats) !== JSON.stringify(expectedChats)) {
+    throw new Error(`Expected full chat information, received ${JSON.stringify(chats)}`);
+  }
+
+  // A bot that left a private supergroup is turned away, and a removed bot even from a public one.
+  await callBotApi(api, `${readerBot.botApiPath}/leaveChat`, { chat_id: supergroup.id });
+  await api.request(`${supergroupPath(owner.id)}/members/${bot.bot.id}`, { method: 'DELETE' });
+  const publicMembersPath =
+    `${sessionPath}/accounts/${owner.id}/conversations/supergroup/${publicSupergroup.id}/members`;
+  await api.request(`${publicMembersPath}/${readerBot.bot.id}`, { method: 'PUT' });
+  await api.request(`${publicMembersPath}/${readerBot.bot.id}`, { method: 'DELETE' });
+  const failures = await Promise.all([
+    getChat(supergroup.id, readerBot.botApiPath),
+    getChat(supergroup.id),
+    getChat(publicSupergroup.id, readerBot.botApiPath),
+    getChat(-1_000_000_009_999),
+    getChat(owner.id, readerBot.botApiPath),
+    getChat(readerBot.bot.id),
+    callBotApi(api, `${bot.botApiPath}/getChat`, {}).then(({ status, body }) => ({
+      status,
+      body: body as { description?: string },
+    })),
+  ]);
+  const expectedFailures = [
+    [403, 'Forbidden: bot is not a member of the supergroup chat'],
+    [403, 'Forbidden: bot was kicked from the supergroup chat'],
+    [403, 'Forbidden: bot was kicked from the supergroup chat'],
+    [400, 'Bad Request: chat not found'],
+    [400, 'Bad Request: chat not found'],
+    [400, 'Bad Request: chat not found'],
+    [400, 'Bad Request: chat_id is empty'],
+  ];
+  const receivedFailures = failures.map(({ status, body }) => [status, body.description]);
+  if (JSON.stringify(receivedFailures) !== JSON.stringify(expectedFailures)) {
+    throw new Error(`Expected Telegram's access checks, received ${JSON.stringify(failures)}`);
+  }
+});
+
 Deno.test('the owner sets custom titles, which bots see but cannot change', async () => {
   const { api, sessionPath, owner, member, bot, readerBot, supergroup, supergroupPath } =
     await createSupergroupFixture();
