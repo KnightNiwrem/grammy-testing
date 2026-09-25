@@ -1,7 +1,7 @@
 import { createEmulationApi } from '../../src/api/mod.ts';
 import { createSessionLifecycleService } from '../../src/composition/session_lifecycle.ts';
 import { MAX_TELEGRAM_USER_ID } from './constants.ts';
-import { EmulationClientError, TelegramEmulationClient } from './mod.ts';
+import { ButtonSelectionError, EmulationClientError, TelegramEmulationClient } from './mod.ts';
 import { virtualAccountProfileSchema } from './schemas.ts';
 
 Deno.test('TypeScript client validates the official Telegram user ID range', () => {
@@ -789,6 +789,33 @@ Deno.test('TypeScript client reads rich messages and presses their buttons', asy
   if (callbackQuery.callback_data !== 'book' || callbackQuery.status !== 'awaiting_answer') {
     throw new Error('Expected the client to press the rich message button');
   }
+
+  const pressedByLabel = await account.pressButton({
+    chat: to,
+    message_id: sentMessage.message_id,
+    button: { label: 'Book', within: 'Share ✈' },
+    expired: true,
+  });
+  if (pressedByLabel.callback_data !== 'book' || pressedByLabel.status !== 'expired') {
+    throw new Error('Expected the client to press the button selected by its label');
+  }
+
+  for (
+    const [messageId, label, expectedError] of [
+      [sentMessage.message_id, 'Share ✈', /is not a callback button/],
+      [sentMessage.message_id + 1, 'Book', /is not in the account's history/],
+    ] as const
+  ) {
+    try {
+      await account.pressButton({ chat: to, message_id: messageId, button: { label } });
+      throw new Error(`Expected pressing ${label} on message ${messageId} to fail`);
+    } catch (error) {
+      if (!(error instanceof ButtonSelectionError) || !expectedError.test(error.message)) {
+        throw error;
+      }
+    }
+  }
+  await session.end();
 });
 
 Deno.test('TypeScript client sends inline queries and results through an inline bot', async () => {

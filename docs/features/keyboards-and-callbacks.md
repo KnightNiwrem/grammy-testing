@@ -32,7 +32,10 @@ creates a `callback_query` update for the bot responsible for that button. The q
 account, data and `chat_instance`; ordinary message callbacks include a message, while inline
 callbacks use `inline_message_id` instead. Tests inspect the answer after the bot calls
 `answerCallbackQuery`. Answers store optional text, `show_alert`, `url` and `cache_time`; answer
-text is limited to 200 UTF-16 code units by the emulator's schema.
+text is limited to 200 UTF-16 code units by the emulator's schema. The TypeScript client's
+`pressButton` selects a button by its label instead of its data, within the innermost keyboard row,
+table row, list item or block whose text mentions a given text, and refuses a selection that matches
+no button or several.
 
 The [Bot API handler][answer-callback] and TDLib's [`answer_callback_query`][td-callback] pass `url`
 to Telegram, whose servers decide which URLs to accept. The Bot API documents a game's URL for game

@@ -287,6 +287,73 @@ export interface PressCallbackButtonInput {
   readonly expired?: boolean;
 }
 
+export interface PressButtonInput {
+  readonly chat: MessageTarget;
+  /** The ID of the message carrying the button, as message history shows it. */
+  readonly message_id: number;
+  /** Selects exactly one button of the message, which must be a callback button. */
+  readonly button: ButtonSelector;
+  /** As for `pressCallbackButton`, creates the query already expired. */
+  readonly expired?: boolean;
+}
+
+/** The parts of a message that show buttons: its rich message and its inline keyboard. */
+export interface MessageWithButtons {
+  readonly rich_message?: RichMessage;
+  readonly reply_markup?: InlineKeyboardMarkup;
+}
+
+/**
+ * A button of a message as the account's client shows it: a button of the rich message, in a row
+ * or in text, or of the inline keyboard below it.
+ */
+export interface MessageButton {
+  /** The button's text as plain text, with custom emoji shown by their alternative text. */
+  readonly label: string;
+  readonly button: InlineKeyboardButton | RichMessageButton;
+  /** Where the button is in the message, such as `reply_markup.inline_keyboard[0][1]`. */
+  readonly path: string;
+  /** The parts of the message that enclose the button, outermost first. */
+  readonly containers: readonly ButtonContainer[];
+}
+
+/** A block of a rich message that encloses a button. */
+export interface RichBlockButtonContainer {
+  readonly kind: 'block';
+  readonly block: RichBlock;
+  /** The block list that holds the block, which gives its neighbors. */
+  readonly siblingBlocks: readonly RichBlock[];
+  /** The block's index in `siblingBlocks`. */
+  readonly index: number;
+  /** Everything the block shows as plain text, including button labels. */
+  readonly text: string;
+  readonly path: string;
+}
+
+/** A list item, table row, or inline keyboard row that encloses a button. */
+export interface ButtonRowContainer {
+  readonly kind: 'list_item' | 'table_row' | 'inline_keyboard_row';
+  /** Everything the item or row shows as plain text, including button labels. */
+  readonly text: string;
+  readonly path: string;
+}
+
+export type ButtonContainer = RichBlockButtonContainer | ButtonRowContainer;
+
+/**
+ * Selects a button by its label, optionally within a part of the message. `within` names the
+ * innermost parts whose text contains the string or matches the pattern, so that `within: 'Potion'`
+ * selects the table row that mentions Potion rather than the whole table.
+ */
+export interface ButtonLabelSelector {
+  /** The whole label, or a pattern the label matches. */
+  readonly label: string | RegExp;
+  readonly within?: string | RegExp;
+}
+
+/** A label selector, or a predicate that inspects each button's label, path, and containers. */
+export type ButtonSelector = ButtonLabelSelector | ((button: MessageButton) => boolean);
+
 export interface PrivateChat {
   readonly id: number;
   readonly type: 'private';
@@ -1178,6 +1245,12 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    * `getCallbackQuery`.
    */
   pressCallbackButton(input: PressCallbackButtonInput): Promise<CallbackQuery>;
+  /**
+   * Presses the callback button a selector picks on a message as the account's history shows it
+   * now, as `pressCallbackButton` presses it by its callback data. Throws a `ButtonSelectionError`
+   * listing the candidates unless exactly one button matches and it is a callback button.
+   */
+  pressButton(input: PressButtonInput): Promise<CallbackQuery>;
   /** Returns a callback query this account created, with the bot's answer once given. */
   getCallbackQuery(callbackQueryId: string): Promise<CallbackQuery>;
   /**

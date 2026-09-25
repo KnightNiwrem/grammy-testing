@@ -44,13 +44,18 @@ try {
     chat: { type: 'private', botId: bot.id },
   });
 
-  // Press a callback button on the bot's latest reply, then read the bot's answer.
+  // Press a callback button on the bot's latest reply by its label, then read the bot's answer.
+  // `within` narrows a repeated label to the innermost row, list item, or block that mentions the
+  // text; a selector that matches no button or several fails and lists the candidates.
+  // A selector can also be a predicate over the buttons `listButtons` returns, each with its path
+  // and the parts of the message around it. `pressCallbackButton` presses a button by its exact
+  // callback data instead.
   const menu = history.at(-1);
-  if (menu?.reply_markup !== undefined) {
-    const callbackQuery = await account.pressCallbackButton({
+  if (menu !== undefined) {
+    const callbackQuery = await account.pressButton({
       chat: { type: 'private', botId: bot.id },
       message_id: menu.message_id,
-      callback_data: 'yes',
+      button: { label: 'Details', within: 'Potion' },
     });
     await activity.waitFor(
       { method: 'answerCallbackQuery', parameters: { callback_query_id: callbackQuery.id } },

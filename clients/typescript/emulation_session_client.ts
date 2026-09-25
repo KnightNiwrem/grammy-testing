@@ -2,6 +2,7 @@ import type { z } from 'zod';
 
 import { createBotActivityLog } from './bot_activity_log.ts';
 import { HTTP_STATUS_CREATED, HTTP_STATUS_NO_CONTENT, HTTP_STATUS_OK } from './constants.ts';
+import { ButtonSelectionError, findButton } from './message_buttons.ts';
 import {
   botCommandsResponseSchema,
   callbackQueryResponseSchema,
@@ -61,6 +62,7 @@ import type {
   MessageIn,
   MessageTarget,
   Notification,
+  PressButtonInput,
   PressCallbackButtonInput,
   PressReplyKeyboardButtonInput,
   PrivateMessage,
@@ -228,6 +230,29 @@ function createVirtualAccountClient(
   accountUrl: string,
   fetchImplementation: typeof globalThis.fetch,
 ): VirtualAccountClient {
+  async function getMessages<Target extends MessageTarget>(
+    input: AccountMessageHistoryInput<Target>,
+  ): Promise<readonly MessageIn<Target>[]> {
+    const response = await requestJson(fetchImplementation, {
+      method: 'GET',
+      url: `${conversationUrl(accountUrl, input.chat)}/messages`,
+      expectedStatus: HTTP_STATUS_OK,
+      responseSchema: messageResponseSchemasFor(input.chat).history,
+    });
+    return response.messages;
+  }
+
+  async function pressCallbackButton(input: PressCallbackButtonInput): Promise<CallbackQuery> {
+    const response = await requestJson(fetchImplementation, {
+      method: 'POST',
+      url: `${accountUrl}/callback-queries`,
+      expectedStatus: HTTP_STATUS_CREATED,
+      responseSchema: callbackQueryResponseSchema,
+      body: input,
+    });
+    return response.callback_query;
+  }
+
   return Object.freeze({
     ...profile,
     async sendMessage<Target extends MessageTarget>(
@@ -416,17 +441,7 @@ function createVirtualAccountClient(
         expectedStatus: HTTP_STATUS_NO_CONTENT,
       });
     },
-    async getMessages<Target extends MessageTarget>(
-      input: AccountMessageHistoryInput<Target>,
-    ): Promise<readonly MessageIn<Target>[]> {
-      const response = await requestJson(fetchImplementation, {
-        method: 'GET',
-        url: `${conversationUrl(accountUrl, input.chat)}/messages`,
-        expectedStatus: HTTP_STATUS_OK,
-        responseSchema: messageResponseSchemasFor(input.chat).history,
-      });
-      return response.messages;
-    },
+    getMessages,
     async getChatActions(input: AccountChatActionsInput): Promise<readonly ChatAction[]> {
       const response = await requestJson(fetchImplementation, {
         method: 'GET',
@@ -445,15 +460,34 @@ function createVirtualAccountClient(
       });
       return response.notifications;
     },
-    async pressCallbackButton(input: PressCallbackButtonInput): Promise<CallbackQuery> {
-      const response = await requestJson(fetchImplementation, {
-        method: 'POST',
-        url: `${accountUrl}/callback-queries`,
-        expectedStatus: HTTP_STATUS_CREATED,
-        responseSchema: callbackQueryResponseSchema,
-        body: input,
+    pressCallbackButton,
+    async pressButton(
+      { chat, message_id, button, expired }: PressButtonInput,
+    ): Promise<CallbackQuery> {
+      const message = (await getMessages({ chat })).find((shown) =>
+        shown.message_id === message_id
+      );
+      if (message === undefined) {
+        throw new ButtonSelectionError(
+          `Message ${message_id} is not in the account's history of the chat`,
+          [],
+        );
+      }
+      const selected = findButton(message, button);
+      if (!('callback_data' in selected.button)) {
+        throw new ButtonSelectionError(
+          `Button ${
+            JSON.stringify(selected.label)
+          } at ${selected.path} is not a callback button, so pressing it sends the bot nothing`,
+          [selected],
+        );
+      }
+      return await pressCallbackButton({
+        chat,
+        message_id,
+        callback_data: selected.button.callback_data,
+        expired,
       });
-      return response.callback_query;
     },
     async getCallbackQuery(callbackQueryId: string): Promise<CallbackQuery> {
       const response = await requestJson(fetchImplementation, {
