@@ -331,6 +331,7 @@ Deno.test('BotUpdateDeliveryService delivers supergroup additions and edits to t
     id: -1_000_000_000_001,
     title: 'Team',
     chatInstance: '-42',
+    hasProtectedContent: false,
   } as const;
   sharedChats.registerSupergroup(supergroup, owner.profile.id);
   updateSubscriptions.setAllowedUpdateTypes(privacyModeBot.profile.id, new Set(['message']));
@@ -394,6 +395,7 @@ Deno.test('BotUpdateDeliveryService delivers a promotion and every message to an
     id: -1_000_000_000_001,
     title: 'Team',
     chatInstance: '-42',
+    hasProtectedContent: false,
   } as const;
   sharedChats.registerSupergroup(supergroup, owner.profile.id);
   sharedChats.addChatMember(supergroup.id, administratorBot.profile.id);
@@ -496,6 +498,7 @@ Deno.test("BotUpdateDeliveryService delivers bots' membership service messages t
     id: -1_000_000_000_001,
     title: 'Team',
     chatInstance: '-42',
+    hasProtectedContent: false,
   } as const;
   sharedChats.registerSupergroup(supergroup, owner.profile.id);
   for (
@@ -579,6 +582,7 @@ Deno.test('BotUpdateDeliveryService addresses supergroup media by caption and pe
     id: -1_000_000_000_001,
     title: 'Team',
     chatInstance: '-42',
+    hasProtectedContent: false,
   } as const;
   sharedChats.registerSupergroup(supergroup, owner.profile.id);
   sharedChats.addChatMember(supergroup.id, privacyModeBot.profile.id);
@@ -726,6 +730,7 @@ Deno.test('BotUpdateDeliveryService delivers supergroup messages sent through a 
     id: -1_000_000_000_001,
     title: 'Team',
     chatInstance: '-42',
+    hasProtectedContent: false,
   } as const;
   sharedChats.registerSupergroup(supergroup, owner.profile.id);
   sharedChats.addChatMember(supergroup.id, inlineBot.profile.id);
@@ -767,6 +772,7 @@ Deno.test('BotUpdateDeliveryService lets a message reach only the privacy-mode b
     id: -1_000_000_000_001,
     title: 'Team',
     chatInstance: '-42',
+    hasProtectedContent: false,
   } as const;
   sharedChats.registerSupergroup(supergroup, owner.profile.id);
   for (const bot of [botA, botB, botC, administratorBot]) {
@@ -875,6 +881,7 @@ Deno.test('BotUpdateDeliveryService delivers chat_member updates to subscribed a
     id: -1_000_000_000_001,
     title: 'Team',
     chatInstance: '-42',
+    hasProtectedContent: false,
   } as const;
   const administratorStatus = {
     status: 'administrator',

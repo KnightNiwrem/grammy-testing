@@ -4950,6 +4950,107 @@ Deno.test('the owner sets custom titles, which bots see but cannot change', asyn
   }
 });
 
+Deno.test('the owner protects all supergroup content from forwarding and saving', async () => {
+  const { api, sessionPath, owner, member, bot, supergroup, supergroupPath, sendSupergroupText } =
+    await createSupergroupFixture();
+  const readUpdates = createUpdateReader(api);
+  const contentProtectionPath = (accountId: number) =>
+    `${supergroupPath(accountId)}/content-protection`;
+  await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: '/start' }),
+  );
+  const earlierMessage = await sendSupergroupText(member.id, '/plan before protection');
+  await readUpdates(bot.botApiPath);
+
+  const protectionStatuses = [
+    (await api.request(contentProtectionPath(member.id), { method: 'PUT' })).status,
+    (await api.request(contentProtectionPath(owner.id), { method: 'PUT' })).status,
+  ];
+  const laterMessage = await sendSupergroupText(member.id, '/plan after protection');
+  const [update] = await readUpdates(bot.botApiPath);
+  const botMessage = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+      chat_id: supergroup.id,
+      text: 'Noted',
+    })).body,
+  );
+  if (
+    JSON.stringify(protectionStatuses) !== JSON.stringify([403, 204]) ||
+    (update?.message as Record<string, unknown> | undefined)?.has_protected_content !== true ||
+    botMessage?.has_protected_content !== true
+  ) {
+    throw new Error(
+      `Expected the owner alone to protect every message, received ${
+        JSON.stringify({ protectionStatuses, update, botMessage })
+      }`,
+    );
+  }
+
+  // Protection covers earlier messages too; bots may still copy them, as TDLib lets bots.
+  const repeat = (method: string, parameters: Record<string, unknown>) =>
+    callBotApi(api, `${bot.botApiPath}/${method}`, {
+      chat_id: owner.id,
+      from_chat_id: supergroup.id,
+      ...parameters,
+    }).then(({ body }) => body);
+  const forwardFailure = await repeat('forwardMessage', { message_id: earlierMessage.message_id });
+  const forwardsFailure = await repeat('forwardMessages', {
+    message_ids: [earlierMessage.message_id, laterMessage.message_id],
+  });
+  const copy = await repeat('copyMessage', { message_id: earlierMessage.message_id });
+  const externalReply = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+      chat_id: owner.id,
+      text: 'About your plan',
+      reply_parameters: { chat_id: supergroup.id, message_id: earlierMessage.message_id },
+    })).body,
+  );
+  const accountForward = await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', {
+      to: { type: 'private', botId: bot.bot.id },
+      forward: {
+        chat: { type: 'supergroup', chatId: supergroup.id },
+        message_id: laterMessage.message_id,
+      },
+    }),
+  );
+  if (
+    !isBadRequestResponse(forwardFailure) ||
+    forwardFailure.description !== "Bad Request: the message can't be forwarded" ||
+    !isBadRequestResponse(forwardsFailure) ||
+    forwardsFailure.description !== "Bad Request: messages can't be forwarded" ||
+    botApiResult(copy)?.message_id === undefined ||
+    externalReply === undefined || externalReply.external_reply !== undefined ||
+    accountForward.status !== 400
+  ) {
+    throw new Error(
+      `Expected protected messages to be copied only, received ${
+        JSON.stringify({ forwardFailure, forwardsFailure, copy, status: accountForward.status })
+      }`,
+    );
+  }
+
+  // Lifting the protection lets every message be forwarded again.
+  const liftStatus = (await api.request(contentProtectionPath(owner.id), { method: 'DELETE' }))
+    .status;
+  const forward = await repeat('forwardMessage', { message_id: earlierMessage.message_id });
+  const history = await (await api.request(`${supergroupPath(member.id)}/messages`)).json() as {
+    messages: Array<{ message_id: number; has_protected_content?: boolean }>;
+  };
+  if (
+    liftStatus !== 204 || botApiResult(forward)?.message_id === undefined ||
+    history.messages.some((message) => message.has_protected_content !== undefined)
+  ) {
+    throw new Error(
+      `Expected lifted protection to allow forwards, received ${
+        JSON.stringify({ forward, history })
+      }`,
+    );
+  }
+});
+
 Deno.test('administrator bots that request chat_member updates observe members joining', async () => {
   const { api, sessionPath, owner, bot, readerBot, supergroup, supergroupPath } =
     await createSupergroupFixture();

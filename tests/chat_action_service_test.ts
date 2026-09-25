@@ -36,7 +36,13 @@ Deno.test('ChatActionService shows members each bot latest action until its mess
   const { chatActions, sharedChats, virtualUsers, account, bot } = createChatActionFixture();
   const otherBot = createBot(virtualUsers, 'other_bot');
   sharedChats.registerSupergroup(
-    { kind: 'supergroup', id: SUPERGROUP_ID, title: 'Team', chatInstance: '1' },
+    {
+      kind: 'supergroup',
+      id: SUPERGROUP_ID,
+      title: 'Team',
+      chatInstance: '1',
+      hasProtectedContent: false,
+    },
     account.profile.id,
   );
   const chat: ChatActionChat = { type: 'supergroup', chatId: SUPERGROUP_ID };

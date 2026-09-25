@@ -47,6 +47,7 @@ Deno.test('SharedChatRepository registers supergroups and channels with their re
     id: -1_000_000_000_001,
     title: 'Test',
     chatInstance: '-42',
+    hasProtectedContent: false,
   } as const;
   const channel = { kind: 'channel', id: -1_000_000_000_002, title: 'Test' } as const;
 

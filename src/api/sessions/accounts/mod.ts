@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { basePath } from 'hono/route';
 import { z } from 'zod';
 
@@ -74,6 +74,8 @@ const SUPERGROUP_MEMBER_PATH =
 const SUPERGROUP_ADMINISTRATOR_PATH =
   `${SUPERGROUP_CONVERSATION_PATH}/administrators/:${USER_ID_PARAMETER}` as const;
 const SUPERGROUP_CUSTOM_TITLE_PATH = `${SUPERGROUP_ADMINISTRATOR_PATH}/custom-title` as const;
+const SUPERGROUP_CONTENT_PROTECTION_PATH =
+  `${SUPERGROUP_CONVERSATION_PATH}/content-protection` as const;
 
 const telegramUserIdSchema = z.number().int()
   .min(MIN_TELEGRAM_USER_ID)
@@ -549,6 +551,16 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       }
     }
   });
+
+  // The owner protects all content of the supergroup from forwarding and saving, or lifts that.
+  accountRoutes.put(
+    SUPERGROUP_CONTENT_PROTECTION_PATH,
+    (context) => setSupergroupContentProtection(context, true),
+  );
+  accountRoutes.delete(
+    SUPERGROUP_CONTENT_PROTECTION_PATH,
+    (context) => setSupergroupContentProtection(context, false),
+  );
 
   // The owner demotes an administrator to a member; demoting a member changes nothing.
   accountRoutes.delete(SUPERGROUP_ADMINISTRATOR_PATH, (context) => {
@@ -1336,6 +1348,32 @@ function memberRoleChangeFailureStatus(
       throw new Error(`Unhandled member role change failure: ${unhandledReason}`);
     }
   }
+}
+
+/** Answers the owner's request to protect a supergroup's content, or to lift that protection. */
+function setSupergroupContentProtection(
+  context: Context<SessionRouteContextTypes>,
+  hasProtectedContent: boolean,
+): Response {
+  const accountId = telegramUserIdPathParameterSchema.safeParse(
+    context.req.param(ACCOUNT_ID_PARAMETER),
+  );
+  const chatId = supergroupChatIdPathParameterSchema.safeParse(
+    context.req.param(CHAT_ID_PARAMETER),
+  );
+  if (!accountId.success || !chatId.success) {
+    return context.body(null, 400);
+  }
+
+  const result = context.get('emulationSession').sharedChatAdministration.setContentProtection({
+    actorAccountId: accountId.data,
+    chatId: chatId.data,
+    hasProtectedContent,
+  });
+  if (result.set) {
+    return context.body(null, 204);
+  }
+  return context.body(null, result.reason === 'actor_not_authorized' ? 403 : 404);
 }
 
 /** Shows a supergroup as the Bot API shows a chat, with its description when it has one. */

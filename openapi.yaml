@@ -518,6 +518,49 @@ paths:
           description: The session, account, supergroup, or user does not exist.
         '409':
           description: The user is not the owner or an administrator of the supergroup.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/content-protection:
+    description: >-
+      Whether a supergroup protects all its content from forwarding and saving, as Telegram's
+      "Restrict saving content" setting does.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/SupergroupChatId'
+    put:
+      operationId: protectSupergroupContent
+      summary: Protect all content of a supergroup the account owns
+      description: >-
+        As TDLib's `get_message_has_protected_content` decides, every message of the supergroup,
+        including earlier ones, is then protected while the setting lasts: bots see
+        `has_protected_content`, neither bots nor accounts can forward the messages, and a bot's
+        reply to one from another chat is sent without the reply, though bots may still copy them.
+        As on Telegram, only the
+        owner may change the setting, and bots receive no service message for it. Protecting a
+        protected supergroup changes nothing.
+      responses:
+        '204':
+          description: The supergroup protects all its content.
+        '400':
+          description: A path identifier is invalid.
+        '403':
+          description: The account does not own the supergroup.
+        '404':
+          description: The session, account, or supergroup does not exist.
+    delete:
+      operationId: unprotectSupergroupContent
+      summary: Lift the content protection of a supergroup the account owns
+      description: >-
+        Messages are then protected only when their senders protected them. Lifting the protection
+        of an unprotected supergroup changes nothing.
+      responses:
+        '204':
+          description: The supergroup no longer protects all its content.
+        '400':
+          description: A path identifier is invalid.
+        '403':
+          description: The account does not own the supergroup.
+        '404':
+          description: The session, account, or supergroup does not exist.
   /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/messages:
     description: Stored messages of a supergroup the account is a member of.
     parameters:
@@ -4012,7 +4055,8 @@ components:
           const: true
           description: >-
             Present when the bot protected the message from forwarding and saving with
-            `protect_content`.
+            `protect_content`, or when the message belongs to a supergroup whose owner protects all
+            its content.
         effect_id:
           type: string
           pattern: '^-?\d+$'

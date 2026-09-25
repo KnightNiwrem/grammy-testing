@@ -119,7 +119,7 @@ Deno.test('createMessageForward shows only the name of a sender with private for
   }
 });
 
-Deno.test('isForwardable refuses protected content and service messages', () => {
+Deno.test('isForwardable refuses content its sender or chat protects, and service messages', () => {
   const serviceMessage: SupergroupMessage = {
     kind: 'supergroup_message',
     id: 'service',
@@ -132,11 +132,12 @@ Deno.test('isForwardable refuses protected content and service messages', () => 
   };
 
   const forwardability = [
-    isForwardable(accountMessage()),
-    isForwardable(accountMessage({ authorRole: 'bot', isContentProtected: true })),
-    isForwardable(serviceMessage),
+    isForwardable(accountMessage(), false),
+    isForwardable(accountMessage({ authorRole: 'bot', isContentProtected: true }), false),
+    isForwardable(accountMessage(), true),
+    isForwardable(serviceMessage, false),
   ];
-  if (JSON.stringify(forwardability) !== JSON.stringify([true, false, false])) {
+  if (JSON.stringify(forwardability) !== JSON.stringify([true, false, false, false])) {
     throw new Error(
       `Expected only unprotected content to be forwardable, received ${forwardability}`,
     );

@@ -60,6 +60,16 @@ Removed members lose access to history; their prior messages remain visible to o
 supergroup path changes participant status. The public client code does not establish additional
 remote history processing.
 
+The owner can also protect all of the supergroup's content, as Telegram's "Restrict saving content"
+setting does, and lift that protection. As TDLib's
+[`get_message_has_protected_content`][protected-content] decides, every message of the supergroup,
+including earlier ones, is then protected while the setting lasts: bots see `has_protected_content`,
+neither bots nor accounts can forward the messages, and a bot's reply to one from another chat is
+sent without the reply, though bots may still copy them. As TDLib's
+[`toggle_dialog_has_protected_content`][protection-toggle] requires, only the owner may change the
+setting. The official server hides the service message for the change from bots, so they receive
+none.
+
 The owner also sets its own custom title or an administrator's through the emulation API, and an
 empty title removes it. Bots see it as `custom_title` of the owner and administrators, in the field
 order of the official server's [`JsonChatMember`][chat-member-json], and a bot whose title changes
@@ -127,8 +137,6 @@ production read permissions.
   who can edit another administrator's status.
 - **Invitation and joining workflows.** Invite links, join requests and account self-joining are
   absent; additions require the owner.
-- **Chat-wide content protection.** Only individual messages can be protected. A chat-wide setting
-  and its effects are missing.
 - **Additional service messages.** Only membership service messages are produced. Other service
   events, such as title changes or pins, need corresponding messages as their features are
   supported.
@@ -151,6 +159,8 @@ production read permissions.
 [supergroup messaging tests](../../tests/supergroup_messaging_service_test.ts).
 
 [privacy-faq]: https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
+[protected-content]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8145-L8148
+[protection-toggle]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogManager.cpp#L2721-L2745
 [chat-member-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L5802-L5872
 [custom-title-method]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L16451-L16482
 [participant-checks]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogParticipantManager.cpp#L2820-L3065

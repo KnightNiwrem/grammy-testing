@@ -51,20 +51,21 @@ import type { StoredFile } from '../types/stored_file.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
 import type { VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { BasicGroup, Supergroup } from '../types/virtual_chat.ts';
-import type {
-  ChatMessage,
-  DateTimeFormat,
-  DateTimePartPrecision,
-  ExternalReply,
-  FormattedText,
-  MembershipServiceContent,
-  MessageContent,
-  MessageForwardInfo,
-  PrivateMessage,
-  SupergroupMessage,
-  SupergroupMessageContent,
-  TextEntity,
-  TextQuote,
+import {
+  type ChatMessage,
+  type DateTimeFormat,
+  type DateTimePartPrecision,
+  type ExternalReply,
+  type FormattedText,
+  hasProtectedContent,
+  type MembershipServiceContent,
+  type MessageContent,
+  type MessageForwardInfo,
+  type PrivateMessage,
+  type SupergroupMessage,
+  type SupergroupMessageContent,
+  type TextEntity,
+  type TextQuote,
 } from '../types/virtual_message.ts';
 
 /** A stored file with the `file_id` by which the observer of a projection knows it. */
@@ -146,6 +147,7 @@ export function projectPrivateMessageForBot(
       projectMessageContent(message.content, context),
       context,
       repliedMessage,
+      false,
     ),
   };
 }
@@ -181,19 +183,22 @@ export function projectSupergroupMessage(
       projectSupergroupMessageContent(message.content, context),
       context,
       repliedMessage,
+      supergroup.hasProtectedContent,
     ),
   };
 }
 
 /**
  * Projects the fields that follow a message's date, which every chat type shows alike, with the
- * given projection of its content.
+ * given projection of its content. As the official Bot API server shows a message that cannot be
+ * saved, content is protected when its sender or its chat protects it.
  */
 function projectMessageBody<Content extends BotApiSupergroupMessageContent, RepliedMessage>(
   message: ChatMessage,
   content: Content,
   context: MessageProjectionContext,
   repliedMessage: RepliedMessage | undefined,
+  chatProtectsContent: boolean,
 ) {
   const { viaBot, forwardSender, externalReply } = context;
   return {
@@ -211,7 +216,9 @@ function projectMessageBody<Content extends BotApiSupergroupMessageContent, Repl
       ? {}
       : { reply_markup: projectInlineKeyboardMarkup(message.inlineKeyboard) }),
     ...(viaBot === undefined ? {} : { via_bot: viaBot }),
-    ...(message.isContentProtected ? { has_protected_content: true as const } : {}),
+    ...(hasProtectedContent(message, chatProtectsContent)
+      ? { has_protected_content: true as const }
+      : {}),
     ...(message.kind === 'private_message' && message.messageEffectId !== undefined
       ? { effect_id: message.messageEffectId }
       : {}),

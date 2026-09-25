@@ -64,6 +64,7 @@ Deno.test('CallbackQueryService presses buttons on bot messages in a supergroup 
     id: -1_000_000_000_001,
     title: 'Team',
     chatInstance: '-42',
+    hasProtectedContent: false,
   } as const;
   sharedChats.registerSupergroup(supergroup, chat.account.profile.id);
   sharedChats.addChatMember(supergroup.id, chat.bot.profile.id);

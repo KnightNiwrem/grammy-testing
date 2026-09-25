@@ -139,12 +139,14 @@ request's reply and markup. A supplied caption, including an empty one, replaces
 caption; without one the original caption is kept. `show_caption_above_media` applies to a copied
 photo when a replacement caption is supplied.
 
-Protected messages cannot be forwarded, but bots can copy them. Service messages can be neither
-forwarded nor copied. The protected-content exception for bot copies is explicit in TDLib's
-[`MessagesManager::can_forward_message`][forward-permissions]. Keyboard filtering follows
-[`dup_reply_markup`][forward-markup] and [`InlineKeyboardButton::clone`][forward-buttons], except
-that a forwarded disabled button keeps its text, which TDLib's copy leaves empty. Upstream also
-retains login buttons, which the emulator cannot create.
+Protected messages, including every message of a supergroup whose owner
+[protects its content](supergroups.md#administrator-operations), cannot be forwarded, but bots can
+copy them. Service messages can be neither forwarded nor copied. The protected-content exception for
+bot copies is explicit in TDLib's [`MessagesManager::can_forward_message`][forward-permissions].
+Keyboard filtering follows [`dup_reply_markup`][forward-markup] and
+[`InlineKeyboardButton::clone`][forward-buttons], except that a forwarded disabled button keeps its
+text, which TDLib's copy leaves empty. Upstream also retains login buttons, which the emulator
+cannot create.
 
 `forwardMessages` and `copyMessages` repeat up to 100 messages of one chat, whose IDs must be in
 strictly increasing order, and return the new `message_id`s. As in TDLib's

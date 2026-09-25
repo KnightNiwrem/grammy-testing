@@ -62,6 +62,7 @@ import type {
   RemoveChatMemberInput,
   ReplyInterface,
   SendInlineQueryInput,
+  SetContentProtectionInput,
   SetCustomTitleInput,
   Supergroup,
   SupergroupBotCommands,
@@ -354,6 +355,13 @@ function createVirtualAccountClient(
         }/custom-title`,
         expectedStatus: HTTP_STATUS_NO_CONTENT,
         body: { custom_title: input.customTitle },
+      });
+    },
+    async setContentProtection(input: SetContentProtectionInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: input.hasProtectedContent ? 'PUT' : 'DELETE',
+        url: `${conversationUrl(accountUrl, input.chat)}/content-protection`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
       });
     },
     async blockBot(input: BotBlockInput): Promise<void> {

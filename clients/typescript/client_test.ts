@@ -505,6 +505,10 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
   const deletionBeforePromotion = await deleteGreeting();
   await owner.promoteChatMember({ chat, userId: bot.id, rights: { can_delete_messages: true } });
   await owner.setCustomTitle({ chat, userId: bot.id, customTitle: 'Janitor' });
+  await owner.setContentProtection({ chat, hasProtectedContent: true });
+  const protectedGreeting = (await owner.getMessages({ chat }))
+    .find(({ message_id }) => message_id === greeting.message_id);
+  await owner.setContentProtection({ chat, hasProtectedContent: false });
   const titledMemberResponse = await api.request(`${botApiPath}/getChatMember`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -518,7 +522,8 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
   await owner.demoteChatMember({ chat, userId: bot.id });
   if (
     deletionBeforePromotion.status !== 400 || deletionAfterPromotion.status !== 200 ||
-    titledMember.custom_title !== 'Janitor'
+    titledMember.custom_title !== 'Janitor' ||
+    protectedGreeting?.has_protected_content !== true
   ) {
     throw new Error(
       `Expected the promoted bot to delete the greeting, received ${

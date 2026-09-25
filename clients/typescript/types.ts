@@ -214,6 +214,11 @@ export interface DemoteChatMemberInput {
   readonly userId: number;
 }
 
+export interface SetContentProtectionInput {
+  readonly chat: SupergroupMessageTarget;
+  readonly hasProtectedContent: boolean;
+}
+
 export interface SetCustomTitleInput {
   readonly chat: SupergroupMessageTarget;
   /** The owner itself or an administrator, account or bot. */
@@ -902,6 +907,13 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    * rights change, and loses it when demoted.
    */
   setCustomTitle(input: SetCustomTitleInput): Promise<void>;
+  /**
+   * Protects all content of a supergroup this account owns from forwarding and saving, as
+   * Telegram's "Restrict saving content" setting does, or lifts that protection with
+   * `hasProtectedContent: false`. Every message of the supergroup then shows
+   * `has_protected_content`, and only bots can copy them.
+   */
+  setContentProtection(input: SetContentProtectionInput): Promise<void>;
   /**
    * Blocks a bot, which Telegram calls stopping it. The bot receives a `my_chat_member` update
    * showing it as `kicked`, its messages to this account fail with `403 Forbidden: bot was

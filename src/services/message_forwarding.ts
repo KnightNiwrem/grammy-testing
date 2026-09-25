@@ -4,6 +4,7 @@ import {
   type MessageForward,
   type PrivateForwardNameLookup,
 } from '../types/message_forward.ts';
+import type { Supergroup } from '../types/virtual_chat.ts';
 import type { ChatMessage, PrivateMessage, SupergroupMessage } from '../types/virtual_message.ts';
 
 /** A chat of an account: its private chat with a bot, or a supergroup it is a member of. */
@@ -65,10 +66,20 @@ interface SupergroupForwardMessaging {
     readonly accountId: number;
     readonly chatId: number;
     readonly messageId: number;
-  }): AccountMessageLookupResult<
-    SupergroupMessage,
-    'account_not_found' | 'chat_not_found' | 'not_a_member' | 'message_not_found'
-  >;
+  }):
+    | {
+      readonly found: true;
+      readonly message: SupergroupMessage;
+      readonly supergroup: Supergroup;
+    }
+    | {
+      readonly found: false;
+      readonly reason:
+        | 'account_not_found'
+        | 'chat_not_found'
+        | 'not_a_member'
+        | 'message_not_found';
+    };
   sendAccountForward(input: {
     readonly fromAccountId: number;
     readonly chatId: number;
@@ -109,14 +120,14 @@ export class MessageForwardingService {
 
   /**
    * Forwards a message an account can read to a chat it can write to. The forwarded message is
-   * resolved first; content its sender protected, and service messages, cannot be forwarded.
+   * resolved first; protected content, and service messages, cannot be forwarded.
    */
   forwardAccountMessage(input: ForwardAccountMessageInput): ForwardAccountMessageResult {
     const lookup = this.#findAccountMessage(input);
     if (!lookup.found) {
       return { forwarded: false, reason: lookup.reason };
     }
-    if (!isForwardable(lookup.message)) {
+    if (!isForwardable(lookup.message, lookup.chatProtectsContent)) {
       return { forwarded: false, reason: 'message_not_forwardable' };
     }
 
@@ -134,19 +145,35 @@ export class MessageForwardingService {
       : { forwarded: false, reason: sending.reason };
   }
 
+  /** Finds the forwarded message, with whether its chat protects all content: only a supergroup can. */
   #findAccountMessage(
     { fromAccountId, fromChat, messageId }: ForwardAccountMessageInput,
-  ): AccountMessageLookupResult<ChatMessage, ForwardAccountMessageFailureReason> {
-    return fromChat.type === 'private'
-      ? this.#privateMessages.getMessageForAccount({
+  ):
+    | {
+      readonly found: true;
+      readonly message: ChatMessage;
+      readonly chatProtectsContent: boolean;
+    }
+    | { readonly found: false; readonly reason: ForwardAccountMessageFailureReason } {
+    if (fromChat.type === 'private') {
+      const lookup = this.#privateMessages.getMessageForAccount({
         accountId: fromAccountId,
         botId: fromChat.botId,
         botMessageId: messageId,
-      })
-      : this.#supergroupMessages.getMessageForAccount({
-        accountId: fromAccountId,
-        chatId: fromChat.chatId,
-        messageId,
       });
+      return lookup.found ? { ...lookup, chatProtectsContent: false } : lookup;
+    }
+    const lookup = this.#supergroupMessages.getMessageForAccount({
+      accountId: fromAccountId,
+      chatId: fromChat.chatId,
+      messageId,
+    });
+    return lookup.found
+      ? {
+        found: true,
+        message: lookup.message,
+        chatProtectsContent: lookup.supergroup.hasProtectedContent,
+      }
+      : lookup;
   }
 }

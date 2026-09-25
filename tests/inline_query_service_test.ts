@@ -24,6 +24,7 @@ const SUPERGROUP = {
   id: -1_000_000_000_001,
   title: 'Team',
   chatInstance: '-42',
+  hasProtectedContent: false,
 } as const;
 
 Deno.test('InlineQueryService sends queries only to inline bots in chats the account writes to', () => {

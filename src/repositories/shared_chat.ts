@@ -181,6 +181,16 @@ export class SharedChatRepository {
     return { added: true };
   }
 
+  /** Sets whether a supergroup protects all its content; returns false for an unknown supergroup. */
+  updateSupergroupContentProtection(chatId: number, hasProtectedContent: boolean): boolean {
+    const chat = this.#sharedChatsById.get(chatId);
+    if (chat?.kind !== 'supergroup') {
+      return false;
+    }
+    this.#sharedChatsById.set(chatId, { ...chat, hasProtectedContent });
+    return true;
+  }
+
   /** Promotes a member to administrator, changes its rights, or demotes it; never the owner. */
   updateChatMemberStatus(
     chatId: number,

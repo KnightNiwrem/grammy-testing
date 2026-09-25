@@ -363,7 +363,13 @@ function registerSupergroup(
   ownerAccountId: number,
 ): number {
   const registration = sharedChats.registerSupergroup(
-    { kind: 'supergroup', id: chatId, title: 'Team', chatInstance: String(-chatId) },
+    {
+      kind: 'supergroup',
+      id: chatId,
+      title: 'Team',
+      chatInstance: String(-chatId),
+      hasProtectedContent: false,
+    },
     ownerAccountId,
   );
   if (!registration.registered) {

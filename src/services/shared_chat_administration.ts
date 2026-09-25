@@ -209,6 +209,20 @@ export type SetCustomTitleResult =
     readonly reason: OwnerMemberManagementFailureReason | 'not_an_administrator';
   };
 
+export interface SetContentProtectionInput {
+  /** The owner, who alone restricts saving content. */
+  readonly actorAccountId: number;
+  readonly chatId: number;
+  readonly hasProtectedContent: boolean;
+}
+
+export type SetContentProtectionResult =
+  | { readonly set: true }
+  | {
+    readonly set: false;
+    readonly reason: 'actor_account_not_found' | 'chat_not_found' | 'actor_not_authorized';
+  };
+
 export interface DemoteChatMemberInput {
   /** The owner, who alone demotes administrators here. */
   readonly actorAccountId: number;
@@ -362,6 +376,7 @@ interface ChatMembershipStore {
     memberId: number,
     customTitle: string | undefined,
   ): CustomTitleUpdateResult;
+  updateSupergroupContentProtection(chatId: number, hasProtectedContent: boolean): boolean;
   removeChatMember(
     chatId: number,
     memberId: number,
@@ -482,6 +497,7 @@ export class SharedChatAdministrationService {
       title: input.title,
       description: input.description,
       chatInstance: createChatInstance(),
+      hasProtectedContent: false,
     };
     const registration = this.#sharedChats.registerSupergroup(supergroup, input.creatorAccountId);
     if (!registration.registered) {
@@ -820,6 +836,31 @@ export class SharedChatAdministrationService {
   }
 
   /** Changes the role of a supergroup member that is not the owner, as the owner. */
+  /**
+   * Protects all messages of a supergroup from forwarding and saving, or lifts that protection, as
+   * its owner, who alone may, as TDLib's `toggle_dialog_has_protected_content` requires. It applies
+   * to every message, including earlier ones, as long as it lasts.
+   */
+  setContentProtection(input: SetContentProtectionInput): SetContentProtectionResult {
+    if (this.#accounts.getById(input.actorAccountId) === undefined) {
+      return { set: false, reason: 'actor_account_not_found' };
+    }
+    if (this.#sharedChats.getSharedChat(input.chatId)?.kind !== 'supergroup') {
+      return { set: false, reason: 'chat_not_found' };
+    }
+    if (
+      this.#sharedChats.getChatMembership(input.chatId, input.actorAccountId)?.status !== 'owner'
+    ) {
+      return { set: false, reason: 'actor_not_authorized' };
+    }
+    if (
+      !this.#sharedChats.updateSupergroupContentProtection(input.chatId, input.hasProtectedContent)
+    ) {
+      throw new Error(`Supergroup ${input.chatId} could not be updated`);
+    }
+    return { set: true };
+  }
+
   /** Resolves a member of a supergroup that the acting account owns, for the owner to manage. */
   #resolveMemberAsOwner(
     { actorAccountId, chatId, memberId }: {

@@ -33,7 +33,7 @@ import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
 import { isUserId } from '../types/telegram_identity.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
-import type { ChatAction, ChatActionChat } from '../types/virtual_chat.ts';
+import type { ChatAction, ChatActionChat, Supergroup } from '../types/virtual_chat.ts';
 import {
   type CanonicalMessageId,
   type ChatMessage,
@@ -870,7 +870,11 @@ interface SupergroupBotMessaging {
     readonly chatId: number;
     readonly messageId: number;
   }):
-    | { readonly found: true; readonly message: SupergroupMessage }
+    | {
+      readonly found: true;
+      readonly message: SupergroupMessage;
+      readonly supergroup: Supergroup;
+    }
     | {
       readonly found: false;
       readonly reason:
@@ -1385,7 +1389,7 @@ export class BotApiService {
     if (!lookup.found) {
       return { sent: false, reason: lookup.reason };
     }
-    if (!isForwardable(lookup.message)) {
+    if (!isForwardable(lookup.message, lookup.chatProtectsContent)) {
       return { sent: false, reason: 'message_not_forwardable' };
     }
     const { content, forwardInfo, inlineKeyboard } = createMessageForward(
@@ -1449,8 +1453,8 @@ export class BotApiService {
     authenticatedBot: VirtualBotProfile,
     request: RepeatMessagesRequest,
   ): RepeatMessagesResult {
-    return this.#repeatMessages(authenticatedBot, request, (message) => {
-      if (!isForwardable(message)) {
+    return this.#repeatMessages(authenticatedBot, request, (message, chatProtectsContent) => {
+      if (!isForwardable(message, chatProtectsContent)) {
         return undefined;
       }
       const { content, forwardInfo, inlineKeyboard } = createMessageForward(
@@ -1516,14 +1520,18 @@ export class BotApiService {
     authenticatedBot: VirtualBotProfile,
     { chatId, fromChatId, messageIds, isContentProtected, isSilent, messageEffectId }:
       RepeatMessagesRequest,
-    repeat: (message: ChatMessage) => MessageRepetition | undefined,
+    repeat: (message: ChatMessage, chatProtectsContent: boolean) => MessageRepetition | undefined,
   ): RepeatMessagesResult {
-    const repeatedMessages: Array<{ readonly messageId: number; readonly message: ChatMessage }> =
-      [];
+    const repeatedMessages: Array<{
+      readonly messageId: number;
+      readonly message: ChatMessage;
+      readonly chatProtectsContent: boolean;
+    }> = [];
     for (const messageId of messageIds) {
       const lookup = this.#findRepeatedMessage(authenticatedBot, { chatId: fromChatId, messageId });
       if (lookup.found) {
-        repeatedMessages.push({ messageId, message: lookup.message });
+        const { message, chatProtectsContent } = lookup;
+        repeatedMessages.push({ messageId, message, chatProtectsContent });
       } else if (lookup.reason !== 'repeated_message_not_found') {
         return { sent: false, reason: lookup.reason };
       }
@@ -1546,8 +1554,8 @@ export class BotApiService {
     ) {
       return { sent: false, reason: 'repeated_message_ids_not_increasing' };
     }
-    const repetitions = repeatedMessages.flatMap(({ message }) => {
-      const repetition = repeat(message);
+    const repetitions = repeatedMessages.flatMap(({ message, chatProtectsContent }) => {
+      const repetition = repeat(message, chatProtectsContent);
       return repetition === undefined ? [] : [{ message, repetition }];
     });
     if (repetitions.length === 0) {
@@ -1587,11 +1595,19 @@ export class BotApiService {
    * Finds the message of one of the bot's chats that a forward or copy repeats. As on Telegram, a
    * chat the bot cannot address is not found.
    */
+  /**
+   * Finds a message of one of the bot's chats for the bot to repeat or reply to, with whether its
+   * chat protects all content: only a supergroup can.
+   */
   #findRepeatedMessage(
     authenticatedBot: VirtualBotProfile,
     { chatId, messageId }: MessageTarget,
   ):
-    | { readonly found: true; readonly message: ChatMessage }
+    | {
+      readonly found: true;
+      readonly message: ChatMessage;
+      readonly chatProtectsContent: boolean;
+    }
     | { readonly found: false; readonly reason: RepeatedMessageFailureReason } {
     const lookup = isUserId(chatId)
       ? this.#botMessages.getMessageForBot({
@@ -1605,7 +1621,11 @@ export class BotApiService {
         messageId,
       });
     if (lookup.found) {
-      return lookup;
+      return {
+        found: true,
+        message: lookup.message,
+        chatProtectsContent: 'supergroup' in lookup && lookup.supergroup.hasProtectedContent,
+      };
     }
 
     const { reason } = lookup;
@@ -1694,7 +1714,7 @@ export class BotApiService {
     }
     return {
       resolved: true,
-      reply: isForwardable(lookup.message)
+      reply: isForwardable(lookup.message, lookup.chatProtectsContent)
         ? {
           externalReply: createExternalReply(
             lookup.message,

@@ -7,6 +7,7 @@ import {
   type ChatMessage,
   type ContentMessage,
   getMessageAuthorId,
+  hasProtectedContent,
   isContentMessage,
   type MessageContent,
   type MessageForwardInfo,
@@ -29,11 +30,15 @@ export interface MessageForward {
 }
 
 /**
- * Whether Telegram lets a user forward a message: only content can be forwarded, and not when its
- * sender protected it. Bots may still copy protected content, which clients cannot.
+ * Whether Telegram lets a user forward a message: only content can be forwarded, and not when it
+ * is protected, by its sender or by its chat. Bots may still copy protected content, which clients
+ * cannot.
  */
-export function isForwardable(message: ChatMessage): message is ContentMessage {
-  return isContentMessage(message) && !message.isContentProtected;
+export function isForwardable(
+  message: ChatMessage,
+  chatProtectsContent: boolean,
+): message is ContentMessage {
+  return isContentMessage(message) && !hasProtectedContent(message, chatProtectsContent);
 }
 
 /**

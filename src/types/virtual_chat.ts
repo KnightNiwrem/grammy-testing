@@ -67,6 +67,11 @@ export interface Supergroup extends SharedChatBase {
   readonly description?: string;
   /** Telegram's `chat_instance` of the supergroup, as `PrivateConversation` describes it. */
   readonly chatInstance: string;
+  /**
+   * Whether the owner protects all of the supergroup's messages from forwarding and saving, as
+   * Telegram's "Restrict saving content" setting does, whoever sent them and whenever.
+   */
+  readonly hasProtectedContent: boolean;
 }
 
 export interface Channel extends SharedChatBase {

@@ -490,3 +490,12 @@ export type ContentMessage = PrivateMessage | SupergroupContentMessage;
 export function isContentMessage(message: ChatMessage): message is ContentMessage {
   return message.kind === 'private_message' || isSupergroupContentMessage(message);
 }
+
+/**
+ * Whether a message's content is protected from forwarding and saving, as TDLib's
+ * `get_message_has_protected_content` decides: its sender protected it, or its chat protects all
+ * content, which only a supergroup's owner can make it do.
+ */
+export function hasProtectedContent(message: ChatMessage, chatProtectsContent: boolean): boolean {
+  return message.isContentProtected || chatProtectsContent;
+}
