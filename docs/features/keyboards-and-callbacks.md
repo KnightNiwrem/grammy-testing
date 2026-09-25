@@ -37,7 +37,8 @@ removal follow the corresponding private-chat logic in TDLib's
 [`MessagesManager` reply markup handling][reply-state].
 
 `selective` has no effect in private chats. Messages sent with any non-inline reply markup remain
-uneditable, even after the interface clears. Forced-reply dismissal is a [real gap](#real-gaps).
+uneditable, even after the interface clears. A forced reply stays shown after the account replies;
+its dismissal is an [intentional deviation](#intentional-deviations).
 
 ## Intentional deviations
 
@@ -45,6 +46,11 @@ uneditable, even after the interface clears. Forced-reply dismissal is a [real g
   Telegram's rendering or hidden/shown state. Pressing a `one_time_keyboard` button leaves the
   keyboard available through the inspection API. Persistent and resize flags are recorded without
   rendering a keyboard.
+- **No client-side dismissal.** Telegram apps call TDLib's
+  [`delete_dialog_reply_markup`][dismiss-reply] after the user answers a forced reply or uses a
+  one-time keyboard. That call only changes what the client shows and sends nothing to Telegram, so
+  no bot can observe it. The inspection API keeps showing a forced reply until a bot's markup
+  replaces or removes it, or its message is deleted.
 - **URL inspection without navigation.** URL buttons are stored but cannot be opened through the
   test client. Tests can inspect the target without opening it.
 - **Rejecting ambiguous buttons.** Markup and buttons with multiple actions fail strict validation
@@ -60,9 +66,6 @@ uneditable, even after the interface clears. Forced-reply dismissal is a [real g
 
 ## Real gaps
 
-- **Forced-reply dismissal.** Sending a reply does not dismiss a forced reply, and the account API
-  has no explicit dismissal operation. Tests need to simulate that transition. TDLib exposes
-  [`delete_dialog_reply_markup`][dismiss-reply] for the client action.
 - **Supergroup reply interfaces.** Reply keyboards and forced replies in supergroups are rejected.
   Telegram's [`Client::get_reply_markup`][reply-markup] and TDLib support them in groups.
 - **Inline button types.** Login, Mini Apps, games, payments, inline switching, copy-text and
