@@ -77,19 +77,20 @@ grammY and Telegraf.
 - **Cloud `max_connections` range.** `max_connections` defaults to 40 and is clamped to 1–100, as in
   cloud mode. The official [limit][max-connections] rises to 100,000 in local mode, which tests do
   not need.
+- **No fixed webhook addresses.** Tests register webhook servers of their own environment, which the
+  emulator reaches through the URL's host as the platform resolves it. Upstream accepts `ip_address`
+  in [`Client::do_set_webhook`][set-webhook] and connects to that address instead of resolving the
+  host during [connection setup][webhook-network]; [`getWebhookInfo`][webhook-info] reports the
+  fixed or resolved address. The address only chooses where Telegram's servers connect and has no
+  effect on the bot. The emulator refuses `ip_address` with
+  `Bad Request: webhook IP addresses are not supported` rather than accepting it without effect, so
+  a test cannot appear to exercise it, and `getWebhookInfo` omits `ip_address`.
 - **No custom certificate uploads.** Local HTTP or trusted TLS is sufficient for webhook tests, so
   `setWebhook` does not accept custom certificates and `getWebhookInfo` always reports
   `has_custom_certificate: false`. Upstream accepts certificate uploads in
   [`Client::do_set_webhook`][set-webhook].
 
 There is no Telegram synchronization error state because sessions have no Telegram connection.
-
-## Real gaps
-
-- **Fixed IP addresses and address reporting.** `setWebhook` does not accept `ip_address`, and
-  `getWebhookInfo` omits the resolved address. Tests cannot configure a fixed webhook IP or inspect
-  address resolution. Upstream accepts the option in [`Client::do_set_webhook`][set-webhook] and
-  uses it during [connection setup][webhook-network].
 
 ## Local evidence
 
@@ -107,6 +108,7 @@ There is no Telegram synchronization error state because sessions have no Telegr
 [webhook-retry]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L493-L520
 [webhook-drop-timeout]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.h#L75-L76
 [max-connections]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17215-L17225
+[webhook-info]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L6641-L6643
 [set-webhook]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17227-L17340
 [http-connection]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/tdnet/td/net/HttpConnectionBase.cpp#L39-L154
 [webhook-throttle]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L16952-L16985
