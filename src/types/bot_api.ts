@@ -1,3 +1,4 @@
+import type { BotApiRichMessage } from './bot_api_rich_message.ts';
 import type { ChatAdministratorRightName } from './bot_default_administrator_rights.ts';
 import type { ButtonStyle } from './button_appearance.ts';
 import type { SupergroupAdministratorRight } from './chat_membership.ts';
@@ -238,7 +239,8 @@ export type BotApiMessageContent =
     /** Present only for a photo that clients cover until the user reveals it. */
     readonly has_media_spoiler?: true;
   })
-  | (BotApiCaption & { readonly document: BotApiDocument });
+  | (BotApiCaption & { readonly document: BotApiDocument })
+  | { readonly rich_message: BotApiRichMessage };
 
 /**
  * The fields of a service message about a membership change, which take the place of content.

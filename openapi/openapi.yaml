@@ -129,6 +129,8 @@ paths:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_sendPhoto.yaml
   /sessions/{sessionId}/bot-api/bot{token}/sendDocument:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_sendDocument.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/sendRichMessage:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_sendRichMessage.yaml
   /sessions/{sessionId}/bot-api/bot{token}/forwardMessage:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_forwardMessage.yaml
   /sessions/{sessionId}/bot-api/bot{token}/copyMessage:

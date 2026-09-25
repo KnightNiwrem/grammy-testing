@@ -2,9 +2,12 @@ type: object
 additionalProperties: false
 description: >-
   Addresses a message of a chat by `chat_id` and `message_id`, or a message sent through the
-  bot's inline mode by `inline_message_id`.
-required:
-  - text
+  bot's inline mode by `inline_message_id`, and gives its new text or rich message.
+oneOf:
+  - required:
+      - text
+  - required:
+      - rich_message
 properties:
   chat_id:
     $ref: ./ChatIdentifier.yaml
@@ -22,7 +25,8 @@ properties:
   text:
     type: string
     minLength: 1
-    description: New message text, read and normalized as by `sendMessage`.
+    description: >-
+      New message text, read and normalized as by `sendMessage`; ignored with `rich_message`.
   parse_mode:
     $ref: ./ParseMode.yaml
   entities:
@@ -35,6 +39,12 @@ properties:
   disable_web_page_preview:
     type: boolean
     description: The older form of `link_preview_options`, validated and without effect.
+  rich_message:
+    $ref: ./InputRichMessage.yaml
+    description: >-
+      A new rich message, read as by `sendRichMessage`, which replaces the text. As TDLib's
+      `edit_inline_message_text` requires, an inline message's new rich message reuses files by
+      `file_id` and uploads none.
   reply_markup:
     $ref: ./InlineKeyboardMarkup.yaml
     description: Keyboard the edited message shows; omitting it removes the keyboard.

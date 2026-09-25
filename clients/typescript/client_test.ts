@@ -704,6 +704,93 @@ Deno.test('TypeScript client sends, edits, and downloads photos and documents', 
   throw new Error('Expected content that is not an image to be refused as a photo');
 });
 
+Deno.test('TypeScript client reads rich messages and presses their buttons', async () => {
+  const publicOrigin = 'http://emulator.example:9000';
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin,
+  });
+  const client = new TelegramEmulationClient(publicOrigin, {
+    fetch: createInProcessFetch(api.fetch),
+  });
+  const session = await client.createSession();
+  const { token, bot } = await session.createBot({ first_name: 'Test Bot', username: 'test_bot' });
+  const { account } = await session.createAccount({ first_name: 'Ada' });
+  const to = { type: 'private', botId: bot.id } as const;
+  await account.sendMessage({ to, text: 'Hello' });
+
+  const sendResponse = await api.request(
+    `/sessions/${session.id}/bot-api/bot${token}/sendRichMessage`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: account.id,
+        rich_message: {
+          blocks: [
+            { type: 'heading', text: 'Trip to @berlin_guide', size: 1 },
+            { type: 'map', location: { latitude: 52.52, longitude: 13.405 }, zoom: 12 },
+            {
+              type: 'details',
+              summary: 'Schedule',
+              blocks: [{
+                type: 'table',
+                cells: [[{ text: 'Day 1', is_header: true }], [{ text: 'Museum', rowspan: 2 }]],
+                is_striped: true,
+              }],
+              is_open: true,
+            },
+            {
+              type: 'blockquote',
+              blocks: [{ type: 'list', items: [{ blocks: [{ type: 'divider' }] }] }],
+              credit: { type: 'date_time', text: 'Today', unix_time: 1_700_000_000 },
+            },
+            {
+              type: 'pullquote',
+              text: { type: 'mathematical_expression', expression: 'e^{i\\pi}' },
+            },
+            {
+              type: 'buttons',
+              buttons: [
+                { text: 'Book', style: 'success', callback_data: 'book' },
+                {
+                  text: ['Share ', {
+                    type: 'custom_emoji',
+                    custom_emoji_id: '5',
+                    alternative_text: '✈',
+                  }],
+                  switch_inline_query: 'trip',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    },
+  );
+  const { result: sentMessage } = await sendResponse.json() as {
+    result: { message_id: number; rich_message: unknown };
+  };
+  const history = await account.getMessages({ chat: to });
+  const shownMessage = history.at(-1);
+  if (
+    shownMessage?.rich_message === undefined ||
+    JSON.stringify(shownMessage.rich_message) !== JSON.stringify(sentMessage.rich_message) ||
+    shownMessage.rich_message.blocks[0]?.type !== 'heading'
+  ) {
+    throw new Error('Expected the client to read the rich message the bot sent');
+  }
+
+  const callbackQuery = await account.pressCallbackButton({
+    chat: to,
+    message_id: sentMessage.message_id,
+    callback_data: 'book',
+  });
+  if (callbackQuery.callback_data !== 'book' || callbackQuery.status !== 'awaiting_answer') {
+    throw new Error('Expected the client to press the rich message button');
+  }
+});
+
 Deno.test('TypeScript client sends inline queries and results through an inline bot', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({

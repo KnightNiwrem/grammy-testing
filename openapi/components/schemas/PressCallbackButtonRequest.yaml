@@ -16,7 +16,8 @@ properties:
   callback_data:
     type: string
     minLength: 1
-    description: Callback data of the button to press.
+    description: >-
+      Callback data of the button to press, in the message's inline keyboard or rich message.
   expired:
     type: boolean
     default: false

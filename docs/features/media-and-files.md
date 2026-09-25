@@ -4,11 +4,11 @@
 
 ## Supported behavior
 
-Bots send photos and documents with `sendPhoto` and `sendDocument`. Files can be multipart uploads,
-either in the part named for the parameter or referenced with `attach://<part-name>`, or an existing
-`file_id` known to that bot. Accounts upload base64 content through the emulation API; the
-TypeScript client accepts bytes and performs the encoding. Both sides can supply captions and
-caption entities.
+Bots send photos and documents with `sendPhoto` and `sendDocument`, and in the blocks of
+[rich messages](rich-messages.md). Files can be multipart uploads, either in the part named for the
+parameter or referenced with `attach://<part-name>`, or an existing `file_id` known to that bot.
+Accounts upload base64 content through the emulation API; the TypeScript client accepts bytes and
+performs the encoding. Both sides can supply captions and caption entities.
 
 Photos expose dimensions, `has_media_spoiler` when requested and `show_caption_above_media` for a
 caption above the photo. Documents expose their cleaned filename and a MIME type derived from its

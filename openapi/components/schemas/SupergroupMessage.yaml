@@ -20,6 +20,8 @@ oneOf:
   - required:
       - document
   - required:
+      - rich_message
+  - required:
       - new_chat_participant
       - new_chat_member
       - new_chat_members
@@ -125,6 +127,10 @@ properties:
   left_chat_member:
     $ref: ./MessageUser.yaml
     description: The account or bot that left or was removed.
+  rich_message:
+    $ref: ./RichMessage.yaml
+    description: >-
+      The blocks of a rich message, which only bots send, as `sendRichMessage` describes them.
   reply_markup:
     $ref: ./InlineKeyboardMarkup.yaml
   via_bot:

@@ -26,12 +26,13 @@ allows every kind as a `switch_inline_query` button. To test what follows a swit
 send the inline query from the account. Copied text is limited to the documented 256 characters,
 which TDLib does not check.
 
-An account presses a callback button using its message ID and `callback_data`. The emulator creates
-a `callback_query` update for the bot responsible for that keyboard. The query includes the account,
-data and `chat_instance`; ordinary message callbacks include a message, while inline callbacks use
-`inline_message_id` instead. Tests inspect the answer after the bot calls `answerCallbackQuery`.
-Answers store optional text, `show_alert`, `url` and `cache_time`; answer text is limited to 200
-UTF-16 code units by the emulator's schema.
+An account presses a callback button using its message ID and `callback_data`, whether the button
+belongs to the message's inline keyboard or to its [rich message](rich-messages.md). The emulator
+creates a `callback_query` update for the bot responsible for that button. The query includes the
+account, data and `chat_instance`; ordinary message callbacks include a message, while inline
+callbacks use `inline_message_id` instead. Tests inspect the answer after the bot calls
+`answerCallbackQuery`. Answers store optional text, `show_alert`, `url` and `cache_time`; answer
+text is limited to 200 UTF-16 code units by the emulator's schema.
 
 The [Bot API handler][answer-callback] and TDLib's [`answer_callback_query`][td-callback] pass `url`
 to Telegram, whose servers decide which URLs to accept. The Bot API documents a game's URL for game

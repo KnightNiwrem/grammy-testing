@@ -1,0 +1,247 @@
+type: object
+additionalProperties: false
+description: >-
+  A block of a rich message a bot sends, as the Bot API's `InputRichBlock` classes describe
+  them, with the fields of its `type`: `paragraph`, `footer`, and `pre` hold `text`, `pre` an
+  optional `language`, and `heading` also a `size` from 1 to 6. `divider` holds nothing,
+  `mathematical_expression` an `expression` in LaTeX, and `anchor` the `name` of an invisible
+  target of anchor links. `list` holds `items`, all ordered with a label `type` or all
+  unordered. `blockquote` holds `blocks`, while `expandable_blockquote` and `pullquote` hold
+  `text`; each has an optional `credit`. `collage` and `slideshow` hold `blocks` and an optional
+  `caption`. `table` holds `cells` in rows, with an optional `caption` and flags. `details`
+  holds a `summary`, `blocks`, and `is_open`. `map` holds a `location` whose latitude is at most
+  90 degrees and longitude at most 180 either way, a `zoom` from 0 to 24, and optional
+  dimensions of at most 10,000 together, neither more than 20 times the other. `buttons` holds
+  from 1 to 8 `buttons` and an optional `align`. `photo` and `document` hold their media, whose
+  captions are ignored, and an optional `caption`; the media's `media` is the `file_id` of a
+  file of that type the bot knows, or `attach://<part name>` for a file uploaded in that part,
+  and a document's `thumbnail` works as for `sendDocument`.
+
+  Telegram's `animation`, `audio`, `video`, and `voice_note` blocks are not supported (`Bad
+  Request: rich message blocks with an animation, audio, video, or voice note are not
+  supported`), and a `thinking` block, which only drafts may hold, is refused (`Bad Request:
+  thinking blocks can be used only in rich message drafts`).
+required:
+  - type
+properties:
+  type:
+    type: string
+    enum:
+      - paragraph
+      - heading
+      - pre
+      - footer
+      - divider
+      - mathematical_expression
+      - anchor
+      - list
+      - blockquote
+      - expandable_blockquote
+      - pullquote
+      - collage
+      - slideshow
+      - table
+      - details
+      - map
+      - buttons
+      - photo
+      - document
+  text:
+    $ref: ./RichText.yaml
+  size:
+    type: integer
+    minimum: 1
+    maximum: 6
+  language:
+    type: string
+  expression:
+    type: string
+  name:
+    type: string
+  items:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required:
+        - blocks
+      properties:
+        blocks:
+          type: array
+          description: The item's content; an item without blocks shows an empty paragraph.
+          items:
+            $ref: ./InputRichBlock.yaml
+        has_checkbox:
+          type: boolean
+          default: false
+        is_checked:
+          type: boolean
+          default: false
+          description: Checks the item's checkbox; ignored without one.
+        value:
+          type: integer
+          default: 0
+          description: The number of an item of an ordered list.
+        type:
+          type: string
+          enum:
+            - a
+            - A
+            - i
+            - I
+            - '1'
+          description: >-
+            The label of an item of an ordered list: letters, Roman numerals, or decimal numbers.
+            An item without one is unordered.
+  blocks:
+    type: array
+    items:
+      $ref: ./InputRichBlock.yaml
+  credit:
+    $ref: ./RichText.yaml
+  caption:
+    description: >-
+      A `RichBlockCaption` of a collage, slideshow, map, photo, or document; the `RichText`
+      caption of a table.
+    oneOf:
+      - $ref: ./RichBlockCaption.yaml
+      - $ref: ./RichText.yaml
+  cells:
+    type: array
+    items:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          text:
+            $ref: ./RichText.yaml
+          is_header:
+            type: boolean
+            default: false
+          colspan:
+            type: integer
+            minimum: 0
+          rowspan:
+            type: integer
+            minimum: 0
+          align:
+            type: string
+            enum:
+              - left
+              - center
+              - right
+            description: Defaults to `left`, or `center` for a header cell.
+          valign:
+            type: string
+            enum:
+              - top
+              - middle
+              - bottom
+            description: Defaults to `middle`.
+  is_bordered:
+    type: boolean
+    default: false
+  is_striped:
+    type: boolean
+    default: false
+  is_compact:
+    type: boolean
+    default: false
+  summary:
+    $ref: ./RichText.yaml
+  is_open:
+    type: boolean
+    default: false
+  location:
+    type: object
+    additionalProperties: false
+    required:
+      - latitude
+      - longitude
+    properties:
+      latitude:
+        type: number
+      longitude:
+        type: number
+      horizontal_accuracy:
+        type: number
+        description: Meters of uncertainty, of which 1500 are kept at most.
+  zoom:
+    type: integer
+    minimum: 0
+    maximum: 24
+    default: 0
+  width:
+    type: integer
+    minimum: 0
+    maximum: 10000
+    default: 0
+  height:
+    type: integer
+    minimum: 0
+    maximum: 10000
+    default: 0
+  buttons:
+    type: array
+    minItems: 1
+    maxItems: 8
+    items:
+      $ref: ./RichMessageButton.yaml
+  align:
+    type: string
+    enum:
+      - left
+      - center
+      - right
+  photo:
+    type: object
+    additionalProperties: false
+    required:
+      - type
+      - media
+    properties:
+      type:
+        type: string
+        const: photo
+      media:
+        type: string
+      caption:
+        type: string
+      parse_mode:
+        type: string
+      caption_entities:
+        type: array
+        items:
+          $ref: ./MessageEntityParameter.yaml
+      show_caption_above_media:
+        type: boolean
+      has_spoiler:
+        type: boolean
+        default: false
+        description: Covers the photo until the user reveals it.
+  document:
+    type: object
+    additionalProperties: false
+    required:
+      - type
+      - media
+    properties:
+      type:
+        type: string
+        const: document
+      media:
+        type: string
+      thumbnail:
+        type: string
+      caption:
+        type: string
+      parse_mode:
+        type: string
+      caption_entities:
+        type: array
+        items:
+          $ref: ./MessageEntityParameter.yaml
+      disable_content_type_detection:
+        type: boolean

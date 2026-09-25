@@ -1,0 +1,11 @@
+type: string
+description: >-
+  A style clients show instead of their default one, read in any letter case; `default` or an
+  empty style chooses the default. `link` shows the button as a link and is allowed only for
+  callback buttons.
+enum:
+  - default
+  - primary
+  - danger
+  - success
+  - link

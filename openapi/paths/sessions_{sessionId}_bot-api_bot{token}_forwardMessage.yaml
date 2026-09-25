@@ -9,7 +9,9 @@ description: >-
   `forward_sender_name`. As TDLib's `dup_reply_markup` does, it keeps the inline keyboard only
   when every button works away from the original message: URL, copy-text and disabled buttons,
   and the switch-inline buttons of a message sent through an inline bot, which then let the user
-  choose any chat. As on Telegram, a forward cannot be edited and the bot receives no update for it. Topics, paid
+  choose any chat. As TDLib's `InlineKeyboardButton::clone` does, the buttons of a rich message
+  keep working when they are URL or copy-text buttons, and show the others as disabled buttons.
+  As on Telegram, a forward cannot be edited and the bot receives no update for it. Topics, paid
   broadcasts, suggested posts, and video start timestamps are not supported.
 parameters:
   - $ref: ../components/parameters/SessionId.yaml

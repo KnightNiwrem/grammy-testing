@@ -1,0 +1,97 @@
+description: >-
+  Telegram Bot API method for sending a rich message: text laid out in blocks, such as
+  paragraphs, headings, lists, tables, quotations, maps, rows of buttons, photos, and
+  documents, whose text nests formatting, links, and buttons. The emulator supports messages
+  described as blocks; messages written in HTML or Markdown, blocks with animations, audio,
+  videos, or voice notes, and drafts are not supported. The blocks are read as the official Bot
+  API server and TDLib read them, their strings are cleaned as TDLib cleans them, and Telegram's
+  detected entities are marked in their plain text. Photos and documents are uploaded with the
+  request or reused by `file_id`, as for `sendPhoto` and `sendDocument`. The other parameters
+  work as for `sendMessage`. The message shows the blocks in `rich_message`, as accounts see it
+  too; accounts press its callback buttons as they press those of an inline keyboard.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: sendRichMessage
+  summary: Send a rich message from the authenticated virtual bot to an account or a supergroup
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/SendRichMessageRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/SendRichMessageRequest.yaml
+        encoding:
+          rich_message:
+            contentType: application/json
+          reply_parameters:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/SendRichMessageRequest.yaml
+        encoding:
+          rich_message:
+            contentType: application/json
+          reply_parameters:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+  responses:
+    '200':
+      description: >-
+        The rich message was stored in the private conversation or supergroup. No bot receives
+        an update for a bot's message.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MessageResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: `rich_message` is missing or empty, or has no blocks (`Bad
+        Request: rich message must be non-empty`), is not JSON (`Bad Request: can't parse rich
+        message JSON object`), or not an object (`Bad Request: object expected as rich
+        message`); a block, a text, or a button cannot be read, with the Bot API server's or
+        TDLib's description, such as `Bad Request: type "…" is unsupported`, `Bad Request:
+        unsupported rich text type`, `Bad Request: invalid section heading size specified`,
+        `Bad Request: list must be either ordered or unordered`, `Bad Request: invalid map
+        properties specified`, or `Bad Request: media not found`; a row has more than 8 buttons
+        (`Bad Request: a button row can have at most 8 buttons`), a button other than a
+        callback button has the link style (`Bad Request: only callback buttons can have the
+        link style`), or a button's text holds formatting other than custom emoji and dates
+        (`Bad Request: button text can have only custom emoji and dates`); a button's link
+        cannot be read, as for an inline keyboard; `chat_id` is missing (`Bad Request: chat_id
+        is empty`); a file cannot be sent, as for `sendPhoto` and `sendDocument`; the chat, the
+        reply, and the message effect fail as for `sendMessage`; a string is not well-formed
+        Unicode (for example `Bad Request: rich text must be encoded in UTF-8`) or a text
+        mention names a user the session does not know (`Bad Request: user not found`); or a
+        button's callback data exceeds 64 bytes (`Bad Request: BUTTON_DATA_INVALID`). Telegram
+        checks the chat before the blocks and files, which the emulator reads first.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The account blocks the bot (`Forbidden: bot was blocked by the user`), or the bot left
+        the supergroup (`Forbidden: bot is not a member of the supergroup chat`) or was removed
+        from it (`Forbidden: bot was kicked from the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

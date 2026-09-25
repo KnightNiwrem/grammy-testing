@@ -1,5 +1,6 @@
 import type { InlineKeyboard } from './inline_keyboard.ts';
 import type { ReplyInterfaceMarkup } from './reply_interface.ts';
+import { type RichMessage, richMessageMentionsUser } from './rich_message.ts';
 import type { StoredFileId } from './stored_file.ts';
 import type { PrivateConversationKey, PrivateConversationRole } from './virtual_chat.ts';
 
@@ -185,8 +186,17 @@ export interface DocumentMessageContent {
   readonly caption: FormattedText;
 }
 
-/** What a message shows: text, or a file with a caption. */
-export type MessageContent = TextMessageContent | PhotoMessageContent | DocumentMessageContent;
+/** A message laid out in blocks, which only bots send. It has no text or caption. */
+export interface RichMessageContent extends RichMessage {
+  readonly kind: 'rich_message';
+}
+
+/** What a message shows: text, a file with a caption, or a rich message. */
+export type MessageContent =
+  | TextMessageContent
+  | PhotoMessageContent
+  | DocumentMessageContent
+  | RichMessageContent;
 
 /** A service message's record that accounts or bots joined a supergroup. */
 export interface MembersJoinedMessageContent {
@@ -212,7 +222,8 @@ export type SupergroupMessageContent = MessageContent | MembershipServiceContent
 
 /**
  * The text a message's content carries: the text of a text message, or the caption of a media
- * message, which is empty when it has none. A service message carries no text.
+ * message, which is empty when it has none. As TDLib's `get_message_content_text` has none for
+ * them, a rich message and a service message carry no text.
  */
 export function getContentText(content: SupergroupMessageContent): FormattedText {
   switch (content.kind) {
@@ -221,6 +232,7 @@ export function getContentText(content: SupergroupMessageContent): FormattedText
     case 'photo':
     case 'document':
       return content.caption;
+    case 'rich_message':
     case 'members_joined':
     case 'member_left':
       return { text: '', entities: [] };
@@ -232,15 +244,18 @@ export function getContentText(content: SupergroupMessageContent): FormattedText
 }
 
 /**
- * Whether a message's text or caption mentions a user: by a text mention of the user, or by a
- * mention of the user's username, ignoring letter case. Mentions are the entities Telegram detects
- * in stored text, so an `@username` that runs into further letters or digits, or lies in code, a
- * link, or a URL, is none.
+ * Whether a message's text, caption, or rich message mentions a user: by a text mention of the
+ * user, or by a mention of the user's username, ignoring letter case. Mentions are the entities
+ * Telegram detects in stored text, so an `@username` that runs into further letters or digits, or
+ * lies in code, a link, or a URL, is none.
  */
 export function mentionsUser(
   content: SupergroupMessageContent,
   user: { readonly id: number; readonly username?: string },
 ): boolean {
+  if (content.kind === 'rich_message') {
+    return richMessageMentionsUser(content, user);
+  }
   const { text, entities } = getContentText(content);
   // Usernames and the mentions Telegram detects consist of ASCII letters, digits and underscores.
   const username = user.username?.toLowerCase();

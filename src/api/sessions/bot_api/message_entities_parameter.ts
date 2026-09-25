@@ -211,7 +211,7 @@ function readMessageEntity(value: unknown): MessageEntityReading {
  * to show. `t` or `T` shows a short or long time, `d` or `D` a short or long date, and `w` or `W`
  * the day of the week; the last letter for a part decides its precision.
  */
-function readDateTimeFormat(
+export function readDateTimeFormat(
   format: string,
 ): { readonly valid: true; readonly format?: DateTimeFormat } | { readonly valid: false } {
   if (format.length === 0) {

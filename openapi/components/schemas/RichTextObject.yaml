@@ -1,0 +1,99 @@
+type: object
+additionalProperties: false
+description: >-
+  Rich text of a type, as the Bot API's `RichText` classes describe them. Formatting types hold
+  only `text`. `date_time` also holds `unix_time`, a positive Unix time, and
+  `date_time_format`, as for a `date_time` entity. `text_mention` holds the mentioned `user`,
+  of whom a bot gives only the `id` of a session user. `url`, `email_address`, and
+  `phone_number` hold their target. `custom_emoji` holds `custom_emoji_id` and
+  `alternative_text` instead of text, `mathematical_expression` an `expression` in LaTeX, and
+  `anchor` the `name` of an invisible target of anchor links. `reference` holds text that
+  `reference_link`s name, and `anchor_link` names an `anchor`, or with an empty name, the top of
+  the message. `button` holds a `button`.
+
+  Telegram detects `mention`, `hashtag`, `cashtag`, `bot_command`, `url`, and `email_address`
+  entities, and `bank_card_number`s, in the plain text of a rich message, as it detects them in
+  message text; each shows what its text says, such as the `username` of a mention. A bot's
+  entity of these detected types keeps only its text, whose data field is ignored, so rich
+  text received in a message can be sent back. As TDLib shows them, a link of the URL `#` and
+  the name of an anchor or reference of the message is an `anchor_link` or `reference_link`,
+  and a `reference` without text is an `anchor`.
+required:
+  - type
+properties:
+  type:
+    type: string
+    enum:
+      - bold
+      - italic
+      - underline
+      - strikethrough
+      - spoiler
+      - subscript
+      - superscript
+      - marked
+      - code
+      - date_time
+      - mention
+      - hashtag
+      - cashtag
+      - bot_command
+      - bank_card_number
+      - text_mention
+      - url
+      - email_address
+      - phone_number
+      - custom_emoji
+      - mathematical_expression
+      - reference
+      - reference_link
+      - anchor
+      - anchor_link
+      - button
+  text:
+    $ref: ./RichText.yaml
+  unix_time:
+    type: integer
+    minimum: 1
+  date_time_format:
+    type: string
+    pattern: '^[tTdDwW]*$|^[rR]$'
+  username:
+    type: string
+  hashtag:
+    type: string
+  cashtag:
+    type: string
+  bot_command:
+    type: string
+  bank_card_number:
+    type: string
+  user:
+    type: object
+    description: The mentioned account or bot; a bot gives only its `id`.
+    required:
+      - id
+    properties:
+      id:
+        type: integer
+  url:
+    type: string
+  email_address:
+    type: string
+  phone_number:
+    type: string
+  custom_emoji_id:
+    type: string
+    pattern: '^-?[1-9]\d*$'
+  alternative_text:
+    type: string
+  expression:
+    type: string
+  name:
+    type: string
+  reference_name:
+    type: string
+  anchor_name:
+    type: string
+  button:
+    $ref: ./RichMessageButton.yaml

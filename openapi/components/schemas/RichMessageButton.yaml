@@ -1,0 +1,138 @@
+description: >-
+  A button of a rich message, in a row of buttons or in its text, with exactly one action that
+  works as it does on an inline keyboard button; accounts press callback buttons by their data.
+  Its text may hold only plain text, custom emoji, and dates, as the Bot API documents. As for
+  inline keyboards, other actions, and buttons with several, are rejected. A forward or copy of
+  the message keeps URL and copy-text buttons, and shows the others as disabled buttons with
+  their text and style, as TDLib's `InlineKeyboardButton::clone` does.
+oneOf:
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - callback_data
+    properties:
+      text:
+        $ref: ./RichText.yaml
+      style:
+        $ref: ./RichMessageButtonStyle.yaml
+      callback_data:
+        type: string
+        minLength: 1
+        description: >-
+          Data sent to the bot in a callback query, at most 64 bytes when UTF-8 encoded.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - url
+    properties:
+      text:
+        $ref: ./RichText.yaml
+      style:
+        $ref: ./RichMessageButtonStyle.yaml
+      url:
+        type: string
+        minLength: 1
+        description: >-
+          A link as Telegram reads it: an HTTP or HTTPS URL, whose scheme defaults to
+          `http`, or a `tg:`, `ton:` or `tonsite:` link. Responses show it normalized, as
+          `http://grammy.dev/` for `grammy.dev`; a `tg://user?id=` link opens the user's
+          profile. A link Telegram refuses fails with `Bad Request: inline keyboard button
+          URL '…' is invalid: …`.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - copy_text
+    properties:
+      text:
+        $ref: ./RichText.yaml
+      style:
+        $ref: ./RichMessageButtonStyle.yaml
+      copy_text:
+        type: object
+        additionalProperties: false
+        description: The text the button copies to the clipboard.
+        required:
+          - text
+        properties:
+          text:
+            type: string
+            minLength: 1
+            maxLength: 256
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - switch_inline_query
+    properties:
+      text:
+        $ref: ./RichText.yaml
+      style:
+        $ref: ./RichMessageButtonStyle.yaml
+      switch_inline_query:
+        type: string
+        description: >-
+          The query that pressing the button puts after the bot's username in a chat the
+          user chooses; empty for the username alone. Pressing the button involves only the
+          user's client, so tests send the inline query itself.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - switch_inline_query_current_chat
+    properties:
+      text:
+        $ref: ./RichText.yaml
+      style:
+        $ref: ./RichMessageButtonStyle.yaml
+      switch_inline_query_current_chat:
+        type: string
+        description: >-
+          The query that pressing the button puts after the bot's username in the message's
+          own chat.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - switch_inline_query_chosen_chat
+    properties:
+      text:
+        $ref: ./RichText.yaml
+      style:
+        $ref: ./RichMessageButtonStyle.yaml
+      switch_inline_query_chosen_chat:
+        type: object
+        additionalProperties: false
+        description: >-
+          A query for a chat the user chooses among the allowed kinds. As a request field,
+          omitted fields default to an empty query and to kinds that are not allowed; at
+          least one kind must be allowed (`Bad Request: At least one chat type must be
+          allowed`). As on Telegram, responses show a button that allows every kind as a
+          `switch_inline_query` button, and every field of any other.
+        properties:
+          query:
+            type: string
+          allow_user_chats:
+            type: boolean
+          allow_bot_chats:
+            type: boolean
+          allow_group_chats:
+            type: boolean
+          allow_channel_chats:
+            type: boolean
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - disabled
+    properties:
+      text:
+        $ref: ./RichText.yaml
+      style:
+        $ref: ./RichMessageButtonStyle.yaml
+      disabled:
+        type: object
+        additionalProperties: false
+        description: Marks a button that does nothing when pressed.

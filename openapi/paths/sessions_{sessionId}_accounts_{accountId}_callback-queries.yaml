@@ -6,8 +6,9 @@ post:
   operationId: pressCallbackButton
   summary: Press a callback button on a bot message as a virtual account
   description: >-
-    Presses the button with the given callback data on a bot message in the account's private
-    chat with the bot, or in a supergroup the account is a member of. Unless the bot that sent
+    Presses the button with the given callback data, in the inline keyboard or the rich message
+    of a bot message in the account's private chat with the bot, or in a supergroup the account
+    is a member of. Unless the bot that sent
     the message has an allowed_updates subscription that excludes callback_query
     updates, the bot receives a callback_query update carrying the message as it is now. A
     button on a message sent through a bot's inline mode reaches that inline bot instead, with

@@ -278,7 +278,7 @@ export interface PressCallbackButtonInput {
   readonly chat: MessageTarget;
   /** The ID of the message carrying the button, as message history shows it. */
   readonly message_id: number;
-  /** The callback data of the button to press. */
+  /** The callback data of the button to press, in the inline keyboard or the rich message. */
   readonly callback_data: string;
   /**
    * Creates the query already expired: the bot still receives it but cannot answer it, as when a
@@ -459,8 +459,181 @@ export interface Document extends MessageFile {
 }
 
 /**
- * The fields that show what a message is: text, a photo, or a document. Each kind declares the
- * others' fields absent, so that any of them can be read from a message of unknown kind.
+ * Text of a rich message: plain text as a string, texts one after another as an array, or an
+ * object of a type.
+ */
+export type RichText = string | readonly RichText[] | RichTextObject;
+
+/** Rich text of a type, as the Bot API's `RichText` shows it. */
+export type RichTextObject =
+  | {
+    readonly type:
+      | 'bold'
+      | 'italic'
+      | 'underline'
+      | 'strikethrough'
+      | 'spoiler'
+      | 'subscript'
+      | 'superscript'
+      | 'marked'
+      | 'code';
+    readonly text: RichText;
+  }
+  | {
+    readonly type: 'date_time';
+    readonly text: RichText;
+    readonly unix_time: number;
+    /** As a `date_time` entity's `date_time_format`. */
+    readonly date_time_format: string;
+  }
+  /** Entities Telegram detects in the text, each showing the text it covers. */
+  | { readonly type: 'mention'; readonly text: RichText; readonly username: string }
+  | { readonly type: 'hashtag'; readonly text: RichText; readonly hashtag: string }
+  | { readonly type: 'cashtag'; readonly text: RichText; readonly cashtag: string }
+  | { readonly type: 'bot_command'; readonly text: RichText; readonly bot_command: string }
+  | {
+    readonly type: 'bank_card_number';
+    readonly text: RichText;
+    readonly bank_card_number: string;
+  }
+  | {
+    readonly type: 'text_mention';
+    readonly text: RichText;
+    readonly user: VirtualAccountProfile | MessageSenderBot;
+  }
+  | { readonly type: 'url'; readonly text: RichText; readonly url: string }
+  | { readonly type: 'email_address'; readonly text: RichText; readonly email_address: string }
+  | { readonly type: 'phone_number'; readonly text: RichText; readonly phone_number: string }
+  | {
+    readonly type: 'custom_emoji';
+    readonly custom_emoji_id: string;
+    readonly alternative_text: string;
+  }
+  | { readonly type: 'mathematical_expression'; readonly expression: string }
+  | { readonly type: 'reference'; readonly text: RichText; readonly name: string }
+  | { readonly type: 'reference_link'; readonly text: RichText; readonly reference_name: string }
+  | { readonly type: 'anchor'; readonly name: string }
+  /** A link to an anchor of the message; an empty name links to its top. */
+  | { readonly type: 'anchor_link'; readonly text: RichText; readonly anchor_name: string }
+  | { readonly type: 'button'; readonly button: RichMessageButton };
+
+/** Removes properties from each member of a union, which keeps the union's alternatives apart. */
+type OmitFromEach<Type, Key extends PropertyKey> = Type extends unknown ? Omit<Type, Key> : never;
+
+/**
+ * A button of a rich message, which acts as an inline keyboard button of the same kind. An
+ * account presses a callback button by its callback data.
+ */
+export type RichMessageButton =
+  & {
+    readonly text: RichText;
+    /** Omitted for the client's default style; `link` shows the button as a link. */
+    readonly style?: 'primary' | 'danger' | 'success' | 'link';
+  }
+  & OmitFromEach<InlineKeyboardButton, keyof KeyboardButtonFace>;
+
+export type HorizontalAlignment = 'left' | 'center' | 'right';
+
+/** The caption of a block with media or a map. */
+export interface RichBlockCaption {
+  readonly text: RichText;
+  readonly credit?: RichText;
+}
+
+export interface RichBlockListItem {
+  /** `•` for an item of an unordered list, otherwise its number as its type shows it. */
+  readonly label: string;
+  readonly blocks: readonly RichBlock[];
+  readonly has_checkbox?: true;
+  readonly is_checked?: true;
+  /** Present for an item of an ordered list: letters, Roman numerals, or decimal numbers. */
+  readonly type?: 'a' | 'A' | 'i' | 'I' | '1';
+  readonly value?: number;
+}
+
+export interface RichBlockTableCell {
+  /** Omitted for an invisible cell. */
+  readonly text?: RichText;
+  readonly is_header?: true;
+  /** Omitted for a cell that spans one column. */
+  readonly colspan?: number;
+  /** Omitted for a cell that spans one row. */
+  readonly rowspan?: number;
+  readonly align: HorizontalAlignment;
+  readonly valign: 'top' | 'middle' | 'bottom';
+}
+
+/** A block of a rich message, as the Bot API's `RichBlock` shows it. */
+export type RichBlock =
+  | { readonly type: 'paragraph' | 'footer'; readonly text: RichText }
+  | { readonly type: 'heading'; readonly text: RichText; readonly size: number }
+  | { readonly type: 'pre'; readonly text: RichText; readonly language?: string }
+  | { readonly type: 'divider' }
+  | { readonly type: 'mathematical_expression'; readonly expression: string }
+  | { readonly type: 'anchor'; readonly name: string }
+  | { readonly type: 'list'; readonly items: readonly RichBlockListItem[] }
+  | {
+    readonly type: 'blockquote';
+    readonly blocks: readonly RichBlock[];
+    readonly credit?: RichText;
+  }
+  | {
+    readonly type: 'expandable_blockquote' | 'pullquote';
+    readonly text: RichText;
+    readonly credit?: RichText;
+  }
+  | {
+    readonly type: 'collage' | 'slideshow';
+    readonly blocks: readonly RichBlock[];
+    readonly caption?: RichBlockCaption;
+  }
+  | {
+    readonly type: 'table';
+    readonly cells: readonly (readonly RichBlockTableCell[])[];
+    readonly caption?: RichText;
+    readonly is_bordered?: true;
+    readonly is_striped?: true;
+    readonly is_compact?: true;
+  }
+  | {
+    readonly type: 'details';
+    readonly summary: RichText;
+    readonly blocks: readonly RichBlock[];
+    readonly is_open?: true;
+  }
+  | {
+    readonly type: 'map';
+    readonly location: Location;
+    readonly zoom: number;
+    /** 0, as is the height, when the bot chose no dimensions. */
+    readonly width: number;
+    readonly height: number;
+    readonly caption?: RichBlockCaption;
+  }
+  | {
+    readonly type: 'buttons';
+    readonly buttons: readonly RichMessageButton[];
+    readonly align?: HorizontalAlignment;
+  }
+  | {
+    readonly type: 'photo';
+    readonly photo: readonly PhotoSize[];
+    readonly caption?: RichBlockCaption;
+    readonly has_spoiler?: true;
+  }
+  | { readonly type: 'document'; readonly document: Document; readonly caption?: RichBlockCaption };
+
+/** A message a bot laid out in blocks. */
+export interface RichMessage {
+  readonly blocks: readonly RichBlock[];
+  /** Present when clients show the message right-to-left. */
+  readonly is_rtl?: true;
+}
+
+/**
+ * The fields that show what a message is: text, a photo, a document, or a rich message. Each kind
+ * declares the others' fields absent, so that any of them can be read from a message of unknown
+ * kind.
  */
 export type MessageContent =
   | {
@@ -470,6 +643,7 @@ export type MessageContent =
     readonly document?: never;
     readonly caption?: never;
     readonly caption_entities?: never;
+    readonly rich_message?: never;
   }
   | {
     readonly text?: never;
@@ -484,6 +658,7 @@ export type MessageContent =
     readonly show_caption_above_media?: true;
     /** Present when clients cover the photo until the user reveals it. */
     readonly has_media_spoiler?: true;
+    readonly rich_message?: never;
   }
   | {
     readonly text?: never;
@@ -493,6 +668,17 @@ export type MessageContent =
     /** Omitted for a document without a caption. */
     readonly caption?: string;
     readonly caption_entities?: readonly MessageEntity[];
+    readonly rich_message?: never;
+  }
+  | {
+    readonly text?: never;
+    readonly entities?: never;
+    readonly photo?: never;
+    readonly document?: never;
+    readonly caption?: never;
+    readonly caption_entities?: never;
+    /** A message a bot laid out in blocks, which only bots send. */
+    readonly rich_message: RichMessage;
   };
 
 /** The fields of a membership change, which content never has. */
@@ -512,6 +698,7 @@ interface NoContent {
   readonly document?: never;
   readonly caption?: never;
   readonly caption_entities?: never;
+  readonly rich_message?: never;
 }
 
 /**

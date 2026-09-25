@@ -5,11 +5,11 @@
 
 ## Sending, replying and inspecting history
 
-Accounts and bots exchange text, photos and documents in private chats and supergroups. A private
-conversation must first be started by the account before the bot can send to it. `sendMessage`,
-`sendPhoto` and `sendDocument` accept `protect_content` and supported
-[reply markup](keyboards-and-callbacks.md). Bot messages appear in account history; bots receive no
-updates for their own sends or edits.
+Accounts and bots exchange text, photos and documents in private chats and supergroups, and bots
+also send [rich messages](rich-messages.md). A private conversation must first be started by the
+account before the bot can send to it. `sendMessage`, `sendRichMessage`, `sendPhoto` and
+`sendDocument` accept `protect_content` and supported [reply markup](keyboards-and-callbacks.md).
+Bot messages appear in account history; bots receive no updates for their own sends or edits.
 
 Both sides can reply to a message in the same chat. Bots use `reply_parameters` or the legacy
 `reply_to_message_id` and `allow_sending_without_reply` parameters. `reply_parameters` takes
@@ -83,9 +83,11 @@ notification; a deleted message has none.
 ## Editing and deleting
 
 Bots edit text, captions and inline keyboards with `editMessageText`, `editMessageCaption` and
-`editMessageReplyMarkup`. Omitting the inline keyboard in an edit removes it. Unchanged content and
-markup produce the message-not-modified error. Accounts can edit their own text or captions through
-the emulation API, producing `edited_message` updates for eligible bots.
+`editMessageReplyMarkup`; `editMessageText` also turns text into a
+[rich message](rich-messages.md#sending-and-editing) and back. Omitting the inline keyboard in an
+edit removes it. Unchanged content and markup produce the message-not-modified error. Accounts can
+edit their own text or captions through the emulation API, producing `edited_message` updates for
+eligible bots.
 
 Forwarded messages and messages originally carrying a reply keyboard, keyboard removal or forced
 reply cannot be edited. A bot can edit its own content or content sent through its inline mode;
@@ -136,8 +138,9 @@ any chat. Accounts can forward messages from their own chats too.
 
 `copyMessage` returns only the new `message_id`. The copy has no forward origin and uses the
 request's reply and markup. A supplied caption, including an empty one, replaces a photo/document
-caption; without one the original caption is kept. `show_caption_above_media` applies to a copied
-photo when a replacement caption is supplied.
+caption; without one the original caption is kept. Forwards and copies of a rich message disable its
+[buttons](rich-messages.md#sending-and-editing) that would not work away from the original.
+`show_caption_above_media` applies to a copied photo when a replacement caption is supplied.
 
 Protected messages, including every message of a supergroup whose owner
 [protects its content](supergroups.md#administrator-operations), cannot be forwarded, but bots can

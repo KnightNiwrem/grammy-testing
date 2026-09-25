@@ -1,8 +1,10 @@
 description: >-
-  Telegram Bot API method for editing the text of a message the bot sent to a private chat or a
-  supergroup, or that an account sent there through the bot's inline mode. As on Telegram, the text is formatted and normalized as by `sendMessage`, the edited message
-  keeps only the inline keyboard given in `reply_markup`, and the bot receives no update for
-  its own edit. The edit date changes only when the text or its entities do. Without `chat_id`
+  Telegram Bot API method for editing the text of a text or rich message the bot sent to a
+  private chat or a supergroup, or that an account sent there through the bot's inline mode.
+  As on Telegram, new text is formatted and normalized as by `sendMessage`, and a new rich
+  message is read as by `sendRichMessage`; either kind of message can become the other. The
+  edited message keeps only the inline keyboard given in `reply_markup`, and the bot receives
+  no update for its own edit. The edit date changes only when the content does. Without `chat_id`
   and `message_id`, the method edits a message an account sent through the bot's inline mode,
   which `inline_message_id` identifies, whether or not the bot is a member of its chat, and
   answers `true` rather than the message. As an account's message, the edited inline message
@@ -27,6 +29,8 @@ post:
             contentType: application/json
           link_preview_options:
             contentType: application/json
+          rich_message:
+            contentType: application/json
           reply_markup:
             contentType: application/json
       multipart/form-data:
@@ -36,6 +40,8 @@ post:
           entities:
             contentType: application/json
           link_preview_options:
+            contentType: application/json
+          rich_message:
             contentType: application/json
           reply_markup:
             contentType: application/json
@@ -51,23 +57,27 @@ post:
     '400':
       description: >-
         The request cannot be decoded or has unsupported parameters, or Telegram would reject
-        it, checking in this order: the text is empty (`Bad Request: message text is empty`);
-        the text or its formatting cannot be read, as for `sendMessage`; neither `chat_id` nor
+        it, checking in this order: without `rich_message`, the text is empty (`Bad Request:
+        message text is empty`) or the text or its formatting cannot be read, as for
+        `sendMessage`, and with it, the rich message cannot be read, as for `sendRichMessage`
+        before the chat; neither `chat_id` nor
         a positive `message_id` is given, and no `inline_message_id` either (`Bad Request:
         message identifier is not specified`); `inline_message_id` identifies no message sent
         through the bot's inline mode, including a deleted one or another bot's (`Bad Request:
-        MESSAGE_ID_INVALID`); `chat_id` is missing (`Bad Request: chat_id is empty`); the chat
-        is not one the bot can
-        address, as for `sendMessage` (`Bad Request: chat not found`); the chat has no message
+        MESSAGE_ID_INVALID`), or its new rich message uploads a file (`Bad Request: invalid
+        message content specified`); `chat_id` is missing (`Bad Request: chat_id is empty`); a
+        file of the rich message cannot be sent, as for `sendRichMessage`; the chat is not one
+        the bot can address, as for `sendMessage` (`Bad Request: chat not found`); the chat has no message
         with that ID (`Bad Request: message to edit not found`); as in TDLib, the bot may not
         edit the message, because another user wrote it and it was not sent through the bot's
         inline mode, another bot's inline mode sent it, it is a forward, or it carries a reply
         keyboard, a forced reply, or a keyboard removal (`Bad Request: message can't be
         edited`); the message is a photo or document (`Bad
         Request: there is no text in the message to edit`); the text and its entities
-        cannot be normalized, as for `sendMessage`; the normalized text is longer than 4096
+        cannot be normalized, as for `sendMessage`, or the rich message's strings and text
+        mentions fail as for `sendRichMessage`; the normalized text is longer than 4096
         characters (`Bad Request: message is too long`); a button's callback data exceeds 64
-        bytes (`Bad Request: BUTTON_DATA_INVALID`); or the text, entities, and keyboard are
+        bytes (`Bad Request: BUTTON_DATA_INVALID`); or the content and keyboard are
         unchanged (`Bad Request: message is not modified: specified new message content and
         reply markup are exactly the same as a current content and reply markup of the
         message`).

@@ -5,7 +5,7 @@ register virtual bots and accounts, drive user actions, and inspect the resultin
 Bots connect through their usual Bot API clients using a session-specific API root.
 
 The emulator supports private chats and supergroups, polling and webhooks, text, photos, documents,
-keyboards, inline queries, and selected moderation methods. See the
+rich messages, keyboards, inline queries, and selected moderation methods. See the
 [feature documentation](docs/features/README.md) for the complete method inventory, missing
 features, and known differences from the official Bot API server and TDLib.
 

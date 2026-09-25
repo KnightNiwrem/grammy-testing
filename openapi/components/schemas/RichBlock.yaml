@@ -1,0 +1,174 @@
+type: object
+additionalProperties: false
+description: >-
+  A block of a rich message, as the official Bot API server's `JsonRichBlock` shows it, with
+  the fields of its `type` that `InputRichBlock` describes. Empty credits and captions, flags
+  that are not set, and a default alignment are left out. A list item shows its `label`: `•`
+  for an unordered item, and otherwise its number as TDLib's `get_ordered_list_label` writes
+  it, followed by its `type` and `value`. A table cell shows its `align` and `valign`, and its
+  `colspan` and `rowspan` only above 1; a cell without text is invisible. A map shows its zoom
+  and dimensions, both 0 when the bot chose none. A photo shows its one kept size, and whether
+  a spoiler covers it.
+required:
+  - type
+properties:
+  type:
+    type: string
+    enum:
+      - paragraph
+      - heading
+      - pre
+      - footer
+      - divider
+      - mathematical_expression
+      - anchor
+      - list
+      - blockquote
+      - expandable_blockquote
+      - pullquote
+      - collage
+      - slideshow
+      - table
+      - details
+      - map
+      - buttons
+      - photo
+      - document
+  text:
+    $ref: ./RichText.yaml
+  size:
+    type: integer
+    minimum: 1
+    maximum: 6
+  language:
+    type: string
+    minLength: 1
+  expression:
+    type: string
+  name:
+    type: string
+  items:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - blocks
+      properties:
+        label:
+          type: string
+          minLength: 1
+        blocks:
+          type: array
+          minItems: 1
+          items:
+            $ref: ./RichBlock.yaml
+        has_checkbox:
+          type: boolean
+          const: true
+        is_checked:
+          type: boolean
+          const: true
+        type:
+          type: string
+          enum:
+            - a
+            - A
+            - i
+            - I
+            - '1'
+        value:
+          type: integer
+  blocks:
+    type: array
+    items:
+      $ref: ./RichBlock.yaml
+  credit:
+    $ref: ./RichText.yaml
+  caption:
+    oneOf:
+      - $ref: ./RichBlockCaption.yaml
+      - $ref: ./RichText.yaml
+  cells:
+    type: array
+    items:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        required:
+          - align
+          - valign
+        properties:
+          text:
+            $ref: ./RichText.yaml
+          is_header:
+            type: boolean
+            const: true
+          colspan:
+            type: integer
+            minimum: 2
+          rowspan:
+            type: integer
+            minimum: 2
+          align:
+            type: string
+            enum:
+              - left
+              - center
+              - right
+          valign:
+            type: string
+            enum:
+              - top
+              - middle
+              - bottom
+  is_bordered:
+    type: boolean
+    const: true
+  is_striped:
+    type: boolean
+    const: true
+  is_compact:
+    type: boolean
+    const: true
+  summary:
+    $ref: ./RichText.yaml
+  is_open:
+    type: boolean
+    const: true
+  location:
+    $ref: ./Location.yaml
+  zoom:
+    type: integer
+    minimum: 0
+    maximum: 24
+  width:
+    type: integer
+    minimum: 0
+  height:
+    type: integer
+    minimum: 0
+  buttons:
+    type: array
+    minItems: 1
+    items:
+      $ref: ./RichMessageButton.yaml
+  align:
+    type: string
+    enum:
+      - left
+      - center
+      - right
+  photo:
+    type: array
+    minItems: 1
+    items:
+      $ref: ./PhotoSize.yaml
+  has_spoiler:
+    type: boolean
+    const: true
+  document:
+    $ref: ./Document.yaml

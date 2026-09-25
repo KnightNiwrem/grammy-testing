@@ -25,7 +25,6 @@ import {
   type MessageContent,
   type MessageForwardInfo,
   type PrivateMessage,
-  type TextEntity,
   type TextQuote,
 } from '../types/virtual_message.ts';
 import {
@@ -36,8 +35,10 @@ import {
   type ContentReplacement,
   type FileUploadStore,
   getReplyQuoteSource,
-  hasOnlyValidCallbackData,
+  hasOnlyValidButtonCallbackData,
   isSameMessageContent,
+  isUnchangedContent,
+  type NormalizedOutgoingContent,
   normalizeOutgoingContent,
   type OutgoingContentNormalization,
   type OutgoingMessageContent,
@@ -49,6 +50,8 @@ import {
   type SpecifiedQuote,
   storeOutgoingContent,
   type TextInvalidFailure,
+  type TextMessageReplacement,
+  toContentOfStoredFile,
   toOutgoingAccountContent,
 } from './message_content.ts';
 
@@ -210,9 +213,11 @@ type EditBotMessageTarget =
   };
 
 export type EditBotMessageTextInput = EditBotMessageTarget & {
-  readonly text: string;
-  /** Formatting the bot specified, which Telegram validates and normalizes; omitted for none. */
-  readonly entities?: readonly TextEntity[];
+  /**
+   * New text with the formatting the bot specified, which Telegram validates and normalizes, or a
+   * new rich message.
+   */
+  readonly content: TextMessageReplacement;
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
 };
@@ -679,7 +684,7 @@ export class PrivateMessagingService {
     if (!contentNormalization.normalized) {
       return { sent: false, ...contentNormalization.failure };
     }
-    if (input.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(input.inlineKeyboard)) {
+    if (!hasOnlyValidButtonCallbackData(input.inlineKeyboard, contentNormalization.content)) {
       return { sent: false, reason: 'callback_data_invalid' };
     }
     const quoteResolution = resolveReplyQuote(
@@ -715,19 +720,20 @@ export class PrivateMessagingService {
   }
 
   /**
-   * Replaces the text, entities, and inline keyboard of a text message the bot sent, or that was
-   * sent through its inline mode. Only changed text or entities date the edit. As on Telegram, the
-   * bot receives no update for its own message's edit; an edit of an account's message sent
-   * through the bot reaches the chat's bot as the account's edited message.
+   * Replaces the text, entities, and inline keyboard of a text or rich message the bot sent, or
+   * that was sent through its inline mode, with new text or a rich message, which may change the
+   * message's kind. Only changed content dates the edit. As on Telegram, the bot receives no update
+   * for its own message's edit; an edit of an account's message sent through the bot reaches the
+   * chat's bot as the account's edited message.
    *
-   * Checks follow Telegram's order: the text is checked for emptiness before the message is
-   * resolved; it is then normalized with its entities, and the result is checked for length.
+   * Checks follow Telegram's order: text is checked for emptiness before the message is resolved;
+   * the content is then normalized, and text is checked for length.
    */
   editBotMessageText(input: EditBotMessageTextInput): EditBotMessageTextResult {
     if (this.#bots.getById(input.fromBotId) === undefined) {
       return { edited: false, reason: 'bot_not_found' };
     }
-    if (input.text.length === 0) {
+    if (input.content.kind === 'text' && input.content.text.length === 0) {
       return { edited: false, reason: 'message_text_empty' };
     }
     const resolution = this.#resolveEditableBotMessage(input);
@@ -737,7 +743,7 @@ export class PrivateMessagingService {
     const { message } = resolution;
     return this.#editBotMessageContent(
       message,
-      replaceMessageText(message.content, input, this.#textFixingContext),
+      replaceMessageText(message.content, input.content, this.#textFixingContext),
       input.inlineKeyboard,
     );
   }
@@ -780,7 +786,7 @@ export class PrivateMessagingService {
 
     const { message } = resolution;
     return this.#editBotMessage(message, {
-      content: message.content,
+      content: { kind: 'existing', content: message.content },
       inlineKeyboard: input.inlineKeyboard,
       contentEditedAtUnixSeconds: message.contentEditedAtUnixSeconds,
     });
@@ -820,12 +826,14 @@ export class PrivateMessagingService {
     if (!replacement.replaced) {
       return { edited: false, ...replacement.failure };
     }
-    if (isSameMessageContent(replacement.content, message.content)) {
+    // An account edits only the text or caption of its message, which uploads no file.
+    const content = toContentOfStoredFile(replacement.content);
+    if (isSameMessageContent(content, message.content)) {
       return { edited: false, reason: 'message_not_modified' };
     }
 
     const editedMessage = this.#messages.editPrivateMessage(message.id, {
-      content: replacement.content,
+      content,
       inlineKeyboard: message.inlineKeyboard,
       contentEditedAtUnixSeconds: this.#currentUnixTimeSeconds(),
     });
@@ -1173,7 +1181,7 @@ export class PrivateMessagingService {
     return this.#editBotMessage(message, {
       content: replacement.content,
       inlineKeyboard,
-      contentEditedAtUnixSeconds: isSameMessageContent(replacement.content, message.content)
+      contentEditedAtUnixSeconds: isUnchangedContent(replacement.content, message.content)
         ? message.contentEditedAtUnixSeconds
         : this.#currentUnixTimeSeconds(),
     });
@@ -1181,21 +1189,25 @@ export class PrivateMessagingService {
 
   /**
    * Validates, stores, and publishes a bot's edit of its message, which must change the message.
+   * The new content's upload is stored only once the edit passes its checks.
    */
   #editBotMessage(
     message: PrivateMessage,
-    edit: {
-      readonly content: MessageContent;
+    { content, ...edit }: {
+      readonly content: NormalizedOutgoingContent;
       readonly inlineKeyboard: InlineKeyboard | undefined;
       readonly contentEditedAtUnixSeconds: number | undefined;
     },
   ): PrivateMessageEditResult<'callback_data_invalid' | 'message_not_modified'> {
-    const editFailure = checkBotMessageEdit(message, edit);
+    const editFailure = checkBotMessageEdit(message, { content, ...edit });
     if (editFailure !== undefined) {
       return { edited: false, reason: editFailure };
     }
 
-    const editedMessage = this.#messages.editPrivateMessage(message.id, edit);
+    const editedMessage = this.#messages.editPrivateMessage(message.id, {
+      ...edit,
+      content: storeOutgoingContent(content, this.#files),
+    });
     this.#events.publish({ type: 'message_edited', message: editedMessage });
     return { edited: true, message: editedMessage };
   }

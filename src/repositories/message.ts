@@ -401,6 +401,8 @@ function copyContent(content: SupergroupMessageContent): SupergroupMessageConten
           entities: content.caption.entities.map((entity) => ({ ...entity })),
         },
       };
+    case 'rich_message':
+      return structuredClone(content);
     case 'members_joined':
       return { ...content, memberIds: [...content.memberIds] };
     case 'member_left':

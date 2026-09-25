@@ -28,6 +28,7 @@ thresholds, which tests replace with
 | [Webhooks](webhooks.md)                               | Delivery, replies, retry behavior and connection limitations               |
 | [Messages](messages.md)                               | Sending, replies, edits, deletion, blocking, forwarding and copying        |
 | [Text formatting](text-formatting.md)                 | Parse modes, entities, normalization and limits                            |
+| [Rich messages](rich-messages.md)                     | Blocks, rich text, buttons, media and edits of rich messages               |
 | [Keyboards and callbacks](keyboards-and-callbacks.md) | Inline buttons, reply interfaces and callback answers                      |
 | [Media and files](media-and-files.md)                 | Photos, documents, uploads, file identifiers and downloads                 |
 | [Inline mode](inline-mode.md)                         | Queries, results, feedback and inline message editing                      |
@@ -44,7 +45,7 @@ The two legacy aliases below are also accepted.
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Identity         | `getMe`                                                                                                                                            |
 | Updates          | `getUpdates`, `setWebhook`, `deleteWebhook`, `getWebhookInfo`                                                                                      |
-| Sending          | `sendMessage`, `sendPhoto`, `sendDocument`, `sendChatAction`                                                                                       |
+| Sending          | `sendMessage`, `sendRichMessage`, `sendPhoto`, `sendDocument`, `sendChatAction`                                                                    |
 | Reusing messages | `forwardMessage`, `forwardMessages`, `copyMessage`, `copyMessages`                                                                                 |
 | Editing          | `editMessageText`, `editMessageCaption`, `editMessageReplyMarkup`                                                                                  |
 | Deletion         | `deleteMessage`, `deleteMessages`                                                                                                                  |
@@ -72,7 +73,8 @@ above determines whether an individual method is available.
 - Basic groups, channels, forum topics, direct messages of channels, and chat migration. Supergroups
   are the only shared chat kind exposed by the HTTP server.
 - Media other than photos and documents, albums, stickers and sticker sets, polls, dice, locations,
-  venues, contacts, games, checklists, rich messages, ephemeral messages, drafts and stories.
+  venues, contacts, games, checklists, ephemeral messages, drafts and stories. Rich messages lack
+  [drafts and some blocks](rich-messages.md#real-gaps).
 - Reactions, pins, chat metadata changes and photos, invite links, join requests, member
   restrictions, and promotion through the Bot API. Tests can promote supergroup members through the
   emulation API.

@@ -2,9 +2,9 @@ import {
   projectPrivateChatFullInfo,
   projectSupergroupChatFullInfo,
 } from '../projections/bot_api_chat_full_info.ts';
+import type { ObservedFile } from '../projections/bot_api_file.ts';
 import {
   type ExternalReplyProjectionContext,
-  type ObservedFile,
   projectBotAsUser,
   projectBotBlockChangeForBot,
   projectBotMembershipChangeForBot,
@@ -41,6 +41,11 @@ import type {
 } from '../types/chat_domain_event.ts';
 import type { ChatMemberStatus } from '../types/chat_membership.ts';
 import type { InlineQuery } from '../types/inline_query.ts';
+import {
+  getRichMessageMentionedUserIds,
+  listRichMessageFiles,
+  type RichMessage,
+} from '../types/rich_message.ts';
 import { isUserId } from '../types/telegram_identity.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
@@ -369,7 +374,7 @@ export class BotMessageViewService {
 
   /**
    * Resolves the users a message mentions, the bot it was sent through, a forward's original
-   * sender, its file, and the members a service message names, as the observer sees them.
+   * sender, its files, and the members a service message names, as the observer sees them.
    */
   #resolveProjectionContext(message: ChatMessage, observerId: number) {
     const context = {
@@ -389,6 +394,11 @@ export class BotMessageViewService {
         return {
           ...context,
           contentFile: this.#observeFile(content.fileId, observerId, message.id),
+        };
+      case 'rich_message':
+        return {
+          ...context,
+          richMessageFiles: this.#observeRichMessageFiles(content, observerId, message.id),
         };
       case 'members_joined':
         return { ...context, changedMembers: this.#findChangedMembers(content.memberIds, message) };
@@ -491,6 +501,20 @@ export class BotMessageViewService {
     });
   }
 
+  /** Observes the files of a rich message's photo and document blocks, by stored file. */
+  #observeRichMessageFiles(
+    richMessage: RichMessage,
+    observerId: number,
+    messageId: CanonicalMessageId,
+  ): ReadonlyMap<StoredFileId, ObservedFile> {
+    return new Map(
+      listRichMessageFiles(richMessage).map(({ file }) => [
+        file,
+        this.#observeFile(file, observerId, messageId),
+      ]),
+    );
+  }
+
   #observeFile(
     fileId: StoredFileId,
     observerId: number,
@@ -514,18 +538,24 @@ export class BotMessageViewService {
     };
   }
 
-  /** Looks up the users a message mentions, which sending the message verified exist. */
+  /**
+   * Looks up the users a message's text, caption, or rich message mentions by ID, which sending
+   * the message verified exist.
+   */
   #findMentionedUsers(message: ChatMessage): ReadonlyMap<number, BotApiUser> {
+    const { content } = message;
+    const mentionedUserIds = content.kind === 'rich_message'
+      ? getRichMessageMentionedUserIds(content)
+      : getContentText(content).entities.flatMap((entity) =>
+        entity.type === 'text_mention' ? [entity.userId] : []
+      );
     const mentionedUsers = new Map<number, BotApiUser>();
-    for (const entity of getContentText(message.content).entities) {
-      if (entity.type !== 'text_mention') {
-        continue;
-      }
-      const user = this.#findUser(entity.userId);
+    for (const userId of mentionedUserIds) {
+      const user = this.#findUser(userId);
       if (user === undefined) {
-        throw new Error(`User ${entity.userId} mentioned in message ${message.id} does not exist`);
+        throw new Error(`User ${userId} mentioned in message ${message.id} does not exist`);
       }
-      mentionedUsers.set(entity.userId, user);
+      mentionedUsers.set(userId, user);
     }
     return mentionedUsers;
   }

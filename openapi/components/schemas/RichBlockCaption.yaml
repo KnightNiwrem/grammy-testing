@@ -1,0 +1,12 @@
+type: object
+additionalProperties: false
+description: >-
+  The caption of a block with media or a map. As TDLib shows it, a caption whose text and credit
+  are both empty is none, and an empty credit is left out.
+required:
+  - text
+properties:
+  text:
+    $ref: ./RichText.yaml
+  credit:
+    $ref: ./RichText.yaml

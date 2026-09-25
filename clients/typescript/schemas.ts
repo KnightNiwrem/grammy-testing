@@ -18,6 +18,11 @@ import type {
   PrivateMessage,
   RateLimitResponses,
   ReplyInterface,
+  RichBlock,
+  RichMessage,
+  RichMessageButton,
+  RichText,
+  RichTextObject,
   Supergroup,
   SupergroupMessage,
   VirtualAccountProfile,
@@ -174,35 +179,222 @@ const keyboardButtonFaceShape = {
   style: z.enum(['primary', 'danger', 'success']).optional(),
 };
 
+/** A button of each kind of action, with the fields of its face that `faceShape` describes. */
+function inlineButtonSchemas<FaceShape extends z.ZodRawShape>(faceShape: FaceShape) {
+  return [
+    z.strictObject({ ...faceShape, callback_data: z.string() }),
+    z.strictObject({ ...faceShape, url: z.string() }),
+    z.strictObject({ ...faceShape, copy_text: z.strictObject({ text: z.string() }) }),
+    z.strictObject({ ...faceShape, switch_inline_query: z.string() }),
+    z.strictObject({ ...faceShape, switch_inline_query_current_chat: z.string() }),
+    z.strictObject({
+      ...faceShape,
+      switch_inline_query_chosen_chat: z.strictObject({
+        query: z.string(),
+        allow_user_chats: z.boolean(),
+        allow_bot_chats: z.boolean(),
+        allow_group_chats: z.boolean(),
+        allow_channel_chats: z.boolean(),
+      }),
+    }),
+    z.strictObject({ ...faceShape, disabled: z.strictObject({}) }),
+  ] as const;
+}
+
 const inlineKeyboardMarkupSchema: z.ZodType<InlineKeyboardMarkup> = z.strictObject({
   inline_keyboard: z.array(
-    z.array(
-      z.union([
-        z.strictObject({ ...keyboardButtonFaceShape, callback_data: z.string() }),
-        z.strictObject({ ...keyboardButtonFaceShape, url: z.string() }),
-        z.strictObject({
-          ...keyboardButtonFaceShape,
-          copy_text: z.strictObject({ text: z.string() }),
-        }),
-        z.strictObject({ ...keyboardButtonFaceShape, switch_inline_query: z.string() }),
-        z.strictObject({
-          ...keyboardButtonFaceShape,
-          switch_inline_query_current_chat: z.string(),
-        }),
-        z.strictObject({
-          ...keyboardButtonFaceShape,
-          switch_inline_query_chosen_chat: z.strictObject({
-            query: z.string(),
-            allow_user_chats: z.boolean(),
-            allow_bot_chats: z.boolean(),
-            allow_group_chats: z.boolean(),
-            allow_channel_chats: z.boolean(),
-          }),
-        }),
-        z.strictObject({ ...keyboardButtonFaceShape, disabled: z.strictObject({}) }),
-      ]),
-    ).min(1),
+    z.array(z.union(inlineButtonSchemas(keyboardButtonFaceShape))).min(1),
   ).min(1),
+});
+
+const richTextSchema: z.ZodType<RichText> = z.lazy(() =>
+  z.union([z.string(), z.array(richTextSchema), richTextObjectSchema])
+);
+
+const richMessageButtonSchema: z.ZodType<RichMessageButton> = z.lazy(() =>
+  z.union(inlineButtonSchemas({
+    text: richTextSchema,
+    style: z.enum(['primary', 'danger', 'success', 'link']).optional(),
+  }))
+);
+
+const richTextObjectSchema: z.ZodType<RichTextObject> = z.lazy(() =>
+  z.union([
+    z.strictObject({
+      type: z.enum([
+        'bold',
+        'italic',
+        'underline',
+        'strikethrough',
+        'spoiler',
+        'subscript',
+        'superscript',
+        'marked',
+        'code',
+      ]),
+      text: richTextSchema,
+    }),
+    z.strictObject({
+      type: z.literal('date_time'),
+      text: richTextSchema,
+      unix_time: z.int().positive(),
+      date_time_format: z.string().regex(/^(r|w?[dD]?[tT]?)$/),
+    }),
+    z.strictObject({ type: z.literal('mention'), text: richTextSchema, username: z.string() }),
+    z.strictObject({ type: z.literal('hashtag'), text: richTextSchema, hashtag: z.string() }),
+    z.strictObject({ type: z.literal('cashtag'), text: richTextSchema, cashtag: z.string() }),
+    z.strictObject({
+      type: z.literal('bot_command'),
+      text: richTextSchema,
+      bot_command: z.string(),
+    }),
+    z.strictObject({
+      type: z.literal('bank_card_number'),
+      text: richTextSchema,
+      bank_card_number: z.string(),
+    }),
+    z.strictObject({
+      type: z.literal('text_mention'),
+      text: richTextSchema,
+      user: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
+    }),
+    z.strictObject({ type: z.literal('url'), text: richTextSchema, url: z.string() }),
+    z.strictObject({
+      type: z.literal('email_address'),
+      text: richTextSchema,
+      email_address: z.string(),
+    }),
+    z.strictObject({
+      type: z.literal('phone_number'),
+      text: richTextSchema,
+      phone_number: z.string(),
+    }),
+    z.strictObject({
+      type: z.literal('custom_emoji'),
+      custom_emoji_id: z.string().regex(/^-?[1-9]\d*$/),
+      alternative_text: z.string(),
+    }),
+    z.strictObject({ type: z.literal('mathematical_expression'), expression: z.string() }),
+    z.strictObject({ type: z.literal('reference'), text: richTextSchema, name: z.string() }),
+    z.strictObject({
+      type: z.literal('reference_link'),
+      text: richTextSchema,
+      reference_name: z.string(),
+    }),
+    z.strictObject({ type: z.literal('anchor'), name: z.string() }),
+    z.strictObject({
+      type: z.literal('anchor_link'),
+      text: richTextSchema,
+      anchor_name: z.string(),
+    }),
+    z.strictObject({ type: z.literal('button'), button: richMessageButtonSchema }),
+  ])
+);
+
+const horizontalAlignmentSchema = z.enum(['left', 'center', 'right']);
+
+const richBlockCaptionSchema = z.strictObject({
+  text: richTextSchema,
+  credit: richTextSchema.optional(),
+});
+
+const richBlockSchema: z.ZodType<RichBlock> = z.lazy(() =>
+  z.union([
+    z.strictObject({ type: z.enum(['paragraph', 'footer']), text: richTextSchema }),
+    z.strictObject({
+      type: z.literal('heading'),
+      text: richTextSchema,
+      size: z.int().min(1).max(6),
+    }),
+    z.strictObject({
+      type: z.literal('pre'),
+      text: richTextSchema,
+      language: z.string().min(1).optional(),
+    }),
+    z.strictObject({ type: z.literal('divider') }),
+    z.strictObject({ type: z.literal('mathematical_expression'), expression: z.string() }),
+    z.strictObject({ type: z.literal('anchor'), name: z.string() }),
+    z.strictObject({
+      type: z.literal('list'),
+      items: z.array(z.strictObject({
+        label: z.string().min(1),
+        blocks: z.array(richBlockSchema).min(1),
+        has_checkbox: z.literal(true).optional(),
+        is_checked: z.literal(true).optional(),
+        type: z.enum(['a', 'A', 'i', 'I', '1']).optional(),
+        value: z.int().optional(),
+      })).min(1),
+    }),
+    z.strictObject({
+      type: z.literal('blockquote'),
+      blocks: z.array(richBlockSchema),
+      credit: richTextSchema.optional(),
+    }),
+    z.strictObject({
+      type: z.enum(['expandable_blockquote', 'pullquote']),
+      text: richTextSchema,
+      credit: richTextSchema.optional(),
+    }),
+    z.strictObject({
+      type: z.enum(['collage', 'slideshow']),
+      blocks: z.array(richBlockSchema),
+      caption: richBlockCaptionSchema.optional(),
+    }),
+    z.strictObject({
+      type: z.literal('table'),
+      cells: z.array(z.array(z.strictObject({
+        text: richTextSchema.optional(),
+        is_header: z.literal(true).optional(),
+        colspan: z.int().min(2).optional(),
+        rowspan: z.int().min(2).optional(),
+        align: horizontalAlignmentSchema,
+        valign: z.enum(['top', 'middle', 'bottom']),
+      }))),
+      caption: richTextSchema.optional(),
+      is_bordered: z.literal(true).optional(),
+      is_striped: z.literal(true).optional(),
+      is_compact: z.literal(true).optional(),
+    }),
+    z.strictObject({
+      type: z.literal('details'),
+      summary: richTextSchema,
+      blocks: z.array(richBlockSchema),
+      is_open: z.literal(true).optional(),
+    }),
+    z.strictObject({
+      type: z.literal('map'),
+      location: z.strictObject({
+        latitude: z.number(),
+        longitude: z.number(),
+        horizontal_accuracy: z.number().positive().optional(),
+      }),
+      zoom: z.int().min(0).max(24),
+      width: z.int().nonnegative(),
+      height: z.int().nonnegative(),
+      caption: richBlockCaptionSchema.optional(),
+    }),
+    z.strictObject({
+      type: z.literal('buttons'),
+      buttons: z.array(richMessageButtonSchema).min(1),
+      align: horizontalAlignmentSchema.optional(),
+    }),
+    z.strictObject({
+      type: z.literal('photo'),
+      photo: z.array(photoSizeSchema).min(1),
+      caption: richBlockCaptionSchema.optional(),
+      has_spoiler: z.literal(true).optional(),
+    }),
+    z.strictObject({
+      type: z.literal('document'),
+      document: documentSchema,
+      caption: richBlockCaptionSchema.optional(),
+    }),
+  ])
+);
+
+const richMessageSchema: z.ZodType<RichMessage> = z.strictObject({
+  blocks: z.array(richBlockSchema).min(1),
+  is_rtl: z.literal(true).optional(),
 });
 
 /** Where a forward, or the message of another chat a reply shows, first appeared. */
@@ -328,6 +520,7 @@ function contentMessageSchemas<Header extends z.ZodRawShape>(header: Header) {
     z.strictObject({ ...header, ...textContentShape, ...messageTrailerShape }),
     z.strictObject({ ...header, ...photoContentShape, ...messageTrailerShape }),
     z.strictObject({ ...header, ...documentContentShape, ...messageTrailerShape }),
+    z.strictObject({ ...header, rich_message: richMessageSchema, ...messageTrailerShape }),
   ] as const;
 }
 

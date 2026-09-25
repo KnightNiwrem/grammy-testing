@@ -3,6 +3,7 @@ import type {
   InlineKeyboardButton,
   InlineQuerySwitchTarget,
 } from './inline_keyboard.ts';
+import { repeatRichMessage } from './rich_message.ts';
 import {
   type ChatMessage,
   type ContentMessage,
@@ -56,10 +57,20 @@ export function createMessageForward(
     ? undefined
     : forwardInlineKeyboard(message.inlineKeyboard, message.viaBot !== undefined);
   return {
-    content: message.content,
+    content: getRepeatedContent(message.content),
     forwardInfo,
     ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }),
   };
+}
+
+/**
+ * The content that a forward or copy of a message repeats: the message's own, apart from the
+ * buttons of a rich message, which change as `repeatRichMessage` decides.
+ */
+export function getRepeatedContent(content: MessageContent): MessageContent {
+  return content.kind === 'rich_message'
+    ? { ...repeatRichMessage(content), kind: 'rich_message' }
+    : content;
 }
 
 const EVERY_INLINE_QUERY_CHAT: InlineQuerySwitchTarget = {

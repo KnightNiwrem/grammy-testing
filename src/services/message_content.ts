@@ -18,6 +18,14 @@ import {
   isQuoteEntity,
   MAX_QUOTE_LENGTH,
 } from '../types/message_reply.ts';
+import {
+  areRichMessagesEqual,
+  convertRichMessageFiles,
+  listRichMessageButtons,
+  listRichMessageFiles,
+  type RichMessage,
+  type RichMessageButtonAction,
+} from '../types/rich_message.ts';
 import type {
   DocumentUpload,
   FileUpload,
@@ -40,6 +48,7 @@ import {
   type TextEntity,
   type TextQuote,
 } from '../types/virtual_message.ts';
+import { normalizeRichMessage } from './rich_message_normalization.ts';
 
 // Telegram's rules for the content of messages, which apply alike in every chat type.
 
@@ -63,6 +72,14 @@ export type OutgoingFile<Stored extends StoredFile, Upload extends FileUpload> =
 export type OutgoingPhoto = OutgoingFile<StoredPhotoFile, PhotoUpload>;
 
 export type OutgoingDocument = OutgoingFile<StoredDocumentFile, DocumentUpload>;
+
+/** The files of a rich message being sent: each reused by its stored file, or a new upload. */
+export interface OutgoingRichMessageFileTypes {
+  readonly photo: OutgoingPhoto;
+  readonly document: OutgoingDocument;
+}
+
+export type OutgoingRichMessage = RichMessage<OutgoingRichMessageFileTypes>;
 
 /** A caption as its sender specified it, before Telegram's normalization. */
 export interface SpecifiedCaption {
@@ -91,6 +108,15 @@ export type OutgoingMessageContent =
     readonly kind: 'document';
     readonly document: OutgoingDocument;
   })
+  | {
+    readonly kind: 'rich_message';
+    readonly richMessage: OutgoingRichMessage;
+    /**
+     * Whether Telegram marks the entities it detects in the text, which a bot's
+     * `skip_entity_detection` turns off.
+     */
+    readonly detectsEntities: boolean;
+  }
   | {
     /** The content of an existing message, which a forward or a copy repeats. */
     readonly kind: 'existing';
@@ -121,7 +147,8 @@ export type NormalizedOutgoingContent =
     readonly kind: 'document';
     readonly document: OutgoingDocument;
     readonly caption: FormattedText;
-  };
+  }
+  | { readonly kind: 'rich_message'; readonly richMessage: OutgoingRichMessage };
 
 export type ContentNormalizationFailure =
   | TextInvalidFailure
@@ -134,17 +161,18 @@ export type OutgoingContentNormalization =
 /**
  * Normalizes the text or caption of new message content, with the entities its sender specified,
  * as Telegram does, which also marks bot commands; then checks that the result fits in a message.
+ * A rich message is checked and has its entities marked as `normalizeRichMessage` does.
  */
 export function normalizeOutgoingContent(
   content: OutgoingMessageContent,
   sender: MessageSenderKind,
   context: FormattedTextFixingContext,
 ): OutgoingContentNormalization {
-  if (content.kind === 'text') {
-    const textNormalization = normalizeMessageText(content.text, content.entities ?? [], context);
-    return textNormalization.normalized
-      ? { normalized: true, content: { kind: 'text', ...textNormalization.formattedText } }
-      : textNormalization;
+  if (content.kind === 'text' || content.kind === 'rich_message') {
+    const replacement = normalizeTextMessageReplacement(content, context);
+    return replacement.normalized
+      ? replacement
+      : { normalized: false, failure: replacement.failure };
   }
   if (content.kind === 'existing') {
     return normalizeExistingContent(content.content, content.captionReplacement, sender, context);
@@ -171,7 +199,7 @@ export function normalizeOutgoingContent(
 
 /**
  * Keeps the content of an existing message as it is, apart from a replaced caption of media, which
- * is normalized as a new caption is.
+ * is normalized as a new caption is. Text and rich messages have no caption to replace.
  */
 function normalizeExistingContent(
   content: MessageContent,
@@ -179,7 +207,9 @@ function normalizeExistingContent(
   sender: MessageSenderKind,
   context: FormattedTextFixingContext,
 ): OutgoingContentNormalization {
-  if (captionReplacement === undefined || content.kind === 'text') {
+  if (
+    captionReplacement === undefined || (content.kind !== 'photo' && content.kind !== 'document')
+  ) {
     return { normalized: true, content: { kind: 'existing', content } };
   }
   const captionNormalization = normalizeCaption(captionReplacement, sender, context);
@@ -223,6 +253,56 @@ function normalizeMessageText(
     return { normalized: false, failure: { reason: 'message_text_too_long' } };
   }
   return { normalized: true, formattedText: fixing.formattedText };
+}
+
+/** New content of a text or rich message: text with the entities its sender specified, or a rich message. */
+export type TextMessageReplacement = Extract<
+  OutgoingMessageContent,
+  { readonly kind: 'text' | 'rich_message' }
+>;
+
+type TextMessageReplacementNormalization =
+  | {
+    readonly normalized: true;
+    readonly content: Extract<
+      NormalizedOutgoingContent,
+      { readonly kind: 'text' | 'rich_message' }
+    >;
+  }
+  | {
+    readonly normalized: false;
+    readonly failure: TextInvalidFailure | { readonly reason: 'message_text_too_long' };
+  };
+
+/** Normalizes new text as `normalizeMessageText` does, or a rich message as `normalizeRichMessage` does. */
+function normalizeTextMessageReplacement(
+  replacement: TextMessageReplacement,
+  context: FormattedTextFixingContext,
+): TextMessageReplacementNormalization {
+  if (replacement.kind === 'rich_message') {
+    const normalization = normalizeRichMessage(
+      replacement.richMessage,
+      replacement.detectsEntities,
+      context,
+    );
+    return normalization.normalized
+      ? {
+        normalized: true,
+        content: { kind: 'rich_message', richMessage: normalization.richMessage },
+      }
+      : {
+        normalized: false,
+        failure: { reason: normalization.reason, textError: normalization.textError },
+      };
+  }
+  const textNormalization = normalizeMessageText(
+    replacement.text,
+    replacement.entities ?? [],
+    context,
+  );
+  return textNormalization.normalized
+    ? { normalized: true, content: { kind: 'text', ...textNormalization.formattedText } }
+    : textNormalization;
 }
 
 type CaptionNormalization =
@@ -292,29 +372,34 @@ export function toOutgoingAccountContent(content: AccountMessageContent): Outgoi
     : { kind: 'document', document: { kind: 'upload', upload }, caption, captionEntities };
 }
 
+/**
+ * The new content of an edited message, or why it cannot replace the old: normalized as when
+ * sending, with its upload, if any, not yet stored.
+ */
 export type ContentReplacement<FailureReason extends string> =
-  | { readonly replaced: true; readonly content: MessageContent }
+  | { readonly replaced: true; readonly content: NormalizedOutgoingContent }
   | {
     readonly replaced: false;
     readonly failure: { readonly reason: FailureReason } | TextInvalidFailure;
   };
 
 /**
- * Replaces the text of a text message with nonempty text and the entities its sender specified,
- * normalized as when sending. As on Telegram, a media message has no text to replace.
+ * Replaces the content of a text or rich message with nonempty text and the entities its sender
+ * specified, or with a rich message, normalized as when sending. As TDLib's `edit_message_text`
+ * allows, either kind of message can become the other. A media message has no text to replace.
  */
 export function replaceMessageText(
   content: MessageContent,
-  { text, entities }: { readonly text: string; readonly entities?: readonly TextEntity[] },
+  replacement: TextMessageReplacement,
   context: FormattedTextFixingContext,
 ): ContentReplacement<'message_has_no_text' | 'message_text_too_long'> {
-  if (content.kind !== 'text') {
+  if (content.kind !== 'text' && content.kind !== 'rich_message') {
     return { replaced: false, failure: { reason: 'message_has_no_text' } };
   }
-  const textNormalization = normalizeMessageText(text, entities ?? [], context);
-  return textNormalization.normalized
-    ? { replaced: true, content: { kind: 'text', ...textNormalization.formattedText } }
-    : { replaced: false, failure: textNormalization.failure };
+  const normalization = normalizeTextMessageReplacement(replacement, context);
+  return normalization.normalized
+    ? { replaced: true, content: normalization.content }
+    : { replaced: false, failure: normalization.failure };
 }
 
 /**
@@ -328,7 +413,7 @@ export function replaceMessageCaption(
   sender: MessageSenderKind,
   context: FormattedTextFixingContext,
 ): ContentReplacement<'message_has_no_caption' | 'caption_too_long'> {
-  if (content.kind === 'text') {
+  if (content.kind !== 'photo' && content.kind !== 'document') {
     return { replaced: false, failure: { reason: 'message_has_no_caption' } };
   }
   const captionNormalization = normalizeCaption(specifiedCaption, sender, context);
@@ -337,11 +422,14 @@ export function replaceMessageCaption(
   }
   return {
     replaced: true,
-    content: withCaption(
-      content,
-      captionNormalization.caption,
-      specifiedCaption.showsCaptionAboveMedia,
-    ),
+    content: {
+      kind: 'existing',
+      content: withCaption(
+        content,
+        captionNormalization.caption,
+        specifiedCaption.showsCaptionAboveMedia,
+      ),
+    },
   };
 }
 
@@ -401,7 +489,11 @@ export function replaceAccountMessageContent(
   if (edit.text.length === 0) {
     return { replaced: false, failure: { reason: 'message_text_empty' } };
   }
-  return replaceMessageText(content, { text: edit.text, entities: edit.entities }, context);
+  return replaceMessageText(
+    content,
+    { kind: 'text', text: edit.text, entities: edit.entities },
+    context,
+  );
 }
 
 /** Stores a file upload and returns the stored file's identity. */
@@ -435,6 +527,14 @@ export function storeOutgoingContent(
         kind: 'document',
         fileId: storeOutgoingFile(content.document, files),
         caption: content.caption,
+      };
+    case 'rich_message':
+      return {
+        kind: 'rich_message',
+        ...convertRichMessageFiles(content.richMessage, {
+          photo: (photo) => storeOutgoingFile(photo, files),
+          document: (document) => storeOutgoingFile(document, files),
+        }),
       };
     default: {
       const unhandledContent: never = content;
@@ -475,11 +575,50 @@ export function toContentOfStoredFile(content: NormalizedOutgoingContent): Messa
         fileId: getStoredFileId(content.document),
         caption: content.caption,
       };
+    case 'rich_message':
+      return {
+        kind: 'rich_message',
+        ...convertRichMessageFiles(content.richMessage, {
+          photo: getStoredFileId,
+          document: getStoredFileId,
+        }),
+      };
     default: {
       const unhandledContent: never = content;
       throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
     }
   }
+}
+
+/** Whether normalized content carries a file that is not yet stored. */
+function hasOutgoingUpload(content: NormalizedOutgoingContent): boolean {
+  switch (content.kind) {
+    case 'text':
+    case 'existing':
+      return false;
+    case 'photo':
+      return content.photo.kind === 'upload';
+    case 'document':
+      return content.document.kind === 'upload';
+    case 'rich_message':
+      return listRichMessageFiles(content.richMessage).some(({ file }) => file.kind === 'upload');
+    default: {
+      const unhandledContent: never = content;
+      throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
+    }
+  }
+}
+
+/**
+ * Whether normalized content would leave a message's content as it is. Content with a new upload
+ * always changes it.
+ */
+export function isUnchangedContent(
+  replacement: NormalizedOutgoingContent,
+  content: MessageContent,
+): boolean {
+  return !hasOutgoingUpload(replacement) &&
+    isSameMessageContent(toContentOfStoredFile(replacement), content);
 }
 
 function getStoredFileId(file: OutgoingPhoto | OutgoingDocument): StoredFileId {
@@ -495,18 +634,25 @@ interface EditableMessage {
   readonly inlineKeyboard?: InlineKeyboard;
 }
 
+/** A bot's edit of its message: new content, whose upload is not yet stored, and keyboard. */
+interface BotMessageEdit {
+  readonly content: NormalizedOutgoingContent;
+  readonly inlineKeyboard?: InlineKeyboard;
+}
+
 /**
- * Checks a bot's edit of its message as Telegram does: the new keyboard's callback data must fit,
- * and the edit must change the content or the keyboard.
+ * Checks a bot's edit of its message as Telegram does: the callback data of the new keyboard and
+ * of the buttons of new rich content must fit, and the edit must change the content or the
+ * keyboard.
  */
 export function checkBotMessageEdit(
   message: EditableMessage,
-  edit: EditableMessage,
+  edit: BotMessageEdit,
 ): 'callback_data_invalid' | 'message_not_modified' | undefined {
-  if (edit.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(edit.inlineKeyboard)) {
+  if (!hasOnlyValidButtonCallbackData(edit.inlineKeyboard, edit.content)) {
     return 'callback_data_invalid';
   }
-  return isSameMessageContent(edit.content, message.content) &&
+  return isUnchangedContent(edit.content, message.content) &&
       areInlineKeyboardsEqual(edit.inlineKeyboard, message.inlineKeyboard)
     ? 'message_not_modified'
     : undefined;
@@ -516,12 +662,27 @@ const utf8Encoder = new TextEncoder();
 
 /** Telegram rejects a keyboard whose callback data exceeds its byte limit when UTF-8 encoded. */
 export function hasOnlyValidCallbackData(inlineKeyboard: InlineKeyboard): boolean {
-  return inlineKeyboard.every((row) =>
-    row.every((button) =>
-      button.kind !== 'callback' ||
-      utf8Encoder.encode(button.callbackData).length <= MAX_CALLBACK_DATA_BYTES
-    )
-  );
+  return inlineKeyboard.every((row) => row.every(hasValidCallbackData));
+}
+
+/**
+ * Telegram rejects a message whose buttons exceed the callback data limit, whether they are in
+ * its inline keyboard or in its rich message.
+ */
+export function hasOnlyValidButtonCallbackData(
+  inlineKeyboard: InlineKeyboard | undefined,
+  content: NormalizedOutgoingContent,
+): boolean {
+  return (inlineKeyboard === undefined || hasOnlyValidCallbackData(inlineKeyboard)) &&
+    (content.kind !== 'rich_message' ||
+      listRichMessageButtons(content.richMessage).every(({ action }) =>
+        hasValidCallbackData(action)
+      ));
+}
+
+function hasValidCallbackData(action: RichMessageButtonAction): boolean {
+  return action.kind !== 'callback' ||
+    utf8Encoder.encode(action.callbackData).length <= MAX_CALLBACK_DATA_BYTES;
 }
 
 /**
@@ -541,6 +702,8 @@ export function isSameMessageContent(first: MessageContent, second: MessageConte
     case 'document':
       return second.kind === 'document' && first.fileId === second.fileId &&
         isSameFormattedText(first.caption, second.caption);
+    case 'rich_message':
+      return second.kind === 'rich_message' && areRichMessagesEqual(first, second);
     default: {
       const unhandledContent: never = first;
       throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);

@@ -55,7 +55,11 @@ Deno.test('BotApiService translates private messaging failures into Bot API reas
     ['sendMessage', botApi.sendMessage(bot.profile, { chatId, text: 'Hello' }), 'chat_not_found'],
     [
       'editMessageText',
-      botApi.editMessageText(bot.profile, { chatId, messageId: 1, text: 'Done' }),
+      botApi.editMessageText(bot.profile, {
+        chatId,
+        messageId: 1,
+        content: { kind: 'text', text: 'Done' },
+      }),
       'chat_not_found',
     ],
     [

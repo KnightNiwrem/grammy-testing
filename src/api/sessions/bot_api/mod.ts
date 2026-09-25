@@ -8,7 +8,7 @@ import {
 import { MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH } from '../../../types/callback_query.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { InlineKeyboard } from '../../../types/inline_keyboard.ts';
-import { MAX_PHOTO_UPLOAD_BYTES } from '../../../types/stored_file.ts';
+import { MAX_PHOTO_UPLOAD_BYTES, type StoredFile } from '../../../types/stored_file.ts';
 import type { VirtualBotProfile } from '../../../types/virtual_bot.ts';
 import type { ChatAction } from '../../../types/virtual_chat.ts';
 import { fileDownloadResponse } from '../file_download.ts';
@@ -36,6 +36,7 @@ import {
   replyParametersParameter,
   selectSpecifiedReplyTarget,
 } from './reply_parameters_parameter.ts';
+import { readRichMessageParameter } from './rich_message_parameter.ts';
 import {
   inlineKeyboardMarkupParameter,
   messageReplyMarkupParameter,
@@ -157,6 +158,9 @@ const FILE_TOO_BIG_DESCRIPTION = 'Bad Request: file is too big';
 const FORMATTED_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: text is too long';
 const PARSE_MODE_UNSUPPORTED_DESCRIPTION = 'Bad Request: unsupported parse_mode';
 const TEXT_ENCODING_INVALID_DESCRIPTION = 'Bad Request: text must be encoded in UTF-8';
+
+/** TDLib's description for a rich message edit of an inline message that uploads a file. */
+const INLINE_MESSAGE_CONTENT_INVALID_DESCRIPTION = 'Bad Request: invalid message content specified';
 
 /** Telegram's descriptions for rejected message edits. */
 const MESSAGE_IDENTIFIER_NOT_SPECIFIED_DESCRIPTION =
@@ -372,6 +376,13 @@ const sendMessageParametersSchema = z.strictObject({
   ...linkPreviewParametersShape,
 });
 
+// As for sendMessage, topics, business connections, paid broadcasts, suggested posts, and
+// ephemeral messages are not supported.
+const sendRichMessageParametersSchema = z.strictObject({
+  ...sendOptionsParametersShape,
+  rich_message: z.string().optional(),
+});
+
 const sendPhotoParametersSchema = z.strictObject({
   ...sendOptionsParametersShape,
   photo: z.string().optional(),
@@ -439,12 +450,14 @@ const editedMessageParametersShape = {
   inline_message_id: z.string().default(''),
 };
 
+// A `rich_message`, even an empty one, replaces the text and its formatting, as on Telegram.
 const editMessageTextParametersSchema = z.strictObject({
   ...editedMessageParametersShape,
   text: z.string().default(''),
   parse_mode: z.string().optional(),
   entities: messageEntitiesParameter().optional(),
   ...linkPreviewParametersShape,
+  rich_message: z.string().optional(),
   reply_markup: inlineKeyboardMarkupParameter().optional(),
 });
 
@@ -645,6 +658,33 @@ type InlineQueryResultRequest = Parameters<
   EmulationSession['botApi']['answerInlineQuery']
 >[1]['results'][number];
 
+/** A rich message as a bot specified it. */
+type SpecifiedRichMessage = Pick<
+  Parameters<EmulationSession['botApi']['sendRichMessage']>[1],
+  'richMessage' | 'detectsEntities'
+>;
+
+/** New content of a text or rich message, as `editMessageText` specifies it. */
+type TextMessageReplacementRequest = Parameters<
+  EmulationSession['botApi']['editMessageText']
+>[1]['content'];
+
+/** Why a file a request sends cannot be used: an upload Telegram refuses, or its `file_id`. */
+type FileResolutionFailure =
+  | {
+    readonly reason:
+      | 'file_empty'
+      | 'image_invalid'
+      | 'photo_dimensions_invalid'
+      | 'file_id_invalid';
+  }
+  | { readonly reason: 'photo_too_big'; readonly fileSizeBytes: number }
+  | {
+    readonly reason: 'file_type_mismatch';
+    readonly expectedFileType: StoredFile['type'];
+    readonly actualFileType: StoredFile['type'];
+  };
+
 /** Formatted text as a bot specified it, the result of reading its parse mode or entities. */
 type SpecifiedFormattedText = Extract<
   FormattedTextReadingResult,
@@ -761,6 +801,7 @@ const BOT_API_METHODS: readonly BotApiMethod[] = [
   { name: 'sendDocument', handler: handleSendDocument },
   { name: 'sendMessage', handler: handleSendMessage },
   { name: 'sendPhoto', handler: handleSendPhoto },
+  { name: 'sendRichMessage', handler: handleSendRichMessage },
   {
     name: 'setChatAdministratorCustomTitle',
     handler: handleSetChatAdministratorCustomTitle,
@@ -1073,6 +1114,77 @@ function handleSendMessage(
     ...optionsReading.options,
     ...formattedTextReading.formattedText,
   }));
+}
+
+function handleSendRichMessage(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+  uploadedFiles: BotApiUploadedFiles,
+): BotApiMethodAnswer {
+  const invalidParametersDescription = 'Bad Request: invalid sendRichMessage parameters';
+  const parsedParameters = sendRichMessageParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, invalidParametersDescription);
+  }
+  const { data } = parsedParameters;
+  // Telegram reads the rich message before it looks at the chat.
+  const richMessageReading = readSpecifiedRichMessage(
+    context,
+    data.rich_message,
+    uploadedFiles,
+    invalidParametersDescription,
+  );
+  if (!richMessageReading.read) {
+    return richMessageReading.errorAnswer;
+  }
+  const optionsReading = readSendOptions(context, data, invalidParametersDescription);
+  if (!optionsReading.read) {
+    return optionsReading.errorAnswer;
+  }
+
+  return sendMethodAnswer(context.session.botApi.sendRichMessage(context.bot, {
+    ...optionsReading.options,
+    ...richMessageReading.richMessage,
+  }));
+}
+
+/**
+ * Reads a `rich_message` parameter as `readRichMessageParameter` does, with its buttons as
+ * `BotApiService.readRichMessageButtons` reads them, answering Telegram's error for a message it
+ * cannot read.
+ */
+function readSpecifiedRichMessage(
+  context: BotApiMethodContext,
+  richMessageParameter: string | undefined,
+  uploadedFiles: BotApiUploadedFiles,
+  invalidParametersDescription: string,
+):
+  | { readonly read: true; readonly richMessage: SpecifiedRichMessage }
+  | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
+  const parameterReading = readRichMessageParameter(
+    richMessageParameter,
+    uploadedFiles,
+    invalidParametersDescription,
+  );
+  if (!parameterReading.read) {
+    return { read: false, errorAnswer: botApiError(400, parameterReading.description) };
+  }
+  const buttonReading = context.session.botApi.readRichMessageButtons(
+    parameterReading.richMessage,
+  );
+  if (!buttonReading.read) {
+    return {
+      read: false,
+      errorAnswer: botApiError(400, badRequestDescription(buttonReading.keyboardError)),
+    };
+  }
+  return {
+    read: true,
+    richMessage: {
+      richMessage: buttonReading.richMessage,
+      detectsEntities: parameterReading.detectsEntities,
+    },
+  };
 }
 
 function handleSendPhoto(
@@ -1459,6 +1571,24 @@ function sendMethodAnswer(result: SendResult | SendFailure): BotApiMethodAnswer 
     case 'bot_blocked':
       return botApiError(403, BOT_BLOCKED_DESCRIPTION);
     case 'file_empty':
+    case 'image_invalid':
+    case 'photo_dimensions_invalid':
+    case 'file_id_invalid':
+      return fileResolutionFailureAnswer({ reason: result.reason });
+    case 'photo_too_big':
+    case 'file_type_mismatch':
+      return fileResolutionFailureAnswer(result);
+    default: {
+      const unhandledFailure: never = result;
+      throw new Error(`Unhandled send failure: ${JSON.stringify(unhandledFailure)}`);
+    }
+  }
+}
+
+/** Telegram's error for a file it cannot send: an upload it refuses, or an unusable `file_id`. */
+function fileResolutionFailureAnswer(failure: FileResolutionFailure): BotApiMethodAnswer {
+  switch (failure.reason) {
+    case 'file_empty':
       return botApiError(400, FILE_EMPTY_DESCRIPTION);
     case 'image_invalid':
       return botApiError(400, IMAGE_INVALID_DESCRIPTION);
@@ -1467,7 +1597,7 @@ function sendMethodAnswer(result: SendResult | SendFailure): BotApiMethodAnswer 
     case 'photo_too_big':
       return botApiError(
         400,
-        `Bad Request: file of size ${result.fileSizeBytes} bytes is too big for a photo; ` +
+        `Bad Request: file of size ${failure.fileSizeBytes} bytes is too big for a photo; ` +
           `the maximum size is ${MAX_PHOTO_UPLOAD_BYTES} bytes`,
       );
     case 'file_id_invalid':
@@ -1475,13 +1605,13 @@ function sendMethodAnswer(result: SendResult | SendFailure): BotApiMethodAnswer 
     case 'file_type_mismatch':
       return botApiError(
         400,
-        `Bad Request: can't use file of type ${TDLIB_FILE_TYPE_NAMES[result.actualFileType]} as ${
-          TDLIB_FILE_TYPE_NAMES[result.expectedFileType]
+        `Bad Request: can't use file of type ${TDLIB_FILE_TYPE_NAMES[failure.actualFileType]} as ${
+          TDLIB_FILE_TYPE_NAMES[failure.expectedFileType]
         }`,
       );
     default: {
-      const unhandledFailure: never = result;
-      throw new Error(`Unhandled send failure: ${JSON.stringify(unhandledFailure)}`);
+      const unhandledFailure: never = failure;
+      throw new Error(`Unhandled file failure: ${JSON.stringify(unhandledFailure)}`);
     }
   }
 }
@@ -1489,42 +1619,75 @@ function sendMethodAnswer(result: SendResult | SendFailure): BotApiMethodAnswer 
 function handleEditMessageText(
   context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
+  uploadedFiles: BotApiUploadedFiles,
 ): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid editMessageText parameters';
   const parsedParameters = editMessageTextParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
     return botApiError(400, invalidParametersDescription);
   }
-  const { text, parse_mode: parseMode, entities, reply_markup: inlineKeyboard } =
-    parsedParameters.data;
-  // Telegram reads the text and its formatting before it looks for the message.
-  const formattedTextReading = readSpecifiedFormattedText(
+  // Telegram reads the new content before it looks for the message.
+  const contentReading = readTextMessageReplacement(
     context,
-    { text, parseMode, entities },
+    parsedParameters.data,
+    uploadedFiles,
     invalidParametersDescription,
   );
-  if (!formattedTextReading.read) {
-    return formattedTextReading.errorAnswer;
+  if (!contentReading.read) {
+    return contentReading.errorAnswer;
   }
   const targetReading = readEditedMessageTarget(parsedParameters.data);
   if (!targetReading.read) {
     return targetReading.errorAnswer;
   }
 
-  const keyboardReading = readInlineKeyboardParameter(context, inlineKeyboard);
+  const keyboardReading = readInlineKeyboardParameter(context, parsedParameters.data.reply_markup);
   if (!keyboardReading.read) {
     return keyboardReading.errorAnswer;
   }
 
   const { target } = targetReading;
   const { botApi } = context.session;
-  const edit = {
-    ...formattedTextReading.formattedText,
-    inlineKeyboard: keyboardReading.inlineKeyboard,
-  };
+  const edit = { content: contentReading.content, inlineKeyboard: keyboardReading.inlineKeyboard };
   return target.kind === 'inline_message'
     ? inlineMessageEditAnswer(botApi.editInlineMessageText(context.bot, { ...target, ...edit }))
     : editMessageAnswer(botApi.editMessageText(context.bot, { ...target, ...edit }));
+}
+
+/**
+ * Reads the new content of `editMessageText`, as the official Bot API server's
+ * `process_edit_message_text_query` does: a `rich_message`, when the request has one, and
+ * otherwise the text with its `parse_mode` or `entities`.
+ */
+function readTextMessageReplacement(
+  context: BotApiMethodContext,
+  { text, parse_mode: parseMode, entities, rich_message: richMessageParameter }: z.output<
+    typeof editMessageTextParametersSchema
+  >,
+  uploadedFiles: BotApiUploadedFiles,
+  invalidParametersDescription: string,
+):
+  | { readonly read: true; readonly content: TextMessageReplacementRequest }
+  | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
+  if (richMessageParameter !== undefined) {
+    const richMessageReading = readSpecifiedRichMessage(
+      context,
+      richMessageParameter,
+      uploadedFiles,
+      invalidParametersDescription,
+    );
+    return richMessageReading.read
+      ? { read: true, content: { kind: 'rich_message', ...richMessageReading.richMessage } }
+      : richMessageReading;
+  }
+  const formattedTextReading = readSpecifiedFormattedText(
+    context,
+    { text, parseMode, entities },
+    invalidParametersDescription,
+  );
+  return formattedTextReading.read
+    ? { read: true, content: { kind: 'text', ...formattedTextReading.formattedText } }
+    : formattedTextReading;
 }
 
 function handleEditMessageCaption(
@@ -1759,6 +1922,14 @@ function editMessageAnswer(result: MessageEditResult): BotApiMethodAnswer {
       return botApiError(400, BUTTON_DATA_INVALID_DESCRIPTION);
     case 'message_not_modified':
       return botApiError(400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
+    case 'file_empty':
+    case 'image_invalid':
+    case 'photo_dimensions_invalid':
+    case 'file_id_invalid':
+      return fileResolutionFailureAnswer({ reason: result.reason });
+    case 'photo_too_big':
+    case 'file_type_mismatch':
+      return fileResolutionFailureAnswer(result);
     default: {
       const unhandledFailure: never = result;
       throw new Error(`Unhandled message edit failure: ${JSON.stringify(unhandledFailure)}`);
@@ -1790,6 +1961,16 @@ function inlineMessageEditAnswer(result: InlineMessageEditResult): BotApiMethodA
       return botApiError(400, BUTTON_DATA_INVALID_DESCRIPTION);
     case 'message_not_modified':
       return botApiError(400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
+    case 'inline_message_upload_unsupported':
+      return botApiError(400, INLINE_MESSAGE_CONTENT_INVALID_DESCRIPTION);
+    case 'file_empty':
+    case 'image_invalid':
+    case 'photo_dimensions_invalid':
+    case 'file_id_invalid':
+      return fileResolutionFailureAnswer({ reason: result.reason });
+    case 'photo_too_big':
+    case 'file_type_mismatch':
+      return fileResolutionFailureAnswer(result);
     default: {
       const unhandledFailure: never = result;
       throw new Error(`Unhandled inline message edit failure: ${JSON.stringify(unhandledFailure)}`);

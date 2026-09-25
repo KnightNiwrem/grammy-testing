@@ -4,22 +4,17 @@ import {
   type BotApiChatMember,
   type BotApiChatMemberUpdated,
   type BotApiChosenInlineResult,
-  type BotApiDocument,
   type BotApiExternalReplyInfo,
   type BotApiExternalReplyMedia,
   type BotApiGroupChat,
   type BotApiGroupChatBotMember,
-  type BotApiInlineKeyboardButton,
-  type BotApiInlineKeyboardMarkup,
   type BotApiInlineQuery,
-  type BotApiKeyboardButtonFace,
   type BotApiMembershipServiceContent,
   type BotApiMessage,
   type BotApiMessageContent,
   type BotApiMessageEntity,
   type BotApiMessageOrigin,
   type BotApiMyChatMemberUpdated,
-  type BotApiPhotoSize,
   type BotApiPrivateChat,
   type BotApiPrivateChatBotMember,
   type BotApiPrivateMessage,
@@ -33,7 +28,6 @@ import {
   type BotApiUser,
   toBotApiLocation,
 } from '../types/bot_api.ts';
-import type { ButtonAppearance } from '../types/button_appearance.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
 import type {
   BotBlockChangedEvent,
@@ -41,20 +35,13 @@ import type {
   InlineQueryResultChosenEvent,
 } from '../types/chat_domain_event.ts';
 import type { ChatMemberStatus, SupergroupAdministratorRights } from '../types/chat_membership.ts';
-import {
-  allowsEveryInlineQueryChat,
-  type InlineKeyboard,
-  type InlineKeyboardButton,
-} from '../types/inline_keyboard.ts';
 import { getInlineQueryChatType, type InlineQuery } from '../types/inline_query.ts';
-import type { StoredDocumentFile, StoredFile } from '../types/stored_file.ts';
+import type { StoredFileId } from '../types/stored_file.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
 import type { VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { BasicGroup, Supergroup } from '../types/virtual_chat.ts';
 import {
   type ChatMessage,
-  type DateTimeFormat,
-  type DateTimePartPrecision,
   type ExternalReply,
   type FormattedText,
   hasProtectedContent,
@@ -67,26 +54,24 @@ import {
   type TextEntity,
   type TextQuote,
 } from '../types/virtual_message.ts';
-
-/** A stored file with the `file_id` by which the observer of a projection knows it. */
-export interface ObservedFile {
-  readonly file: StoredFile;
-  readonly observerFileId: string;
-  /**
-   * The `file_id` by which the observer knows a document's thumbnail; omitted for other files and
-   * for a document without a thumbnail.
-   */
-  readonly observerThumbnailFileId?: string;
-}
+import { writeDateTimeFormat } from './bot_api_date_time_format.ts';
+import { type ObservedFile, projectDocument, projectPhotoSize } from './bot_api_file.ts';
+import { projectInlineKeyboardMarkup } from './bot_api_inline_keyboard.ts';
+import { projectRichMessage } from './bot_api_rich_message.ts';
 
 /** What a projection shows beyond the message itself, resolved for the observer. */
 interface MessageProjectionContext {
   /** The user the projection is for. */
   readonly observerId: number;
-  /** Every user the message's text or caption mentions, by ID. */
+  /** Every user the message's text, caption, or rich message mentions, by ID. */
   readonly mentionedUsers: ReadonlyMap<number, BotApiUser>;
   /** The file of a photo or document message; omitted for other messages. */
   readonly contentFile?: ObservedFile;
+  /**
+   * The files of a rich message's photo and document blocks, by stored file; omitted for other
+   * messages.
+   */
+  readonly richMessageFiles?: ReadonlyMap<StoredFileId, ObservedFile>;
   /**
    * The members that joined or left, in the order a service message names them; omitted for
    * other messages.
@@ -361,7 +346,7 @@ function projectMembershipServiceContent(
 
 function projectMessageContent(
   content: MessageContent,
-  { mentionedUsers, contentFile }: MessageProjectionContext,
+  { mentionedUsers, contentFile, richMessageFiles }: MessageProjectionContext,
 ): BotApiMessageContent {
   switch (content.kind) {
     case 'text':
@@ -387,6 +372,13 @@ function projectMessageContent(
         document: projectDocument(contentFile),
         ...projectCaption(content.caption, mentionedUsers),
       };
+    case 'rich_message':
+      return {
+        rich_message: projectRichMessage(content, {
+          mentionedUsers,
+          files: richMessageFiles ?? new Map(),
+        }),
+      };
     default: {
       const unhandledContent: never = content;
       throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
@@ -405,61 +397,6 @@ function projectCaption(caption: FormattedText, mentionedUsers: ReadonlyMap<numb
       caption_entities: caption.entities.map((entity) => projectTextEntity(entity, mentionedUsers)),
     }),
   };
-}
-
-/** Shows a photo in its one kept size; the observed file must be the message's photo. */
-function projectPhotoSize(contentFile: ObservedFile | undefined): BotApiPhotoSize {
-  const file = contentFile?.file;
-  if (contentFile === undefined || file?.type !== 'photo') {
-    throw new Error('Expected the photo of the message to be provided');
-  }
-  return {
-    file_id: contentFile.observerFileId,
-    file_unique_id: file.uniqueId,
-    file_size: file.content.length,
-    width: file.width,
-    height: file.height,
-  };
-}
-
-/** Shows a document; the observed file must be the message's document. */
-function projectDocument(contentFile: ObservedFile | undefined): BotApiDocument {
-  const file = contentFile?.file;
-  if (contentFile === undefined || file?.type !== 'document') {
-    throw new Error('Expected the document of the message to be provided');
-  }
-  return {
-    file_name: file.fileName,
-    mime_type: file.mimeType,
-    ...projectDocumentThumbnail(file, contentFile.observerThumbnailFileId),
-    file_id: contentFile.observerFileId,
-    file_unique_id: file.uniqueId,
-    file_size: file.content.length,
-  };
-}
-
-/**
- * Shows a document's thumbnail both as `thumbnail` and as the legacy `thumb`, as the official Bot
- * API server's `json_store_thumbnail` does; nothing for a document without one.
- */
-function projectDocumentThumbnail(
-  { thumbnail }: StoredDocumentFile,
-  observerThumbnailFileId: string | undefined,
-): Pick<BotApiDocument, 'thumbnail' | 'thumb'> {
-  if (thumbnail === undefined) {
-    return {};
-  }
-  if (observerThumbnailFileId === undefined) {
-    throw new Error('Expected the thumbnail of the document to be provided');
-  }
-  const projectedThumbnail: BotApiPhotoSize = {
-    file_id: observerThumbnailFileId,
-    file_unique_id: thumbnail.uniqueId,
-    file_size: thumbnail.content.length,
-    width: thumbnail.width,
-    height: thumbnail.height,
-  };
-  return { thumbnail: projectedThumbnail, thumb: projectedThumbnail };
 }
 
 export interface CallbackQueryForBotProjectionInput {
@@ -752,94 +689,4 @@ function projectTextEntity(
     default:
       return { type: entity.type, offset, length };
   }
-}
-
-/** The letters of Bot API date and time formats that choose each part's precision. */
-const DATE_PRECISION_LETTERS: Readonly<Record<DateTimePartPrecision, string>> = {
-  short: 'd',
-  long: 'D',
-};
-const TIME_PRECISION_LETTERS: Readonly<Record<DateTimePartPrecision, string>> = {
-  short: 't',
-  long: 'T',
-};
-
-/**
- * Writes a date and time format as the official Bot API server's `get_date_time_format` does:
- * `r` for relative time, otherwise `w` for the day of the week, then `d` or `D` for the date and
- * `t` or `T` for the time, each shown in that order; empty for no format.
- */
-function writeDateTimeFormat(format: DateTimeFormat | undefined): string {
-  if (format === undefined) {
-    return '';
-  }
-  if (format.kind === 'relative') {
-    return 'r';
-  }
-  const { showsDayOfWeek, datePrecision, timePrecision } = format;
-  return [
-    showsDayOfWeek ? 'w' : '',
-    datePrecision === undefined ? '' : DATE_PRECISION_LETTERS[datePrecision],
-    timePrecision === undefined ? '' : TIME_PRECISION_LETTERS[timePrecision],
-  ].join('');
-}
-
-function projectInlineKeyboardMarkup(inlineKeyboard: InlineKeyboard): BotApiInlineKeyboardMarkup {
-  return { inline_keyboard: inlineKeyboard.map((row) => row.map(projectInlineKeyboardButton)) };
-}
-
-/**
- * Shows a button's action as the official Bot API server's
- * `json_store_inline_keyboard_button_type` does: a switch-inline button for a chosen chat that
- * allows every kind of chat shows as a plain `switch_inline_query` button.
- */
-function projectInlineKeyboardButton(button: InlineKeyboardButton): BotApiInlineKeyboardButton {
-  const face = projectKeyboardButtonFace(button);
-  switch (button.kind) {
-    case 'callback':
-      return { ...face, callback_data: button.callbackData };
-    case 'url':
-      return { ...face, url: button.url };
-    case 'copy_text':
-      return { ...face, copy_text: { text: button.copiedText } };
-    case 'switch_inline_query': {
-      const { target, query } = button;
-      if (target.kind === 'current_chat') {
-        return { ...face, switch_inline_query_current_chat: query };
-      }
-      if (allowsEveryInlineQueryChat(target.chatTypes)) {
-        return { ...face, switch_inline_query: query };
-      }
-      return {
-        ...face,
-        switch_inline_query_chosen_chat: {
-          query,
-          allow_user_chats: target.chatTypes.allowsUserChats,
-          allow_bot_chats: target.chatTypes.allowsBotChats,
-          allow_group_chats: target.chatTypes.allowsGroupChats,
-          allow_channel_chats: target.chatTypes.allowsChannelChats,
-        },
-      };
-    }
-    case 'disabled':
-      return { ...face, disabled: {} };
-    default: {
-      const unhandledButton: never = button;
-      throw new Error(`Unhandled inline keyboard button: ${JSON.stringify(unhandledButton)}`);
-    }
-  }
-}
-
-/**
- * Shows a button's text and appearance as the official Bot API server's
- * `JsonInlineKeyboardButton` does, omitting the default style and a missing icon.
- */
-function projectKeyboardButtonFace(
-  { text, style, iconCustomEmojiId }: ButtonAppearance & { readonly text: string },
-): BotApiKeyboardButtonFace {
-  return {
-    text,
-    ...(iconCustomEmojiId === undefined ? {} : { icon_custom_emoji_id: iconCustomEmojiId }),
-    ...(style === undefined ? {} : { style }),
-  };
 }

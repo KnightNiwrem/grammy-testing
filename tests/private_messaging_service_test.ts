@@ -609,7 +609,7 @@ Deno.test('PrivateMessagingService edits the text and keyboard of a bot message'
     fromBotId: bot.profile.id,
     chat: { type: 'private', accountId: account.profile.id },
     botMessageId,
-    text: 'Chosen: /yes',
+    content: { kind: 'text', text: 'Chosen: /yes' },
   });
   if (!textEdit.edited) {
     throw new Error(`Expected the text edit to succeed, received ${textEdit.reason}`);
@@ -648,7 +648,7 @@ Deno.test('PrivateMessagingService edits the text and keyboard of a bot message'
     fromBotId: bot.profile.id,
     chat: { type: 'private', accountId: account.profile.id },
     botMessageId,
-    text: 'Chosen: /yes',
+    content: { kind: 'text', text: 'Chosen: /yes' },
   });
   if (
     !sameTextEdit.edited ||
@@ -773,7 +773,7 @@ Deno.test('PrivateMessagingService validates bot message edits in Telegram order
       fromBotId,
       chat: { type: 'private', accountId },
       botMessageId,
-      text,
+      content: { kind: 'text', text },
       inlineKeyboard,
     });
     if (result.edited || result.reason !== expectedReason) {
@@ -826,7 +826,7 @@ Deno.test('PrivateMessagingService refuses edits of messages with reply markup o
       fromBotId: bot.profile.id,
       chat,
       botMessageId,
-      text: 'Chosen',
+      content: { kind: 'text', text: 'Chosen' },
     }),
     privateMessaging.editBotMessageCaption({
       fromBotId: bot.profile.id,
@@ -956,7 +956,7 @@ Deno.test('PrivateMessagingService lets a bot delete messages of its private cha
     fromBotId: bot.profile.id,
     chat: { type: 'private', accountId: account.profile.id },
     botMessageId,
-    text: 'Done',
+    content: { kind: 'text', text: 'Done' },
   });
   if (editOfDeletedMessage.edited || editOfDeletedMessage.reason !== 'message_not_found') {
     throw new Error('Expected a deleted message not to be found for editing');
@@ -1172,7 +1172,7 @@ Deno.test('PrivateMessagingService limits text by its characters, not its UTF-16
     fromBotId: bot.profile.id,
     chat: { type: 'private', accountId: account.profile.id },
     botMessageId: 2,
-    text: `${'😀'.repeat(MAX_TEXT_MESSAGE_LENGTH - 1)}a`,
+    content: { kind: 'text', text: `${'😀'.repeat(MAX_TEXT_MESSAGE_LENGTH - 1)}a` },
   });
   if (!edited.edited) {
     throw new Error(
@@ -1222,8 +1222,7 @@ Deno.test('PrivateMessagingService treats changed entities as an edit of the tex
       fromBotId: bot.profile.id,
       chat: { type: 'private', accountId: account.profile.id },
       botMessageId,
-      text: getContentText(botMessage.content).text,
-      entities,
+      content: { kind: 'text', text: getContentText(botMessage.content).text, entities },
     });
   advanceClockSeconds(5);
 
@@ -1410,6 +1409,65 @@ Deno.test('PrivateMessagingService limits captions and stores no upload of a ref
   }
 });
 
+Deno.test('PrivateMessagingService stores the uploads of rich messages only once they are sent or edited', () => {
+  const { virtualUsers, privateMessaging, storedUploads, advanceClockSeconds } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  const chat = { type: 'private', accountId: account.profile.id } as const;
+  const richMessageWithPhoto = {
+    kind: 'rich_message',
+    richMessage: {
+      blocks: [{
+        kind: 'photo',
+        photo: { kind: 'upload', upload: photoUpload() },
+        hasSpoiler: false,
+      }],
+      isRightToLeft: false,
+    },
+    detectsEntities: true,
+  } as const;
+
+  const sendBeforeStart = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: chat,
+    content: richMessageWithPhoto,
+  });
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const sent = privateMessaging.sendBotMessage({
+    fromBotId: bot.profile.id,
+    to: chat,
+    content: { kind: 'text', text: 'Draft' },
+  });
+  if (sendBeforeStart.sent || !sent.sent || storedUploads.length !== 0) {
+    throw new Error('Expected a refused rich message to store no upload');
+  }
+  const botMessageId = 2;
+
+  const refusedEdit = privateMessaging.editBotMessageText({
+    fromBotId: bot.profile.id,
+    chat,
+    botMessageId,
+    content: richMessageWithPhoto,
+    inlineKeyboard: [[{ kind: 'callback', text: 'Go', callbackData: 'x'.repeat(65) }]],
+  });
+  advanceClockSeconds(5);
+  const edit = privateMessaging.editBotMessageText({
+    fromBotId: bot.profile.id,
+    chat,
+    botMessageId,
+    content: richMessageWithPhoto,
+  });
+  const storedUploadCount: number = storedUploads.length;
+  if (
+    refusedEdit.edited || refusedEdit.reason !== 'callback_data_invalid' || !edit.edited ||
+    storedUploadCount !== 1 || edit.message.content.kind !== 'rich_message' ||
+    edit.message.contentEditedAtUnixSeconds !== 1_700_000_005
+  ) {
+    throw new Error('Expected only the edit that succeeded to store its upload');
+  }
+});
+
 Deno.test('PrivateMessagingService edits captions and refuses edits of the other content kind', () => {
   const { virtualUsers, messageBoxes, botUpdates, privateMessaging, advanceClockSeconds } =
     createPrivateMessagingFixture();
@@ -1451,7 +1509,7 @@ Deno.test('PrivateMessagingService edits captions and refuses edits of the other
     fromBotId: bot.profile.id,
     chat,
     botMessageId: photoId,
-    text: 'New',
+    content: { kind: 'text', text: 'New' },
   });
   const captionOfText = editCaption(
     'New',
@@ -1701,7 +1759,7 @@ Deno.test('PrivateMessagingService refuses writing either way while the account 
     fromBotId: bot.profile.id,
     chat: { type: 'private', accountId: account.profile.id },
     botMessageId: expectBotMessageId(messageBoxes, bot, botMessage.id),
-    text: 'Goodbye',
+    content: { kind: 'text', text: 'Goodbye' },
   });
   const accountEdit = privateMessaging.editAccountMessage({
     fromAccountId: account.profile.id,

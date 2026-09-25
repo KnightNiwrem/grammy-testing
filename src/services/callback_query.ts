@@ -8,6 +8,7 @@ import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { ChatMembership } from '../types/chat_membership.ts';
+import { listRichMessageButtons, type RichMessageButtonAction } from '../types/rich_message.ts';
 import type {
   PrivateConversation,
   PrivateConversationKey,
@@ -187,9 +188,9 @@ export class CallbackQueryService {
   }
 
   /**
-   * Presses the callback button with the given data on a message of the account's private chat
-   * with a bot or of a supergroup the account is a member of, and publishes the resulting callback
-   * query for the bot whose buttons the message carries. As on Telegram, the inline bot of a
+   * Presses the callback button with the given data, in the inline keyboard or the rich message of
+   * a message of the account's private chat with a bot or of a supergroup the account is a member
+   * of, and publishes the resulting callback query for the bot whose buttons the message carries. As on Telegram, the inline bot of a
    * message sent through it knows the message only by its inline message identifier.
    */
   pressCallbackButton(input: PressCallbackButtonInput): PressCallbackButtonResult {
@@ -204,13 +205,7 @@ export class CallbackQueryService {
     }
     const { message } = resolution;
     const botId = getInlineKeyboardOwnerId(message);
-    const hasPressedButton =
-      message.inlineKeyboard?.some((row) =>
-        row.some((button) =>
-          button.kind === 'callback' && button.callbackData === input.callbackData
-        )
-      ) ?? false;
-    if (botId === undefined || !hasPressedButton) {
+    if (botId === undefined || !hasCallbackButton(message, input.callbackData)) {
       return { pressed: false, reason: 'callback_button_not_found' };
     }
 
@@ -315,4 +310,13 @@ export class CallbackQueryService {
     }
     return { resolved: true, message, chatInstance: supergroup.chatInstance };
   }
+}
+
+/** Whether a message has a callback button with the data, in its inline keyboard or rich message. */
+function hasCallbackButton(message: ChatMessage, callbackData: string): boolean {
+  const isPressedButton = (action: RichMessageButtonAction) =>
+    action.kind === 'callback' && action.callbackData === callbackData;
+  return (message.inlineKeyboard?.some((row) => row.some(isPressedButton)) ?? false) ||
+    (message.content.kind === 'rich_message' &&
+      listRichMessageButtons(message.content).some(({ action }) => isPressedButton(action)));
 }

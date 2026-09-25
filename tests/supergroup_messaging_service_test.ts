@@ -208,19 +208,19 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
       fromBotId: bot.profile.id,
       chatId: supergroup.id,
       messageId: 3,
-      text: 'Changed',
+      content: { kind: 'text', text: 'Changed' },
     }),
     supergroupMessaging.editBotMessageText({
       fromBotId: otherBot.profile.id,
       chatId: supergroup.id,
       messageId: 4,
-      text: 'Changed',
+      content: { kind: 'text', text: 'Changed' },
     }),
     supergroupMessaging.editBotMessageText({
       fromBotId: bot.profile.id,
       chatId: supergroup.id,
       messageId: 99,
-      text: 'Changed',
+      content: { kind: 'text', text: 'Changed' },
     }),
     supergroupMessaging.editBotMessageInlineKeyboard({
       fromBotId: bot.profile.id,
@@ -339,7 +339,12 @@ Deno.test('SupergroupMessagingService lets the inline bot edit a message sent th
     return { message, messageId, inlineMessageId: message.viaBot.inlineMessageId };
   };
   const editText = (fromBotId: number, messageId: number, text: string) =>
-    supergroupMessaging.editBotMessageText({ fromBotId, chatId: supergroup.id, messageId, text });
+    supergroupMessaging.editBotMessageText({
+      fromBotId,
+      chatId: supergroup.id,
+      messageId,
+      content: { kind: 'text', text },
+    });
 
   const inlineMessage = sendThrough(bot.profile.id);
   const textEdit = editText(bot.profile.id, inlineMessage.messageId, 'Dogs');
@@ -370,7 +375,7 @@ Deno.test('SupergroupMessagingService lets the inline bot edit a message sent th
   const outsiderInlineEdit = supergroupMessaging.editBotMessageText({
     fromBotId: outsiderBot.profile.id,
     inlineMessageId: outsiderMessage.inlineMessageId,
-    text: 'Dogs',
+    content: { kind: 'text', text: 'Dogs' },
   });
   if (
     outsiderChatEdit.edited || outsiderChatEdit.reason !== 'chat_not_found' ||

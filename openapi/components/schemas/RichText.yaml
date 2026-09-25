@@ -1,0 +1,9 @@
+description: >-
+  Text of a rich message: plain text as a string, rich texts shown one after another as an
+  array, or an object of a type. An empty array is empty text.
+oneOf:
+  - type: string
+  - type: array
+    items:
+      $ref: ./RichText.yaml
+  - $ref: ./RichTextObject.yaml

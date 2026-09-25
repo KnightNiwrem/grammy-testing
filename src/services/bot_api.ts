@@ -37,11 +37,20 @@ import {
 } from '../types/inline_keyboard.ts';
 import {
   createMessageForward,
+  getRepeatedContent,
   isForwardable,
   type PrivateForwardNameLookup,
 } from '../types/message_forward.ts';
 import { createExternalReply, type ExternalReplyTarget } from '../types/message_reply.ts';
 import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
+import {
+  convertRichMessageFiles,
+  listRichMessageFiles,
+  mapRichMessageButtons,
+  type RichMessage,
+  type RichMessageButtonAction,
+  type RichMessageFileTypes,
+} from '../types/rich_message.ts';
 import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
 import { isUserId } from '../types/telegram_identity.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
@@ -85,8 +94,10 @@ import type {
   OutgoingDocument,
   OutgoingMessageContent,
   OutgoingPhoto,
+  OutgoingRichMessage,
   SpecifiedQuote,
   TextInvalidFailure,
+  TextMessageReplacement,
 } from './message_content.ts';
 
 /** The most UTF-8 bytes of text the Bot API reads before applying its formatting. */
@@ -131,6 +142,14 @@ export type ReadFormattedTextResult =
 
 export type ReadInlineKeyboardResult =
   | { readonly read: true; readonly inlineKeyboard: InlineKeyboard }
+  | {
+    readonly read: false;
+    /** TDLib's description of the button it cannot read. */
+    readonly keyboardError: string;
+  };
+
+export type ReadRichMessageButtonsResult<Files extends RichMessageFileTypes> =
+  | { readonly read: true; readonly richMessage: RichMessage<Files> }
   | {
     readonly read: false;
     /** TDLib's description of the button it cannot read. */
@@ -217,6 +236,37 @@ export type SendPhotoRequest = SendRequestOptions & {
   /** The Bot API `show_caption_above_media`. */
   readonly showsCaptionAboveMedia: boolean;
 };
+
+/** A document a request sends in a rich message, with the thumbnail uploaded for it. */
+export interface BotApiRichMessageDocument {
+  readonly document: BotApiInputFile;
+  /** As `SendDocumentRequest` describes it. */
+  readonly thumbnail?: Uint8Array<ArrayBuffer>;
+}
+
+/** The files of a rich message's photo and document blocks, as a request names them. */
+export interface BotApiRichMessageFileTypes {
+  readonly photo: BotApiInputFile;
+  readonly document: BotApiRichMessageDocument;
+}
+
+/** A rich message as a bot specified it. */
+export interface SpecifiedRichMessage {
+  /** The message, whose buttons `readRichMessageButtons` has read. */
+  readonly richMessage: RichMessage<BotApiRichMessageFileTypes>;
+  /**
+   * Whether Telegram marks the entities it detects in the text; the Bot API's
+   * `skip_entity_detection` turns it off.
+   */
+  readonly detectsEntities: boolean;
+}
+
+export type SendRichMessageRequest = SendRequestOptions & SpecifiedRichMessage;
+
+/** New content of a text or rich message: text with its formatting, or a rich message. */
+export type TextMessageReplacementRequest =
+  | ({ readonly kind: 'text' } & SpecifiedFormattedText)
+  | ({ readonly kind: 'rich_message' } & SpecifiedRichMessage);
 
 export type SendDocumentRequest = SendRequestOptions & {
   readonly document: BotApiInputFile;
@@ -367,7 +417,8 @@ interface MessageRepetition {
   readonly inlineKeyboard?: InlineKeyboard;
 }
 
-export interface EditMessageTextRequest extends MessageTarget, SpecifiedFormattedText {
+export interface EditMessageTextRequest extends MessageTarget {
+  readonly content: TextMessageReplacementRequest;
   /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
   readonly inlineKeyboard?: InlineKeyboard;
 }
@@ -411,7 +462,7 @@ export type EditMessageResult<FailureReason extends string> =
 
 export type EditMessageTextResult =
   | EditMessageResult<EditMessageTextFailureReason>
-  | ({ readonly edited: false } & TextInvalidFailure);
+  | ({ readonly edited: false } & (TextInvalidFailure | FileResolutionFailure));
 
 export type EditMessageCaptionResult =
   | EditMessageResult<EditMessageCaptionFailureReason>
@@ -423,7 +474,8 @@ interface InlineMessageTarget {
   readonly inlineMessageId: InlineMessageId;
 }
 
-export interface EditInlineMessageTextRequest extends InlineMessageTarget, SpecifiedFormattedText {
+export interface EditInlineMessageTextRequest extends InlineMessageTarget {
+  readonly content: TextMessageReplacementRequest;
   /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
   readonly inlineKeyboard?: InlineKeyboard;
 }
@@ -455,7 +507,9 @@ export type EditInlineMessageTextFailureReason =
   | EditInlineMessageReplyMarkupFailureReason
   | 'message_text_empty'
   | 'message_has_no_text'
-  | 'message_text_too_long';
+  | 'message_text_too_long'
+  /** A rich message uploads a file, which an inline message cannot receive. */
+  | 'inline_message_upload_unsupported';
 
 export type EditInlineMessageCaptionFailureReason =
   | EditInlineMessageReplyMarkupFailureReason
@@ -467,6 +521,10 @@ export type EditInlineMessageResult<FailureReason extends string> =
   | { readonly edited: true }
   | { readonly edited: false; readonly reason: FailureReason }
   | ({ readonly edited: false } & TextInvalidFailure);
+
+export type EditInlineMessageTextResult =
+  | EditInlineMessageResult<EditInlineMessageTextFailureReason>
+  | ({ readonly edited: false } & FileResolutionFailure);
 
 interface InlineQueryResultRequestBase {
   /** The bot's identifier of the result. */
@@ -833,8 +891,7 @@ interface BotMessaging {
   ): BotMessageSendingResult;
   editBotMessageText(
     input: PrivateMessageEditTarget & {
-      readonly text: string;
-      readonly entities?: readonly TextEntity[];
+      readonly content: TextMessageReplacement;
       readonly inlineKeyboard?: InlineKeyboard;
     },
   ):
@@ -945,8 +1002,7 @@ interface SupergroupBotMessaging {
     | ({ readonly sent: false } & ContentNormalizationFailure);
   editBotMessageText(
     input: SupergroupMessageEditTarget & {
-      readonly text: string;
-      readonly entities?: readonly TextEntity[];
+      readonly content: TextMessageReplacement;
       readonly inlineKeyboard?: InlineKeyboard;
     },
   ):
@@ -1437,30 +1493,53 @@ export class BotApiService {
     for (const row of inlineKeyboard) {
       const readRow: InlineKeyboardButton[] = [];
       for (const button of row) {
-        if (
-          button.kind === 'switch_inline_query' && button.target.kind === 'chosen_chat' &&
-          !allowsSomeInlineQueryChat(button.target.chatTypes)
-        ) {
-          return { read: false, keyboardError: 'At least one chat type must be allowed' };
+        const targetError = findSwitchInlineTargetError(button);
+        if (targetError !== undefined) {
+          return { read: false, keyboardError: targetError };
         }
         if (button.kind !== 'url') {
           readRow.push(button);
           continue;
         }
-        const userId = getLinkUserId(button.url);
-        if (userId !== undefined) {
-          readRow.push({ ...button, url: `tg://user?id=${userId}` });
-          continue;
+        const urlReading = readInlineButtonUrl(button.url);
+        if (!urlReading.read) {
+          return urlReading;
         }
-        const linkCheck = checkLink(button.url);
-        if (!linkCheck.valid) {
-          return { read: false, keyboardError: `Inline keyboard button ${linkCheck.error}` };
-        }
-        readRow.push({ ...button, url: linkCheck.url });
+        readRow.push({ ...button, url: urlReading.url });
       }
       readRows.push(readRow);
     }
     return { read: true, inlineKeyboard: readRows };
+  }
+
+  /**
+   * Reads the buttons of a rich message, in rows and in its text, as TDLib's
+   * `get_inline_keyboard_button` reads them for a rich message: as `readInlineKeyboard` reads the
+   * buttons of an inline keyboard.
+   */
+  readRichMessageButtons<Files extends RichMessageFileTypes>(
+    richMessage: RichMessage<Files>,
+  ): ReadRichMessageButtonsResult<Files> {
+    let keyboardError: string | undefined;
+    const readRichMessage = mapRichMessageButtons(richMessage, (button) => {
+      const { action } = button;
+      if (keyboardError !== undefined) {
+        return button;
+      }
+      keyboardError = findSwitchInlineTargetError(action);
+      if (keyboardError !== undefined || action.kind !== 'url') {
+        return button;
+      }
+      const urlReading = readInlineButtonUrl(action.url);
+      if (!urlReading.read) {
+        keyboardError = urlReading.keyboardError;
+        return button;
+      }
+      return { ...button, action: { ...action, url: urlReading.url } };
+    });
+    return keyboardError === undefined
+      ? { read: true, richMessage: readRichMessage }
+      : { read: false, keyboardError };
   }
 
   /**
@@ -1474,6 +1553,26 @@ export class BotApiService {
     { text, entities, ...options }: SendMessageRequest,
   ): SendResult {
     return this.#send(authenticatedBot, { kind: 'text', text, entities }, options);
+  }
+
+  /**
+   * Sends a rich message, laid out in blocks, as `sendMessage` sends text. Its photos and
+   * documents are uploaded with the request or reused by the `file_id` the bot knows them by, as
+   * `sendPhoto` and `sendDocument` send theirs, and are resolved before the chat, as theirs are.
+   */
+  sendRichMessage(
+    authenticatedBot: VirtualBotProfile,
+    { richMessage, detectsEntities, ...options }: SendRichMessageRequest,
+  ): SendResult {
+    const resolution = this.#resolveRichMessageFiles(authenticatedBot, richMessage);
+    if (!resolution.resolved) {
+      return { sent: false, ...resolution.failure };
+    }
+    return this.#send(authenticatedBot, {
+      kind: 'rich_message',
+      richMessage: resolution.richMessage,
+      detectsEntities,
+    }, options);
   }
 
   /**
@@ -1564,7 +1663,8 @@ export class BotApiService {
    * Copies a message of one of the bot's chats to a private chat or a supergroup as the bot's own
    * message, which, unlike a forward, does not show where it came from, and which takes the reply
    * and reply markup of the request instead of the original's. A new caption replaces the caption
-   * of copied media, while text stays as it is. As TDLib lets bots do, a bot may copy a message
+   * of copied media, while text and rich messages stay as they are, apart from the buttons of a
+   * rich message, which change as for a forward. As TDLib lets bots do, a bot may copy a message
    * whose sender protected it; a service message cannot be copied.
    *
    * As for `forwardMessage`, the copied message is checked in full before the chat it goes to.
@@ -1582,7 +1682,7 @@ export class BotApiService {
     }
     const result = this.#send(authenticatedBot, {
       kind: 'existing',
-      content: lookup.message.content,
+      content: getRepeatedContent(lookup.message.content),
       ...(caption === undefined ? {} : {
         captionReplacement: {
           caption: caption.text,
@@ -1627,10 +1727,13 @@ export class BotApiService {
     return this.#repeatMessages(
       authenticatedBot,
       request,
-      (message) =>
-        isContentMessage(message)
-          ? { content: removesCaptions ? withoutCaption(message.content) : message.content }
-          : undefined,
+      (message) => {
+        if (!isContentMessage(message)) {
+          return undefined;
+        }
+        const content = getRepeatedContent(message.content);
+        return { content: removesCaptions ? withoutCaption(content) : content };
+      },
     );
   }
 
@@ -2034,6 +2137,66 @@ export class BotApiService {
       : { resolved: false, failure: { reason: preparation.reason } };
   }
 
+  /** Resolves new content of a text or rich message: the files of a rich message. */
+  #resolveTextMessageReplacement(
+    authenticatedBot: VirtualBotProfile,
+    content: TextMessageReplacementRequest,
+  ):
+    | { readonly resolved: true; readonly content: TextMessageReplacement }
+    | { readonly resolved: false; readonly failure: FileResolutionFailure } {
+    if (content.kind === 'text') {
+      return { resolved: true, content };
+    }
+    const resolution = this.#resolveRichMessageFiles(authenticatedBot, content.richMessage);
+    return resolution.resolved
+      ? {
+        resolved: true,
+        content: {
+          kind: 'rich_message',
+          richMessage: resolution.richMessage,
+          detectsEntities: content.detectsEntities,
+        },
+      }
+      : resolution;
+  }
+
+  /**
+   * Resolves the files of a rich message's photo and document blocks, in the order the message
+   * shows them, as `#resolvePhoto` and `#resolveDocument` resolve the file of a photo or document.
+   */
+  #resolveRichMessageFiles(
+    authenticatedBot: VirtualBotProfile,
+    richMessage: RichMessage<BotApiRichMessageFileTypes>,
+  ):
+    | { readonly resolved: true; readonly richMessage: OutgoingRichMessage }
+    | { readonly resolved: false; readonly failure: FileResolutionFailure } {
+    const photos = new Map<BotApiInputFile, OutgoingPhoto>();
+    const documents = new Map<BotApiRichMessageDocument, OutgoingDocument>();
+    for (const file of listRichMessageFiles(richMessage)) {
+      if (file.kind === 'photo') {
+        const resolution = this.#resolvePhoto(authenticatedBot, file.file);
+        if (!resolution.resolved) {
+          return resolution;
+        }
+        photos.set(file.file, resolution.file);
+      } else {
+        const { document, thumbnail } = file.file;
+        const resolution = this.#resolveDocument(authenticatedBot, document, thumbnail);
+        if (!resolution.resolved) {
+          return resolution;
+        }
+        documents.set(file.file, resolution.file);
+      }
+    }
+    return {
+      resolved: true,
+      richMessage: convertRichMessageFiles(richMessage, {
+        photo: (photo) => getResolvedFile(photos, photo),
+        document: (document) => getResolvedFile(documents, document),
+      }),
+    };
+  }
+
   /**
    * Shows a chat action, such as typing, in a private chat or a supergroup, which the chat's
    * accounts see until it expires, is canceled, or the bot sends a message there.
@@ -2314,18 +2477,25 @@ export class BotApiService {
     };
   }
 
-  /** Replaces the text, entities, and inline keyboard of a text message the bot sent. */
+  /**
+   * Replaces the content and inline keyboard of a text or rich message the bot sent with new text
+   * and its entities, or with a rich message, which may change the message's kind. As for
+   * `sendRichMessage`, the files of a rich message are resolved before the message is found.
+   */
   editMessageText(
     authenticatedBot: VirtualBotProfile,
-    { chatId, messageId, text, entities, inlineKeyboard }: EditMessageTextRequest,
+    { chatId, messageId, content, inlineKeyboard }: EditMessageTextRequest,
   ): EditMessageTextResult {
+    const replacement = this.#resolveTextMessageReplacement(authenticatedBot, content);
+    if (!replacement.resolved) {
+      return { edited: false, ...replacement.failure };
+    }
     const result = isUserId(chatId)
       ? this.#presentPrivateEdit(this.#botMessages.editBotMessageText({
         fromBotId: authenticatedBot.id,
         chat: { type: 'private', accountId: chatId },
         botMessageId: messageId,
-        text,
-        entities,
+        content: replacement.content,
         inlineKeyboard,
       }))
       : this.#presentSupergroupEdit(
@@ -2334,8 +2504,7 @@ export class BotApiService {
           fromBotId: authenticatedBot.id,
           chatId,
           messageId,
-          text,
-          entities,
+          content: replacement.content,
           inlineKeyboard,
         }),
       );
@@ -2521,20 +2690,35 @@ export class BotApiService {
     return answering.answered ? { answered: true } : answering;
   }
 
-  /** Replaces the text, entities, and inline keyboard of a text message sent through the bot. */
+  /**
+   * Replaces the content and inline keyboard of a text or rich message sent through the bot, as
+   * `editMessageText` replaces them. As TDLib's `edit_inline_message_text` requires, a rich
+   * message may reuse files by their `file_id` but upload none.
+   */
   editInlineMessageText(
     authenticatedBot: VirtualBotProfile,
-    { inlineMessageId, text, entities, inlineKeyboard }: EditInlineMessageTextRequest,
-  ): EditInlineMessageResult<EditInlineMessageTextFailureReason> {
+    { inlineMessageId, content, inlineKeyboard }: EditInlineMessageTextRequest,
+  ): EditInlineMessageTextResult {
     const message = this.#findOwnInlineMessage(authenticatedBot, inlineMessageId);
     if (message === undefined) {
       return { edited: false, reason: 'inline_message_not_found' };
     }
+    if (
+      content.kind === 'rich_message' &&
+      listRichMessageFiles(content.richMessage).some((file) =>
+        (file.kind === 'photo' ? file.file : file.file.document).kind === 'upload'
+      )
+    ) {
+      return { edited: false, reason: 'inline_message_upload_unsupported' };
+    }
+    const replacement = this.#resolveTextMessageReplacement(authenticatedBot, content);
+    if (!replacement.resolved) {
+      return { edited: false, ...replacement.failure };
+    }
     const edit = {
       fromBotId: authenticatedBot.id,
       inlineMessageId,
-      text,
-      entities,
+      content: replacement.content,
       inlineKeyboard,
     };
     const result = message.kind === 'private_message'
@@ -2981,16 +3165,59 @@ export class BotApiService {
 }
 
 /** A file a send method resolved to send, or why it cannot be sent. */
+/** Why a file a request sends cannot be used: an upload Telegram refuses, or an unusable `file_id`. */
+export type FileResolutionFailure =
+  | { readonly reason: 'file_empty' | 'image_invalid' | 'photo_dimensions_invalid' }
+  | PhotoTooBigFailure
+  | { readonly reason: 'file_id_invalid' }
+  | FileTypeMismatchFailure;
+
 type FileResolution<File> =
   | { readonly resolved: true; readonly file: File }
-  | {
-    readonly resolved: false;
-    readonly failure:
-      | { readonly reason: 'file_empty' | 'image_invalid' | 'photo_dimensions_invalid' }
-      | PhotoTooBigFailure
-      | { readonly reason: 'file_id_invalid' }
-      | FileTypeMismatchFailure;
-  };
+  | { readonly resolved: false; readonly failure: FileResolutionFailure };
+
+/**
+ * Reads a button's link as TDLib's `get_inline_keyboard_button` does: a `tg://user?id=` link opens
+ * the user's profile and is kept in that canonical form, and any other link must pass
+ * `check_link`, which normalizes it.
+ */
+function readInlineButtonUrl(
+  url: string,
+):
+  | { readonly read: true; readonly url: string }
+  | { readonly read: false; readonly keyboardError: string } {
+  const userId = getLinkUserId(url);
+  if (userId !== undefined) {
+    return { read: true, url: `tg://user?id=${userId}` };
+  }
+  const linkCheck = checkLink(url);
+  return linkCheck.valid
+    ? { read: true, url: linkCheck.url }
+    : { read: false, keyboardError: `Inline keyboard button ${linkCheck.error}` };
+}
+
+/**
+ * TDLib's description of a switch-inline button that lets the user choose no kind of chat;
+ * `undefined` for any other button.
+ */
+function findSwitchInlineTargetError(action: RichMessageButtonAction): string | undefined {
+  return action.kind === 'switch_inline_query' && action.target.kind === 'chosen_chat' &&
+      !allowsSomeInlineQueryChat(action.target.chatTypes)
+    ? 'At least one chat type must be allowed'
+    : undefined;
+}
+
+/** Looks up what a file of a request resolved to, which must have been resolved before. */
+function getResolvedFile<RequestedFile, ResolvedFile>(
+  resolvedFiles: ReadonlyMap<RequestedFile, ResolvedFile>,
+  requestedFile: RequestedFile,
+): ResolvedFile {
+  const resolvedFile = resolvedFiles.get(requestedFile);
+  if (resolvedFile === undefined) {
+    throw new Error('Expected every file of the rich message to be resolved');
+  }
+  return resolvedFile;
+}
 
 /**
  * Why a `file_id` cannot send a file of the expected type. As on Telegram, an unknown `file_id`,
@@ -3089,7 +3316,12 @@ function toEditInlineMessageFailureReason(
   }
 }
 
-/** Media content without its caption, as a copy that removes captions sends it; text is kept. */
+/**
+ * Media content without its caption, as a copy that removes captions sends it; text and rich
+ * messages are kept.
+ */
 function withoutCaption(content: MessageContent): MessageContent {
-  return content.kind === 'text' ? content : { ...content, caption: { text: '', entities: [] } };
+  return content.kind === 'photo' || content.kind === 'document'
+    ? { ...content, caption: { text: '', entities: [] } }
+    : content;
 }

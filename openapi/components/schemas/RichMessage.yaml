@@ -1,0 +1,15 @@
+type: object
+additionalProperties: false
+description: A message a bot laid out in blocks.
+required:
+  - blocks
+properties:
+  blocks:
+    type: array
+    minItems: 1
+    items:
+      $ref: ./RichBlock.yaml
+  is_rtl:
+    type: boolean
+    const: true
+    description: Present when clients show the message right-to-left.

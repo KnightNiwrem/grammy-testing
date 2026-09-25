@@ -34,7 +34,6 @@ import {
   type SupergroupMessage,
   type SupergroupMessageAuthor,
   type SupergroupMessageContent,
-  type TextEntity,
   type TextQuote,
 } from '../types/virtual_message.ts';
 import {
@@ -45,8 +44,9 @@ import {
   type ContentReplacement,
   type FileUploadStore,
   getReplyQuoteSource,
-  hasOnlyValidCallbackData,
+  hasOnlyValidButtonCallbackData,
   isSameMessageContent,
+  isUnchangedContent,
   type NormalizedOutgoingContent,
   normalizeOutgoingContent,
   type OutgoingContentNormalization,
@@ -59,6 +59,8 @@ import {
   type SpecifiedQuote,
   storeOutgoingContent,
   type TextInvalidFailure,
+  type TextMessageReplacement,
+  toContentOfStoredFile,
   toOutgoingAccountContent,
 } from './message_content.ts';
 
@@ -214,9 +216,11 @@ type EditSupergroupBotMessageTarget =
   };
 
 export type EditSupergroupBotMessageTextInput = EditSupergroupBotMessageTarget & {
-  readonly text: string;
-  /** Formatting the bot specified, which Telegram validates and normalizes; omitted for none. */
-  readonly entities?: readonly TextEntity[];
+  /**
+   * New text with the formatting the bot specified, which Telegram validates and normalizes, or a
+   * new rich message.
+   */
+  readonly content: TextMessageReplacement;
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
 };
@@ -618,7 +622,7 @@ export class SupergroupMessagingService {
     if (!contentNormalization.normalized) {
       return { sent: false, ...contentNormalization.failure };
     }
-    if (input.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(input.inlineKeyboard)) {
+    if (!hasOnlyValidButtonCallbackData(input.inlineKeyboard, contentNormalization.content)) {
       return { sent: false, reason: 'callback_data_invalid' };
     }
     const quoteResolution = resolveReplyQuote(
@@ -649,16 +653,17 @@ export class SupergroupMessagingService {
   }
 
   /**
-   * Replaces the text, entities, and inline keyboard of a text message the bot sent, or that was
-   * sent through its inline mode. Only changed text or entities date the edit. As on Telegram, no
-   * bot receives an update for a bot's message's edit; an edit of an account's message sent
-   * through a bot reaches the supergroup's bots as the account's edited message.
+   * Replaces the text, entities, and inline keyboard of a text or rich message the bot sent, or
+   * that was sent through its inline mode, with new text or a rich message, which may change the
+   * message's kind. Only changed content dates the edit. As on Telegram, no bot receives an update
+   * for a bot's message's edit; an edit of an account's message sent through a bot reaches the
+   * supergroup's bots as the account's edited message.
    */
   editBotMessageText(input: EditSupergroupBotMessageTextInput): EditSupergroupBotMessageTextResult {
     if (this.#bots.getById(input.fromBotId) === undefined) {
       return { edited: false, reason: 'bot_not_found' };
     }
-    if (input.text.length === 0) {
+    if (input.content.kind === 'text' && input.content.text.length === 0) {
       return { edited: false, reason: 'message_text_empty' };
     }
     const resolution = this.#resolveEditableBotMessage(input);
@@ -668,7 +673,7 @@ export class SupergroupMessagingService {
     const { message } = resolution;
     return this.#editBotMessageContent(
       message,
-      replaceMessageText(message.content, input, this.#textFixingContext),
+      replaceMessageText(message.content, input.content, this.#textFixingContext),
       input.inlineKeyboard,
     );
   }
@@ -713,7 +718,7 @@ export class SupergroupMessagingService {
 
     const { message } = resolution;
     return this.#editBotMessage(message, {
-      content: message.content,
+      content: { kind: 'existing', content: message.content },
       inlineKeyboard: input.inlineKeyboard,
       contentEditedAtUnixSeconds: message.contentEditedAtUnixSeconds,
     });
@@ -749,12 +754,14 @@ export class SupergroupMessagingService {
     if (!replacement.replaced) {
       return { edited: false, ...replacement.failure };
     }
-    if (isSameMessageContent(replacement.content, message.content)) {
+    // An account edits only the text or caption of its message, which uploads no file.
+    const content = toContentOfStoredFile(replacement.content);
+    if (isSameMessageContent(content, message.content)) {
       return { edited: false, reason: 'message_not_modified' };
     }
 
     const editedMessage = this.#messages.editSupergroupMessage(message.id, {
-      content: replacement.content,
+      content,
       inlineKeyboard: message.inlineKeyboard,
       contentEditedAtUnixSeconds: this.#currentUnixTimeSeconds(),
     });
@@ -1068,27 +1075,33 @@ export class SupergroupMessagingService {
     return this.#editBotMessage(message, {
       content: replacement.content,
       inlineKeyboard,
-      contentEditedAtUnixSeconds: isSameMessageContent(replacement.content, message.content)
+      contentEditedAtUnixSeconds: isUnchangedContent(replacement.content, message.content)
         ? message.contentEditedAtUnixSeconds
         : this.#currentUnixTimeSeconds(),
     });
   }
 
-  /** Validates, stores, and publishes a bot's edit of its message, which must change it. */
+  /**
+   * Validates, stores, and publishes a bot's edit of its message, which must change it. The new
+   * content's upload is stored only once the edit passes its checks.
+   */
   #editBotMessage(
     message: SupergroupContentMessage,
-    edit: {
-      readonly content: MessageContent;
+    { content, ...edit }: {
+      readonly content: NormalizedOutgoingContent;
       readonly inlineKeyboard: InlineKeyboard | undefined;
       readonly contentEditedAtUnixSeconds: number | undefined;
     },
   ): SupergroupMessageEditResult<'callback_data_invalid' | 'message_not_modified'> {
-    const editFailure = checkBotMessageEdit(message, edit);
+    const editFailure = checkBotMessageEdit(message, { content, ...edit });
     if (editFailure !== undefined) {
       return { edited: false, reason: editFailure };
     }
 
-    const editedMessage = this.#messages.editSupergroupMessage(message.id, edit);
+    const editedMessage = this.#messages.editSupergroupMessage(message.id, {
+      ...edit,
+      content: storeOutgoingContent(content, this.#files),
+    });
     this.#events.publish({ type: 'message_edited', message: editedMessage });
     return { edited: true, message: editedMessage };
   }
