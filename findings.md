@@ -57,51 +57,6 @@ The findings and recommendations are presented in one priority order, not groupe
 
 ---
 
-## 1. P1 — Messages with non-inline reply markup are incorrectly editable
-
-**Location:**
-[`src/services/private_messaging.ts`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/src/services/private_messaging.ts),
-particularly `#resolveEditableBotMessage` and `#storePrivateMessage`.
-
-### Finding and context
-
-The edit resolver checks whether the message exists and whether the bot authored it, but does not
-reject messages carrying a reply keyboard or forced reply. Consequently, a bot can send a message
-with `ForceReply` or `ReplyKeyboardMarkup`, then successfully edit it through the emulator.
-
-Telegram documents the opposite restriction. TDLib’s `can_edit_message` rejects non-inline reply
-markup and also retains historical markup information relevant to editability.
-
-**References:** [Bot API — updating messages](https://core.telegram.org/bots/api#updating-messages),
-[TDLib `MessagesManager.cpp`](https://github.com/tdlib/td/blob/master/td/telegram/MessagesManager.cpp).
-
-### Practical impact
-
-A conversational bot can pass tests that exercise an interaction Telegram will reject—for example,
-editing its original forced-reply prompt into a confirmation message.
-
-There is an important implementation detail: **checking only `message.replyInterface !== undefined`
-would be an incomplete fix.** `#storePrivateMessage` deliberately stores `undefined` for
-`reply_keyboard_removal`, because removal leaves no currently displayed interface. That discards the
-distinction between “this message had no reply markup” and “this message carried a keyboard-removal
-instruction.”
-
-### Recommendation
-
-Preserve editability-relevant markup provenance separately from the account’s currently displayed
-reply interface. Then apply a shared eligibility check before the text, caption, and reply-markup
-edit paths mutate anything.
-
-This is also an architectural correction: **client presentation state and message editability are
-different responsibilities.** Whether a keyboard is currently visible should not determine whether
-its originating message is editable.
-
-### Regression coverage
-
-Send messages using a reply keyboard, forced reply, and keyboard removal; attempt every applicable
-edit operation; verify rejection and unchanged stored state. Keep no-markup and inline-keyboard
-messages as positive controls.
-
 ## 2. P1 — Privacy-mode routing does not resolve competing recipients correctly
 
 **Location:**
@@ -518,13 +473,12 @@ beneath an otherwise identical source revision.
 ## Bottom line
 
 **Retain the architecture and fix the behavioral invariants first.** The highest-value corrections
-are message editability, privacy recipient selection, service-message visibility, consistent inline
-ownership, and bounded webhook attempts.
+are privacy recipient selection, service-message visibility, consistent inline ownership, and
+bounded webhook attempts.
 
 The most important SRP improvements are not “split every large service.” They are more specific:
-preserve protocol metadata separately from client UI state, separate recipient selection from update
-delivery, make method execution reusable across transports, and distinguish faithful emulation from
-strict diagnostics.
+separate recipient selection from update delivery, make method execution reusable across transports,
+and distinguish faithful emulation from strict diagnostics.
 
 After those corrections, webhook-response execution, `chat_member` notifications, and a narrow
 `getChat` implementation offer useful coverage without requiring comprehensive Telegram emulation.

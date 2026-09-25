@@ -2355,6 +2355,21 @@ Deno.test("sendMessage changes the reply interface the account's client shows", 
     throw new Error('Expected a keyboard without rows to show nothing, as on Telegram');
   }
 
+  // As in TDLib, reply markup other than an inline keyboard makes a message impossible to edit.
+  for (const messageId of [2, 4, 6]) {
+    const { status, body } = await callBotApi(api, `${botApiPath}/editMessageText`, {
+      chat_id: accountId,
+      message_id: messageId,
+      text: 'Chosen',
+    });
+    if (
+      status !== 400 || !isBadRequestResponse(body) ||
+      body.description !== "Bad Request: message can't be edited"
+    ) {
+      throw new Error(`Expected message ${messageId} with reply markup not to be editable`);
+    }
+  }
+
   const invalidMarkups: unknown[] = [
     { keyboard: [[]] },
     { keyboard: [['']] },

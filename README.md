@@ -31,12 +31,13 @@ press can create the callback query already expired, to check how a bot handles 
 longer answer, such as one that arrives after downtime. Bots edit their messages with
 `editMessageText` and `editMessageReplyMarkup`, and delete messages that either side wrote in their
 private chats with `deleteMessage` and `deleteMessages`; deleted messages leave the conversation
-history. With `deleteWebhook` and `getMe` also implemented, a grammY bot can run with `bot.start()`
-and stop with `bot.stop()`. Bots manage their command menus with `setMyCommands`, `getMyCommands`,
-and `deleteMyCommands` for any scope and language, and a test reads the commands an account's
-private chat shows, resolved by scope and language as Telegram documents. Bots can also show chat
-actions such as typing with `sendChatAction`, which the emulator checks but does not keep. As
-Telegram does in private chats with bots, the emulator marks bot commands such as `/start` with
+history. As on Telegram, a message sent with a reply keyboard, a forced reply, or a keyboard removal
+cannot be edited. With `deleteWebhook` and `getMe` also implemented, a grammY bot can run with
+`bot.start()` and stop with `bot.stop()`. Bots manage their command menus with `setMyCommands`,
+`getMyCommands`, and `deleteMyCommands` for any scope and language, and a test reads the commands an
+account's private chat shows, resolved by scope and language as Telegram documents. Bots can also
+show chat actions such as typing with `sendChatAction`, which the emulator checks but does not keep.
+As Telegram does in private chats with bots, the emulator marks bot commands such as `/start` with
 `bot_command` entities, so framework command handlers match them; other entity types that Telegram
 detects, such as URLs and mentions, are not detected yet, and date and time entities are not
 supported.

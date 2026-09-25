@@ -1,5 +1,5 @@
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
-import type { ReplyInterface } from '../types/reply_interface.ts';
+import type { ReplyInterfaceMarkup } from '../types/reply_interface.ts';
 import type { PrivateConversationKey, PrivateConversationRole } from '../types/virtual_chat.ts';
 import type {
   CanonicalMessageId,
@@ -25,7 +25,7 @@ export interface AddPrivateMessageInput {
   /** The message of the same conversation this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
   readonly inlineKeyboard?: InlineKeyboard;
-  readonly replyInterface?: ReplyInterface;
+  readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
   /**
    * The bot through whose inline mode the account sent the message, which gives the message an
    * inline message identifier; omitted for other messages.
@@ -85,9 +85,9 @@ export class MessageRepository {
         : { inlineKeyboard: copyInlineKeyboard(input.inlineKeyboard) }),
       ...this.#createViaBot(input.viaBotId),
       ...(input.forwardInfo === undefined ? {} : { forwardInfo: { ...input.forwardInfo } }),
-      ...(input.replyInterface === undefined
+      ...(input.replyInterfaceMarkup === undefined
         ? {}
-        : { replyInterface: copyReplyInterface(input.replyInterface) }),
+        : { replyInterfaceMarkup: copyReplyInterfaceMarkup(input.replyInterfaceMarkup) }),
       isContentProtected: input.isContentProtected ?? false,
     };
     this.#privateMessagesById.set(message.id, message);
@@ -127,7 +127,7 @@ export class MessageRepository {
       replyToMessageId,
       viaBot,
       forwardInfo,
-      replyInterface,
+      replyInterfaceMarkup,
       isContentProtected,
     } = storedMessage;
     const editedMessage: PrivateMessage = {
@@ -143,7 +143,7 @@ export class MessageRepository {
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
       ...(viaBot === undefined ? {} : { viaBot }),
       ...(forwardInfo === undefined ? {} : { forwardInfo }),
-      ...(replyInterface === undefined ? {} : { replyInterface }),
+      ...(replyInterfaceMarkup === undefined ? {} : { replyInterfaceMarkup }),
       ...(edit.contentEditedAtUnixSeconds === undefined
         ? {}
         : { contentEditedAtUnixSeconds: edit.contentEditedAtUnixSeconds }),
@@ -352,11 +352,8 @@ function copyInlineKeyboard(inlineKeyboard: InlineKeyboard): InlineKeyboard {
   return inlineKeyboard.map((row) => row.map((button) => ({ ...button })));
 }
 
-function copyReplyInterface(replyInterface: ReplyInterface): ReplyInterface {
-  return replyInterface.kind === 'reply_keyboard'
-    ? {
-      ...replyInterface,
-      rows: replyInterface.rows.map((row) => row.map((button) => ({ ...button }))),
-    }
-    : { ...replyInterface };
+function copyReplyInterfaceMarkup(markup: ReplyInterfaceMarkup): ReplyInterfaceMarkup {
+  return markup.kind === 'reply_keyboard'
+    ? { ...markup, rows: markup.rows.map((row) => row.map((button) => ({ ...button }))) }
+    : { ...markup };
 }

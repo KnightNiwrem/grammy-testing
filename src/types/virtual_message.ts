@@ -1,5 +1,5 @@
 import type { InlineKeyboard } from './inline_keyboard.ts';
-import type { ReplyInterface } from './reply_interface.ts';
+import type { ReplyInterfaceMarkup } from './reply_interface.ts';
 import type { StoredFileId } from './stored_file.ts';
 import type { PrivateConversationKey, PrivateConversationRole } from './virtual_chat.ts';
 
@@ -205,10 +205,12 @@ export interface PrivateMessage {
   /** Omitted for a message that is no forward. */
   readonly forwardInfo?: MessageForwardInfo;
   /**
-   * The reply interface the message asks the account's client to show; omitted for none. Only
-   * bots send one, and never with an inline keyboard. Edits leave it unchanged.
+   * The change of the account client's reply interface the message carries: a reply keyboard or
+   * forced reply to show, or the removal of a reply keyboard; omitted for none. Only bots send
+   * one, and never with an inline keyboard. It stays with the message after the client stops
+   * showing the interface, since, as in TDLib, it makes the message impossible to edit.
    */
-  readonly replyInterface?: ReplyInterface;
+  readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
   /**
    * When the text or caption was last edited; omitted for a message whose content was never
    * edited.

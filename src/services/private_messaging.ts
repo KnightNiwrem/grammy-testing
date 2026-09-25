@@ -418,7 +418,7 @@ interface PrivateMessageStore {
     readonly content: MessageContent;
     readonly replyToMessageId?: CanonicalMessageId;
     readonly inlineKeyboard?: InlineKeyboard;
-    readonly replyInterface?: ReplyInterface;
+    readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
     readonly viaBotId?: number;
     readonly forwardInfo?: MessageForwardInfo;
     readonly isContentProtected?: boolean;
@@ -1006,10 +1006,14 @@ export class PrivateMessagingService {
       return undefined;
     }
     const message = this.#messages.getPrivateMessage(messageId);
-    if (message?.replyInterface === undefined) {
+    const replyInterface = message?.replyInterfaceMarkup;
+    if (
+      message === undefined || replyInterface === undefined ||
+      replyInterface.kind === 'reply_keyboard_removal'
+    ) {
       throw new Error(`Reply interface message ${messageId} has no stored reply interface`);
     }
-    return { message, replyInterface: message.replyInterface };
+    return { message, replyInterface };
   }
 
   /**
@@ -1046,8 +1050,12 @@ export class PrivateMessagingService {
     if (message === undefined) {
       return { resolved: false, reason: 'message_not_found' };
     }
-    // As in TDLib, a forward cannot be edited.
-    if (message.authorRole !== 'bot' || message.forwardInfo !== undefined) {
+    // As in TDLib, a forward cannot be edited, nor a message with reply markup other than an
+    // inline keyboard, even a keyboard removal or one the client no longer shows.
+    if (
+      message.authorRole !== 'bot' || message.forwardInfo !== undefined ||
+      message.replyInterfaceMarkup !== undefined
+    ) {
       return { resolved: false, reason: 'message_not_editable' };
     }
     return { resolved: true, message };
@@ -1204,9 +1212,7 @@ export class PrivateMessagingService {
       content,
       replyToMessageId,
       inlineKeyboard,
-      replyInterface: replyInterfaceMarkup?.kind === 'reply_keyboard_removal'
-        ? undefined
-        : replyInterfaceMarkup,
+      replyInterfaceMarkup,
       viaBotId,
       forwardInfo,
       isContentProtected,

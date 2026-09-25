@@ -107,7 +107,7 @@ Deno.test('MessageRepository keeps what an edit cannot change', () => {
     sentAtUnixSeconds: 1_700_000_000,
     content: { kind: 'text', text: 'Colors?', entities: [] },
   });
-  const replyInterface = {
+  const replyInterfaceMarkup = {
     kind: 'reply_keyboard' as const,
     rows: [[{ text: 'Red' }]],
     isPersistent: true,
@@ -119,16 +119,17 @@ Deno.test('MessageRepository keeps what an edit cannot change', () => {
     authorRole: 'bot',
     sentAtUnixSeconds: 1_700_000_001,
     replyToMessageId: question.id,
-    replyInterface,
+    replyInterfaceMarkup,
     isContentProtected: true,
     content: { kind: 'text', text: 'Pick one', entities: [] },
   });
   if (
-    answer.replyInterface === replyInterface ||
-    JSON.stringify(answer.replyInterface) !== JSON.stringify(replyInterface) ||
-    question.isContentProtected || 'replyToMessageId' in question || 'replyInterface' in question
+    answer.replyInterfaceMarkup === replyInterfaceMarkup ||
+    JSON.stringify(answer.replyInterfaceMarkup) !== JSON.stringify(replyInterfaceMarkup) ||
+    question.isContentProtected || 'replyToMessageId' in question ||
+    'replyInterfaceMarkup' in question
   ) {
-    throw new Error('Expected a stored copy of the reply interface only where one was sent');
+    throw new Error('Expected a stored copy of the reply interface markup only where one was sent');
   }
 
   const editedAnswer = messages.editPrivateMessage(answer.id, {
@@ -138,10 +139,10 @@ Deno.test('MessageRepository keeps what an edit cannot change', () => {
   });
   if (
     editedAnswer.replyToMessageId !== question.id ||
-    editedAnswer.replyInterface !== answer.replyInterface ||
+    editedAnswer.replyInterfaceMarkup !== answer.replyInterfaceMarkup ||
     !editedAnswer.isContentProtected
   ) {
-    throw new Error('Expected the edit to keep the reply, reply interface, and protection');
+    throw new Error('Expected the edit to keep the reply, reply interface markup, and protection');
   }
 });
 

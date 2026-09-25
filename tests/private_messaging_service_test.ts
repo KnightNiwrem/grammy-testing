@@ -22,7 +22,7 @@ import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { BotApiMessage, BotApiUpdate } from '../src/types/bot_api.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
 import type { InlineKeyboard } from '../src/types/inline_keyboard.ts';
-import type { ReplyInterfaceMarkup } from '../src/types/reply_interface.ts';
+import type { BotMessageReplyMarkup, ReplyInterfaceMarkup } from '../src/types/reply_interface.ts';
 import type { FileUpload, PhotoUpload } from '../src/types/stored_file.ts';
 import {
   getContentText,
@@ -790,6 +790,117 @@ Deno.test('PrivateMessagingService validates bot message edits in Telegram order
   }
   if (messages.getPrivateMessage(botMessage.id) !== botMessage) {
     throw new Error('Expected rejected edits to leave the message unchanged');
+  }
+});
+
+Deno.test('PrivateMessagingService refuses edits of messages with reply markup other than an inline keyboard', () => {
+  const { virtualUsers, messageBoxes, messages, publishedEvents, privateMessaging } =
+    createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const chat = { type: 'private', accountId: account.profile.id } as const;
+  const sendBotText = (markup: BotMessageReplyMarkup) =>
+    privateMessaging.sendBotMessage({
+      fromBotId: bot.profile.id,
+      to: chat,
+      ...markup,
+      content: { kind: 'text', text: 'Choose' },
+    });
+  const sendBotPhoto = (markup: BotMessageReplyMarkup) =>
+    privateMessaging.sendBotMessage({
+      fromBotId: bot.profile.id,
+      to: chat,
+      ...markup,
+      content: {
+        kind: 'photo',
+        photo: { kind: 'upload', upload: photoUpload() },
+        caption: 'Choose',
+        hasSpoiler: false,
+        showsCaptionAboveMedia: false,
+      },
+    });
+  const editEveryWay = (botMessageId: number) => [
+    privateMessaging.editBotMessageText({
+      fromBotId: bot.profile.id,
+      chat,
+      botMessageId,
+      text: 'Chosen',
+    }),
+    privateMessaging.editBotMessageCaption({
+      fromBotId: bot.profile.id,
+      chat,
+      botMessageId,
+      caption: 'Chosen',
+      showsCaptionAboveMedia: false,
+    }),
+    privateMessaging.editBotMessageInlineKeyboard({
+      fromBotId: bot.profile.id,
+      chat,
+      botMessageId,
+      inlineKeyboard: YES_NO_KEYBOARD,
+    }),
+  ];
+  const replyInterfaceMarkups: ReplyInterfaceMarkup[] = [
+    COLOR_KEYBOARD,
+    { kind: 'forced_reply' },
+    { kind: 'reply_keyboard_removal' },
+  ];
+
+  for (const replyInterfaceMarkup of replyInterfaceMarkups) {
+    for (const send of [sendBotText, sendBotPhoto]) {
+      const sent = send({ replyInterfaceMarkup });
+      if (!sent.sent) {
+        throw new Error(`Expected the bot message to be sent, received ${sent.reason}`);
+      }
+      const eventCountBeforeEdits = publishedEvents.length;
+      const edits = editEveryWay(expectBotMessageId(messageBoxes, bot, sent.message.id));
+      if (
+        edits.some((edit) => edit.edited || edit.reason !== 'message_not_editable') ||
+        messages.getPrivateMessage(sent.message.id) !== sent.message ||
+        publishedEvents.length !== eventCountBeforeEdits
+      ) {
+        throw new Error(
+          `Expected a ${sent.message.content.kind} with ${replyInterfaceMarkup.kind} to refuse ` +
+            `every edit, received ${JSON.stringify(edits)}`,
+        );
+      }
+    }
+  }
+
+  // A keyboard stays with its message after a later message removes it from the client.
+  const keyboardMessage = sendBotText({ replyInterfaceMarkup: COLOR_KEYBOARD });
+  sendBotText({ replyInterfaceMarkup: { kind: 'reply_keyboard_removal' } });
+  const shown = privateMessaging.getPrivateChatReplyInterface({
+    accountId: account.profile.id,
+    botId: bot.profile.id,
+  });
+  if (!keyboardMessage.sent || !shown.found || shown.shownReplyInterface !== undefined) {
+    throw new Error('Expected the removal to leave the client without a reply interface');
+  }
+  const [hiddenKeyboardEdit] = editEveryWay(
+    expectBotMessageId(messageBoxes, bot, keyboardMessage.message.id),
+  );
+  if (hiddenKeyboardEdit.edited || hiddenKeyboardEdit.reason !== 'message_not_editable') {
+    throw new Error('Expected a message whose keyboard the client no longer shows to stay fixed');
+  }
+
+  for (const markup of [{}, { inlineKeyboard: YES_NO_KEYBOARD }]) {
+    const text = sendBotText(markup);
+    const photo = sendBotPhoto(markup);
+    if (!text.sent || !photo.sent) {
+      throw new Error('Expected the bot messages to be sent');
+    }
+    const [textEdit] = editEveryWay(expectBotMessageId(messageBoxes, bot, text.message.id));
+    const [, captionEdit, keyboardEdit] = editEveryWay(
+      expectBotMessageId(messageBoxes, bot, photo.message.id),
+    );
+    if (!textEdit.edited || !captionEdit.edited || !keyboardEdit.edited) {
+      throw new Error(
+        `Expected messages with ${JSON.stringify(markup)} to be editable, received ` +
+          JSON.stringify([textEdit, captionEdit, keyboardEdit]),
+      );
+    }
   }
 });
 
