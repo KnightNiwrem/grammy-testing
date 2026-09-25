@@ -13,8 +13,17 @@ An account presses a callback button using its message ID and `callback_data`. T
 a `callback_query` update for the bot responsible for that keyboard. The query includes the account,
 data and `chat_instance`; ordinary message callbacks include a message, while inline callbacks use
 `inline_message_id` instead. Tests inspect the answer after the bot calls `answerCallbackQuery`.
-Answers store optional text, `show_alert` and `cache_time`; answer text is limited to 200 UTF-16
-code units by the emulator's schema.
+Answers store optional text, `show_alert`, `url` and `cache_time`; answer text is limited to 200
+UTF-16 code units by the emulator's schema.
+
+The [Bot API handler][answer-callback] and TDLib's [`answer_callback_query`][td-callback] pass `url`
+to Telegram, whose servers decide which URLs to accept. The Bot API documents a game's URL for game
+buttons and links like `t.me/<bot_username>?start=<parameter>`. The emulator has no game buttons. It
+accepts only links that start the answering bot, recognizing the `t.me`, `telegram.me` and
+`telegram.dog` forms that TDLib's [`LinkManager`][link-manager] parses, and
+`tg://resolve?domain=<bot_username>&start=<parameter>`. Other URLs are rejected with
+`Bad Request: URL_INVALID`, which may be stricter than Telegram. The link is recorded for tests to
+inspect; the account's client does not follow it.
 
 ## Reply keyboards and forced replies
 
@@ -69,9 +78,6 @@ uneditable, even after the interface clears. Forced-reply dismissal is a [real g
 
 - **Callback answer caching.** `cache_time` is recorded but never avoids a subsequent callback
   update. Tests need simulated reuse of cached answers.
-- **Callback answer URLs.** `url` in an answer is unsupported. Tests need to submit and inspect it.
-  The official [Bot API handler][answer-callback] accepts both URL and cache options, and TDLib's
-  [`answer_callback_query`][td-callback] passes them to Telegram.
 
 ## Comparison limits
 
@@ -83,6 +89,7 @@ server behavior.
 
 [Markup schemas](../../src/api/sessions/bot_api/reply_markup_parameter.ts),
 [callback service](../../src/services/callback_query.ts),
+[start link parsing](../../src/text_entities/telegram_link.ts),
 [reply interface handling](../../src/services/private_messaging.ts),
 [callback tests](../../tests/callback_query_service_test.ts) and
 [private message tests](../../tests/private_messaging_service_test.ts).
@@ -93,3 +100,4 @@ server behavior.
 [button-parsing]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10200-L10503
 [answer-callback]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L15544-L15565
 [td-callback]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/CallbackQueriesManager.cpp#L145-L188
+[link-manager]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/LinkManager.cpp#L2055-L2084

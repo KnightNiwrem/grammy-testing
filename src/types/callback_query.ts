@@ -14,6 +14,11 @@ export interface CallbackQueryAnswer {
   readonly showAlert: boolean;
   /** How long the user's client may reuse this answer for the same button. */
   readonly cacheTimeSeconds: number;
+  /**
+   * The link the user's client opens, which starts the answering bot with a parameter; omitted
+   * for none.
+   */
+  readonly url?: string;
 }
 
 /**

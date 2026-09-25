@@ -344,6 +344,7 @@ const callbackQuerySchema: z.ZodType<CallbackQuery> = z.strictObject({
   answer: z.strictObject({
     text: z.string().optional(),
     show_alert: z.boolean(),
+    url: z.string().min(1).optional(),
     cache_time: z.number().int().nonnegative(),
   }).nullable(),
 });

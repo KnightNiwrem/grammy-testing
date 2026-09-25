@@ -1,3 +1,4 @@
+import { getLinkBotStart, toAsciiLowerCase } from '../text_entities/telegram_link.ts';
 import type {
   CallbackQuery,
   CallbackQueryAnswer,
@@ -61,11 +62,16 @@ export interface BotCallbackQueryAnswerInput {
   readonly text?: string;
   readonly showAlert: boolean;
   readonly cacheTimeSeconds: number;
+  /** A link for the user's client to open; empty or omitted for none. */
+  readonly url?: string;
 }
 
 export type BotCallbackQueryAnswerResult =
   | { readonly answered: true; readonly callbackQuery: CallbackQuery }
-  | { readonly answered: false; readonly reason: 'callback_query_not_answerable' };
+  | {
+    readonly answered: false;
+    readonly reason: 'callback_query_not_answerable' | 'url_invalid';
+  };
 
 /** Identifies a callback query by the account that created it. */
 export interface AccountCallbackQueryKey {
@@ -224,6 +230,12 @@ export class CallbackQueryService {
   /**
    * Records the bot's answer to a callback query it received. As on Telegram, a query that does
    * not exist, belongs to another bot, is already answered, or has expired cannot be answered.
+   *
+   * The Bot API documents two kinds of URL for an answer: a game's URL, for a button that opens a
+   * game, and a link like `t.me/<bot_username>?start=<parameter>`. The emulator has no game
+   * buttons, so it accepts only links that start the answering bot, which Telegram's servers
+   * check beyond the open-source code; other URLs are rejected, as Telegram rejects URLs it does
+   * not allow.
    */
   answerCallbackQuery(input: BotCallbackQueryAnswerInput): BotCallbackQueryAnswerResult {
     const callbackQuery = this.#callbackQueries.getCallbackQuery(input.callbackQueryId);
@@ -234,6 +246,10 @@ export class CallbackQueryService {
     ) {
       return { answered: false, reason: 'callback_query_not_answerable' };
     }
+    const url = input.url === undefined || input.url.length === 0 ? undefined : input.url;
+    if (url !== undefined && !this.#isStartLinkOfBot(url, input.fromBotId)) {
+      return { answered: false, reason: 'url_invalid' };
+    }
 
     return {
       answered: true,
@@ -241,8 +257,17 @@ export class CallbackQueryService {
         ...(input.text === undefined || input.text.length === 0 ? {} : { text: input.text }),
         showAlert: input.showAlert,
         cacheTimeSeconds: input.cacheTimeSeconds,
+        ...(url === undefined ? {} : { url }),
       }),
     };
+  }
+
+  /** Whether a link starts the bot with a parameter; usernames match regardless of case. */
+  #isStartLinkOfBot(url: string, botId: number): boolean {
+    const startLink = getLinkBotStart(url);
+    const botUsername = this.#bots.getById(botId)?.profile.username;
+    return startLink !== undefined && botUsername !== undefined &&
+      toAsciiLowerCase(startLink.username) === toAsciiLowerCase(botUsername);
   }
 
   /** Returns a callback query the account created, or `undefined` for any other query. */

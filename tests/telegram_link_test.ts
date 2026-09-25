@@ -1,6 +1,7 @@
 import {
   checkLink,
   getCheckedLink,
+  getLinkBotStart,
   getLinkCustomEmojiId,
   getLinkDateTime,
   getLinkUserId,
@@ -154,6 +155,31 @@ Deno.test('getLinkCustomEmojiId and getLinkDateTime read tg:// entity links', ()
   for (const link of ['tg://time?format=r', 'tg://time?unix=0', 'tg://time?unix=5&format=rt']) {
     if (getLinkDateTime(link) !== undefined) {
       throw new Error(`Expected ${link} to be an invalid time link`);
+    }
+  }
+});
+
+Deno.test('getLinkBotStart reads links that start a bot with a parameter', () => {
+  const cases: ReadonlyArray<readonly [link: string, expected: string | undefined]> = [
+    ['t.me/test_bot?start=order-42', 'test_bot:order-42'],
+    ['https://www.T.ME/Test_Bot?start=a_b#top', 'Test_Bot:a_b'],
+    ['http://telegram.me/test_bot?ref=x&start=', 'test_bot:'],
+    ['https://telegram.dog/test_bot/?start=1', undefined],
+    ['tg://resolve?domain=test_bot&start=go', 'test_bot:go'],
+    ['tg:resolve?start=go&domain=test_bot', 'test_bot:go'],
+    ['https://t.me/test_bot', undefined],
+    ['https://t.me/test_bot?start=a+b', undefined],
+    [`https://t.me/test_bot?start=${'a'.repeat(65)}`, undefined],
+    ['https://example.com/test_bot?start=go', undefined],
+    ['tg://resolve?start=go', undefined],
+  ];
+  for (const [link, expected] of cases) {
+    const startLink = getLinkBotStart(link);
+    const received = startLink === undefined
+      ? undefined
+      : `${startLink.username}:${startLink.startParameter}`;
+    if (received !== expected) {
+      throw new Error(`Expected ${JSON.stringify(link)} to read ${expected}, received ${received}`);
     }
   }
 });

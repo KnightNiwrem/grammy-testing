@@ -636,11 +636,13 @@ export interface AnswerCallbackQueryRequest {
   readonly text?: string;
   readonly showAlert: boolean;
   readonly cacheTimeSeconds: number;
+  /** The Bot API `url`; empty or omitted for none. */
+  readonly url?: string;
 }
 
 export type AnswerCallbackQueryResult =
   | { readonly answered: true }
-  | { readonly answered: false; readonly reason: 'query_id_invalid' };
+  | { readonly answered: false; readonly reason: 'query_id_invalid' | 'url_invalid' };
 
 interface BotCredentialLookup {
   getByToken(token: string): VirtualBot | undefined;
@@ -1038,7 +1040,13 @@ interface CallbackQueryAnswering {
     readonly text?: string;
     readonly showAlert: boolean;
     readonly cacheTimeSeconds: number;
-  }): { readonly answered: boolean };
+    readonly url?: string;
+  }):
+    | { readonly answered: true }
+    | {
+      readonly answered: false;
+      readonly reason: 'callback_query_not_answerable' | 'url_invalid';
+    };
 }
 
 interface InlineQueryAnswering {
@@ -2083,10 +2091,13 @@ export class BotApiService {
     return result.deleted ? { deleted: true } : result;
   }
 
-  /** Answers a callback query that an account created by pressing one of the bot's buttons. */
+  /**
+   * Answers a callback query that an account created by pressing one of the bot's buttons,
+   * optionally with a link that starts the bot, which the account's client opens.
+   */
   answerCallbackQuery(
     authenticatedBot: VirtualBotProfile,
-    { callbackQueryId, text, showAlert, cacheTimeSeconds }: AnswerCallbackQueryRequest,
+    { callbackQueryId, text, showAlert, cacheTimeSeconds, url }: AnswerCallbackQueryRequest,
   ): AnswerCallbackQueryResult {
     const result = this.#callbackQueries.answerCallbackQuery({
       fromBotId: authenticatedBot.id,
@@ -2094,8 +2105,15 @@ export class BotApiService {
       text,
       showAlert,
       cacheTimeSeconds,
+      url,
     });
-    return result.answered ? { answered: true } : { answered: false, reason: 'query_id_invalid' };
+    if (result.answered) {
+      return { answered: true };
+    }
+    return {
+      answered: false,
+      reason: result.reason === 'url_invalid' ? 'url_invalid' : 'query_id_invalid',
+    };
   }
 
   /**

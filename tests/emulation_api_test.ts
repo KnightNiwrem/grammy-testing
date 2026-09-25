@@ -1150,10 +1150,12 @@ Deno.test('an account presses a callback button and reads the bot answer', async
     throw new Error(`Expected a callback_query update, received ${JSON.stringify(updatesBody)}`);
   }
 
+  const startLink = `https://t.me/${createdBot.bot.username}?start=saved`;
   const answerResponse = await callBotApi(api, `${botApiPath}/answerCallbackQuery`, {
     callback_query_id: callbackQueryId,
     text: 'Saved',
     show_alert: true,
+    url: startLink,
   });
   if (JSON.stringify(answerResponse.body) !== JSON.stringify({ ok: true, result: true })) {
     throw new Error(`Expected the answer to be accepted, received ${answerResponse.status}`);
@@ -1164,7 +1166,7 @@ Deno.test('an account presses a callback button and reads the bot answer', async
   if (
     !isCallbackQueryResponse(answeredBody) ||
     JSON.stringify(answeredBody.callback_query.answer) !==
-      JSON.stringify({ text: 'Saved', show_alert: true, cache_time: 0 })
+      JSON.stringify({ text: 'Saved', show_alert: true, url: startLink, cache_time: 0 })
   ) {
     throw new Error(
       `Expected the account to see the answer, received ${JSON.stringify(answeredBody)}`,
@@ -1180,13 +1182,6 @@ Deno.test('an account presses a callback button and reads the bot answer', async
     if (!isBadRequestResponse(body) || body.description !== queryIdInvalid) {
       throw new Error(`Expected ${JSON.stringify(parameters)} to be an invalid query ID`);
     }
-  }
-  const unsupportedAnswer = await callBotApi(api, `${botApiPath}/answerCallbackQuery`, {
-    callback_query_id: callbackQueryId,
-    url: 'https://grammy.dev',
-  });
-  if (unsupportedAnswer.status !== 400) {
-    throw new Error('Expected an answer URL to be rejected as unsupported');
   }
 
   const pressFailures = await Promise.all([

@@ -578,6 +578,8 @@ export interface CallbackQueryAnswer {
   /** Omitted when the answer shows no notification. */
   readonly text?: string;
   readonly show_alert: boolean;
+  /** The link that starts the bot, which the client opens; omitted when the answer has none. */
+  readonly url?: string;
   readonly cache_time: number;
 }
 

@@ -1,12 +1,14 @@
+import { MAX_START_PARAMETER_LENGTH } from '../types/inline_query.ts';
 import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from '../types/telegram_identity.ts';
 import type { DateTimeFormat } from '../types/virtual_message.ts';
 import { readMarkupDateTimeFormat } from './date_time_format.ts';
 
 /**
- * Link rules that Telegram applies to text links, mirroring `LinkManager::check_link`,
- * `LinkManager::get_link_user_id`, `LinkManager::get_link_custom_emoji_id`, and
- * `LinkManager::get_link_formatted_date` in TDLib's
- * `td/telegram/LinkManager.cpp`, and `parse_url` in `tdutils/td/utils/HttpUrl.cpp`.
+ * Link rules that Telegram applies to text links and bot start links, mirroring
+ * `LinkManager::check_link`, `LinkManager::get_link_user_id`,
+ * `LinkManager::get_link_custom_emoji_id`, `LinkManager::get_link_formatted_date`, and the parsing
+ * of bot start links in TDLib's `td/telegram/LinkManager.cpp`, and `parse_url` in
+ * `tdutils/td/utils/HttpUrl.cpp`.
  *
  * Failures carry TDLib's own error message, which callers wrap as Telegram does.
  */
@@ -145,6 +147,55 @@ export function getLinkDateTime(link: string): LinkDateTime | undefined {
   return formatReading.format === undefined
     ? { unixTime }
     : { unixTime, format: formatReading.format };
+}
+
+/** A link that opens a bot's private chat to start the bot with a parameter. */
+export interface BotStartLink {
+  /** The bot's username, as the link writes it. */
+  readonly username: string;
+  readonly startParameter: string;
+}
+
+/** The domains of Telegram's t.me links, as TDLib's `LinkManager::get_link_info` lists them. */
+const T_ME_HOSTS: readonly string[] = ['t.me', 'telegram.me', 'telegram.dog'];
+
+/** Characters of a start parameter, as TDLib's `is_valid_start_parameter` allows them. */
+const START_PARAMETER_PATTERN = /^[A-Za-z0-9_-]*$/;
+
+/**
+ * Reads a link that starts a bot with a parameter, as TDLib's `LinkManager` parses
+ * `t.me/<username>?start=<parameter>` on Telegram's t.me domains and
+ * `tg://resolve?domain=<username>&start=<parameter>`. Returns `undefined` for any other link,
+ * including forms TDLib also recognizes, such as `<username>.t.me` subdomains, which the emulator
+ * does not read.
+ */
+export function getLinkBotStart(link: string): BotStartLink | undefined {
+  let username: string | undefined;
+  let query: string;
+  const tgLink = getTgLinkQuery(link, 'resolve');
+  if (tgLink.found) {
+    username = findQueryParameter(tgLink.query, 'domain');
+    query = tgLink.query;
+  } else {
+    const parsing = parseHttpUrl(link);
+    if (!parsing.parsed || !T_ME_HOSTS.includes(removePrefix(parsing.url.host, 'www.'))) {
+      return undefined;
+    }
+    const pathAndQuery = truncateAt(parsing.url.query, '#');
+    const queryIndex = pathAndQuery.indexOf('?');
+    const path = queryIndex === -1 ? pathAndQuery : pathAndQuery.slice(0, queryIndex);
+    username = removePrefix(path, '/');
+    query = queryIndex === -1 ? '' : pathAndQuery.slice(queryIndex + 1);
+  }
+  const startParameter = findQueryParameter(query, 'start');
+  if (
+    username === undefined || username.length === 0 || username.includes('/') ||
+    startParameter === undefined || startParameter.length > MAX_START_PARAMETER_LENGTH ||
+    !START_PARAMETER_PATTERN.test(startParameter)
+  ) {
+    return undefined;
+  }
+  return { username, startParameter };
 }
 
 /**

@@ -107,6 +107,7 @@ const REPLY_MESSAGE_NOT_FOUND_DESCRIPTION = 'Bad Request: message to be replied 
 const MESSAGE_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: message is too long';
 const BUTTON_DATA_INVALID_DESCRIPTION = 'Bad Request: BUTTON_DATA_INVALID';
 const QUOTE_TEXT_INVALID_DESCRIPTION = 'Bad Request: QUOTE_TEXT_INVALID';
+const URL_INVALID_DESCRIPTION = 'Bad Request: URL_INVALID';
 
 /** TDLib's descriptions for message effects in chats or requests that cannot use them. */
 const MESSAGE_EFFECT_NOT_ALLOWED_IN_CHAT_DESCRIPTION =
@@ -468,6 +469,7 @@ const answerCallbackQueryParametersSchema = z.strictObject({
   callback_query_id: z.string().default(''),
   text: z.string().max(MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH).optional(),
   show_alert: booleanParameter().default(false),
+  url: z.string().optional(),
   cache_time: integerParameter(z.int().min(0).max(MAX_CALLBACK_QUERY_ANSWER_CACHE_TIME_SECONDS))
     .default(0),
 });
@@ -1715,12 +1717,22 @@ function handleAnswerCallbackQuery(
       text: parsedParameters.data.text,
       showAlert: parsedParameters.data.show_alert,
       cacheTimeSeconds: parsedParameters.data.cache_time,
+      url: parsedParameters.data.url,
     },
   );
-  if (!result.answered) {
-    return botApiError(400, QUERY_ID_INVALID_DESCRIPTION);
+  if (result.answered) {
+    return botApiResult(true);
   }
-  return botApiResult(true);
+  switch (result.reason) {
+    case 'query_id_invalid':
+      return botApiError(400, QUERY_ID_INVALID_DESCRIPTION);
+    case 'url_invalid':
+      return botApiError(400, URL_INVALID_DESCRIPTION);
+    default: {
+      const unhandledReason: never = result.reason;
+      throw new Error(`Unhandled answerCallbackQuery failure: ${unhandledReason}`);
+    }
+  }
 }
 
 function handleSendChatAction(

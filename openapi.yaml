@@ -2050,8 +2050,8 @@ paths:
   /sessions/{sessionId}/bot-api/bot{token}/answerCallbackQuery:
     description: >-
       Telegram Bot API method for answering a callback query the bot received. The account that
-      pressed the button can read the answer from its callback query. Answer URLs, which Telegram
-      allows only for game buttons and bot links, are not supported.
+      pressed the button can read the answer from its callback query, including a URL for its
+      client to open.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -2081,7 +2081,8 @@ paths:
           description: >-
             The request cannot be decoded or has unsupported parameters, or the callback query
             does not exist, was sent to another bot, is already answered, or has expired (`Bad
-            Request: query is too old and response timeout expired or query ID is invalid`).
+            Request: query is too old and response timeout expired or query ID is invalid`), or
+            the URL does not start the bot (`Bad Request: URL_INVALID`).
           content:
             application/json:
               schema:
@@ -5305,6 +5306,15 @@ components:
           type: boolean
           default: false
           description: Shows the text as an alert instead of a transient notification.
+        url:
+          type: string
+          description: >-
+            A link for the account's client to open; empty for none. The Bot API allows a game's
+            URL for a game button, and links like `t.me/<bot_username>?start=<parameter>` that
+            start the bot. The emulator has no game buttons, so it accepts only a link that starts
+            the answering bot: `t.me`, `telegram.me`, or `telegram.dog` links, with or without a
+            scheme, and `tg://resolve?domain=<bot_username>&start=<parameter>`, where the start
+            parameter has at most 64 letters, digits, underscores, and hyphens.
         cache_time:
           type: integer
           minimum: 0
@@ -5739,6 +5749,11 @@ components:
                   description: Notification text, omitted when the answer shows none.
                 show_alert:
                   type: boolean
+                url:
+                  type: string
+                  description: >-
+                    The link that starts the bot, which the account's client opens; omitted when
+                    the answer has none.
                 cache_time:
                   type: integer
                   minimum: 0

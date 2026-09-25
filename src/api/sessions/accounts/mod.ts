@@ -1119,6 +1119,7 @@ function presentCallbackQueryForAccount({ id, callbackData, state }: CallbackQue
     answer: state.status !== 'answered' ? null : {
       ...(state.answer.text === undefined ? {} : { text: state.answer.text }),
       show_alert: state.answer.showAlert,
+      ...(state.answer.url === undefined ? {} : { url: state.answer.url }),
       cache_time: state.answer.cacheTimeSeconds,
     },
   };

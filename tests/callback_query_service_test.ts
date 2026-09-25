@@ -269,6 +269,50 @@ Deno.test('CallbackQueryService records an empty answer text as no notification'
   }
 });
 
+Deno.test('CallbackQueryService records only answer URLs that start the answering bot', () => {
+  const { callbackQueries, chat } = createCallbackQueryFixture();
+  const press = () => {
+    const pressResult = callbackQueries.pressCallbackButton({
+      fromAccountId: chat.account.profile.id,
+      chat: { type: 'private', botId: chat.bot.profile.id },
+      messageId: chat.botMessageId,
+      callbackData: 'yes',
+      expired: false,
+    });
+    if (!pressResult.pressed) {
+      throw new Error(`Expected the button press to succeed, received ${pressResult.reason}`);
+    }
+    return pressResult.callbackQuery.id;
+  };
+  const answer = (callbackQueryId: string, url: string) =>
+    callbackQueries.answerCallbackQuery({
+      fromBotId: chat.bot.profile.id,
+      callbackQueryId,
+      showAlert: false,
+      cacheTimeSeconds: 0,
+      url,
+    });
+
+  const callbackQueryId = press();
+  for (const url of ['https://grammy.dev', 'https://t.me/other_bot?start=x', 't.me/test_bot']) {
+    const result = answer(callbackQueryId, url);
+    if (result.answered || result.reason !== 'url_invalid') {
+      throw new Error(`Expected ${url} to be rejected, received ${JSON.stringify(result)}`);
+    }
+  }
+  const startLink = `https://t.me/${chat.bot.profile.username.toUpperCase()}?start=order`;
+  const accepted = answer(callbackQueryId, startLink);
+  const withoutUrl = answer(press(), '');
+  if (
+    !accepted.answered || accepted.callbackQuery.state.status !== 'answered' ||
+    accepted.callbackQuery.state.answer.url !== startLink || !withoutUrl.answered ||
+    withoutUrl.callbackQuery.state.status !== 'answered' ||
+    'url' in withoutUrl.callbackQuery.state.answer
+  ) {
+    throw new Error('Expected a link that starts the bot to be recorded, and an empty URL omitted');
+  }
+});
+
 Deno.test('CallbackQueryService shows callback queries only to the account that created them', () => {
   const { virtualUsers, callbackQueries, chat } = createCallbackQueryFixture();
   const otherAccount = createAccount(virtualUsers, 'Grace');
