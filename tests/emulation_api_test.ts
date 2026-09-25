@@ -2608,6 +2608,79 @@ Deno.test('setMyCommands, getMyCommands, and deleteMyCommands follow Telegram ch
   }
 });
 
+Deno.test('bots set and read their descriptions and short descriptions by language', async () => {
+  const { api, botApiPath } = await createPrivateConversationFixture();
+  const callBot = async (methodName: string, parameters: Record<string, unknown>) =>
+    await callBotApi(api, `${botApiPath}/${methodName}`, parameters);
+  const expectResult = async (
+    methodName: string,
+    parameters: Record<string, unknown>,
+    expectedResult: unknown,
+  ) => {
+    const { status, body } = await callBot(methodName, parameters);
+    if (
+      status !== 200 ||
+      JSON.stringify(body) !== JSON.stringify({ ok: true, result: expectedResult })
+    ) {
+      throw new Error(
+        `Expected ${methodName} ${JSON.stringify(parameters)} to return ${
+          JSON.stringify(expectedResult)
+        }, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  };
+
+  await expectResult('getMyDescription', {}, { description: '' });
+  await expectResult('setMyDescription', { description: 'Orders\tpizza ' }, true);
+  await expectResult('setMyShortDescription', {
+    short_description: 'Bestellt Pizza',
+    language_code: 'de',
+  }, true);
+  await expectResult('getMyDescription', {}, { description: 'Orders pizza ' });
+  await expectResult('getMyDescription', { language_code: 'de' }, { description: '' });
+  await expectResult('getMyShortDescription', { language_code: 'de' }, {
+    short_description: 'Bestellt Pizza',
+  });
+  await expectResult('getMyShortDescription', {}, { short_description: '' });
+
+  // A missing text removes the text for the language, as an empty one does.
+  await expectResult('setMyDescription', {}, true);
+  await expectResult('getMyDescription', {}, { description: '' });
+
+  const failures = [
+    [
+      'setMyDescription',
+      { description: 'Hi', language_code: 'en-US' },
+      'Bad Request: invalid language code specified',
+    ],
+    [
+      'getMyShortDescription',
+      { language_code: 'EN' },
+      'Bad Request: invalid language code specified',
+    ],
+    [
+      'setMyShortDescription',
+      { short_description: '\ud800', language_code: 'EN' },
+      'Bad Request: strings must be encoded in UTF-8',
+    ],
+    [
+      'setMyDescription',
+      { description: 'Hi', short_description: 'Hi' },
+      'Bad Request: invalid setMyDescription parameters',
+    ],
+  ] as const;
+  for (const [methodName, parameters, expectedDescription] of failures) {
+    const { status, body } = await callBot(methodName, parameters);
+    if (status !== 400 || !isBadRequestResponse(body) || body.description !== expectedDescription) {
+      throw new Error(
+        `Expected ${methodName} ${
+          JSON.stringify(parameters)
+        } to fail with ${expectedDescription}, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  }
+});
+
 Deno.test('accounts see the chat action a bot shows until its next message', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
     await createPrivateConversationFixture();

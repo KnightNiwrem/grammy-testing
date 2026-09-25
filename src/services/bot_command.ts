@@ -1,12 +1,12 @@
 import { cleanInputString, trimTdlibSpaces } from '../text_entities/input_string.ts';
 import {
   type BotCommand,
-  type BotCommandLanguageCode,
   type BotCommandScope,
   MAX_BOT_COMMAND_COUNT,
   MAX_BOT_COMMAND_DESCRIPTION_LENGTH,
   MAX_BOT_COMMAND_LENGTH,
 } from '../types/bot_command.ts';
+import { type BotLanguageCode, isBotLanguageCode } from '../types/bot_language_code.ts';
 import {
   resolveSupergroupBotMembership,
   type SupergroupBotAccessFailureReason,
@@ -28,7 +28,7 @@ export interface SpecifiedBotCommand {
 export interface BotCommandListTarget {
   readonly botId: number;
   readonly scope: BotCommandScope;
-  readonly languageCode: BotCommandLanguageCode;
+  readonly languageCode: BotLanguageCode;
 }
 
 export interface SetBotCommandsInput extends BotCommandListTarget {
@@ -122,9 +122,6 @@ interface BotCommandServiceDependencies {
 
 /** Characters Telegram allows in a bot command. */
 const BOT_COMMAND_PATTERN = /^[a-z0-9_]+$/;
-
-/** A language code Telegram accepts for a command list: empty or two lowercase letters. */
-const LANGUAGE_CODE_PATTERN = /^(?:[a-z]{2})?$/;
 
 /**
  * Keeps each bot's command lists by scope and language, as `setMyCommands`, `getMyCommands`, and
@@ -335,7 +332,7 @@ export class BotCommandService {
         throw new Error(`Unhandled bot command scope: ${JSON.stringify(unhandledScope)}`);
       }
     }
-    return LANGUAGE_CODE_PATTERN.test(languageCode) ? undefined : 'language_code_invalid';
+    return isBotLanguageCode(languageCode) ? undefined : 'language_code_invalid';
   }
 }
 
@@ -382,7 +379,7 @@ function normalizeBotCommand(
  * The command list language for a user's language: the primary subtag of an IETF language tag,
  * such as `en` for `en-US`.
  */
-function getCommandListLanguageCode(userLanguageCode: string | undefined): BotCommandLanguageCode {
+function getCommandListLanguageCode(userLanguageCode: string | undefined): BotLanguageCode {
   const primarySubtag = userLanguageCode?.split('-')[0].toLowerCase() ?? '';
-  return LANGUAGE_CODE_PATTERN.test(primarySubtag) ? primarySubtag : '';
+  return isBotLanguageCode(primarySubtag) ? primarySubtag : '';
 }

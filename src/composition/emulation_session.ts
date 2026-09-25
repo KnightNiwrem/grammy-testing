@@ -5,6 +5,7 @@ import { AccountRepository } from '../repositories/account.ts';
 import { BlockedUserRepository } from '../repositories/blocked_user.ts';
 import { BotRepository } from '../repositories/bot.ts';
 import { BotCommandRepository } from '../repositories/bot_command.ts';
+import { BotDescriptionRepository } from '../repositories/bot_description.ts';
 import { BotRateLimitRepository } from '../repositories/bot_rate_limit.ts';
 import { BotUpdateRepository } from '../repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../repositories/bot_update_subscription.ts';
@@ -21,6 +22,7 @@ import { MessageBoxRepository } from '../repositories/message_box.ts';
 import { BotApiService } from '../services/bot_api.ts';
 import { BotBlockingService } from '../services/bot_blocking.ts';
 import { BotCommandService } from '../services/bot_command.ts';
+import { BotDescriptionService } from '../services/bot_description.ts';
 import { BotMessageViewService } from '../services/bot_message_view.ts';
 import { BotRateLimitService } from '../services/bot_rate_limit.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
@@ -154,6 +156,11 @@ export function createEmulationSession(id: string): EmulationSession {
     botCommands: new BotCommandRepository(),
   });
 
+  const botDescriptions = new BotDescriptionService({
+    bots,
+    botDescriptions: new BotDescriptionRepository(),
+  });
+
   const botRateLimits = new BotRateLimitService({
     bots,
     rateLimitResponses: new BotRateLimitRepository(),
@@ -188,6 +195,7 @@ export function createEmulationSession(id: string): EmulationSession {
     inlineQueries,
     inlineMessages: messages,
     botCommands,
+    botDescriptions,
     chatActions,
     publicChats: sharedChatAdministration,
     getPrivateForwardName: getAccountPrivateForwardName,

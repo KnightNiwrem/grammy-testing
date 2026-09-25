@@ -2,6 +2,7 @@ import { AccountRepository } from '../src/repositories/account.ts';
 import { BlockedUserRepository } from '../src/repositories/blocked_user.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotCommandRepository } from '../src/repositories/bot_command.ts';
+import { BotDescriptionRepository } from '../src/repositories/bot_description.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { BotWebhookRepository } from '../src/repositories/bot_webhook.ts';
@@ -16,6 +17,7 @@ import { TelegramIdentityRepository } from '../src/repositories/telegram_identit
 import { MessageBoxRepository } from '../src/repositories/message_box.ts';
 import { BotApiService } from '../src/services/bot_api.ts';
 import { BotCommandService } from '../src/services/bot_command.ts';
+import { BotDescriptionService } from '../src/services/bot_description.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { MediaFileService } from '../src/services/media_file.ts';
 import { SharedChatAdministrationService } from '../src/services/shared_chat_administration.ts';
@@ -247,6 +249,10 @@ function createBotApiFixture() {
       privateConversations,
       supergroupMembers: sharedChats,
       botCommands: new BotCommandRepository(),
+    }),
+    botDescriptions: new BotDescriptionService({
+      bots,
+      botDescriptions: new BotDescriptionRepository(),
     }),
     chatActions: new ChatActionService({
       accounts,

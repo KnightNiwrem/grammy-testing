@@ -1,10 +1,11 @@
-import type { BotCommand, BotCommandLanguageCode, BotCommandScope } from '../types/bot_command.ts';
+import type { BotCommand, BotCommandScope } from '../types/bot_command.ts';
+import type { BotLanguageCode } from '../types/bot_language_code.ts';
 
 /** Identifies one command list of a bot: its scope and language. */
 export interface BotCommandListKey {
   readonly botId: number;
   readonly scope: BotCommandScope;
-  readonly languageCode: BotCommandLanguageCode;
+  readonly languageCode: BotLanguageCode;
 }
 
 /**

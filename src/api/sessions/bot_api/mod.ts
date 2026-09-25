@@ -266,6 +266,9 @@ const BOT_COMMAND_FAILURE_DESCRIPTIONS = {
   command_invalid: 'Bad Request: BOT_COMMAND_INVALID',
 } as const;
 
+/** TDLib's description of text that is not well-formed Unicode, which it rejects first. */
+const STRINGS_NOT_UTF8_DESCRIPTION = 'Bad Request: strings must be encoded in UTF-8';
+
 /** Telegram's descriptions for rejected requests about chat members. */
 const USER_ID_INVALID_DESCRIPTION = 'Bad Request: invalid user_id specified';
 const MEMBER_NOT_FOUND_DESCRIPTION = 'Bad Request: member not found';
@@ -501,6 +504,21 @@ const myCommandsTargetParametersSchema = z.strictObject({
   language_code: z.string().default(''),
 });
 
+const setMyDescriptionParametersSchema = z.strictObject({
+  description: z.string().default(''),
+  language_code: z.string().default(''),
+});
+
+const setMyShortDescriptionParametersSchema = z.strictObject({
+  short_description: z.string().default(''),
+  language_code: z.string().default(''),
+});
+
+/** Parameters of getMyDescription and getMyShortDescription, which address one language. */
+const myDescriptionTargetParametersSchema = z.strictObject({
+  language_code: z.string().default(''),
+});
+
 const getChatMemberParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   user_id: integerParameter(z.int()).optional(),
@@ -687,6 +705,8 @@ const BOT_API_METHODS: readonly BotApiMethod[] = [
   { name: 'getFile', handler: handleGetFile },
   { name: 'getMe', handler: handleGetMe },
   { name: 'getMyCommands', handler: handleGetMyCommands },
+  { name: 'getMyDescription', handler: handleGetMyDescription },
+  { name: 'getMyShortDescription', handler: handleGetMyShortDescription },
   { name: 'getUpdates', handler: handleGetUpdates },
   { name: 'getWebhookInfo', handler: handleGetWebhookInfo },
   { name: 'leaveChat', handler: handleLeaveChat },
@@ -699,6 +719,8 @@ const BOT_API_METHODS: readonly BotApiMethod[] = [
     handler: handleSetChatAdministratorCustomTitle,
   },
   { name: 'setMyCommands', handler: handleSetMyCommands },
+  { name: 'setMyDescription', handler: handleSetMyDescription },
+  { name: 'setMyShortDescription', handler: handleSetMyShortDescription },
   { name: 'setWebhook', handler: handleSetWebhook },
   { name: 'unbanChatMember', handler: handleUnbanChatMember },
 ];
@@ -2254,6 +2276,90 @@ function myCommandsTargetError(reason: MyCommandsTargetFailureReason): BotApiMet
       throw new Error(`Unhandled command list failure: ${unhandledReason}`);
     }
   }
+}
+
+function handleSetMyDescription(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const parsedParameters = setMyDescriptionParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, 'Bad Request: invalid setMyDescription parameters');
+  }
+  return setMyDescription(context, {
+    kind: 'description',
+    text: parsedParameters.data.description,
+    languageCode: parsedParameters.data.language_code,
+  });
+}
+
+function handleSetMyShortDescription(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const parsedParameters = setMyShortDescriptionParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, 'Bad Request: invalid setMyShortDescription parameters');
+  }
+  return setMyDescription(context, {
+    kind: 'short_description',
+    text: parsedParameters.data.short_description,
+    languageCode: parsedParameters.data.language_code,
+  });
+}
+
+function setMyDescription(
+  context: BotApiMethodContext,
+  request: Parameters<EmulationSession['botApi']['setMyDescription']>[1],
+): BotApiMethodAnswer {
+  const result = context.session.botApi.setMyDescription(context.bot, request);
+  if (result.set) {
+    return botApiResult(true);
+  }
+  switch (result.reason) {
+    case 'text_not_utf8':
+      return botApiError(400, STRINGS_NOT_UTF8_DESCRIPTION);
+    case 'language_code_invalid':
+      return botApiError(400, LANGUAGE_CODE_INVALID_DESCRIPTION);
+    default: {
+      const unhandledReason: never = result.reason;
+      throw new Error(`Unhandled description failure: ${unhandledReason}`);
+    }
+  }
+}
+
+function handleGetMyDescription(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const parsedParameters = myDescriptionTargetParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, 'Bad Request: invalid getMyDescription parameters');
+  }
+  const result = context.session.botApi.getMyDescription(context.bot, {
+    kind: 'description',
+    languageCode: parsedParameters.data.language_code,
+  });
+  return result.found
+    ? botApiResult({ description: result.text })
+    : botApiError(400, LANGUAGE_CODE_INVALID_DESCRIPTION);
+}
+
+function handleGetMyShortDescription(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const parsedParameters = myDescriptionTargetParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, 'Bad Request: invalid getMyShortDescription parameters');
+  }
+  const result = context.session.botApi.getMyDescription(context.bot, {
+    kind: 'short_description',
+    languageCode: parsedParameters.data.language_code,
+  });
+  return result.found
+    ? botApiResult({ short_description: result.text })
+    : botApiError(400, LANGUAGE_CODE_INVALID_DESCRIPTION);
 }
 
 function handleAnswerInlineQuery(

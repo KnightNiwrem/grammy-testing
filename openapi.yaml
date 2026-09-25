@@ -3288,6 +3288,201 @@ paths:
           description: No active test session has the supplied identifier.
         '429':
           $ref: '#/components/responses/BotApiRateLimited'
+  /sessions/{sessionId}/bot-api/bot{token}/setMyDescription:
+    description: >-
+      Telegram Bot API method for replacing the bot's description, shown in an empty chat with the
+      bot, for a language. As on Telegram, the text is cleaned of control characters but not
+      trimmed, and an empty or missing `description` removes the description for the language.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: setMyDescription
+      summary: Replace the authenticated virtual bot's description for a language
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMyDescriptionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SetMyDescriptionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SetMyDescriptionRequest'
+      responses:
+        '200':
+          description: The description was replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrueResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it, checking in this order: the text is not well-formed Unicode (`Bad Request: strings
+            must be encoded in UTF-8`), or the language code is neither empty nor two lowercase
+            letters (`Bad Request: invalid language code specified`). Telegram's server limit on
+            the text's length is not enforced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
+  /sessions/{sessionId}/bot-api/bot{token}/getMyDescription:
+    description: >-
+      Telegram Bot API method for reading the bot's description for exactly one language, without
+      falling back to the description for users without a dedicated one.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getMyDescription
+      summary: Return the authenticated virtual bot's description for a language
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MyDescriptionTargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MyDescriptionTargetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MyDescriptionTargetRequest'
+      responses:
+        '200':
+          description: The description, which is empty if none is set for the language.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotDescriptionResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or the language code is
+            neither empty nor two lowercase letters (`Bad Request: invalid language code
+            specified`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
+  /sessions/{sessionId}/bot-api/bot{token}/setMyShortDescription:
+    description: >-
+      Telegram Bot API method for replacing the bot's short description, shown on its profile page
+      and when it is shared, for a language. As on Telegram, the text is cleaned of control
+      characters but not trimmed, and an empty or missing `short_description` removes the short
+      description for the language.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: setMyShortDescription
+      summary: Replace the authenticated virtual bot's short description for a language
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMyShortDescriptionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SetMyShortDescriptionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SetMyShortDescriptionRequest'
+      responses:
+        '200':
+          description: The short description was replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrueResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it, checking in this order: the text is not well-formed Unicode (`Bad Request: strings
+            must be encoded in UTF-8`), or the language code is neither empty nor two lowercase
+            letters (`Bad Request: invalid language code specified`). Telegram's server limit on
+            the text's length is not enforced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
+  /sessions/{sessionId}/bot-api/bot{token}/getMyShortDescription:
+    description: >-
+      Telegram Bot API method for reading the bot's short description for exactly one language,
+      without falling back to the short description for users without a dedicated one.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getMyShortDescription
+      summary: Return the authenticated virtual bot's short description for a language
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MyDescriptionTargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MyDescriptionTargetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MyDescriptionTargetRequest'
+      responses:
+        '200':
+          description: The short description, which is empty if none is set for the language.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotShortDescriptionResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or the language code is
+            neither empty nor two lowercase letters (`Bad Request: invalid language code
+            specified`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/{method}:
     description: Telegram Bot API methods invoked for a virtual bot within a test session.
     x-implementation-status: unimplemented
@@ -6413,6 +6608,80 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BotCommand'
+    MyDescriptionTargetRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        language_code:
+          type: string
+          pattern: '^([a-z]{2})?$'
+          description: >-
+            Two-letter ISO 639-1 language code of the text, or empty for users whose language has
+            no dedicated text.
+    SetMyDescriptionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        description:
+          type: string
+          description: The new description; empty removes the description for the language.
+        language_code:
+          type: string
+          pattern: '^([a-z]{2})?$'
+          description: >-
+            Two-letter ISO 639-1 language code of the text, or empty for users whose language has
+            no dedicated text.
+    SetMyShortDescriptionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        short_description:
+          type: string
+          description: The new short description; empty removes it for the language.
+        language_code:
+          type: string
+          pattern: '^([a-z]{2})?$'
+          description: >-
+            Two-letter ISO 639-1 language code of the text, or empty for users whose language has
+            no dedicated text.
+    BotDescriptionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: object
+          additionalProperties: false
+          required:
+            - description
+          properties:
+            description:
+              type: string
+              description: Empty if none is set for the language.
+    BotShortDescriptionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: object
+          additionalProperties: false
+          required:
+            - short_description
+          properties:
+            short_description:
+              type: string
+              description: Empty if none is set for the language.
     TrueResultResponse:
       type: object
       additionalProperties: false

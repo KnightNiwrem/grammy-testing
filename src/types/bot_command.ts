@@ -27,9 +27,3 @@ export type BotCommandScope =
   | { readonly type: 'chat'; readonly chatId: number }
   | { readonly type: 'chat_administrators'; readonly chatId: number }
   | { readonly type: 'chat_member'; readonly chatId: number; readonly userId: number };
-
-/**
- * A two-letter ISO 639-1 language code that a command list is for, or the empty string for users
- * whose language has no dedicated list.
- */
-export type BotCommandLanguageCode = string;

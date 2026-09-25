@@ -10,7 +10,9 @@ import type {
   BotApiSupergroupMessage,
   BotApiWebhookInfo,
 } from '../types/bot_api.ts';
-import type { BotCommand, BotCommandLanguageCode, BotCommandScope } from '../types/bot_command.ts';
+import type { BotCommand, BotCommandScope } from '../types/bot_command.ts';
+import type { BotDescriptionKind } from '../types/bot_description.ts';
+import type { BotLanguageCode } from '../types/bot_language_code.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
 import {
   type ChatMemberStatus,
@@ -1016,7 +1018,7 @@ interface MediaFiles {
 /** A command list of the bot, addressed as the command methods address it. */
 export interface MyCommandsTarget {
   readonly scope: BotCommandScope;
-  readonly languageCode: BotCommandLanguageCode;
+  readonly languageCode: BotLanguageCode;
 }
 
 export interface SetMyCommandsRequest extends MyCommandsTarget {
@@ -1083,6 +1085,37 @@ interface BotCommandLists {
     | { readonly deleted: false; readonly reason: BotCommandListTargetFailure };
 }
 
+/** A description or short description of the bot, addressed by its kind and language. */
+export interface MyDescriptionTarget {
+  readonly kind: BotDescriptionKind;
+  readonly languageCode: BotLanguageCode;
+}
+
+export interface SetMyDescriptionRequest extends MyDescriptionTarget {
+  /** Empty to remove the text for the language. */
+  readonly text: string;
+}
+
+export type SetMyDescriptionResult =
+  | { readonly set: true }
+  | { readonly set: false; readonly reason: 'text_not_utf8' | 'language_code_invalid' };
+
+export type GetMyDescriptionResult =
+  | { readonly found: true; readonly text: string }
+  | { readonly found: false; readonly reason: 'language_code_invalid' };
+
+interface BotDescriptions {
+  setBotDescription(input: SetMyDescriptionRequest & { readonly botId: number }):
+    | { readonly set: true }
+    | {
+      readonly set: false;
+      readonly reason: 'bot_not_found' | 'text_not_utf8' | 'language_code_invalid';
+    };
+  getBotDescription(target: MyDescriptionTarget & { readonly botId: number }):
+    | { readonly found: true; readonly text: string }
+    | { readonly found: false; readonly reason: 'bot_not_found' | 'language_code_invalid' };
+}
+
 interface CallbackQueryAnswering {
   answerCallbackQuery(input: {
     readonly fromBotId: number;
@@ -1135,6 +1168,7 @@ interface BotApiServiceDependencies {
   readonly inlineQueries: InlineQueryAnswering;
   readonly inlineMessages: InlineMessageLookup;
   readonly botCommands: BotCommandLists;
+  readonly botDescriptions: BotDescriptions;
   readonly chatActions: ChatActions;
   readonly publicChats: PublicChatDirectory;
   /** Hides the accounts whose privacy settings keep forwards from linking to them. */
@@ -1166,6 +1200,7 @@ export class BotApiService {
   readonly #inlineQueries: InlineQueryAnswering;
   readonly #inlineMessages: InlineMessageLookup;
   readonly #botCommands: BotCommandLists;
+  readonly #botDescriptions: BotDescriptions;
   readonly #chatActions: ChatActions;
   readonly #publicChats: PublicChatDirectory;
   readonly #getPrivateForwardName: PrivateForwardNameLookup;
@@ -1184,6 +1219,7 @@ export class BotApiService {
       inlineQueries,
       inlineMessages,
       botCommands,
+      botDescriptions,
       chatActions,
       publicChats,
       getPrivateForwardName,
@@ -1201,6 +1237,7 @@ export class BotApiService {
     this.#inlineQueries = inlineQueries;
     this.#inlineMessages = inlineMessages;
     this.#botCommands = botCommands;
+    this.#botDescriptions = botDescriptions;
     this.#chatActions = chatActions;
     this.#publicChats = publicChats;
     this.#getPrivateForwardName = getPrivateForwardName;
@@ -2506,6 +2543,42 @@ export class BotApiService {
       throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
     }
     return { deleted: false, reason: result.reason };
+  }
+
+  /** Replaces the bot's description or short description for a language; empty removes it. */
+  setMyDescription(
+    authenticatedBot: VirtualBotProfile,
+    request: SetMyDescriptionRequest,
+  ): SetMyDescriptionResult {
+    const result = this.#botDescriptions.setBotDescription({
+      botId: authenticatedBot.id,
+      ...request,
+    });
+    if (result.set) {
+      return result;
+    }
+    if (result.reason === 'bot_not_found') {
+      throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+    }
+    return { set: false, reason: result.reason };
+  }
+
+  /** Returns the bot's description or short description for exactly this language. */
+  getMyDescription(
+    authenticatedBot: VirtualBotProfile,
+    target: MyDescriptionTarget,
+  ): GetMyDescriptionResult {
+    const result = this.#botDescriptions.getBotDescription({
+      botId: authenticatedBot.id,
+      ...target,
+    });
+    if (result.found) {
+      return result;
+    }
+    if (result.reason === 'bot_not_found') {
+      throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+    }
+    return { found: false, reason: result.reason };
   }
 
   /**
