@@ -645,6 +645,37 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     });
   });
 
+  // The account deletes the message for every member, as Telegram's clients do.
+  accountRoutes.delete(SUPERGROUP_MESSAGE_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const chatId = supergroupChatIdPathParameterSchema.safeParse(
+      context.req.param(CHAT_ID_PARAMETER),
+    );
+    const messageId = messageIdPathParameterSchema.safeParse(
+      context.req.param(MESSAGE_ID_PARAMETER),
+    );
+    if (!accountId.success || !chatId.success || !messageId.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').supergroupMessaging.deleteAccountMessage({
+      fromAccountId: accountId.data,
+      chatId: chatId.data,
+      messageId: messageId.data,
+    });
+    if (result.deleted) {
+      return context.body(null, 204);
+    }
+    return context.body(
+      null,
+      result.reason === 'message_not_deletable'
+        ? 403
+        : supergroupMemberFailureStatus(result.reason),
+    );
+  });
+
   accountRoutes.get(PRIVATE_MESSAGE_HISTORY_PATH, (context) => {
     const accountId = telegramUserIdPathParameterSchema.safeParse(
       context.req.param(ACCOUNT_ID_PARAMETER),
@@ -704,6 +735,27 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, isNotFound ? 404 : 400);
     }
     return context.json({ message: botMessageViews.viewPrivateMessageForBot(result.message) });
+  });
+
+  // The account deletes the message for both participants, as Telegram's clients can.
+  accountRoutes.delete(PRIVATE_MESSAGE_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
+    const messageId = messageIdPathParameterSchema.safeParse(
+      context.req.param(MESSAGE_ID_PARAMETER),
+    );
+    if (!accountId.success || !botId.success || !messageId.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').privateMessaging.deleteAccountMessage({
+      fromAccountId: accountId.data,
+      botId: botId.data,
+      botMessageId: messageId.data,
+    });
+    return context.body(null, result.deleted ? 204 : 404);
   });
 
   accountRoutes.put(BLOCKED_BOT_PATH, (context) => {

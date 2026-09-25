@@ -317,6 +317,20 @@ export type DeleteMessagesByBotResult =
     readonly reason: DeleteMessagesByBotFailureReason;
   };
 
+export interface DeleteAccountMessageInput {
+  readonly fromAccountId: number;
+  readonly botId: number;
+  /** The message's ID in the bot's message box. */
+  readonly botMessageId: number;
+}
+
+export type DeleteAccountMessageResult =
+  | { readonly deleted: true }
+  | {
+    readonly deleted: false;
+    readonly reason: 'account_not_found' | 'bot_not_found' | 'message_not_found';
+  };
+
 export interface SendBotChatActionInput {
   readonly fromBotId: number;
   readonly to: BotPrivateChat;
@@ -848,14 +862,45 @@ export class PrivateMessagingService {
       if (message === undefined) {
         continue;
       }
-      // As TDLib does, deleting the message whose reply interface the client shows removes it.
-      if (this.#privateConversations.getReplyInterfaceMessageId(conversation) === message.id) {
-        this.#privateConversations.setReplyInterfaceMessageId(conversation, undefined);
-      }
-      this.#messages.deletePrivateMessage(message.id);
+      this.#deleteMessage(conversation, message);
       deletedMessageCount++;
     }
     return { deleted: true, deletedMessageCount };
+  }
+
+  /**
+   * Deletes a message of an account's private chat with a bot for both participants, as the
+   * account's client does when it deletes a message for everyone. As TDLib's `can_revoke_message`
+   * allows users in private chats, the account deletes the messages either participant wrote,
+   * without a time limit. As for a bot's deletion, the bot receives no update for it.
+   */
+  deleteAccountMessage(
+    { fromAccountId, botId, botMessageId }: DeleteAccountMessageInput,
+  ): DeleteAccountMessageResult {
+    if (this.#accounts.getById(fromAccountId) === undefined) {
+      return { deleted: false, reason: 'account_not_found' };
+    }
+    if (this.#bots.getById(botId) === undefined) {
+      return { deleted: false, reason: 'bot_not_found' };
+    }
+    const conversation: PrivateConversationKey = { accountId: fromAccountId, botId };
+    const message = this.getPrivateMessageByBotMessageId(conversation, botMessageId);
+    if (message === undefined) {
+      return { deleted: false, reason: 'message_not_found' };
+    }
+    this.#deleteMessage(conversation, message);
+    return { deleted: true };
+  }
+
+  /**
+   * Deletes a message of a conversation. As TDLib does, deleting the message whose reply interface
+   * the client shows removes the interface.
+   */
+  #deleteMessage(conversation: PrivateConversationKey, message: PrivateMessage): void {
+    if (this.#privateConversations.getReplyInterfaceMessageId(conversation) === message.id) {
+      this.#privateConversations.setReplyInterfaceMessageId(conversation, undefined);
+    }
+    this.#messages.deletePrivateMessage(message.id);
   }
 
   /**

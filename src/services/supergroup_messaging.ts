@@ -270,6 +270,25 @@ export type DeleteSupergroupMessagesByBotResult =
     readonly reason: 'bot_not_found' | SupergroupBotAccessFailureReason | 'message_not_deletable';
   };
 
+export interface DeleteSupergroupAccountMessageInput {
+  readonly fromAccountId: number;
+  readonly chatId: number;
+  /** The supergroup's ID of the message. */
+  readonly messageId: number;
+}
+
+export type DeleteSupergroupAccountMessageResult =
+  | { readonly deleted: true }
+  | {
+    readonly deleted: false;
+    readonly reason:
+      | 'account_not_found'
+      | 'chat_not_found'
+      | 'not_a_member'
+      | 'message_not_found'
+      | 'message_not_deletable';
+  };
+
 export interface SendSupergroupBotChatActionInput {
   readonly fromBotId: number;
   readonly chatId: number;
@@ -729,6 +748,37 @@ export class SupergroupMessagingService {
       this.#messages.deleteSupergroupMessage(messageId);
     }
     return { deleted: true, deletedMessageCount: messages.size };
+  }
+
+  /**
+   * Deletes a message of a supergroup for every member, as an account does from its client. As
+   * TDLib's `can_delete_channel_message` allows, an account deletes the messages it wrote, and the
+   * owner or an administrator with the `can_delete_messages` right deletes any message; a member
+   * cannot delete a service message recording its own change. As for a bot's deletion, no bot
+   * receives an update for it.
+   */
+  deleteAccountMessage(
+    { fromAccountId, chatId, messageId }: DeleteSupergroupAccountMessageInput,
+  ): DeleteSupergroupAccountMessageResult {
+    const memberResolution = this.#resolveAccountMember(fromAccountId, chatId);
+    if (!memberResolution.resolved) {
+      return { deleted: false, reason: memberResolution.reason };
+    }
+    const message = this.getMessageByChatMessageId(chatId, messageId);
+    if (message === undefined) {
+      return { deleted: false, reason: 'message_not_found' };
+    }
+    const deletesAnyMessage = holdsSupergroupAdministratorRight(
+      this.#sharedChats.getChatMembership(chatId, fromAccountId),
+      'can_delete_messages',
+    );
+    const isOwnContentMessage = isSupergroupContentMessage(message) &&
+      message.author.kind === 'account' && message.author.accountId === fromAccountId;
+    if (!isOwnContentMessage && !deletesAnyMessage) {
+      return { deleted: false, reason: 'message_not_deletable' };
+    }
+    this.#messages.deleteSupergroupMessage(message.id);
+    return { deleted: true };
   }
 
   /**

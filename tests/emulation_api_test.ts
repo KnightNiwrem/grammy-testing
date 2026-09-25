@@ -2927,6 +2927,111 @@ Deno.test('an account blocks a bot, which receives my_chat_member updates and Te
   }
 });
 
+Deno.test('accounts delete messages, which bots then no longer find', async () => {
+  const { api, sessionPath, owner, member, bot, supergroup, supergroupPath, sendSupergroupText } =
+    await createSupergroupFixture();
+  const readUpdates = createUpdateReader(api);
+  const privatePath = `${sessionPath}/accounts/${owner.id}/conversations/private/${bot.bot.id}`;
+  const sent = await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: 'Hello' }),
+  );
+  const { message: greeting } = await sent.json() as { message: { message_id: number } };
+  const question = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+      chat_id: owner.id,
+      text: 'Your name?',
+      reply_markup: { force_reply: true },
+    })).body,
+  );
+  await readUpdates(bot.botApiPath);
+
+  // The account deletes the bot's question and its own greeting for both participants.
+  const privateDeletions = [
+    (await api.request(`${privatePath}/messages/${question?.message_id}`, { method: 'DELETE' }))
+      .status,
+    (await api.request(`${privatePath}/messages/${greeting.message_id}`, { method: 'DELETE' }))
+      .status,
+    (await api.request(`${privatePath}/messages/${greeting.message_id}`, { method: 'DELETE' }))
+      .status,
+    (await api.request(`${privatePath}/messages/0`, { method: 'DELETE' })).status,
+  ];
+  const edit = await callBotApi(api, `${bot.botApiPath}/editMessageText`, {
+    chat_id: owner.id,
+    message_id: question?.message_id,
+    text: 'Your full name?',
+  });
+  const reply = await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+    chat_id: owner.id,
+    text: 'Hello to you',
+    reply_parameters: { message_id: greeting.message_id },
+  });
+  const { reply_interface } = await (await api.request(`${privatePath}/reply-interface`))
+    .json() as { reply_interface: unknown };
+  const { messages: privateHistory } = await (await api.request(`${privatePath}/messages`))
+    .json() as { messages: unknown[] };
+  if (
+    JSON.stringify(privateDeletions) !== JSON.stringify([204, 204, 404, 400]) ||
+    JSON.stringify(edit.body) !== JSON.stringify({
+        ok: false,
+        error_code: 400,
+        description: 'Bad Request: message to edit not found',
+      }) ||
+    (reply.body as { description?: string }).description !==
+      'Bad Request: message to be replied not found' ||
+    reply_interface !== null || privateHistory.length !== 0 ||
+    (await readUpdates(bot.botApiPath)).length !== 0
+  ) {
+    throw new Error(
+      `Expected the account to delete its private messages, received ${
+        JSON.stringify({ privateDeletions, edit, reply, reply_interface, privateHistory })
+      }`,
+    );
+  }
+
+  // A member deletes only its own messages; the owner deletes any.
+  const memberMessage = await sendSupergroupText(member.id, 'Oops');
+  const ownerMessage = await sendSupergroupText(owner.id, 'Welcome');
+  const botMessage = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+      chat_id: supergroup.id,
+      text: 'Rules',
+    })).body,
+  );
+  const deleteInSupergroup = async (accountId: number, messageId: unknown) =>
+    (await api.request(`${supergroupPath(accountId)}/messages/${messageId}`, {
+      method: 'DELETE',
+    })).status;
+  const outsider = await createAccount(api, sessionPath, 'Linus');
+  const supergroupDeletions = [
+    await deleteInSupergroup(member.id, ownerMessage.message_id),
+    await deleteInSupergroup(member.id, botMessage?.message_id),
+    // The service message recording the member joining is the owner's.
+    await deleteInSupergroup(member.id, 1),
+    await deleteInSupergroup(outsider.id, memberMessage.message_id),
+    await deleteInSupergroup(member.id, memberMessage.message_id),
+    await deleteInSupergroup(owner.id, botMessage?.message_id),
+    await deleteInSupergroup(owner.id, memberMessage.message_id),
+  ];
+  const { messages: supergroupHistory } = await (await api.request(
+    `${supergroupPath(member.id)}/messages`,
+  )).json() as { messages: Array<{ message_id: number }> };
+  if (
+    JSON.stringify(supergroupDeletions) !==
+      JSON.stringify([403, 403, 403, 403, 204, 204, 404]) ||
+    supergroupHistory.some(({ message_id }) =>
+      message_id === memberMessage.message_id || message_id === botMessage?.message_id
+    ) ||
+    !supergroupHistory.some(({ message_id }) => message_id === ownerMessage.message_id)
+  ) {
+    throw new Error(
+      `Expected members to delete the messages they may delete, received ${
+        JSON.stringify({ supergroupDeletions, supergroupHistory })
+      }`,
+    );
+  }
+});
+
 Deno.test('PATCH on an account message edits it and sends the bot an edited_message update', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
     await createPrivateConversationFixture();

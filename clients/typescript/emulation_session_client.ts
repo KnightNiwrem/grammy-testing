@@ -22,6 +22,7 @@ import {
 import type {
   AccountBotCommandsInput,
   AccountChatActionsInput,
+  AccountDeleteMessageInput,
   AccountEditMessageCaptionInput,
   AccountEditMessageInput,
   AccountForwardMessageInput,
@@ -248,6 +249,14 @@ function createVirtualAccountClient(
         body: { caption: input.caption },
       });
       return response.message;
+    },
+    async deleteMessage(input: AccountDeleteMessageInput): Promise<void> {
+      const messageId = encodeURIComponent(input.message_id);
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'DELETE',
+        url: `${conversationUrl(accountUrl, input.chat)}/messages/${messageId}`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+      });
     },
     async createSupergroup(input: CreateSupergroupInput): Promise<Supergroup> {
       const response = await requestJson(fetchImplementation, {

@@ -10,6 +10,7 @@ export {
 export type {
   AccountBotCommandsInput,
   AccountChatActionsInput,
+  AccountDeleteMessageInput,
   AccountEditMessageCaptionInput,
   AccountEditMessageInput,
   AccountForwardMessageInput,

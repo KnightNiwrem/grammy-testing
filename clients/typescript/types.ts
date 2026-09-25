@@ -194,6 +194,12 @@ export interface AccountEditMessageInput<Target extends MessageTarget = MessageT
   readonly text: string;
 }
 
+export interface AccountDeleteMessageInput {
+  readonly chat: MessageTarget;
+  /** The ID of the message to delete, as message history shows it. */
+  readonly message_id: number;
+}
+
 export interface AccountEditMessageCaptionInput<Target extends MessageTarget = MessageTarget> {
   readonly chat: Target;
   /** The ID of the account's photo or document to edit, as message history shows it. */
@@ -732,6 +738,13 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
   editMessageCaption<Target extends MessageTarget>(
     input: AccountEditMessageCaptionInput<Target>,
   ): Promise<MessageIn<Target>>;
+  /**
+   * Deletes a message for every participant of the chat, as Telegram's clients do; the chat's
+   * bots receive no update for it. In a private chat, the account deletes either participant's
+   * messages. In a supergroup, it deletes its own messages, and any message as the owner or as an
+   * administrator with the `can_delete_messages` right.
+   */
+  deleteMessage(input: AccountDeleteMessageInput): Promise<void>;
   /** Creates a supergroup that this account owns. */
   createSupergroup(input: CreateSupergroupInput): Promise<Supergroup>;
   /**

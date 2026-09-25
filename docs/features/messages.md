@@ -98,12 +98,23 @@ and skips missing messages. In private chats, the bot may delete either particip
 supergroups, it may delete its own content; `can_delete_messages` allows deleting other members'
 messages and membership service messages.
 
+Accounts delete messages through the emulation API or `account.deleteMessage`, for every
+participant, as Telegram's clients delete for everyone. As TDLib's
+[`can_revoke_message`][delete-permissions] allows users in private chats, an account deletes either
+participant's messages there. In supergroups, [`can_delete_channel_message`][delete-permissions]
+lets an account delete its own content, and the owner or an administrator with `can_delete_messages`
+delete any message. The official server only drops a deleted message from its cache in
+[`updateDeleteMessages`][delete-update], so, as for a bot's deletion, no bot receives an update.
+Bots then no longer find the message, for example to edit or reply to it. Deleting the message whose
+reply interface the account's client shows removes that interface.
+
 Message deletion does not consider message age, and account edits have no age limit. Scheduled
 messages and automatic deletion timers are absent. These timing simplifications are
 [intentional](#intentional-deviations).
 
-Media edits are limited to captions and inline keyboards. Replacing media and deleting messages as
-an account are [real gaps](#real-gaps).
+Media edits are limited to captions and inline keyboards. Replacing media is a
+[real gap](#real-gaps), and deleting a message only for the account is an
+[intentional deviation](#intentional-deviations).
 
 ## Blocking
 
@@ -166,6 +177,9 @@ Other origins are users. Channel and chat origins, video start timestamps and me
   message age. TDLib's [`can_delete_channel_message` and `can_revoke_message`][delete-permissions]
   stop bots from deleting messages older than two days in production. Test sessions do not run that
   long, so the limit could not be exercised.
+- **Deletion for every participant only.** Telegram's clients can also delete a private message only
+  for the account itself. That leaves the bot's copy in place, so no bot can observe it, and the
+  emulator keeps one copy of each message that both participants see.
 - **Immediate sends only.** The account emulation API does not expose scheduled messages. Tests only
   need immediately sent messages, so scheduling is outside the intended account simulation.
 - **No automatic message deletion.** Message fixtures remain available until explicitly deleted or
@@ -178,8 +192,6 @@ Other origins are users. Channel and chat origins, video start timestamps and me
   [`Client::get_reply_parameters`][reply-parameters], and are missing from the emulator.
 - **Replacing media.** `editMessageMedia` is not implemented, preventing tests from exercising bots
   that replace message media.
-- **Account-side deletion.** The account emulation API has no message deletion operation. Tests
-  cannot simulate an account deleting its messages; only Bot API deletion is available.
 - **Channel and chat origins.** Forward origins are users or hidden users. Tests cannot exercise
   channel or chat origins, which TDLib's [forward origin model][forward-origin] supports; they need
   the missing channels and anonymous administrators.
@@ -213,6 +225,7 @@ Other origins are users. Channel and chat origins, video start timestamps and me
 [forward-markup]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/ReplyMarkup.cpp
 [silent-message]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L11842
 [notification-object]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/generate/scheme/td_api.tl#L8864-L8868
+[delete-update]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L9565-L9576
 [forward-origin]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageForwardInfo.cpp
 [hide-sender]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageOrigin.cpp#L123-L131
 [copy-forward-info]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageForwardInfo.cpp#L182-L192

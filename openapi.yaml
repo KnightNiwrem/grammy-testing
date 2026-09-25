@@ -273,6 +273,25 @@ paths:
             caption is the message's current one.
         '404':
           description: The session, account, bot, or message of their private chat does not exist.
+    delete:
+      operationId: deleteAccountMessage
+      summary: Delete a message of the private chat for both participants
+      description: >-
+        Deletes the account's message or the bot's message for both participants, as Telegram's
+        clients do when deleting for everyone; as TDLib's `can_revoke_message` allows users in
+        private chats, either participant's messages can be deleted, without a time limit. As on
+        Telegram, the bot receives no update, and then no longer finds the message, for example to
+        edit or reply to it. Deleting the message that asked for the reply interface the client
+        shows removes that interface.
+      responses:
+        '204':
+          description: The message was deleted.
+        '400':
+          description: A path identifier is invalid.
+        '404':
+          description: >-
+            The session, account, bot, or message of their private chat does not exist, including
+            a deleted message.
   /sessions/{sessionId}/accounts/{accountId}/supergroups:
     description: Supergroups an account creates, which it owns.
     parameters:
@@ -554,6 +573,26 @@ paths:
           description: The account is not a member of the supergroup.
         '404':
           description: The session, account, supergroup, or message of the supergroup does not exist.
+    delete:
+      operationId: deleteSupergroupAccountMessage
+      summary: Delete a message of a supergroup for every member
+      description: >-
+        Deletes a message for every member, as TDLib's `can_delete_channel_message` allows: the
+        account deletes the messages it wrote, and the owner or an administrator with the
+        `can_delete_messages` right deletes any message, service messages included. As on
+        Telegram, no bot receives an update for the deletion.
+      responses:
+        '204':
+          description: The message was deleted.
+        '400':
+          description: A path identifier is invalid.
+        '403':
+          description: >-
+            The account is not a member of the supergroup, or may not delete the message.
+        '404':
+          description: >-
+            The session, account, supergroup, or message of the supergroup does not exist,
+            including a deleted message.
   /sessions/{sessionId}/accounts/{accountId}/blocked-bots/{botId}:
     description: >-
       A bot on the account's block list. Telegram calls blocking a bot stopping it. While the

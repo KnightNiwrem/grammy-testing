@@ -444,6 +444,15 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     );
   }
 
+  const privateChat = { type: 'private', botId: bot.id } as const;
+  await owner.deleteMessage({ chat: privateChat, message_id: externalReply.message_id });
+  const privateHistory = await owner.getMessages({ chat: privateChat });
+  if (privateHistory.some(({ message_id }) => message_id === externalReply.message_id)) {
+    throw new Error(
+      `Expected the client to delete the bot's message, received ${JSON.stringify(privateHistory)}`,
+    );
+  }
+
   // Only an administrator with the right deletes another member's message.
   const deleteGreeting = () =>
     api.request(`${botApiPath}/deleteMessage`, {
