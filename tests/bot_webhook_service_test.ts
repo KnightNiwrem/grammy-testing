@@ -4,6 +4,7 @@ import { BotWebhookRepository } from '../src/repositories/bot_webhook.ts';
 import {
   BotWebhookService,
   type SetWebhookRequest,
+  waitForRetryDelay,
   WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
 } from '../src/services/bot_webhook.ts';
 import type { BotApiPrivateMessage } from '../src/types/bot_api.ts';
@@ -179,6 +180,57 @@ Deno.test('BotWebhookService retries a failed update and reports the latest fail
     botWebhooks.setWebhook(BOT_ID, { ...webhookRequest(), url: `${WEBHOOK_URL}/new` });
     if ('last_error_message' in botWebhooks.getWebhookInfo(BOT_ID)) {
       throw new Error('Expected a new webhook to forget the failure of the previous one');
+    }
+  } finally {
+    botWebhooks.endDelivery();
+  }
+});
+
+Deno.test('BotWebhookService waits as long as a failed response asks with Retry-After', async () => {
+  // Each failed response asks for a wait as Telegram reads its header, or for none.
+  const failedResponseRetryAfters = [
+    undefined,
+    '5',
+    undefined,
+    '99999',
+    'Wed, 21 Oct 2026 07:28:00 GMT',
+    '-3',
+    '2147483648',
+  ];
+  const requestedDelaysSeconds: number[] = [];
+  const { botUpdates, botWebhooks, waitForRequestCount } = createWebhookFixture(
+    (_request, requestIndex) => {
+      const retryAfter = failedResponseRetryAfters[requestIndex];
+      if (requestIndex >= failedResponseRetryAfters.length) {
+        return new Response(null, { headers: { 'Retry-After': '30' } });
+      }
+      return new Response(null, {
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: retryAfter === undefined ? {} : { 'Retry-After': retryAfter },
+      });
+    },
+    {
+      waitBeforeRetry: (delaySeconds) => {
+        requestedDelaysSeconds.push(delaySeconds);
+        return Promise.resolve();
+      },
+    },
+  );
+
+  try {
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
+    botWebhooks.setWebhook(BOT_ID, webhookRequest());
+    await waitForRequestCount(failedResponseRetryAfters.length + 1);
+    await waitUntil(() => botWebhooks.getWebhookInfo(BOT_ID).pending_update_count === 0);
+
+    // A requested wait, capped at an hour, replaces the backoff delay without doubling it.
+    if (JSON.stringify(requestedDelaysSeconds) !== JSON.stringify([0, 5, 2, 3600, 4, 8, 16])) {
+      throw new Error(
+        `Expected Retry-After to set the waits it asks for, received ${
+          JSON.stringify(requestedDelaysSeconds)
+        }`,
+      );
     }
   } finally {
     botWebhooks.endDelivery();
@@ -392,6 +444,8 @@ function createWebhookFixture(
   respond: (request: Request, requestIndex: number) => Response | Promise<Response>,
   options: {
     readonly attemptTimeoutMilliseconds?: number;
+    /** Waits for real when omitted. */
+    readonly waitBeforeRetry?: (delaySeconds: number, signal: AbortSignal) => Promise<void>;
     /** Records each reply's body when omitted. */
     readonly runWebhookReply?: (botId: number, reply: Response) => Promise<void>;
   } = {},
@@ -420,6 +474,7 @@ function createWebhookFixture(
     runWebhookReply,
     attemptTimeoutMilliseconds: options.attemptTimeoutMilliseconds ??
       WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
+    waitBeforeRetry: options.waitBeforeRetry ?? waitForRetryDelay,
     currentUnixTimeSeconds: () => NOW_UNIX_SECONDS,
   });
 

@@ -24,6 +24,18 @@ const SECRET_TOKEN_HEADER = 'X-Telegram-Bot-Api-Secret-Token';
  */
 const MAX_RETRY_DELAY_SECONDS = 60;
 
+/** The longest wait a webhook's `Retry-After` header can ask for, as Telegram limits it. */
+const MAX_RETRY_AFTER_SECONDS = 3_600;
+
+/**
+ * The text of a `Retry-After` header that TDLib's `HttpQuery::get_retry_after` reads as a positive
+ * number of seconds: a whole number written without a sign or leading zeros.
+ */
+const POSITIVE_RETRY_AFTER_PATTERN = /^[1-9]\d*$/;
+
+/** The largest number TDLib reads from a `Retry-After` header, which is the largest `int`. */
+const MAX_READABLE_RETRY_AFTER_SECONDS = 2 ** 31 - 1;
+
 /**
  * How long a webhook may take to answer an update. Telegram's webhook connections give up after 60
  * seconds without data from the webhook.
@@ -111,16 +123,43 @@ interface BotWebhookServiceDependencies {
    * `WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS` outside tests.
    */
   readonly attemptTimeoutMilliseconds: number;
+  /**
+   * Waits `delaySeconds` before a failed update is sent again, and resolves early once `signal`
+   * aborts, as `waitForRetryDelay` does outside tests.
+   */
+  readonly waitBeforeRetry: (delaySeconds: number, signal: AbortSignal) => Promise<void>;
   readonly currentUnixTimeSeconds: () => number;
 }
+
+/** How an attempt to deliver an update to a webhook ended. */
+type UpdateDeliveryOutcome =
+  | { readonly accepted: true }
+  | {
+    readonly accepted: false;
+    /** Telegram's description of the failure, which `getWebhookInfo` reports. */
+    readonly errorMessage: string;
+    /** The wait the webhook asked for in its `Retry-After` header, or 0 when it asked for none. */
+    readonly retryAfterSeconds: number;
+  };
+
+/** How the retries of a failing update stand, as `WebhookActor` keeps them for each update. */
+interface UpdateRetryBackoff {
+  readonly failureCount: number;
+  /** Doubles with each later failure that has no `Retry-After`, up to the maximum. */
+  readonly delaySeconds: number;
+}
+
+/** The backoff of an update that has not failed yet. */
+const INITIAL_UPDATE_RETRY_BACKOFF: UpdateRetryBackoff = { failureCount: 0, delaySeconds: 1 };
 
 /**
  * Keeps each bot's webhook and delivers the bot's pending updates to it.
  *
  * As on Telegram, an update stays pending until its webhook answers it with a 2xx status, and a
- * failed update is sent again after a growing delay. Telegram sends updates of different chats
- * over up to `max_connections` connections at once; the emulator sends one update at a time, in
- * order, so a failing update holds back later ones.
+ * failed update is sent again after a growing delay, or after the delay the webhook asks for in a
+ * `Retry-After` header. Telegram sends updates of different chats over up to `max_connections`
+ * connections at once; the emulator sends one update at a time, in order, so a failing update
+ * holds back later ones.
  *
  * An attempt that takes too long fails as Telegram's read timeout does. Telegram times out a
  * connection that receives no data for a while; the emulator bounds each attempt as a whole,
@@ -133,6 +172,7 @@ export class BotWebhookService {
   readonly #sendWebhookRequest: (request: Request) => Promise<Response>;
   readonly #runWebhookReply: (botId: number, reply: Response, signal: AbortSignal) => Promise<void>;
   readonly #attemptTimeoutMilliseconds: number;
+  readonly #waitBeforeRetry: (delaySeconds: number, signal: AbortSignal) => Promise<void>;
   readonly #currentUnixTimeSeconds: () => number;
   /** Aborting a bot's controller stops delivery to its webhook, including a request in flight. */
   readonly #deliveriesByBotId = new Map<number, AbortController>();
@@ -147,6 +187,7 @@ export class BotWebhookService {
       sendWebhookRequest,
       runWebhookReply,
       attemptTimeoutMilliseconds,
+      waitBeforeRetry,
       currentUnixTimeSeconds,
     }: BotWebhookServiceDependencies,
   ) {
@@ -156,6 +197,7 @@ export class BotWebhookService {
     this.#sendWebhookRequest = sendWebhookRequest;
     this.#runWebhookReply = runWebhookReply;
     this.#attemptTimeoutMilliseconds = attemptTimeoutMilliseconds;
+    this.#waitBeforeRetry = waitBeforeRetry;
     this.#currentUnixTimeSeconds = currentUnixTimeSeconds;
   }
 
@@ -299,7 +341,7 @@ export class BotWebhookService {
   ): Promise<void> {
     let firstUnconfirmedUpdateId: number | undefined;
     let failingUpdateId: number | undefined;
-    let consecutiveFailureCount = 0;
+    let retryBackoff = INITIAL_UPDATE_RETRY_BACKOFF;
     while (!signal.aborted) {
       const [update] = this.#pendingUpdates.confirmAndReadPendingUpdates(botId, {
         firstUnconfirmedUpdateId,
@@ -310,32 +352,33 @@ export class BotWebhookService {
         continue;
       }
 
-      const deliveryErrorMessage = await this.#sendUpdate(botId, webhook, update, signal);
+      const outcome = await this.#sendUpdate(botId, webhook, update, signal);
       if (signal.aborted) {
         return;
       }
-      if (deliveryErrorMessage === undefined) {
+      if (outcome.accepted) {
         firstUnconfirmedUpdateId = update.update_id + 1;
         continue;
       }
 
       this.#webhooks.recordDeliveryError(botId, {
         dateUnixSeconds: this.#currentUnixTimeSeconds(),
-        message: deliveryErrorMessage,
+        message: outcome.errorMessage,
       });
       if (failingUpdateId !== update.update_id) {
         failingUpdateId = update.update_id;
-        consecutiveFailureCount = 0;
+        retryBackoff = INITIAL_UPDATE_RETRY_BACKOFF;
       }
-      consecutiveFailureCount++;
-      await waitFor(retryDelaySeconds(consecutiveFailureCount), signal);
+      const retry = scheduleUpdateRetry(retryBackoff, outcome.retryAfterSeconds);
+      retryBackoff = retry.backoff;
+      await this.#waitBeforeRetry(retry.delaySeconds, signal);
     }
   }
 
   /**
    * Posts the update to the webhook as the official Bot API server's `WebhookActor` does, and
-   * returns Telegram's description of the failure, or `undefined` when the webhook accepted it.
-   * The attempt ends when `deliverySignal` aborts, or fails once it outlasts its timeout.
+   * returns whether the webhook accepted it. The attempt ends when `deliverySignal` aborts, or
+   * fails once it outlasts its timeout.
    *
    * As on Telegram, a successful response may name a Bot API method, which runs before the next
    * update is sent. The status alone decides the outcome of the delivery: the method's failure, or
@@ -346,7 +389,7 @@ export class BotWebhookService {
     webhook: BotWebhook,
     update: BotApiUpdate,
     deliverySignal: AbortSignal,
-  ): Promise<string | undefined> {
+  ): Promise<UpdateDeliveryOutcome> {
     const timeout = new AbortController();
     const timeoutId = setTimeout(() => timeout.abort(), this.#attemptTimeoutMilliseconds);
     const attemptSignal = AbortSignal.any([deliverySignal, timeout.signal]);
@@ -357,7 +400,13 @@ export class BotWebhookService {
         response = await settleUnlessAborted(this.#sendWebhookRequest(request), attemptSignal);
       } catch {
         // Telegram reports other failures to connect without their cause.
-        return timeout.signal.aborted ? READ_TIMEOUT_ERROR_MESSAGE : "Can't connect to the webhook";
+        return {
+          accepted: false,
+          errorMessage: timeout.signal.aborted
+            ? READ_TIMEOUT_ERROR_MESSAGE
+            : "Can't connect to the webhook",
+          retryAfterSeconds: 0,
+        };
       }
       const isAccepted = response.status >= 200 && response.status <= 299;
       try {
@@ -370,9 +419,11 @@ export class BotWebhookService {
       } catch {
         // The status alone decides the outcome, so neither the reply nor the body changes it.
       }
-      return isAccepted
-        ? undefined
-        : `Wrong response from the webhook: ${response.status} ${response.statusText}`;
+      return isAccepted ? { accepted: true } : {
+        accepted: false,
+        errorMessage: `Wrong response from the webhook: ${response.status} ${response.statusText}`,
+        retryAfterSeconds: readRetryAfterSeconds(response),
+      };
     } finally {
       clearTimeout(timeoutId);
     }
@@ -400,14 +451,42 @@ function isSameWebhook(first: BotWebhook, second: BotWebhook): boolean {
 }
 
 /**
- * How long to wait before sending an update again after it failed the given number of times in a
- * row, as the official Bot API server's `WebhookActor::on_update_error` does: the first failure is
- * retried at once, and each later one after twice the previous delay, starting at 2 seconds.
+ * Counts another failure of an update and returns how long to wait before sending it again, as
+ * the official Bot API server's `WebhookActor::on_update_error` does. A positive `Retry-After`
+ * sets the wait, up to an hour, and leaves the backoff delay as it is. Otherwise the first failure
+ * is retried at once, and each later one after twice the previous backoff delay, starting at 2
+ * seconds.
  */
-function retryDelaySeconds(consecutiveFailureCount: number): number {
-  return consecutiveFailureCount === 1
-    ? 0
-    : Math.min(MAX_RETRY_DELAY_SECONDS, 2 ** (consecutiveFailureCount - 1));
+function scheduleUpdateRetry(
+  backoff: UpdateRetryBackoff,
+  retryAfterSeconds: number,
+): { readonly delaySeconds: number; readonly backoff: UpdateRetryBackoff } {
+  const failureCount = backoff.failureCount + 1;
+  if (retryAfterSeconds > 0) {
+    return {
+      delaySeconds: Math.min(retryAfterSeconds, MAX_RETRY_AFTER_SECONDS),
+      backoff: { failureCount, delaySeconds: backoff.delaySeconds },
+    };
+  }
+  if (backoff.failureCount === 0) {
+    return { delaySeconds: 0, backoff: { failureCount, delaySeconds: backoff.delaySeconds } };
+  }
+  const delaySeconds = Math.min(MAX_RETRY_DELAY_SECONDS, backoff.delaySeconds * 2);
+  return { delaySeconds, backoff: { failureCount, delaySeconds } };
+}
+
+/**
+ * Reads the wait, in seconds, that a failed response asks for in its `Retry-After` header, as
+ * TDLib's `HttpQuery::get_retry_after` does. Anything but a whole number of seconds, such as an
+ * HTTP date, asks for none, which is 0.
+ */
+function readRetryAfterSeconds(response: Response): number {
+  const retryAfter = response.headers.get('Retry-After') ?? '';
+  if (!POSITIVE_RETRY_AFTER_PATTERN.test(retryAfter)) {
+    return 0;
+  }
+  const retryAfterSeconds = Number(retryAfter);
+  return retryAfterSeconds <= MAX_READABLE_RETRY_AFTER_SECONDS ? retryAfterSeconds : 0;
 }
 
 function isDefaultSubscription(allowedUpdateTypes: ReadonlySet<BotApiUpdateType>): boolean {
@@ -465,7 +544,7 @@ function settleUnlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promi
 }
 
 /** Resolves after the delay, or at once when `signal` aborts. */
-function waitFor(delaySeconds: number, signal: AbortSignal): Promise<void> {
+export function waitForRetryDelay(delaySeconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) {
       resolve();

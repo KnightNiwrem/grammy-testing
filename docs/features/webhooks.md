@@ -7,7 +7,10 @@
 `setWebhook` registers or replaces a bot's webhook. The emulator posts updates as JSON and adds
 `X-Telegram-Bot-Api-Secret-Token` when `secret_token` is set. URL credentials become HTTP Basic
 authorization. Redirects are treated as delivery failures. A 2xx response confirms the update; other
-statuses and connection failures leave it pending for another attempt.
+statuses and connection failures leave it pending for another attempt. The first retry is immediate,
+and later ones back off as described under [intentional deviations](#intentional-deviations). A
+failed response's `Retry-After` header, in whole seconds, sets the wait before the next attempt
+instead, up to one hour, as in [`WebhookActor::on_update_error`][webhook-retry].
 
 `deleteWebhook`, or `setWebhook` with an empty URL, removes the registration. Both support
 `drop_pending_updates`. `setWebhook` also accepts `allowed_updates`. `getWebhookInfo` reports the
@@ -71,9 +74,6 @@ There is no Telegram synchronization error state because sessions have no Telegr
   has no effect on concurrency. Tests need concurrent delivery across chats that honors this
   setting. Upstream uses [multiple connections and separate queues][webhook-queues]; its
   [`max_connections` limit][max-connections] rises to 100,000 in local mode.
-- **`Retry-After`.** The emulator ignores `Retry-After` headers on failed deliveries. Upstream waits
-  the header's number of seconds, up to an hour, instead of the next backoff delay. See
-  [retry calculation][webhook-retry] and [`HttpQuery::get_retry_after`][retry-after].
 - **Complete response before confirmation.** A 2xx response confirms delivery even if reading its
   body later fails or times out. Confirmation should require a complete response so tests can
   exercise incomplete deliveries. Upstream completes HTTP response parsing before delivering the
@@ -95,7 +95,6 @@ There is no Telegram synchronization error state because sessions have no Telegr
 [webhook-queues]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L365-L425
 [webhook-retry]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L493-L520
 [webhook-drop-timeout]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.h#L75-L76
-[retry-after]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/tdnet/td/net/HttpQuery.cpp#L36-L47
 [max-connections]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17215-L17225
 [set-webhook]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17227-L17340
 [http-connection]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/tdnet/td/net/HttpConnectionBase.cpp#L39-L154

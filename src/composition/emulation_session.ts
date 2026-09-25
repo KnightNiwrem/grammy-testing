@@ -23,6 +23,7 @@ import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../services/bot_update_polling.ts';
 import {
   BotWebhookService,
+  waitForRetryDelay,
   WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
 } from '../services/bot_webhook.ts';
 import { CallbackQueryService } from '../services/callback_query.ts';
@@ -146,6 +147,7 @@ export function createEmulationSession(id: string): EmulationSession {
       }
     },
     attemptTimeoutMilliseconds: WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
+    waitBeforeRetry: waitForRetryDelay,
     currentUnixTimeSeconds,
   });
   const botApi = new BotApiService({

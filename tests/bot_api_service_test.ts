@@ -211,6 +211,7 @@ function createBotApiFixture() {
       sendWebhookRequest: () => Promise.reject(new Error('Unexpected webhook request')),
       runWebhookReply: () => Promise.reject(new Error('Unexpected webhook reply')),
       attemptTimeoutMilliseconds: WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
+      waitBeforeRetry: () => Promise.reject(new Error('Unexpected webhook retry')),
       currentUnixTimeSeconds: () => 1_700_000_000,
     }),
     botMessages: privateMessaging,
