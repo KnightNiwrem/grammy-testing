@@ -249,6 +249,8 @@ const photoSizeSchema = z.strictObject({
 const documentSchema = z.strictObject({
   file_name: z.string().min(1),
   mime_type: z.string().min(1),
+  thumbnail: photoSizeSchema.optional(),
+  thumb: photoSizeSchema.optional(),
   ...messageFileShape,
 });
 

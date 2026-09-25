@@ -24,6 +24,21 @@ export interface PhotoUpload {
   readonly height: number;
 }
 
+/** TDLib ignores a larger thumbnail that a sender uploads with a file. */
+export const MAX_THUMBNAIL_UPLOAD_BYTES = 200 * 1024 - 1;
+
+/**
+ * A preview image that a sender uploaded with a document, as it was sent. Telegram asks for a JPEG
+ * of at most 320 pixels a side; the emulator keeps any image whose dimensions it reads unchanged.
+ */
+export interface ThumbnailUpload {
+  readonly type: 'thumbnail';
+  readonly content: Uint8Array<ArrayBuffer>;
+  readonly imageFormat: PhotoImageFormat;
+  readonly width: number;
+  readonly height: number;
+}
+
 /** A file sent as a document, before it is stored. */
 export interface DocumentUpload {
   readonly type: 'document';
@@ -32,8 +47,11 @@ export interface DocumentUpload {
   readonly fileName: string;
   /** The MIME type Telegram derives from the file name's extension. */
   readonly mimeType: string;
+  /** Omitted for a document sent without a usable thumbnail. */
+  readonly thumbnail?: ThumbnailUpload;
 }
 
+/** A file a user sends as a message's media; a thumbnail is uploaded only with its document. */
 export type FileUpload = PhotoUpload | DocumentUpload;
 
 interface StoredFileIdentity {
@@ -51,6 +69,15 @@ interface StoredFileIdentity {
  */
 export type StoredPhotoFile = StoredFileIdentity & PhotoUpload;
 
-export type StoredDocumentFile = StoredFileIdentity & DocumentUpload;
+/** A stored thumbnail, which users know by a `file_id` of its own, as any file. */
+export type StoredThumbnailFile = StoredFileIdentity & ThumbnailUpload;
 
-export type StoredFile = StoredPhotoFile | StoredDocumentFile;
+export type StoredDocumentFile =
+  & StoredFileIdentity
+  & Omit<DocumentUpload, 'thumbnail'>
+  & {
+    /** Omitted for a document without a thumbnail. */
+    readonly thumbnail?: StoredThumbnailFile;
+  };
+
+export type StoredFile = StoredPhotoFile | StoredDocumentFile | StoredThumbnailFile;

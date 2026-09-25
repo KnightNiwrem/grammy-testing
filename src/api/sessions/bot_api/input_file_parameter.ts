@@ -37,3 +37,30 @@ export function readInputFileParameter(
     ? { read: false, reason: 'url_unsupported' }
     : { read: true, inputFile: { kind: 'file_id', fileId: value } };
 }
+
+/** The parameters that name a document's thumbnail: the current name, then the legacy one. */
+const THUMBNAIL_PARAMETER_NAMES = ['thumbnail', 'thumb'] as const;
+
+/**
+ * Finds the content of a thumbnail uploaded for a file, as the official Bot API server's
+ * `get_input_thumbnail` does: from the part that `thumbnail` names with `attach://<name>`, or else
+ * the part named `thumbnail`, and failing both, likewise for the legacy `thumb`. A thumbnail must
+ * be uploaded, so other text, such as a `file_id` or URL, is ignored; without an uploaded part the
+ * file is sent without a thumbnail.
+ */
+export function readThumbnailParameter(
+  values: { readonly [Name in typeof THUMBNAIL_PARAMETER_NAMES[number]]?: string },
+  uploadedFiles: BotApiUploadedFiles,
+): Uint8Array<ArrayBuffer> | undefined {
+  for (const parameterName of THUMBNAIL_PARAMETER_NAMES) {
+    const value = values[parameterName];
+    const partName = value?.startsWith(ATTACHED_FILE_PREFIX)
+      ? value.slice(ATTACHED_FILE_PREFIX.length)
+      : parameterName;
+    const uploadedFile = uploadedFiles.get(partName);
+    if (uploadedFile !== undefined) {
+      return uploadedFile.content;
+    }
+  }
+  return undefined;
+}

@@ -5906,6 +5906,115 @@ Deno.test('sendPhoto and sendDocument upload files, reuse file IDs, and follow T
   }
 });
 
+Deno.test('sendDocument keeps an uploaded thumbnail that bots and accounts see and download', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  await sendText('/start');
+  const chatId = String(createdAccount.account.id);
+  const sendDocument = async (parameters: Record<string, string>, files: Record<string, File>) => {
+    const { status, body } = await callBotApiWithFiles(
+      api,
+      `${botApiPath}/sendDocument`,
+      { chat_id: chatId, ...parameters },
+      { document: new File(['a,b\n'], 'report.csv'), ...files },
+    );
+    const document = botApiResult(body)?.document as Record<string, unknown> | undefined;
+    if (status !== 200 || document === undefined) {
+      throw new Error(`Expected a document to be sent, received ${status} ${JSON.stringify(body)}`);
+    }
+    return { message: botApiResult(body), document };
+  };
+
+  const { message, document } = await sendDocument(
+    { thumbnail: 'attach://preview' },
+    { preview: new File([gifImage(90, 60)], 'preview.gif') },
+  );
+  const thumbnail = document.thumbnail as Record<string, unknown> | undefined;
+  if (
+    JSON.stringify(Object.keys(document)) !== JSON.stringify([
+        'file_name',
+        'mime_type',
+        'thumbnail',
+        'thumb',
+        'file_id',
+        'file_unique_id',
+        'file_size',
+      ]) ||
+    JSON.stringify(document.thumb) !== JSON.stringify(thumbnail) ||
+    thumbnail?.width !== 90 || thumbnail.height !== 60 ||
+    thumbnail.file_size !== gifImage(90, 60).length || thumbnail.file_id === document.file_id
+  ) {
+    throw new Error(`Expected the document's thumbnail, received ${JSON.stringify(document)}`);
+  }
+
+  const thumbnailFile = await callBotApi(api, `${botApiPath}/getFile`, {
+    file_id: thumbnail.file_id,
+  });
+  const thumbnailPath = botApiResult(thumbnailFile.body)?.file_path;
+  const download = await api.request(
+    `${sessionPath}/bot-api/file/bot${createdBot.token}/${thumbnailPath}`,
+  );
+  if (
+    thumbnailPath !== 'thumbnails/file_0.gif' || download.status !== 200 ||
+    JSON.stringify([...new Uint8Array(await download.arrayBuffer())]) !==
+      JSON.stringify([...gifImage(90, 60)])
+  ) {
+    throw new Error(`Expected the thumbnail to be downloadable, received ${thumbnailPath}`);
+  }
+
+  const history = await (await api.request(
+    `${sessionPath}/accounts/${chatId}/conversations/private/${createdBot.bot.id}/messages`,
+  )).json() as { messages: Array<{ message_id: number; document?: Record<string, unknown> }> };
+  const accountThumbnail = history.messages.find(({ message_id }) =>
+    message_id === message?.message_id
+  )?.document?.thumbnail as Record<string, unknown> | undefined;
+  if (
+    accountThumbnail?.file_unique_id !== thumbnail.file_unique_id
+  ) {
+    throw new Error(
+      `Expected the account to see the thumbnail, received ${JSON.stringify(history)}`,
+    );
+  }
+
+  const reusedDocument = await callBotApi(api, `${botApiPath}/sendDocument`, {
+    chat_id: chatId,
+    document: document.file_id,
+  });
+  const legacyThumbnail = await sendDocument({}, {
+    thumb: new File([gifImage(40, 40)], 'thumb.gif'),
+  });
+  const oversizedThumbnail = new Uint8Array(200 * 1024);
+  oversizedThumbnail.set(gifImage(90, 60));
+  const withoutThumbnail = await sendDocument({ thumbnail: 'https://example.com/preview.jpg' }, {
+    thumbnail: new File([oversizedThumbnail], 'preview.gif'),
+  });
+  const reusedThumbnail = (botApiResult(reusedDocument.body)?.document as
+    | Record<string, unknown>
+    | undefined)?.thumbnail;
+  if (
+    JSON.stringify(reusedThumbnail) !== JSON.stringify(thumbnail) ||
+    (legacyThumbnail.document.thumbnail as Record<string, unknown> | undefined)?.width !== 40 ||
+    'thumbnail' in withoutThumbnail.document || 'thumb' in withoutThumbnail.document
+  ) {
+    throw new Error('Expected reuse to keep the thumbnail, thumb to work, and a large one ignored');
+  }
+
+  const thumbnailAsPhoto = await callBotApi(api, `${botApiPath}/sendPhoto`, {
+    chat_id: chatId,
+    photo: thumbnail.file_id,
+  });
+  if (
+    thumbnailAsPhoto.status !== 400 || !isBadRequestResponse(thumbnailAsPhoto.body) ||
+    thumbnailAsPhoto.body.description !== "Bad Request: can't use file of type Thumbnail as Photo"
+  ) {
+    throw new Error(
+      `Expected a thumbnail not to be sent as a photo, received ${
+        JSON.stringify(thumbnailAsPhoto.body)
+      }`,
+    );
+  }
+});
+
 Deno.test('a bot downloads the files it knows with getFile, and tests read any by unique ID', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount } =
     await createPrivateConversationFixture();

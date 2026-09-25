@@ -395,9 +395,9 @@ export function replaceAccountMessageContent(
   return replaceMessageText(content, { text: edit.text }, context);
 }
 
-/** Stores a file upload and returns the stored file, which carries the upload's own type. */
+/** Stores a file upload and returns the stored file's identity. */
 export interface FileUploadStore {
-  addFile<Upload extends FileUpload>(upload: Upload): Upload & Pick<StoredFile, 'id' | 'uniqueId'>;
+  addFile(upload: FileUpload): Pick<StoredFile, 'id'>;
 }
 
 /**

@@ -434,6 +434,10 @@ export interface PhotoSize extends MessageFile {
 export interface Document extends MessageFile {
   readonly file_name: string;
   readonly mime_type: string;
+  /** The preview image the sender uploaded with the document; omitted for none. */
+  readonly thumbnail?: PhotoSize;
+  /** Legacy copy of `thumbnail`, which the Bot API still shows. */
+  readonly thumb?: PhotoSize;
 }
 
 /**

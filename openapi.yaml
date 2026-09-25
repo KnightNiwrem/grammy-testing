@@ -1623,7 +1623,8 @@ paths:
       `sendPhoto` sends a photo. The Bot API server cleans the name of an uploaded file, and the
       name's extension decides the document's MIME type. Telegram sends some files, such as videos
       and GIF animations, as other media unless `disable_content_type_detection` is set; the
-      emulator always sends a document. Document thumbnails are not supported.
+      emulator always sends a document. An uploaded `thumbnail` is kept as the document's
+      thumbnail, as described for that parameter.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -4565,6 +4566,14 @@ components:
             The MIME type Telegram derives from the file name's extension, matched
             case-insensitively; `application/octet-stream` for an extension the emulator does not
             recognize.
+        thumbnail:
+          $ref: '#/components/schemas/PhotoSize'
+          description: >-
+            The preview image a bot uploaded with the document, kept as it was sent; omitted for
+            none. It has a `file_id` and `file_unique_id` of its own.
+        thumb:
+          $ref: '#/components/schemas/PhotoSize'
+          description: Legacy copy of `thumbnail`, which the Bot API still shows.
         file_id:
           $ref: '#/components/schemas/FileId'
         file_unique_id:
@@ -6251,6 +6260,19 @@ components:
           description: >-
             The `file_id` of a document the bot knows, or `attach://<part name>` for a file
             uploaded in that part. Without it, the document is the part named `document`.
+        thumbnail:
+          type: string
+          description: >-
+            `attach://<part name>` for a preview image uploaded in that part; without it, or with
+            other text, the part named `thumbnail`, if any. As in TDLib, a thumbnail must be
+            uploaded, and one that is empty or larger than 204799 bytes is left out rather than
+            failing the request, as is one whose image the emulator cannot read. The image is kept
+            as sent; Telegram asks for a JPEG of at most 320 pixels a side. A document sent by
+            `file_id` keeps its own thumbnail.
+        thumb:
+          type: string
+          description: >-
+            Legacy name of `thumbnail`, read as it is when `thumbnail` names no uploaded part.
         caption:
           $ref: '#/components/schemas/Caption'
         parse_mode:

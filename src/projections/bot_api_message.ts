@@ -47,7 +47,7 @@ import {
   type InlineKeyboardButton,
 } from '../types/inline_keyboard.ts';
 import { getInlineQueryChatType, type InlineQuery } from '../types/inline_query.ts';
-import type { StoredFile } from '../types/stored_file.ts';
+import type { StoredDocumentFile, StoredFile } from '../types/stored_file.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
 import type { VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { BasicGroup, Supergroup } from '../types/virtual_chat.ts';
@@ -72,6 +72,11 @@ import {
 export interface ObservedFile {
   readonly file: StoredFile;
   readonly observerFileId: string;
+  /**
+   * The `file_id` by which the observer knows a document's thumbnail; omitted for other files and
+   * for a document without a thumbnail.
+   */
+  readonly observerThumbnailFileId?: string;
 }
 
 /** What a projection shows beyond the message itself, resolved for the observer. */
@@ -426,10 +431,35 @@ function projectDocument(contentFile: ObservedFile | undefined): BotApiDocument 
   return {
     file_name: file.fileName,
     mime_type: file.mimeType,
+    ...projectDocumentThumbnail(file, contentFile.observerThumbnailFileId),
     file_id: contentFile.observerFileId,
     file_unique_id: file.uniqueId,
     file_size: file.content.length,
   };
+}
+
+/**
+ * Shows a document's thumbnail both as `thumbnail` and as the legacy `thumb`, as the official Bot
+ * API server's `json_store_thumbnail` does; nothing for a document without one.
+ */
+function projectDocumentThumbnail(
+  { thumbnail }: StoredDocumentFile,
+  observerThumbnailFileId: string | undefined,
+): Pick<BotApiDocument, 'thumbnail' | 'thumb'> {
+  if (thumbnail === undefined) {
+    return {};
+  }
+  if (observerThumbnailFileId === undefined) {
+    throw new Error('Expected the thumbnail of the document to be provided');
+  }
+  const projectedThumbnail: BotApiPhotoSize = {
+    file_id: observerThumbnailFileId,
+    file_unique_id: thumbnail.uniqueId,
+    file_size: thumbnail.content.length,
+    width: thumbnail.width,
+    height: thumbnail.height,
+  };
+  return { thumbnail: projectedThumbnail, thumb: projectedThumbnail };
 }
 
 export interface CallbackQueryForBotProjectionInput {

@@ -4,10 +4,12 @@ import {
   type DocumentUpload,
   MAX_BOT_DOWNLOAD_FILE_BYTES,
   MAX_PHOTO_UPLOAD_BYTES,
+  MAX_THUMBNAIL_UPLOAD_BYTES,
   type PhotoImageFormat,
   type PhotoUpload,
   type StoredFile,
   type StoredFileId,
+  type ThumbnailUpload,
 } from '../types/stored_file.ts';
 
 /** Telegram rejects a photo whose width and height add up to more than this. */
@@ -20,6 +22,7 @@ const MAX_PHOTO_ASPECT_RATIO = 20;
 const BOT_FILE_DIRECTORIES: Readonly<Record<StoredFile['type'], string>> = {
   photo: 'photos',
   document: 'documents',
+  thumbnail: 'thumbnails',
 };
 
 const PHOTO_FILE_EXTENSIONS: Readonly<Record<PhotoImageFormat, string>> = {
@@ -115,18 +118,31 @@ export class MediaFileService {
 
   /**
    * Prepares an uploaded file to be sent as a document under the given nonempty name, whose
-   * extension decides its MIME type.
+   * extension decides its MIME type, with the thumbnail uploaded for it, if any. As TDLib's
+   * `get_input_thumbnail_photo_size` does, a thumbnail that cannot be used is left out rather than
+   * failing the document: one that is empty or larger than 200 KB, which TDLib refuses, or whose
+   * image the emulator cannot read.
    */
   prepareDocumentUpload(
     content: Uint8Array<ArrayBuffer>,
     fileName: string,
+    thumbnailContent?: Uint8Array<ArrayBuffer>,
   ): DocumentUploadPreparation {
     if (content.length === 0) {
       return { prepared: false, reason: 'file_empty' };
     }
+    const thumbnail = thumbnailContent === undefined
+      ? undefined
+      : readThumbnailUpload(thumbnailContent);
     return {
       prepared: true,
-      upload: { type: 'document', content, fileName, mimeType: getDocumentMimeType(fileName) },
+      upload: {
+        type: 'document',
+        content,
+        fileName,
+        mimeType: getDocumentMimeType(fileName),
+        ...(thumbnail === undefined ? {} : { thumbnail }),
+      },
     };
   }
 
@@ -175,12 +191,21 @@ export class MediaFileService {
    * bot's directory for the file's type, with the extension of the file's format or name.
    */
   #createBotFilePath(botId: number, file: StoredFile): string {
-    const extension = file.type === 'photo'
-      ? PHOTO_FILE_EXTENSIONS[file.imageFormat]
-      : getFileNameExtension(file.fileName);
+    const extension = file.type === 'document'
+      ? getFileNameExtension(file.fileName)
+      : PHOTO_FILE_EXTENSIONS[file.imageFormat];
     const fileName = `file_${this.#files.countBotFilePaths(botId)}`;
     return `${BOT_FILE_DIRECTORIES[file.type]}/${
       extension === undefined ? fileName : `${fileName}.${extension}`
     }`;
   }
+}
+
+/** Reads a usable thumbnail, or returns `undefined` for one Telegram would leave out. */
+function readThumbnailUpload(content: Uint8Array<ArrayBuffer>): ThumbnailUpload | undefined {
+  if (content.length === 0 || content.length > MAX_THUMBNAIL_UPLOAD_BYTES) {
+    return undefined;
+  }
+  const dimensions = readImageDimensions(content);
+  return dimensions === undefined ? undefined : { type: 'thumbnail', content, ...dimensions };
 }

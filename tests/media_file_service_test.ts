@@ -1,6 +1,10 @@
 import { FileRepository } from '../src/repositories/file.ts';
 import { MediaFileService } from '../src/services/media_file.ts';
-import { MAX_BOT_DOWNLOAD_FILE_BYTES, MAX_PHOTO_UPLOAD_BYTES } from '../src/types/stored_file.ts';
+import {
+  MAX_BOT_DOWNLOAD_FILE_BYTES,
+  MAX_PHOTO_UPLOAD_BYTES,
+  MAX_THUMBNAIL_UPLOAD_BYTES,
+} from '../src/types/stored_file.ts';
 
 const FIRST_BOT_ID = 1;
 const SECOND_BOT_ID = 2;
@@ -69,6 +73,75 @@ Deno.test('MediaFileService names documents and derives their MIME type', () => 
     emptyDocument.prepared || emptyDocument.reason !== 'file_empty'
   ) {
     throw new Error(`Expected a PDF document and an empty file to be rejected`);
+  }
+});
+
+Deno.test('MediaFileService keeps a usable thumbnail and leaves out others, as TDLib does', () => {
+  const { mediaFiles } = createMediaFileFixture();
+  const withThumbnail = (thumbnailContent: Uint8Array<ArrayBuffer>) =>
+    mediaFiles.prepareDocumentUpload(new Uint8Array([1]), 'report.pdf', thumbnailContent);
+
+  const document = withThumbnail(gifImage(320, 240));
+  if (
+    !document.prepared ||
+    JSON.stringify(document.upload.thumbnail) !== JSON.stringify({
+        type: 'thumbnail',
+        content: gifImage(320, 240),
+        imageFormat: 'gif',
+        width: 320,
+        height: 240,
+      })
+  ) {
+    throw new Error(`Expected a document with its thumbnail, received ${JSON.stringify(document)}`);
+  }
+
+  const largestThumbnail = new Uint8Array(MAX_THUMBNAIL_UPLOAD_BYTES);
+  largestThumbnail.set(gifImage(90, 90));
+  const unusableThumbnails = [
+    new Uint8Array(),
+    new Uint8Array(MAX_THUMBNAIL_UPLOAD_BYTES + 1),
+    new TextEncoder().encode('not an image'),
+  ];
+  for (const thumbnailContent of unusableThumbnails) {
+    const preparation = withThumbnail(thumbnailContent);
+    if (!preparation.prepared || preparation.upload.thumbnail !== undefined) {
+      throw new Error(
+        `Expected the thumbnail to be left out, received ${JSON.stringify(preparation)}`,
+      );
+    }
+  }
+  const largest = withThumbnail(largestThumbnail);
+  if (
+    !largest.prepared || largest.upload.thumbnail?.content.length !== MAX_THUMBNAIL_UPLOAD_BYTES
+  ) {
+    throw new Error('Expected a thumbnail of 204799 bytes to be kept');
+  }
+});
+
+Deno.test('MediaFileService lets bots download a document thumbnail as a file of its own', () => {
+  const { files, mediaFiles } = createMediaFileFixture();
+  const document = files.addFile({
+    type: 'document',
+    content: new Uint8Array([1, 2, 3]),
+    fileName: 'notes.txt',
+    mimeType: 'text/plain',
+    thumbnail: {
+      type: 'thumbnail',
+      content: gifImage(32, 32),
+      imageFormat: 'gif',
+      width: 32,
+      height: 32,
+    },
+  });
+  const thumbnail = document.thumbnail;
+  if (thumbnail === undefined || files.getFileByUniqueId(thumbnail.uniqueId) !== thumbnail) {
+    throw new Error('Expected the thumbnail to be stored as a file of its own');
+  }
+
+  const thumbnailFileId = files.getOrAssignObserverFileId(FIRST_BOT_ID, thumbnail.id);
+  const download = mediaFiles.getBotFile(FIRST_BOT_ID, thumbnailFileId);
+  if (!download.found || download.downloadableFile.filePath !== 'thumbnails/file_0.gif') {
+    throw new Error(`Expected a thumbnail download path, received ${JSON.stringify(download)}`);
   }
 });
 

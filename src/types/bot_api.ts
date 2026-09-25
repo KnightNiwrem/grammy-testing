@@ -138,10 +138,17 @@ export interface BotApiPhotoSize extends BotApiFile {
   readonly height: number;
 }
 
-/** A document as the Bot API shows it: its name and type precede its file fields. */
+/**
+ * A document as the Bot API shows it: its name and type, then its thumbnail, precede its file
+ * fields.
+ */
 export interface BotApiDocument extends BotApiFile {
   readonly file_name: string;
   readonly mime_type: string;
+  /** Omitted for a document without a thumbnail. */
+  readonly thumbnail?: BotApiPhotoSize;
+  /** Legacy copy of `thumbnail`, which the Bot API still shows. */
+  readonly thumb?: BotApiPhotoSize;
 }
 
 /** A caption's fields, which Telegram omits for a media message without a caption. */

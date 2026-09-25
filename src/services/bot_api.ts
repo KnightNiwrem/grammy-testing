@@ -218,6 +218,11 @@ export type SendPhotoRequest = SendRequestOptions & {
 
 export type SendDocumentRequest = SendRequestOptions & {
   readonly document: BotApiInputFile;
+  /**
+   * The content of the thumbnail uploaded for the document; omitted for none. Telegram ignores it
+   * for a document sent by `file_id`, which keeps its own thumbnail.
+   */
+  readonly thumbnail?: Uint8Array<ArrayBuffer>;
   /** Empty text for no caption. */
   readonly caption: SpecifiedFormattedText;
 };
@@ -1010,7 +1015,11 @@ interface MediaFiles {
       readonly reason: 'file_empty' | 'image_invalid' | 'photo_dimensions_invalid';
     }
     | ({ readonly prepared: false } & PhotoTooBigFailure);
-  prepareDocumentUpload(content: Uint8Array<ArrayBuffer>, fileName: string):
+  prepareDocumentUpload(
+    content: Uint8Array<ArrayBuffer>,
+    fileName: string,
+    thumbnailContent?: Uint8Array<ArrayBuffer>,
+  ):
     | { readonly prepared: true; readonly upload: DocumentUpload }
     | { readonly prepared: false; readonly reason: 'file_empty' };
   findObserverFile(observerId: number, fileId: string): StoredFile | undefined;
@@ -1484,9 +1493,9 @@ export class BotApiService {
    */
   sendDocument(
     authenticatedBot: VirtualBotProfile,
-    { document, caption, ...options }: SendDocumentRequest,
+    { document, thumbnail, caption, ...options }: SendDocumentRequest,
   ): SendResult {
-    const documentResolution = this.#resolveDocument(authenticatedBot, document);
+    const documentResolution = this.#resolveDocument(authenticatedBot, document, thumbnail);
     if (!documentResolution.resolved) {
       return { sent: false, ...documentResolution.failure };
     }
@@ -1984,12 +1993,15 @@ export class BotApiService {
   }
 
   /**
-   * Resolves the document a request sends: an upload, whose name the Bot API server cleans, or a
-   * document the bot knows by `file_id`.
+   * Resolves the document a request sends: an upload, whose name the Bot API server cleans, with
+   * the thumbnail uploaded for it, or a document the bot knows by `file_id`, which keeps its own
+   * thumbnail.
    */
-  #resolveDocument(authenticatedBot: VirtualBotProfile, input: BotApiInputFile): FileResolution<
-    OutgoingDocument
-  > {
+  #resolveDocument(
+    authenticatedBot: VirtualBotProfile,
+    input: BotApiInputFile,
+    thumbnailContent: Uint8Array<ArrayBuffer> | undefined,
+  ): FileResolution<OutgoingDocument> {
     if (input.kind === 'file_id') {
       const file = this.#mediaFiles.findObserverFile(authenticatedBot.id, input.fileId);
       if (file?.type === 'document') {
@@ -2000,6 +2012,7 @@ export class BotApiService {
     const preparation = this.#mediaFiles.prepareDocumentUpload(
       input.content,
       cleanUploadedFileName(input.fileName),
+      thumbnailContent,
     );
     return preparation.prepared
       ? { resolved: true, file: { kind: 'upload', upload: preparation.upload } }

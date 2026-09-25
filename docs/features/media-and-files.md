@@ -19,6 +19,17 @@ receive
 `Bad Request: file of size <size> bytes is too big for a photo; the maximum size is 10485760 bytes`.
 Captions can be edited with `editMessageCaption` or the account client.
 
+A bot can upload a thumbnail with `sendDocument`: the part that `thumbnail` names with
+`attach://<part-name>`, or else the part named `thumbnail`, and failing both, likewise for the
+legacy `thumb`, as the official server's [`get_input_thumbnail`][thumbnail-input] reads it. Other
+text, such as a URL, is ignored, because a thumbnail must be uploaded. As TDLib's
+[`get_input_thumbnail_photo_size`][thumbnail-photo-size] does, an empty thumbnail or one larger than
+204,799 bytes is left out rather than failing the document; so is one whose image header the
+emulator cannot read. Documents show the thumbnail as `thumbnail` and the legacy `thumb`, with its
+own `file_id` and `file_unique_id`, and bots download it with `getFile` from `thumbnails/`. A
+document sent again by `file_id` keeps its thumbnail, and a thumbnail's `file_id` cannot send a
+photo or document (`Bad Request: can't use file of type Thumbnail as Photo`).
+
 Each observer receives a different `file_id` for the same stored file. `file_unique_id` identifies
 it across observers in that session. Reusing another bot's `file_id`, or sending a document ID as a
 photo, fails. `getFile` returns a `file_path`; download the bytes at
@@ -47,8 +58,9 @@ transformations Telegram will apply.
 ### No generated document previews
 
 Document fixtures are kept without a preview-generation pipeline. Automatically generating previews
-is intentionally omitted; accepting [uploaded thumbnails](#file-limits-and-sources) is a separate
-real gap.
+is intentionally omitted; tests that need a preview upload a thumbnail. An uploaded thumbnail is
+kept as sent, like a photo: Telegram asks for a JPEG of at most 320 pixels a side, and its server's
+handling of other thumbnails is not visible in the source.
 
 ### Opaque session file identifiers
 
@@ -89,16 +101,14 @@ Tests need to exercise media classification and the flag's effect.
 | Document upload sizes              | No byte cap                                      | Server-side 50 MB cap, 2000 MB in local mode; its error is not in the source |
 | HTTP URL file sources              | Rejected                                         | `get_input_file` and TDLib support remote sources                            |
 | Local filesystem paths / `file://` | Unsupported                                      | Official `--local` mode can use local paths                                  |
-| Thumbnails                         | Unsupported                                      | Official document input reads thumbnail uploads                              |
 
 Download limits are explicit in [`Client` file handling][download-limit]; upload/path handling is in
 [`Client::get_input_file`][file-input]. The public [document][send-document] method reference
 documents the cloud upload ceiling, and the official [local-mode description][local-mode] explains
 its relaxed limits. Passing a large document to the emulator does not test those ceilings.
 
-Tests need the local-mode download exemption, document size validation, URL and filesystem inputs,
-and inspectable uploaded thumbnails. Uploaded thumbnail support is separate from the intentionally
-absent photo transformation pipeline.
+Tests need the local-mode download exemption, document size validation, and URL and filesystem
+inputs.
 
 ### Additional media types and methods
 
@@ -114,6 +124,8 @@ Media types other than photos/documents, albums, stickers and sticker sets are m
 [media tests](../../tests/media_file_service_test.ts) and
 [image tests](../../tests/image_dimensions_test.ts).
 
+[thumbnail-input]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10778-L10813
+[thumbnail-photo-size]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/PhotoSize.cpp#L460-L481
 [photo-size-limit]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/files/FileLoaderUtils.cpp#L273-L340
 [photos]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/Photo.cpp#L45-L210
 [document-input]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageContent.cpp#L5201-L5213

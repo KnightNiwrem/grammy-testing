@@ -481,7 +481,18 @@ export class BotMessageViewService {
     if (file === undefined) {
       throw new Error(`File ${fileId} of message ${messageId} does not exist`);
     }
-    return { file, observerFileId: this.#files.getOrAssignObserverFileId(observerId, fileId) };
+    const observerFileId = this.#files.getOrAssignObserverFileId(observerId, fileId);
+    if (file.type !== 'document' || file.thumbnail === undefined) {
+      return { file, observerFileId };
+    }
+    return {
+      file,
+      observerFileId,
+      observerThumbnailFileId: this.#files.getOrAssignObserverFileId(
+        observerId,
+        file.thumbnail.id,
+      ),
+    };
   }
 
   /** Looks up the users a message mentions, which sending the message verified exist. */

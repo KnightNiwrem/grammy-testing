@@ -30,7 +30,7 @@ import {
   readInlineQueryResultsParameter,
   type UnreadFormattedText,
 } from './inline_query_answer_parameters.ts';
-import { readInputFileParameter } from './input_file_parameter.ts';
+import { readInputFileParameter, readThumbnailParameter } from './input_file_parameter.ts';
 import { linkPreviewOptionsParameter } from './link_preview_options_parameter.ts';
 import {
   replyParametersParameter,
@@ -139,7 +139,11 @@ const FILE_ID_INVALID_DESCRIPTION = 'Bad Request: wrong file identifier/HTTP URL
 const CAPTION_TOO_LONG_DESCRIPTION = 'Bad Request: message caption is too long';
 
 /** TDLib's names of file types in its errors about a file of the wrong type. */
-const TDLIB_FILE_TYPE_NAMES = { photo: 'Photo', document: 'Document' } as const;
+const TDLIB_FILE_TYPE_NAMES = {
+  photo: 'Photo',
+  document: 'Document',
+  thumbnail: 'Thumbnail',
+} as const;
 
 /** The emulator's description for a file sent by URL, which Telegram downloads itself. */
 const FILE_URL_UNSUPPORTED_DESCRIPTION = 'Bad Request: sending files by URL is not supported';
@@ -377,10 +381,12 @@ const sendPhotoParametersSchema = z.strictObject({
 });
 
 // The emulator never detects other media types in documents, so `disable_content_type_detection`
-// is validated and ignored. Document thumbnails are not supported.
+// is validated and ignored.
 const sendDocumentParametersSchema = z.strictObject({
   ...sendOptionsParametersShape,
   document: z.string().optional(),
+  thumbnail: z.string().optional(),
+  thumb: z.string().optional(),
   ...captionParametersShape,
   disable_content_type_detection: booleanParameter().optional(),
 });
@@ -1123,9 +1129,11 @@ function handleSendDocument(
     return optionsReading.errorAnswer;
   }
 
+  const thumbnail = readThumbnailParameter(data, uploadedFiles);
   return sendMethodAnswer(context.session.botApi.sendDocument(context.bot, {
     ...optionsReading.options,
     document: documentReading.inputFile,
+    ...(thumbnail === undefined ? {} : { thumbnail }),
     caption: captionReading.formattedText,
   }));
 }
