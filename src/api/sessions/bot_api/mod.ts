@@ -165,6 +165,13 @@ const TOO_MANY_MESSAGE_IDENTIFIERS_DESCRIPTION =
   'Bad Request: too many message identifiers specified';
 const INVALID_MESSAGE_IDENTIFIER_DESCRIPTION = 'Bad Request: invalid message identifier specified';
 
+/** Telegram's descriptions for rejected forwards and copies of messages. */
+const FROM_CHAT_ID_REQUIRED_DESCRIPTION = 'Bad Request: parameter "from_chat_id" is required';
+const MESSAGE_TO_FORWARD_NOT_FOUND_DESCRIPTION = 'Bad Request: message to forward not found';
+const MESSAGE_TO_COPY_NOT_FOUND_DESCRIPTION = 'Bad Request: message to copy not found';
+const MESSAGE_NOT_FORWARDABLE_DESCRIPTION = "Bad Request: the message can't be forwarded";
+const MESSAGE_NOT_COPYABLE_DESCRIPTION = "Bad Request: the message can't be copied";
+
 /** Telegram deletes at most 100 messages in one deleteMessages request. */
 const MAX_DELETE_MESSAGES_COUNT = 100;
 
@@ -343,6 +350,28 @@ const sendDocumentParametersSchema = z.strictObject({
   disable_content_type_detection: booleanParameter().optional(),
 });
 
+// As for sending, Telegram accepts only numeric chat IDs of the emulator's chats. Topics, message
+// effects, paid broadcasts, suggested posts, and video start timestamps are not supported.
+const forwardMessageParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  from_chat_id: integerParameter(z.int()).optional(),
+  message_id: integerParameter(z.int()).optional(),
+  disable_notification: booleanParameter().optional(),
+  protect_content: booleanParameter().default(false),
+});
+
+// A caption, even an empty one, replaces the caption of copied media; without one, its parse mode
+// and entities are ignored, as on Telegram.
+const copyMessageParametersSchema = z.strictObject({
+  ...sendOptionsParametersShape,
+  from_chat_id: integerParameter(z.int()).optional(),
+  message_id: integerParameter(z.int()).optional(),
+  caption: z.string().optional(),
+  parse_mode: z.string().optional(),
+  caption_entities: messageEntitiesParameter().optional(),
+  show_caption_above_media: booleanParameter().default(false),
+});
+
 /** Where an edit method finds the message: in a chat, or sent through the bot's inline mode. */
 const editedMessageParametersShape = {
   chat_id: integerParameter(z.int()).optional(),
@@ -493,6 +522,8 @@ type MessageEditResult =
 
 type SendResult = ReturnType<EmulationSession['botApi']['sendMessage']>;
 
+type SendFailure = Extract<SendResult, { readonly sent: false }>;
+
 /** The outcome of any edit method for an inline message; each fails for a subset of the reasons. */
 type InlineMessageEditResult =
   | ReturnType<EmulationSession['botApi']['editInlineMessageText']>
@@ -578,6 +609,7 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['answercallbackquery', handleAnswerCallbackQuery],
   ['answerinlinequery', handleAnswerInlineQuery],
   ['banchatmember', handleBanChatMember],
+  ['copymessage', handleCopyMessage],
   ['deletemessage', handleDeleteMessage],
   ['deletemessages', handleDeleteMessages],
   ['deletemycommands', handleDeleteMyCommands],
@@ -585,6 +617,7 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['editmessagecaption', handleEditMessageCaption],
   ['editmessagereplymarkup', handleEditMessageReplyMarkup],
   ['editmessagetext', handleEditMessageText],
+  ['forwardmessage', handleForwardMessage],
   ['getchatadministrators', handleGetChatAdministrators],
   ['getchatmember', handleGetChatMember],
   ['getchatmembercount', handleGetChatMemberCount],
@@ -891,6 +924,99 @@ function handleSendDocument(
   );
 }
 
+function handleForwardMessage(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const parsedParameters = forwardMessageParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, 'Bad Request: invalid forwardMessage parameters');
+  }
+  const {
+    chat_id: chatId,
+    from_chat_id: fromChatId,
+    message_id: messageId,
+    protect_content: isContentProtected,
+  } = parsedParameters.data;
+  if (fromChatId === undefined) {
+    return botApiError(context, 400, FROM_CHAT_ID_REQUIRED_DESCRIPTION);
+  }
+  // Telegram looks for the forwarded message before it looks at chat_id; the emulator reports a
+  // missing chat_id first.
+  if (chatId === undefined) {
+    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+  }
+
+  const result = context.get('emulationSession').botApi.forwardMessage(
+    context.get('authenticatedBot'),
+    {
+      chatId,
+      forwardedMessage: { chatId: fromChatId, messageId: messageIdOrNone(messageId) },
+      isContentProtected,
+    },
+  );
+  if (result.sent) {
+    return sendResponse(context, result);
+  }
+  switch (result.reason) {
+    case 'repeated_message_not_found':
+      return botApiError(context, 400, MESSAGE_TO_FORWARD_NOT_FOUND_DESCRIPTION);
+    case 'message_not_forwardable':
+      return botApiError(context, 400, MESSAGE_NOT_FORWARDABLE_DESCRIPTION);
+    default:
+      return sendResponse(context, result);
+  }
+}
+
+function handleCopyMessage(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const invalidParametersDescription = 'Bad Request: invalid copyMessage parameters';
+  const parsedParameters = copyMessageParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, invalidParametersDescription);
+  }
+  const { data } = parsedParameters;
+  if (data.from_chat_id === undefined) {
+    return botApiError(context, 400, FROM_CHAT_ID_REQUIRED_DESCRIPTION);
+  }
+  // Telegram reads a new caption and its formatting before it looks at either chat.
+  const { caption } = data;
+  const captionReading = caption === undefined
+    ? undefined
+    : readSpecifiedCaption(context, { ...data, caption }, invalidParametersDescription);
+  if (captionReading?.read === false) {
+    return captionReading.response;
+  }
+  // As for forwardMessage, the emulator reports a missing chat_id before the copied message.
+  const optionsReading = readSendOptions(context, data);
+  if (!optionsReading.read) {
+    return optionsReading.response;
+  }
+
+  const result = context.get('emulationSession').botApi.copyMessage(
+    context.get('authenticatedBot'),
+    {
+      ...optionsReading.options,
+      copiedMessage: { chatId: data.from_chat_id, messageId: messageIdOrNone(data.message_id) },
+      caption: captionReading?.formattedText,
+      showsCaptionAboveMedia: data.show_caption_above_media,
+    },
+  );
+  if (result.sent) {
+    return context.json({ ok: true as const, result: { message_id: result.messageId } });
+  }
+  switch (result.reason) {
+    case 'repeated_message_not_found':
+      return botApiError(context, 400, MESSAGE_TO_COPY_NOT_FOUND_DESCRIPTION);
+    case 'message_not_copyable':
+      return botApiError(context, 400, MESSAGE_NOT_COPYABLE_DESCRIPTION);
+    default:
+      return sendResponse(context, result);
+  }
+}
+
 /**
  * Reads where and how a send method sends its message. A reply to a message of another chat,
  * which Telegram supports, is rejected as unsupported.
@@ -938,7 +1064,7 @@ function inputFileError(
     : botApiError(context, 400, FILE_URL_UNSUPPORTED_DESCRIPTION);
 }
 
-function sendResponse(context: BotApiRouteContext, result: SendResult): Response {
+function sendResponse(context: BotApiRouteContext, result: SendResult | SendFailure): Response {
   if (result.sent) {
     return context.json({ ok: true as const, result: result.message });
   }

@@ -163,6 +163,13 @@ function messageHeaderShape<Chat extends z.ZodType>(chat: Chat) {
     chat,
     date: z.number().int().nonnegative(),
     edit_date: z.number().int().nonnegative().optional(),
+    forward_origin: z.strictObject({
+      type: z.literal('user'),
+      sender_user: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
+      date: z.number().int().nonnegative(),
+    }).optional(),
+    forward_from: z.union([virtualAccountProfileSchema, messageSenderBotSchema]).optional(),
+    forward_date: z.number().int().nonnegative().optional(),
   };
 }
 

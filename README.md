@@ -67,6 +67,19 @@ name's extension; unlike Telegram, the emulator never turns a video, audio file,
 document into other media. Files sent by URL, thumbnails, and other media types, such as videos,
 voice messages, and stickers, are not supported yet.
 
+Bots forward and copy messages, as support and relay bots do, between the private chats and
+supergroups they can reach. A bot forwards a message with `forwardMessage`: as TDLib does, the
+forward repeats the content, shows who first sent it and when in `forward_origin` and the legacy
+`forward_from` and `forward_date`, keeps the original's `via_bot`, and keeps an inline keyboard only
+when every button opens a URL. A forward of a forward shows the original's origin, and a forward
+cannot be edited. A bot copies a message with `copyMessage`, which answers only the copy's
+`message_id`: the copy is the bot's own message, without an origin, with the reply and reply markup
+of the request and, for a photo or document, an optional new caption. As on Telegram, a message
+protected with `protect_content` cannot be forwarded, though a bot may copy it, and service messages
+can be neither. An account forwards a message of one of its chats, too, and the bots of the chat it
+goes to receive it with its `forward_origin`. Accounts never hide their name from forwards, so the
+origin is always a user. `forwardMessages` and `copyMessages` are not supported yet.
+
 Bots can run in inline mode, so tests can drive inline bots as users do. A bot created with
 `supports_inline_queries` receives an `inline_query` update when an account types a query for it in
 the account's private chat with a bot or in a supergroup, with Telegram's `chat_type`, and answers
@@ -221,9 +234,17 @@ try {
   const supergroup = await account.createSupergroup({ title: 'Team' });
   const groupChat = { type: 'supergroup', chatId: supergroup.id } as const;
   await account.addChatMember({ chat: groupChat, userId: bot.id });
-  await account.sendMessage({ to: groupChat, text: '/start@test_bot' });
+  const groupCommand = await account.sendMessage({ to: groupChat, text: '/start@test_bot' });
   const groupHistory = await account.getMessages({ chat: groupChat });
   console.log(groupHistory.map(({ from, text }) => `${from.first_name}: ${text ?? '(service)'}`));
+
+  // Forward the command to the bot's private chat. The bot receives it with its forward_origin.
+  const forwardedCommand = await account.forwardMessage({
+    from: groupChat,
+    message_id: groupCommand.message_id,
+    to: { type: 'private', botId: bot.id },
+  });
+  console.log(forwardedCommand.forward_origin?.sender_user.first_name);
 
   // Type an inline query for the bot in the supergroup, read the bot's answer once it has
   // answered, and send a result, which appears in the supergroup with via_bot.

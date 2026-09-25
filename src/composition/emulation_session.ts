@@ -24,6 +24,7 @@ import { BotWebhookService } from '../services/bot_webhook.ts';
 import { CallbackQueryService } from '../services/callback_query.ts';
 import { InlineQueryService } from '../services/inline_query.ts';
 import { MediaFileService } from '../services/media_file.ts';
+import { MessageForwardingService } from '../services/message_forwarding.ts';
 import { PrivateMessagingService } from '../services/private_messaging.ts';
 import { SharedChatAdministrationService } from '../services/shared_chat_administration.ts';
 import { SupergroupMessagingService } from '../services/supergroup_messaging.ts';
@@ -89,6 +90,10 @@ export function createEmulationSession(id: string): EmulationSession {
     events: botUpdateDelivery,
     currentUnixTimeSeconds,
   });
+  const messageForwarding = new MessageForwardingService({
+    privateMessages: privateMessaging,
+    supergroupMessages: supergroupMessaging,
+  });
   const mediaFiles = new MediaFileService({ files });
   const botBlocking = new BotBlockingService({
     accounts,
@@ -153,6 +158,7 @@ export function createEmulationSession(id: string): EmulationSession {
     sharedChatAdministration,
     privateMessaging,
     supergroupMessaging,
+    messageForwarding,
     botBlocking,
     callbackQueries,
     inlineQueries,

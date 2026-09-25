@@ -26,6 +26,21 @@ export interface ViaBot {
   readonly inlineMessageId: InlineMessageId;
 }
 
+/**
+ * Where a forwarded message first appeared, which the forward shows as Telegram's origin of a user.
+ * Forwarding a forward keeps its origin.
+ */
+export interface MessageForwardInfo {
+  /** The account or bot that wrote the original message. */
+  readonly originalSenderId: number;
+  readonly originalSentAtUnixSeconds: number;
+  /**
+   * The inline bot the original message was sent through, which the forward still shows; omitted
+   * for none. Unlike the original's inline bot, it cannot edit the forward.
+   */
+  readonly viaBotId?: number;
+}
+
 /** A span of message text. Offsets and lengths count UTF-16 code units, as Telegram's do. */
 interface TextSpan {
   readonly offset: number;
@@ -175,6 +190,8 @@ export interface PrivateMessage {
   readonly inlineKeyboard?: InlineKeyboard;
   /** Omitted for a message not sent through a bot's inline mode. Only accounts send them. */
   readonly viaBot?: ViaBot;
+  /** Omitted for a message that is no forward. */
+  readonly forwardInfo?: MessageForwardInfo;
   /**
    * The reply interface the message asks the account's client to show; omitted for none. Only
    * bots send one, and never with an inline keyboard. Edits leave it unchanged.
@@ -217,6 +234,8 @@ export interface SupergroupMessage {
   readonly inlineKeyboard?: InlineKeyboard;
   /** Omitted for a message not sent through a bot's inline mode. Only accounts send them. */
   readonly viaBot?: ViaBot;
+  /** Omitted for a message that is no forward. */
+  readonly forwardInfo?: MessageForwardInfo;
   /**
    * When the text or caption was last edited; omitted for a message whose content was never
    * edited.
@@ -250,6 +269,22 @@ export function getInlineKeyboardOwnerId(message: ChatMessage): number | undefin
   }
 }
 
+/** The account or bot that wrote a message, or made the change a service message records. */
+export function getMessageAuthorId(message: ChatMessage): number {
+  switch (message.kind) {
+    case 'private_message':
+      return message.authorRole === 'account'
+        ? message.conversation.accountId
+        : message.conversation.botId;
+    case 'supergroup_message':
+      return message.author.kind === 'account' ? message.author.accountId : message.author.botId;
+    default: {
+      const unhandledMessage: never = message;
+      throw new Error(`Unhandled message: ${JSON.stringify(unhandledMessage)}`);
+    }
+  }
+}
+
 /** A supergroup message that shows content its author wrote, rather than a membership change. */
 export type SupergroupContentMessage = SupergroupMessage & { readonly content: MessageContent };
 
@@ -258,4 +293,12 @@ export function isSupergroupContentMessage(
   message: SupergroupMessage,
 ): message is SupergroupContentMessage {
   return message.content.kind !== 'members_joined' && message.content.kind !== 'member_left';
+}
+
+/** A message of any chat that shows content its author wrote, rather than a membership change. */
+export type ContentMessage = PrivateMessage | SupergroupContentMessage;
+
+/** Whether a message of any chat shows content its author wrote. */
+export function isContentMessage(message: ChatMessage): message is ContentMessage {
+  return message.kind === 'private_message' || isSupergroupContentMessage(message);
 }

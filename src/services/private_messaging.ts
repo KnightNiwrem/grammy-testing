@@ -1,5 +1,6 @@
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
+import type { MessageForward } from '../types/message_forward.ts';
 import type {
   BotMessageReplyMarkup,
   ReplyInterface,
@@ -19,6 +20,7 @@ import type {
   ChatMessage,
   InlineMessageId,
   MessageContent,
+  MessageForwardInfo,
   PrivateMessage,
   TextEntity,
 } from '../types/virtual_message.ts';
@@ -112,6 +114,18 @@ export type SendAccountInlineResultResult =
     readonly reason: 'account_not_found' | 'bot_not_found' | 'bot_blocked';
   };
 
+/** A forward that an account sends to its private chat with a bot. */
+export interface SendAccountForwardInput {
+  readonly fromAccountId: number;
+  readonly to: {
+    readonly type: 'private';
+    readonly botId: number;
+  };
+  readonly forward: MessageForward;
+}
+
+export type SendAccountForwardResult = SendAccountInlineResultResult;
+
 /** A bot's private chat, identified by the account at its other end. */
 export interface BotPrivateChat {
   readonly type: 'private';
@@ -134,6 +148,8 @@ export type SendBotMessageInput = BotMessageReplyMarkup & {
   readonly replyTo?: BotMessageReplyTarget;
   /** Protects the message from forwarding and saving; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
+  /** Where the content first appeared, for a forward; omitted for other messages. */
+  readonly forwardInfo?: MessageForwardInfo;
 };
 
 export type SendBotMessageFailureReason =
@@ -327,6 +343,40 @@ export type PressReplyKeyboardButtonResult =
   | SendAccountMessageResult
   | { readonly sent: false; readonly reason: 'reply_keyboard_button_not_found' };
 
+export interface GetMessageForBotInput {
+  readonly botId: number;
+  /** The account at the other end of the bot's private chat. */
+  readonly accountId: number;
+  /** The message's ID in the bot's message box. */
+  readonly botMessageId: number;
+}
+
+export type GetMessageForBotResult =
+  | { readonly found: true; readonly message: PrivateMessage }
+  | {
+    readonly found: false;
+    readonly reason:
+      | 'bot_not_found'
+      | 'account_not_found'
+      | 'conversation_not_started'
+      | 'message_not_found';
+  };
+
+export interface GetMessageForAccountInput {
+  readonly accountId: number;
+  /** The bot at the other end of the account's private chat. */
+  readonly botId: number;
+  /** The message's ID in the bot's message box, which is how accounts address messages. */
+  readonly botMessageId: number;
+}
+
+export type GetMessageForAccountResult =
+  | { readonly found: true; readonly message: PrivateMessage }
+  | {
+    readonly found: false;
+    readonly reason: 'account_not_found' | 'bot_not_found' | 'message_not_found';
+  };
+
 export interface GetPrivateMessageHistoryInput {
   readonly accountId: number;
   readonly botId: number;
@@ -370,6 +420,7 @@ interface PrivateMessageStore {
     readonly inlineKeyboard?: InlineKeyboard;
     readonly replyInterface?: ReplyInterface;
     readonly viaBotId?: number;
+    readonly forwardInfo?: MessageForwardInfo;
     readonly isContentProtected?: boolean;
   }): PrivateMessage;
   getPrivateMessage(messageId: CanonicalMessageId): PrivateMessage | undefined;
@@ -412,11 +463,11 @@ interface PrivateMessagingServiceDependencies {
 
 /**
  * Carries out exchanges of text, photos, and documents between an account and a bot in their
- * private conversation, and commits each accepted message: its upload stored, the message stored,
- * numbered for both participants, then published. Bots can attach inline keyboards to their
- * messages, edit them afterward, and delete messages of their chats. A bot's message can also
- * change the reply interface the account's client shows, such as a reply keyboard whose buttons
- * the account presses. An account edits the text or caption of its messages, and sends inline
+ * private conversation, including forwards by either and copies by the bot, and commits each
+ * accepted message: its upload stored, the message stored, numbered for both participants, then
+ * published. Bots can attach inline keyboards to their messages, edit them afterward, and delete
+ * messages of their chats. A bot's message can also change the reply interface the account's
+ * client shows, such as a reply keyboard whose buttons the account presses. An account edits the text or caption of its messages, and sends inline
  * query results through inline bots, which edit the messages sent through them.
  *
  * While an account blocks a bot, neither can write to the other, as on Telegram, where the bot's
@@ -536,38 +587,27 @@ export class PrivateMessagingService {
    * not block the chat's bot.
    */
   sendAccountInlineResult(input: SendAccountInlineResultInput): SendAccountInlineResultResult {
-    const account = this.#accounts.getById(input.fromAccountId);
-    if (account === undefined) {
-      return { sent: false, reason: 'account_not_found' };
-    }
-    const bot = this.#bots.getById(input.to.botId);
-    if (bot === undefined) {
-      return { sent: false, reason: 'bot_not_found' };
-    }
-    if (this.#blockedUsers.isBlocked(account.profile.id, bot.profile.id)) {
-      return { sent: false, reason: 'bot_blocked' };
-    }
-
-    this.#privateConversations.getOrCreatePrivateConversation({
-      accountId: account.profile.id,
-      botId: bot.profile.id,
+    return this.#sendAccountPreparedMessage(input.fromAccountId, input.to.botId, {
+      content: input.content,
+      inlineKeyboard: input.inlineKeyboard,
+      viaBotId: input.viaBotId,
     });
-    return {
-      sent: true,
-      message: this.#storePrivateMessage({
-        account,
-        bot,
-        authorRole: 'account',
-        content: input.content,
-        inlineKeyboard: input.inlineKeyboard,
-        viaBotId: input.viaBotId,
-      }),
-    };
   }
 
   /**
-   * Sends text, a photo, or a document from a bot to an account. As on Telegram, a bot cannot
-   * initiate a private conversation, so the account must have started one with the bot.
+   * Sends a forward from an account to its private chat with a bot, which receives it as the
+   * account's message. As for any message, the account must not block the chat's bot.
+   */
+  sendAccountForward(
+    { fromAccountId, to, forward }: SendAccountForwardInput,
+  ): SendAccountForwardResult {
+    return this.#sendAccountPreparedMessage(fromAccountId, to.botId, forward);
+  }
+
+  /**
+   * Sends text, a photo, or a document from a bot to an account, or the content of an existing
+   * message as a forward or copy of it. As on Telegram, a bot cannot initiate a private
+   * conversation, so the account must have started one with the bot.
    *
    * Checks follow Telegram's order: text is checked for emptiness before the recipient is
    * resolved, and the replied message is looked up after it; the text or caption is then
@@ -619,6 +659,7 @@ export class PrivateMessagingService {
         replyToMessageId: replyResolution.repliedMessage?.id,
         inlineKeyboard: input.inlineKeyboard,
         replyInterfaceMarkup: input.replyInterfaceMarkup,
+        forwardInfo: input.forwardInfo,
         isContentProtected: input.isContentProtected,
       }),
     };
@@ -715,8 +756,11 @@ export class PrivateMessagingService {
     if (message === undefined) {
       return { edited: false, reason: 'message_not_found' };
     }
-    // As in TDLib, only the inline bot edits a message sent through it.
-    if (message.authorRole !== 'account' || message.viaBot !== undefined) {
+    // As in TDLib, only the inline bot edits a message sent through it, and no one edits a forward.
+    if (
+      message.authorRole !== 'account' || message.viaBot !== undefined ||
+      message.forwardInfo !== undefined
+    ) {
       return { edited: false, reason: 'message_not_editable' };
     }
     const replacement = replaceAccountMessageContent(
@@ -875,6 +919,49 @@ export class PrivateMessagingService {
     });
   }
 
+  /**
+   * Finds a message of the bot's private chat with an account by its ID in the bot's message box,
+   * as the bot addresses a message it forwards or copies. The chat is known to the bot only once
+   * the account has started a conversation with it.
+   */
+  getMessageForBot(
+    { botId, accountId, botMessageId }: GetMessageForBotInput,
+  ): GetMessageForBotResult {
+    if (this.#bots.getById(botId) === undefined) {
+      return { found: false, reason: 'bot_not_found' };
+    }
+    if (this.#accounts.getById(accountId) === undefined) {
+      return { found: false, reason: 'account_not_found' };
+    }
+    const conversation: PrivateConversationKey = { accountId, botId };
+    if (this.#privateConversations.getPrivateConversation(conversation) === undefined) {
+      return { found: false, reason: 'conversation_not_started' };
+    }
+    const message = this.getPrivateMessageByBotMessageId(conversation, botMessageId);
+    return message === undefined
+      ? { found: false, reason: 'message_not_found' }
+      : { found: true, message };
+  }
+
+  /**
+   * Finds a message of the account's private chat with a bot, as the account addresses a message
+   * it forwards: by the message's ID in the bot's message box.
+   */
+  getMessageForAccount(
+    { accountId, botId, botMessageId }: GetMessageForAccountInput,
+  ): GetMessageForAccountResult {
+    if (this.#accounts.getById(accountId) === undefined) {
+      return { found: false, reason: 'account_not_found' };
+    }
+    if (this.#bots.getById(botId) === undefined) {
+      return { found: false, reason: 'bot_not_found' };
+    }
+    const message = this.getPrivateMessageByBotMessageId({ accountId, botId }, botMessageId);
+    return message === undefined
+      ? { found: false, reason: 'message_not_found' }
+      : { found: true, message };
+  }
+
   getPrivateMessageHistory(
     input: GetPrivateMessageHistoryInput,
   ): GetPrivateMessageHistoryResult {
@@ -959,7 +1046,8 @@ export class PrivateMessagingService {
     if (message === undefined) {
       return { resolved: false, reason: 'message_not_found' };
     }
-    if (message.authorRole !== 'bot') {
+    // As in TDLib, a forward cannot be edited.
+    if (message.authorRole !== 'bot' || message.forwardInfo !== undefined) {
       return { resolved: false, reason: 'message_not_editable' };
     }
     return { resolved: true, message };
@@ -1035,6 +1123,47 @@ export class PrivateMessagingService {
   }
 
   /**
+   * Sends content that is ready to store, such as an inline query result or a forward, from an
+   * account to its private chat with a bot, which the account must not block.
+   */
+  #sendAccountPreparedMessage(
+    fromAccountId: number,
+    botId: number,
+    preparedMessage: {
+      readonly content: MessageContent;
+      readonly inlineKeyboard?: InlineKeyboard;
+      readonly viaBotId?: number;
+      readonly forwardInfo?: MessageForwardInfo;
+    },
+  ): SendAccountInlineResultResult {
+    const account = this.#accounts.getById(fromAccountId);
+    if (account === undefined) {
+      return { sent: false, reason: 'account_not_found' };
+    }
+    const bot = this.#bots.getById(botId);
+    if (bot === undefined) {
+      return { sent: false, reason: 'bot_not_found' };
+    }
+    if (this.#blockedUsers.isBlocked(account.profile.id, bot.profile.id)) {
+      return { sent: false, reason: 'bot_blocked' };
+    }
+
+    this.#privateConversations.getOrCreatePrivateConversation({
+      accountId: account.profile.id,
+      botId: bot.profile.id,
+    });
+    return {
+      sent: true,
+      message: this.#storePrivateMessage({
+        ...preparedMessage,
+        account,
+        bot,
+        authorRole: 'account',
+      }),
+    };
+  }
+
+  /**
    * Stores content written by one participant of an existing private conversation, whose file the
    * caller stored, numbers it in both participants' message boxes, applies its change of the
    * account's reply interface, and publishes its creation.
@@ -1049,6 +1178,7 @@ export class PrivateMessagingService {
       inlineKeyboard,
       replyInterfaceMarkup,
       viaBotId,
+      forwardInfo,
       isContentProtected,
     }: {
       readonly account: VirtualAccount;
@@ -1059,6 +1189,7 @@ export class PrivateMessagingService {
       readonly inlineKeyboard?: InlineKeyboard;
       readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
       readonly viaBotId?: number;
+      readonly forwardInfo?: MessageForwardInfo;
       readonly isContentProtected?: boolean;
     },
   ): PrivateMessage {
@@ -1077,6 +1208,7 @@ export class PrivateMessagingService {
         ? undefined
         : replyInterfaceMarkup,
       viaBotId,
+      forwardInfo,
       isContentProtected,
     });
     // Telegram numbers a private message in each participant's message box. Only the bot's

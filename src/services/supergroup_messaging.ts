@@ -6,6 +6,7 @@ import {
   type SupergroupMembershipLookup,
 } from '../types/chat_membership.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
+import type { MessageForward } from '../types/message_forward.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { ChatAction, Supergroup } from '../types/virtual_chat.ts';
@@ -16,6 +17,7 @@ import {
   isSupergroupContentMessage,
   type MembershipServiceContent,
   type MessageContent,
+  type MessageForwardInfo,
   type SupergroupContentMessage,
   type SupergroupMessage,
   type SupergroupMessageAuthor,
@@ -87,6 +89,15 @@ export type SendSupergroupAccountInlineResultResult =
     readonly reason: 'account_not_found' | 'chat_not_found' | 'not_a_member';
   };
 
+/** A forward that an account sends to a supergroup it is a member of. */
+export interface SendSupergroupAccountForwardInput {
+  readonly fromAccountId: number;
+  readonly chatId: number;
+  readonly forward: MessageForward;
+}
+
+export type SendSupergroupAccountForwardResult = SendSupergroupAccountInlineResultResult;
+
 /** The message of the supergroup that a bot's message replies to. */
 export interface SupergroupBotMessageReplyTarget {
   /** The supergroup's ID of the message. */
@@ -105,6 +116,8 @@ export interface SendSupergroupBotMessageInput {
   readonly replyTo?: SupergroupBotMessageReplyTarget;
   /** Protects the message from forwarding and saving; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
+  /** Where the content first appeared, for a forward; omitted for other messages. */
+  readonly forwardInfo?: MessageForwardInfo;
 }
 
 export type SendSupergroupBotMessageFailureReason =
@@ -252,6 +265,34 @@ export interface RecordSupergroupMembershipChangeInput {
   readonly changedAtUnixSeconds: number;
 }
 
+export interface GetSupergroupMessageForBotInput {
+  readonly botId: number;
+  readonly chatId: number;
+  /** The supergroup's ID of the message. */
+  readonly messageId: number;
+}
+
+export type GetSupergroupMessageForBotResult =
+  | { readonly found: true; readonly message: SupergroupMessage }
+  | {
+    readonly found: false;
+    readonly reason: 'bot_not_found' | SupergroupBotAccessFailureReason | 'message_not_found';
+  };
+
+export interface GetSupergroupMessageForAccountInput {
+  readonly accountId: number;
+  readonly chatId: number;
+  /** The supergroup's ID of the message. */
+  readonly messageId: number;
+}
+
+export type GetSupergroupMessageForAccountResult =
+  | { readonly found: true; readonly message: SupergroupMessage }
+  | {
+    readonly found: false;
+    readonly reason: 'account_not_found' | 'chat_not_found' | 'not_a_member' | 'message_not_found';
+  };
+
 export interface GetSupergroupMessageHistoryInput {
   readonly accountId: number;
   readonly chatId: number;
@@ -281,6 +322,7 @@ interface NewSupergroupMessage {
   readonly replyToMessageId?: CanonicalMessageId;
   readonly inlineKeyboard?: InlineKeyboard;
   readonly viaBotId?: number;
+  readonly forwardInfo?: MessageForwardInfo;
   readonly isContentProtected?: boolean;
 }
 
@@ -319,9 +361,9 @@ interface SupergroupMessagingServiceDependencies {
 
 /**
  * Carries out exchanges of text, photos, and documents among the members of a supergroup,
- * accounts and bots alike, and commits each accepted message: its upload stored, the message
- * stored, numbered once in the supergroup's own message box, then published. Only members write to
- * a supergroup or read its messages.
+ * accounts and bots alike, including forwards by members and copies by bots, and commits each
+ * accepted message: its upload stored, the message stored, numbered once in the supergroup's own
+ * message box, then published. Only members write to a supergroup or read its messages.
  *
  * Bots attach inline keyboards, edit their own messages, and delete them; as on Telegram, only an
  * administrator bot with the right to delete messages deletes other members'. Accounts edit the text or
@@ -417,8 +459,30 @@ export class SupergroupMessagingService {
   }
 
   /**
-   * Sends text, a photo, or a document from a bot to a supergroup it is a member of. A supergroup
-   * the bot is not a member of is unknown to it, as on Telegram.
+   * Sends a forward from an account to a supergroup it is a member of, as the account's message.
+   */
+  sendAccountForward(
+    { fromAccountId, chatId, forward }: SendSupergroupAccountForwardInput,
+  ): SendSupergroupAccountForwardResult {
+    const memberResolution = this.#resolveAccountMember(fromAccountId, chatId);
+    if (!memberResolution.resolved) {
+      return { sent: false, reason: memberResolution.reason };
+    }
+    return {
+      sent: true,
+      message: this.#commitMessage({
+        ...forward,
+        chatId,
+        author: { kind: 'account', accountId: fromAccountId },
+        sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
+      }),
+    };
+  }
+
+  /**
+   * Sends text, a photo, or a document from a bot to a supergroup it is a member of, or the content
+   * of an existing message as a forward or copy of it. A supergroup the bot is not a member of is
+   * unknown to it, as on Telegram.
    *
    * Checks follow Telegram's order: text is checked for emptiness before the chat is resolved, and
    * the replied message is looked up after it; the text or caption is then normalized with its
@@ -460,6 +524,7 @@ export class SupergroupMessagingService {
         content: contentNormalization.content,
         replyToMessageId: repliedMessage?.id,
         inlineKeyboard: input.inlineKeyboard,
+        forwardInfo: input.forwardInfo,
         isContentProtected: input.isContentProtected,
       }),
     };
@@ -550,10 +615,11 @@ export class SupergroupMessagingService {
     if (message === undefined) {
       return { edited: false, reason: 'message_not_found' };
     }
-    // As in TDLib, only the inline bot edits a message sent through it.
+    // As in TDLib, only the inline bot edits a message sent through it, and no one edits a forward.
     if (
       !isSupergroupContentMessage(message) || message.author.kind !== 'account' ||
-      message.author.accountId !== input.fromAccountId || message.viaBot !== undefined
+      message.author.accountId !== input.fromAccountId || message.viaBot !== undefined ||
+      message.forwardInfo !== undefined
     ) {
       return { edited: false, reason: 'message_not_editable' };
     }
@@ -663,6 +729,43 @@ export class SupergroupMessagingService {
     return { found: true, messages: this.#messages.getSupergroupMessages(chatId) };
   }
 
+  /**
+   * Finds a message of a supergroup the bot is a member of, as the bot addresses a message it
+   * forwards or copies.
+   */
+  getMessageForBot(
+    { botId, chatId, messageId }: GetSupergroupMessageForBotInput,
+  ): GetSupergroupMessageForBotResult {
+    if (this.#bots.getById(botId) === undefined) {
+      return { found: false, reason: 'bot_not_found' };
+    }
+    const accessFailure = this.#checkBotAccess(botId, chatId);
+    if (accessFailure !== undefined) {
+      return { found: false, reason: accessFailure };
+    }
+    const message = this.getMessageByChatMessageId(chatId, messageId);
+    return message === undefined
+      ? { found: false, reason: 'message_not_found' }
+      : { found: true, message };
+  }
+
+  /**
+   * Finds a message of a supergroup the account is a member of, as the account addresses a message
+   * it forwards.
+   */
+  getMessageForAccount(
+    { accountId, chatId, messageId }: GetSupergroupMessageForAccountInput,
+  ): GetSupergroupMessageForAccountResult {
+    const memberResolution = this.#resolveAccountMember(accountId, chatId);
+    if (!memberResolution.resolved) {
+      return { found: false, reason: memberResolution.reason };
+    }
+    const message = this.getMessageByChatMessageId(chatId, messageId);
+    return message === undefined
+      ? { found: false, reason: 'message_not_found' }
+      : { found: true, message };
+  }
+
   /** Finds a message of a supergroup by the ID the supergroup's message box gave it. */
   getMessageByChatMessageId(
     chatId: number,
@@ -734,9 +837,10 @@ export class SupergroupMessagingService {
     if (message === undefined) {
       return { resolved: false, reason: 'message_not_found' };
     }
+    // As in TDLib, a forward cannot be edited.
     if (
       !isSupergroupContentMessage(message) || message.author.kind !== 'bot' ||
-      message.author.botId !== fromBotId
+      message.author.botId !== fromBotId || message.forwardInfo !== undefined
     ) {
       return { resolved: false, reason: 'message_not_editable' };
     }
@@ -809,23 +913,14 @@ export class SupergroupMessagingService {
    * publishes it.
    */
   #storeMessage(
-    { chatId, author, content, replyToMessageId, inlineKeyboard, isContentProtected }: {
-      readonly chatId: number;
-      readonly author: SupergroupMessageAuthor;
+    { content, ...message }: Omit<NewSupergroupMessage, 'sentAtUnixSeconds' | 'content'> & {
       readonly content: NormalizedOutgoingContent;
-      readonly replyToMessageId?: CanonicalMessageId;
-      readonly inlineKeyboard?: InlineKeyboard;
-      readonly isContentProtected?: boolean;
     },
   ): SupergroupMessage {
     return this.#commitMessage({
-      chatId,
-      author,
+      ...message,
       sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
       content: storeOutgoingContent(content, this.#files),
-      replyToMessageId,
-      inlineKeyboard,
-      isContentProtected,
     });
   }
 

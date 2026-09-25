@@ -20,6 +20,7 @@ import type {
   AccountBotCommandsInput,
   AccountEditMessageCaptionInput,
   AccountEditMessageInput,
+  AccountForwardMessageInput,
   AccountMessageHistoryInput,
   AccountReplyInterfaceInput,
   AccountSendDocumentInput,
@@ -198,6 +199,18 @@ function createVirtualAccountClient(
           caption,
           reply_to_message_id,
         },
+      });
+      return response.message;
+    },
+    async forwardMessage<Target extends MessageTarget>(
+      { from, message_id, to }: AccountForwardMessageInput<Target>,
+    ): Promise<MessageIn<Target>> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'POST',
+        url: `${accountUrl}/messages`,
+        expectedStatus: HTTP_STATUS_CREATED,
+        responseSchema: messageResponseSchemasFor(to).sent,
+        body: { to, forward: { chat: from, message_id } },
       });
       return response.message;
     },

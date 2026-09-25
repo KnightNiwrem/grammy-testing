@@ -141,6 +141,14 @@ export type BotApiSupergroupMessageContent =
   | BotApiMessageContent
   | BotApiMembershipServiceContent;
 
+/** Where a forward first appeared: always a user, because the emulator's senders are users. */
+export interface BotApiMessageOriginUser {
+  readonly type: 'user';
+  readonly sender_user: BotApiUser;
+  /** When the original message was sent. */
+  readonly date: number;
+}
+
 interface BotApiMessageHeader<Chat> {
   readonly message_id: number;
   readonly from: BotApiUser;
@@ -148,6 +156,12 @@ interface BotApiMessageHeader<Chat> {
   readonly date: number;
   /** Omitted for a message whose content was never edited. */
   readonly edit_date?: number;
+  /** Present only for a forward. */
+  readonly forward_origin?: BotApiMessageOriginUser;
+  /** Legacy form of the origin's sender; present only for a forward. */
+  readonly forward_from?: BotApiUser;
+  /** Legacy form of the origin's date; present only for a forward. */
+  readonly forward_date?: number;
 }
 
 interface BotApiMessageTrailer {

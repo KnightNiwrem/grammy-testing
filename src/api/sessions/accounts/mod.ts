@@ -112,8 +112,19 @@ const sentMessageTargetShape = {
 /** A caption, which Telegram's service limits, so its length is checked when sending. */
 const captionSchema = z.string().default('');
 
-/** A text message, a photo, or a document, each with an optional caption. */
+/**
+ * A text message, a photo, or a document, each with an optional caption; or a forward of a message
+ * of one of the account's chats, which, as in Telegram's clients, replies to none.
+ */
 const sendMessageRequestSchema = z.union([
+  z.strictObject({
+    to: chatSchema,
+    forward: z.strictObject({
+      chat: chatSchema,
+      /** The message's ID as the chat's bots see it, which is how these routes show messages. */
+      message_id: z.int().positive(),
+    }),
+  }),
   z.strictObject({
     ...sentMessageTargetShape,
     text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH),
@@ -236,9 +247,29 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 400);
     }
 
-    const { privateMessaging, supergroupMessaging, botMessageViews, mediaFiles } = context.get(
-      'emulationSession',
-    );
+    const {
+      privateMessaging,
+      supergroupMessaging,
+      messageForwarding,
+      botMessageViews,
+      mediaFiles,
+    } = context.get('emulationSession');
+    if ('forward' in parsedRequest.data) {
+      const { to, forward } = parsedRequest.data;
+      const result = messageForwarding.forwardAccountMessage({
+        fromAccountId: accountId.data,
+        fromChat: forward.chat,
+        messageId: forward.message_id,
+        toChat: to,
+      });
+      if (!result.forwarded) {
+        return context.body(null, forwardFailureStatus(result.reason));
+      }
+      return context.json(
+        { message: viewChatMessageForAccount(botMessageViews, result.message, accountId.data) },
+        201,
+      );
+    }
     const content = readAccountMessageContent(parsedRequest.data, mediaFiles);
     if (content === undefined) {
       return context.body(null, 400);
@@ -869,7 +900,7 @@ type AccountMessageContent = Parameters<
  * `undefined` for a file Telegram would not send.
  */
 function readAccountMessageContent(
-  request: z.infer<typeof sendMessageRequestSchema>,
+  request: Exclude<z.infer<typeof sendMessageRequestSchema>, { readonly forward: unknown }>,
   mediaFiles: EmulationSession['mediaFiles'],
 ): AccountMessageContent | undefined {
   if ('text' in request) {
@@ -939,6 +970,36 @@ function supergroupMemberFailureStatus(reason: SupergroupAccountFailureReason): 
       return 403;
     default:
       return 400;
+  }
+}
+
+/**
+ * A missing account, bot, supergroup, or message is not found, and an account that is not a member
+ * of a supergroup is forbidden from it. A message that cannot be forwarded rejects the request,
+ * and a block conflicts with writing to the bot.
+ */
+function forwardFailureStatus(
+  reason: Extract<
+    ReturnType<EmulationSession['messageForwarding']['forwardAccountMessage']>,
+    { readonly forwarded: false }
+  >['reason'],
+): 400 | 403 | 404 | 409 {
+  switch (reason) {
+    case 'account_not_found':
+    case 'bot_not_found':
+    case 'chat_not_found':
+    case 'message_not_found':
+      return 404;
+    case 'not_a_member':
+      return 403;
+    case 'message_not_forwardable':
+      return 400;
+    case 'bot_blocked':
+      return 409;
+    default: {
+      const unhandledReason: never = reason;
+      throw new Error(`Unhandled account forward failure: ${unhandledReason}`);
+    }
   }
 }
 

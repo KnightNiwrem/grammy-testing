@@ -365,6 +365,21 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     throw new Error('Expected the client to exchange messages and press buttons in the supergroup');
   }
 
+  const forward = await owner.forwardMessage({
+    from: chat,
+    message_id: greeting.message_id,
+    to: { type: 'private', botId: bot.id },
+  });
+  if (
+    forward.chat.id !== owner.id || forward.text !== 'Hello everyone' ||
+    forward.forward_origin?.sender_user.id !== member.id ||
+    forward.forward_origin.date !== greeting.date
+  ) {
+    throw new Error(
+      `Expected the client to forward a message, received ${JSON.stringify(forward)}`,
+    );
+  }
+
   // Only an administrator with the right deletes another member's message.
   const deleteGreeting = () =>
     api.request(`${botApiPath}/deleteMessage`, {

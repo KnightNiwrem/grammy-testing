@@ -171,7 +171,10 @@ paths:
       summary: Send a message as a virtual account
       description: >-
         Sends text, a photo, or a document to the account's private chat with a bot, or to a
-        supergroup the account is a member of. In a supergroup, the supergroup's bots receive the
+        supergroup the account is a member of; or forwards a message of such a chat there, as the
+        account's message that shows who first sent it. Messages protected from forwarding and
+        service messages cannot be forwarded, and, as on Telegram, a forward cannot be edited. In
+        a supergroup, the supergroup's bots receive the
         message unless it is not addressed to a bot in privacy mode: such a bot receives only
         messages whose text or caption starts with a command not addressed to another bot, replies
         to one of its messages, or mentions it. As on Telegram, a bot that is an administrator of
@@ -198,11 +201,14 @@ paths:
         '400':
           description: >-
             The request, message text, or caption is invalid, the photo is not an image Telegram
-            accepts, the file is empty, or the replied message is not a message of the chat.
+            accepts, the file is empty, the replied message is not a message of the chat, or the
+            forwarded message cannot be forwarded.
         '403':
-          description: The account is not a member of the supergroup.
+          description: The account is not a member of a supergroup of the request.
         '404':
-          description: The session, sending account, target bot, or supergroup does not exist.
+          description: >-
+            The session, sending account, a bot or supergroup of the request, or the forwarded
+            message does not exist.
         '409':
           description: The account blocks the target bot and must unblock it before writing to it.
   /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/messages:
@@ -1255,6 +1261,158 @@ paths:
             The account blocks the bot (`Forbidden: bot was blocked by the user`), or the bot left
             the supergroup (`Forbidden: bot is not a member of the supergroup chat`) or was removed
             from it (`Forbidden: bot was kicked from the supergroup chat`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/forwardMessage:
+    description: >-
+      Telegram Bot API method for forwarding a message of one of the bot's chats, a private chat
+      with an account that has written to it or a supergroup it is a member of, to another such
+      chat. As TDLib does, the forward repeats the message's content and the bot through whose
+      inline mode it was sent, and shows who first sent it and when in `forward_origin` and the
+      legacy `forward_from` and `forward_date`; a forward of a forward shows the original's origin.
+      It keeps the inline keyboard only when every button opens a URL. As on Telegram, a forward
+      cannot be edited and the bot receives no update for it. Accounts never hide their name from
+      forwards here, so the origin is always a user. Topics, message effects, paid broadcasts,
+      suggested posts, and video start timestamps are not supported.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: forwardMessage
+      summary: Forward a message from one of the authenticated virtual bot's chats
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForwardMessageRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ForwardMessageRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ForwardMessageRequest'
+      responses:
+        '200':
+          description: The forward was stored in the chat it was sent to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it, checking in this order: `from_chat_id` is missing (`Bad Request: parameter
+            "from_chat_id" is required`); `chat_id` is missing (`Bad Request: chat_id is empty`),
+            which Telegram checks after the forwarded message; the chat of the forwarded message is
+            unknown to the bot (`Bad Request: chat not found`); `message_id` is missing or
+            identifies no message of that chat (`Bad Request: message to forward not found`); the
+            message's sender protected it, or it is a service message (`Bad Request: the message
+            can't be forwarded`), which Telegram checks after the chat the forward goes to; or that
+            chat is unknown to the bot (`Bad Request: chat not found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            The bot left a supergroup of the request (`Forbidden: bot is not a member of the
+            supergroup chat`) or was removed from it (`Forbidden: bot was kicked from the
+            supergroup chat`), which is checked in place of that chat; or the account the forward
+            goes to blocks the bot (`Forbidden: bot was blocked by the user`), which is checked
+            last.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/copyMessage:
+    description: >-
+      Telegram Bot API method for copying a message of one of the bot's chats to a private chat
+      or a supergroup, as `forwardMessage` addresses them. The copy is the bot's own message: it
+      repeats the content but, unlike a forward, shows neither where it came from nor the bot the
+      original was sent through, and takes its reply and reply markup from the request. A
+      `caption`, even an empty one, replaces the caption of a photo or document, formatted and
+      normalized as by `sendPhoto`, with `show_caption_above_media` for a photo; text stays as it
+      is. As TDLib lets bots do, a bot may copy a message whose sender protected it. The bot
+      receives no update for the copy. Topics, message effects, paid broadcasts, suggested posts,
+      and video start timestamps are not supported.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: copyMessage
+      summary: Copy a message from one of the authenticated virtual bot's chats
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CopyMessageRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CopyMessageRequest'
+            encoding:
+              caption_entities:
+                contentType: application/json
+              reply_parameters:
+                contentType: application/json
+              reply_markup:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CopyMessageRequest'
+            encoding:
+              caption_entities:
+                contentType: application/json
+              reply_parameters:
+                contentType: application/json
+              reply_markup:
+                contentType: application/json
+      responses:
+        '200':
+          description: >-
+            The copy was stored in the chat it was sent to. As on Telegram, the response holds only
+            the copy's message ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageIdResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it, checking in this order: `from_chat_id` is missing (`Bad Request: parameter
+            "from_chat_id" is required`); the new caption or its formatting cannot be read, as for
+            `sendPhoto`; `chat_id` is missing (`Bad Request: chat_id is empty`), which Telegram
+            checks after the copied message; the chat of the copied message is unknown to the bot
+            (`Bad Request: chat not found`); `message_id` is missing or identifies no message of
+            that chat (`Bad Request: message to copy not found`); the message is a service message
+            (`Bad Request: the message can't be copied`), which Telegram checks after the rest of
+            the request; or the request fails as `sendPhoto` does for the chat the copy goes to,
+            its reply, the new caption, or the reply markup.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: As for `forwardMessage`.
           content:
             application/json:
               schema:
@@ -2689,11 +2847,36 @@ components:
             description:
               type: string
     SendAccountMessageRequest:
-      description: Text, a photo, or a document to send.
+      description: Text, a photo, or a document to send, or a message to forward.
       oneOf:
         - $ref: '#/components/schemas/SendAccountTextRequest'
         - $ref: '#/components/schemas/SendAccountPhotoRequest'
         - $ref: '#/components/schemas/SendAccountDocumentRequest'
+        - $ref: '#/components/schemas/ForwardAccountMessageRequest'
+    ForwardAccountMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - to
+        - forward
+      properties:
+        to:
+          $ref: '#/components/schemas/MessageTarget'
+        forward:
+          type: object
+          additionalProperties: false
+          required:
+            - chat
+            - message_id
+          description: >-
+            The message to forward. As in Telegram's clients, a forward replies to no message.
+          properties:
+            chat:
+              $ref: '#/components/schemas/MessageTarget'
+            message_id:
+              type: integer
+              minimum: 1
+              description: The message's ID as the chat's message history shows it.
     SendAccountTextRequest:
       type: object
       additionalProperties: false
@@ -2863,6 +3046,15 @@ components:
         edit_date:
           type: integer
           minimum: 0
+        forward_origin:
+          $ref: '#/components/schemas/MessageOriginUser'
+        forward_from:
+          $ref: '#/components/schemas/MessageUser'
+          description: Legacy form of `forward_origin.sender_user`, present only for a forward.
+        forward_date:
+          type: integer
+          minimum: 0
+          description: Legacy form of `forward_origin.date`, present only for a forward.
         reply_to_message:
           $ref: '#/components/schemas/SupergroupMessage'
         text:
@@ -2928,6 +3120,25 @@ components:
         has_protected_content:
           type: boolean
           const: true
+    MessageOriginUser:
+      type: object
+      additionalProperties: false
+      description: >-
+        Where a forward first appeared, present only for a forward: the account or bot that sent
+        the original message, and when.
+      required:
+        - type
+        - sender_user
+        - date
+      properties:
+        type:
+          type: string
+          const: user
+        sender_user:
+          $ref: '#/components/schemas/MessageUser'
+        date:
+          type: integer
+          minimum: 0
     MessageUser:
       description: An account or a bot as a message shows it.
       oneOf:
@@ -2982,6 +3193,15 @@ components:
             Unix timestamp of the last edit of the text or caption by its author, omitted if the
             message's content was never edited. Replacing only the inline keyboard does not change
             it.
+        forward_origin:
+          $ref: '#/components/schemas/MessageOriginUser'
+        forward_from:
+          $ref: '#/components/schemas/MessageUser'
+          description: Legacy form of `forward_origin.sender_user`, present only for a forward.
+        forward_date:
+          type: integer
+          minimum: 0
+          description: Legacy form of `forward_origin.date`, present only for a forward.
         reply_to_message:
           $ref: '#/components/schemas/PrivateMessage'
           description: >-
@@ -3038,8 +3258,8 @@ components:
         via_bot:
           $ref: '#/components/schemas/MessageSenderBot'
           description: >-
-            The bot through whose inline mode the account sent the message; omitted for other
-            messages.
+            The bot through whose inline mode the account sent the message, or the original of a
+            forward; omitted for other messages.
         has_protected_content:
           type: boolean
           const: true
@@ -4246,6 +4466,86 @@ components:
             - $ref: '#/components/schemas/ReplyKeyboardMarkup'
             - $ref: '#/components/schemas/ReplyKeyboardRemove'
             - $ref: '#/components/schemas/ForceReply'
+    ForwardMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+        - from_chat_id
+        - message_id
+      properties:
+        chat_id:
+          type: integer
+          description: >-
+            Identifier of the chat to forward to, as for `sendMessage`: for a private chat, the
+            account's user ID; for a supergroup, its negative chat ID.
+        from_chat_id:
+          type: integer
+          description: Identifier of the chat of the forwarded message, as for `chat_id`.
+        message_id:
+          type: integer
+          description: The forwarded message's ID in the bot's chat.
+        disable_notification:
+          type: boolean
+          description: Validated and without effect, because notifications are not modeled.
+        protect_content:
+          type: boolean
+          default: false
+          description: As for `sendMessage`.
+    CopyMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+        - from_chat_id
+        - message_id
+      properties:
+        chat_id:
+          type: integer
+          description: Identifier of the chat to copy to, as for `forwardMessage`.
+        from_chat_id:
+          type: integer
+          description: Identifier of the chat of the copied message, as for `chat_id`.
+        message_id:
+          type: integer
+          description: The copied message's ID in the bot's chat.
+        caption:
+          type: string
+          maxLength: 1024
+          description: >-
+            A caption that replaces the caption of a copied photo or document; an empty caption
+            removes it. Omitted, the caption is kept. Text messages ignore it.
+        parse_mode:
+          $ref: '#/components/schemas/ParseMode'
+        caption_entities:
+          $ref: '#/components/schemas/CaptionEntitiesParameter'
+        show_caption_above_media:
+          type: boolean
+          default: false
+          description: With a new caption of a photo, shows it above the photo.
+        disable_notification:
+          type: boolean
+          description: Validated and without effect, because notifications are not modeled.
+        protect_content:
+          type: boolean
+          default: false
+          description: As for `sendMessage`.
+        reply_parameters:
+          $ref: '#/components/schemas/ReplyParameters'
+        reply_to_message_id:
+          type: integer
+          description: As for `sendMessage`.
+        allow_sending_without_reply:
+          type: boolean
+          default: false
+          description: As for `sendMessage`.
+        reply_markup:
+          description: As for `sendMessage`; the copy never keeps the original's reply markup.
+          oneOf:
+            - $ref: '#/components/schemas/InlineKeyboardMarkup'
+            - $ref: '#/components/schemas/ReplyKeyboardMarkup'
+            - $ref: '#/components/schemas/ReplyKeyboardRemove'
+            - $ref: '#/components/schemas/ForceReply'
     SendDocumentRequest:
       type: object
       additionalProperties: false
@@ -4413,6 +4713,26 @@ components:
           const: true
         result:
           $ref: '#/components/schemas/Message'
+    MessageIdResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: object
+          additionalProperties: false
+          required:
+            - message_id
+          properties:
+            message_id:
+              type: integer
+              minimum: 1
+              description: The new message's ID in the bot's chat.
     EditMessageResponse:
       type: object
       additionalProperties: false

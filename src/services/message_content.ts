@@ -15,10 +15,12 @@ import type {
   StoredPhotoFile,
 } from '../types/stored_file.ts';
 import {
+  type DocumentMessageContent,
   type FormattedText,
   MAX_CAPTION_LENGTH,
   MAX_TEXT_MESSAGE_LENGTH,
   type MessageContent,
+  type PhotoMessageContent,
   type TextEntity,
 } from '../types/virtual_message.ts';
 
@@ -71,11 +73,26 @@ export type OutgoingMessageContent =
   | (SpecifiedCaption & {
     readonly kind: 'document';
     readonly document: OutgoingDocument;
-  });
+  })
+  | {
+    /** The content of an existing message, which a forward or a copy repeats. */
+    readonly kind: 'existing';
+    /** The content as Telegram checked it when the existing message was sent. */
+    readonly content: MessageContent;
+    /**
+     * A caption that replaces the caption of media, as a copy may specify; omitted to keep the
+     * caption. Text has no caption to replace and stays as it is.
+     */
+    readonly captionReplacement?: CaptionReplacement;
+  };
+
+/** A new caption of media, with where a photo shows it; a document ignores the placement. */
+export type CaptionReplacement = SpecifiedCaption & { readonly showsCaptionAboveMedia: boolean };
 
 /** New message content that passed Telegram's checks, whose upload is not yet stored. */
 export type NormalizedOutgoingContent =
   | Extract<MessageContent, { readonly kind: 'text' }>
+  | { readonly kind: 'existing'; readonly content: MessageContent }
   | {
     readonly kind: 'photo';
     readonly photo: OutgoingPhoto;
@@ -112,6 +129,9 @@ export function normalizeOutgoingContent(
       ? { normalized: true, content: { kind: 'text', ...textNormalization.formattedText } }
       : textNormalization;
   }
+  if (content.kind === 'existing') {
+    return normalizeExistingContent(content.content, content.captionReplacement, sender, context);
+  }
 
   const captionNormalization = normalizeCaption(content, sender, context);
   if (!captionNormalization.normalized) {
@@ -129,6 +149,36 @@ export function normalizeOutgoingContent(
         showsCaptionAboveMedia: content.showsCaptionAboveMedia,
       }
       : { kind: 'document', document: content.document, caption },
+  };
+}
+
+/**
+ * Keeps the content of an existing message as it is, apart from a replaced caption of media, which
+ * is normalized as a new caption is.
+ */
+function normalizeExistingContent(
+  content: MessageContent,
+  captionReplacement: CaptionReplacement | undefined,
+  sender: MessageSenderKind,
+  context: FormattedTextFixingContext,
+): OutgoingContentNormalization {
+  if (captionReplacement === undefined || content.kind === 'text') {
+    return { normalized: true, content: { kind: 'existing', content } };
+  }
+  const captionNormalization = normalizeCaption(captionReplacement, sender, context);
+  if (!captionNormalization.normalized) {
+    return captionNormalization;
+  }
+  return {
+    normalized: true,
+    content: {
+      kind: 'existing',
+      content: withCaption(
+        content,
+        captionNormalization.caption,
+        captionReplacement.showsCaptionAboveMedia,
+      ),
+    },
   };
 }
 
@@ -265,18 +315,32 @@ export function replaceMessageCaption(
   if (!captionNormalization.normalized) {
     return { replaced: false, failure: captionNormalization.failure };
   }
-  const { caption } = captionNormalization;
   return {
     replaced: true,
-    content: content.kind === 'photo'
-      ? {
-        ...content,
-        caption,
-        showsCaptionAboveMedia: specifiedCaption.showsCaptionAboveMedia ??
-          content.showsCaptionAboveMedia,
-      }
-      : { ...content, caption },
+    content: withCaption(
+      content,
+      captionNormalization.caption,
+      specifiedCaption.showsCaptionAboveMedia,
+    ),
   };
+}
+
+/**
+ * Gives media a normalized caption. Only a photo shows its caption above itself; omitting the
+ * placement keeps it.
+ */
+function withCaption(
+  content: PhotoMessageContent | DocumentMessageContent,
+  caption: FormattedText,
+  showsCaptionAboveMedia: boolean | undefined,
+): PhotoMessageContent | DocumentMessageContent {
+  return content.kind === 'photo'
+    ? {
+      ...content,
+      caption,
+      showsCaptionAboveMedia: showsCaptionAboveMedia ?? content.showsCaptionAboveMedia,
+    }
+    : { ...content, caption };
 }
 
 /** An account's edit of its message: new text for a text message, or a new caption for media. */
@@ -331,6 +395,8 @@ export function storeOutgoingContent(
   switch (content.kind) {
     case 'text':
       return content;
+    case 'existing':
+      return content.content;
     case 'photo':
       return {
         kind: 'photo',
@@ -368,6 +434,8 @@ export function toContentOfStoredFile(content: NormalizedOutgoingContent): Messa
   switch (content.kind) {
     case 'text':
       return content;
+    case 'existing':
+      return content.content;
     case 'photo':
       return {
         kind: 'photo',

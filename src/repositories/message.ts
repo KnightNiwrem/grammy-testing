@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   InlineMessageId,
   MessageContent,
+  MessageForwardInfo,
   PrivateMessage,
   SupergroupMessage,
   SupergroupMessageAuthor,
@@ -30,6 +31,8 @@ export interface AddPrivateMessageInput {
    * inline message identifier; omitted for other messages.
    */
   readonly viaBotId?: number;
+  /** Omitted for a message that is no forward. */
+  readonly forwardInfo?: MessageForwardInfo;
   /** Omitted for a message its sender did not protect. */
   readonly isContentProtected?: boolean;
 }
@@ -44,6 +47,8 @@ export interface AddSupergroupMessageInput {
   readonly inlineKeyboard?: InlineKeyboard;
   /** As `AddPrivateMessageInput` describes it. */
   readonly viaBotId?: number;
+  /** Omitted for a message that is no forward. */
+  readonly forwardInfo?: MessageForwardInfo;
   /** Omitted for a message its sender did not protect. */
   readonly isContentProtected?: boolean;
 }
@@ -79,6 +84,7 @@ export class MessageRepository {
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(input.inlineKeyboard) }),
       ...this.#createViaBot(input.viaBotId),
+      ...(input.forwardInfo === undefined ? {} : { forwardInfo: { ...input.forwardInfo } }),
       ...(input.replyInterface === undefined
         ? {}
         : { replyInterface: copyReplyInterface(input.replyInterface) }),
@@ -120,6 +126,7 @@ export class MessageRepository {
       sentAtUnixSeconds,
       replyToMessageId,
       viaBot,
+      forwardInfo,
       replyInterface,
       isContentProtected,
     } = storedMessage;
@@ -135,6 +142,7 @@ export class MessageRepository {
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
       ...(viaBot === undefined ? {} : { viaBot }),
+      ...(forwardInfo === undefined ? {} : { forwardInfo }),
       ...(replyInterface === undefined ? {} : { replyInterface }),
       ...(edit.contentEditedAtUnixSeconds === undefined
         ? {}
@@ -191,6 +199,7 @@ export class MessageRepository {
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(input.inlineKeyboard) }),
       ...this.#createViaBot(input.viaBotId),
+      ...(input.forwardInfo === undefined ? {} : { forwardInfo: { ...input.forwardInfo } }),
       isContentProtected: input.isContentProtected ?? false,
     };
     this.#supergroupMessagesById.set(message.id, message);
@@ -225,6 +234,7 @@ export class MessageRepository {
       sentAtUnixSeconds,
       replyToMessageId,
       viaBot,
+      forwardInfo,
       isContentProtected,
     } = storedMessage;
     const editedMessage: SupergroupMessage = {
@@ -239,6 +249,7 @@ export class MessageRepository {
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
       ...(viaBot === undefined ? {} : { viaBot }),
+      ...(forwardInfo === undefined ? {} : { forwardInfo }),
       ...(edit.contentEditedAtUnixSeconds === undefined
         ? {}
         : { contentEditedAtUnixSeconds: edit.contentEditedAtUnixSeconds }),

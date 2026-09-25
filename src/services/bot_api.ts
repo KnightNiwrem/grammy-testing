@@ -18,16 +18,19 @@ import {
 } from '../types/chat_membership.ts';
 import type { InlineQueryId, InlineQueryResultsButton } from '../types/inline_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
+import { createMessageForward, isForwardable } from '../types/message_forward.ts';
 import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { ChatAction } from '../types/virtual_chat.ts';
-import type {
-  ChatMessage,
-  InlineMessageId,
-  PrivateMessage,
-  SupergroupMessage,
-  TextEntity,
+import {
+  type ChatMessage,
+  type InlineMessageId,
+  isContentMessage,
+  type MessageForwardInfo,
+  type PrivateMessage,
+  type SupergroupMessage,
+  type TextEntity,
 } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
 import type {
@@ -187,12 +190,53 @@ export type SendResult =
   );
 
 /** A message of one of the bot's chats, as Bot API methods address it. */
-interface MessageTarget {
+export interface MessageTarget {
   /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
   readonly chatId: number;
   /** The message's ID in the bot's chat. */
   readonly messageId: number;
 }
+
+export interface ForwardMessageRequest {
+  /** The Bot API `chat_id` of the chat to forward the message to. */
+  readonly chatId: number;
+  /** The forwarded message: the Bot API `from_chat_id` and `message_id`. */
+  readonly forwardedMessage: MessageTarget;
+  /** The Bot API `protect_content`; omitted for an unprotected message. */
+  readonly isContentProtected?: boolean;
+}
+
+/**
+ * Why the message that a forward or copy repeats cannot be read: its chat is unknown to the bot,
+ * or the bot is no member of it, or the chat has no such message.
+ */
+type RepeatedMessageFailureReason =
+  | 'chat_not_found'
+  | FormerSupergroupMemberFailureReason
+  | 'repeated_message_not_found';
+
+/** A failure of a forward or copy that a send cannot have. */
+type RepetitionFailure<NotRepeatableReason extends string> = {
+  readonly sent: false;
+  readonly reason: 'repeated_message_not_found' | NotRepeatableReason;
+};
+
+export type ForwardMessageResult = SendResult | RepetitionFailure<'message_not_forwardable'>;
+
+export type CopyMessageRequest = SendRequestOptions & {
+  /** The copied message: the Bot API `from_chat_id` and `message_id`. */
+  readonly copiedMessage: MessageTarget;
+  /** A caption that replaces the caption of copied media; omitted to keep it. */
+  readonly caption?: SpecifiedFormattedText;
+  /** The Bot API `show_caption_above_media`, which applies only with a new caption of a photo. */
+  readonly showsCaptionAboveMedia: boolean;
+};
+
+/** The Bot API answers a copy with the new message's ID rather than the message. */
+export type CopyMessageResult =
+  | { readonly sent: true; readonly messageId: number }
+  | Extract<SendResult, { readonly sent: false }>
+  | RepetitionFailure<'message_not_copyable'>;
 
 export interface EditMessageTextRequest extends MessageTarget, SpecifiedFormattedText {
   /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
@@ -597,6 +641,20 @@ interface BotMessaging {
   isPrivateConversationStarted(
     key: { readonly accountId: number; readonly botId: number },
   ): boolean;
+  getMessageForBot(input: {
+    readonly botId: number;
+    readonly accountId: number;
+    readonly botMessageId: number;
+  }):
+    | { readonly found: true; readonly message: PrivateMessage }
+    | {
+      readonly found: false;
+      readonly reason:
+        | 'bot_not_found'
+        | 'account_not_found'
+        | 'conversation_not_started'
+        | 'message_not_found';
+    };
   sendBotMessage(
     input: BotMessageReplyMarkup & {
       readonly fromBotId: number;
@@ -607,6 +665,7 @@ interface BotMessaging {
         readonly allowSendingWithoutReply: boolean;
       };
       readonly isContentProtected?: boolean;
+      readonly forwardInfo?: MessageForwardInfo;
     },
   ): BotMessageSendingResult;
   editBotMessageText(
@@ -672,6 +731,20 @@ type SupergroupBotMessageEditFailureReason =
   | 'message_not_modified';
 
 interface SupergroupBotMessaging {
+  getMessageForBot(input: {
+    readonly botId: number;
+    readonly chatId: number;
+    readonly messageId: number;
+  }):
+    | { readonly found: true; readonly message: SupergroupMessage }
+    | {
+      readonly found: false;
+      readonly reason:
+        | 'bot_not_found'
+        | 'chat_not_found'
+        | FormerSupergroupMemberFailureReason
+        | 'message_not_found';
+    };
   sendBotMessage(input: {
     readonly fromBotId: number;
     readonly chatId: number;
@@ -679,6 +752,7 @@ interface SupergroupBotMessaging {
     readonly inlineKeyboard?: InlineKeyboard;
     readonly replyTo?: { readonly messageId: number; readonly allowSendingWithoutReply: boolean };
     readonly isContentProtected?: boolean;
+    readonly forwardInfo?: MessageForwardInfo;
   }):
     | { readonly sent: true; readonly message: SupergroupMessage }
     | {
@@ -1087,6 +1161,68 @@ export class BotApiService {
     }, options);
   }
 
+  /**
+   * Forwards a message of one of the bot's chats to a private chat or a supergroup, as TDLib does:
+   * the forward repeats the message's content and shows who first sent it and when. As on Telegram,
+   * a message whose sender protected it cannot be forwarded, nor can a service message.
+   *
+   * The forwarded message is checked in full before the chat it goes to, while TDLib checks whether
+   * it can be forwarded only after that chat; a request that fails both ways fails for the message.
+   */
+  forwardMessage(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, forwardedMessage, isContentProtected }: ForwardMessageRequest,
+  ): ForwardMessageResult {
+    const lookup = this.#findRepeatedMessage(authenticatedBot, forwardedMessage);
+    if (!lookup.found) {
+      return { sent: false, reason: lookup.reason };
+    }
+    if (!isForwardable(lookup.message)) {
+      return { sent: false, reason: 'message_not_forwardable' };
+    }
+    const { content, forwardInfo, inlineKeyboard } = createMessageForward(lookup.message);
+    return this.#send(
+      authenticatedBot,
+      { kind: 'existing', content },
+      { chatId, isContentProtected, ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }) },
+      forwardInfo,
+    );
+  }
+
+  /**
+   * Copies a message of one of the bot's chats to a private chat or a supergroup as the bot's own
+   * message, which, unlike a forward, does not show where it came from, and which takes the reply
+   * and reply markup of the request instead of the original's. A new caption replaces the caption
+   * of copied media, while text stays as it is. As TDLib lets bots do, a bot may copy a message
+   * whose sender protected it; a service message cannot be copied.
+   *
+   * As for `forwardMessage`, the copied message is checked in full before the chat it goes to.
+   */
+  copyMessage(
+    authenticatedBot: VirtualBotProfile,
+    { copiedMessage, caption, showsCaptionAboveMedia, ...options }: CopyMessageRequest,
+  ): CopyMessageResult {
+    const lookup = this.#findRepeatedMessage(authenticatedBot, copiedMessage);
+    if (!lookup.found) {
+      return { sent: false, reason: lookup.reason };
+    }
+    if (!isContentMessage(lookup.message)) {
+      return { sent: false, reason: 'message_not_copyable' };
+    }
+    const result = this.#send(authenticatedBot, {
+      kind: 'existing',
+      content: lookup.message.content,
+      ...(caption === undefined ? {} : {
+        captionReplacement: {
+          caption: caption.text,
+          captionEntities: caption.entities,
+          showsCaptionAboveMedia,
+        },
+      }),
+    }, options);
+    return result.sent ? { sent: true, messageId: result.message.message_id } : result;
+  }
+
   /** Returns a file the bot knows by its `file_id`, with the `file_path` to download it from. */
   getFile(authenticatedBot: VirtualBotProfile, fileId: string): GetFileResult {
     const result = this.#mediaFiles.getBotFile(authenticatedBot.id, fileId);
@@ -1110,20 +1246,68 @@ export class BotApiService {
     return this.#mediaFiles.findBotFileByPath(authenticatedBot.id, filePath);
   }
 
+  /**
+   * Finds the message of one of the bot's chats that a forward or copy repeats. As on Telegram, a
+   * chat the bot cannot address is not found.
+   */
+  #findRepeatedMessage(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, messageId }: MessageTarget,
+  ):
+    | { readonly found: true; readonly message: ChatMessage }
+    | { readonly found: false; readonly reason: RepeatedMessageFailureReason } {
+    const lookup = isUserId(chatId)
+      ? this.#botMessages.getMessageForBot({
+        botId: authenticatedBot.id,
+        accountId: chatId,
+        botMessageId: messageId,
+      })
+      : this.#supergroupBotMessages.getMessageForBot({
+        botId: authenticatedBot.id,
+        chatId,
+        messageId,
+      });
+    if (lookup.found) {
+      return lookup;
+    }
+
+    const { reason } = lookup;
+    switch (reason) {
+      case 'chat_not_found':
+      case 'bot_not_a_member':
+      case 'bot_kicked':
+        return { found: false, reason };
+      case 'account_not_found':
+      case 'conversation_not_started':
+        return { found: false, reason: 'chat_not_found' };
+      case 'message_not_found':
+        return { found: false, reason: 'repeated_message_not_found' };
+      case 'bot_not_found':
+        throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+      default: {
+        const unhandledReason: never = reason;
+        throw new Error(`Unhandled repeated message lookup failure: ${unhandledReason}`);
+      }
+    }
+  }
+
+  /** Sends content to a private chat or a supergroup; a forward also shows where it came from. */
   #send(
     authenticatedBot: VirtualBotProfile,
     content: OutgoingMessageContent,
     options: SendRequestOptions,
+    forwardInfo?: MessageForwardInfo,
   ): SendResult {
     return isUserId(options.chatId)
-      ? this.#sendPrivateMessage(authenticatedBot, content, options)
-      : this.#sendSupergroupMessage(authenticatedBot, content, options);
+      ? this.#sendPrivateMessage(authenticatedBot, content, options, forwardInfo)
+      : this.#sendSupergroupMessage(authenticatedBot, content, options, forwardInfo);
   }
 
   #sendPrivateMessage(
     authenticatedBot: VirtualBotProfile,
     content: OutgoingMessageContent,
     { chatId, replyTo, isContentProtected, ...replyMarkup }: SendRequestOptions,
+    forwardInfo: MessageForwardInfo | undefined,
   ): SendResult {
     const result = this.#botMessages.sendBotMessage({
       ...replyMarkup,
@@ -1135,6 +1319,7 @@ export class BotApiService {
         allowSendingWithoutReply: replyTo.allowSendingWithoutReply,
       },
       isContentProtected,
+      forwardInfo,
     });
     if (result.sent) {
       return {
@@ -1172,6 +1357,7 @@ export class BotApiService {
     content: OutgoingMessageContent,
     { chatId, replyTo, isContentProtected, inlineKeyboard, replyInterfaceMarkup }:
       SendRequestOptions,
+    forwardInfo: MessageForwardInfo | undefined,
   ): SendResult {
     if (replyInterfaceMarkup !== undefined) {
       return { sent: false, reason: 'reply_interface_unsupported_in_groups' };
@@ -1183,6 +1369,7 @@ export class BotApiService {
       inlineKeyboard,
       replyTo,
       isContentProtected,
+      forwardInfo,
     });
     if (result.sent) {
       return {

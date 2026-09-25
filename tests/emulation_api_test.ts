@@ -4801,6 +4801,506 @@ Deno.test('a grammY bot answers inline queries and edits the message it sent to 
   }
 });
 
+Deno.test('forwardMessage forwards messages with their origin and follows Telegram checks', async () => {
+  const { api, sessionPath, owner, bot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const privateChat = { type: 'private', botId: bot.bot.id };
+  const accountMessageResponse = await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', { to: privateChat, text: 'Where is my order?' }),
+  );
+  const { message: accountMessage } = await accountMessageResponse.json() as {
+    message: { message_id: number; date: number };
+  };
+  const forwardMessage = (parameters: Record<string, unknown>) =>
+    callBotApi(api, `${bot.botApiPath}/forwardMessage`, parameters);
+
+  const forward = botApiResult(
+    (await forwardMessage({
+      chat_id: supergroup.id,
+      from_chat_id: owner.id,
+      message_id: accountMessage.message_id,
+    })).body,
+  );
+  const expectedOrigin = { type: 'user', sender_user: owner, date: accountMessage.date };
+  const expectedForwardFields = {
+    forward_origin: expectedOrigin,
+    forward_from: owner,
+    forward_date: accountMessage.date,
+    text: 'Where is my order?',
+  };
+  const { forward_origin, forward_from, forward_date, text } = forward ?? {};
+  if (
+    forward?.chat === undefined || (forward.from as { id: number }).id !== bot.bot.id ||
+    JSON.stringify({ forward_origin, forward_from, forward_date, text }) !==
+      JSON.stringify(expectedForwardFields)
+  ) {
+    throw new Error(
+      `Expected the bot's forward to show its origin, received ${JSON.stringify(forward)}`,
+    );
+  }
+
+  // A forward of a forward keeps the original's origin.
+  const forwardOfForward = botApiResult(
+    (await forwardMessage({
+      chat_id: owner.id,
+      from_chat_id: supergroup.id,
+      message_id: forward.message_id,
+    })).body,
+  );
+  if (JSON.stringify(forwardOfForward?.forward_origin) !== JSON.stringify(expectedOrigin)) {
+    throw new Error(
+      `Expected a forward of a forward to keep its origin, received ${
+        JSON.stringify(forwardOfForward)
+      }`,
+    );
+  }
+
+  // Only a keyboard of URL buttons stays on a forward.
+  const sendMenu = async (inlineKeyboard: unknown) =>
+    botApiResult(
+      (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+        chat_id: owner.id,
+        text: 'Menu',
+        reply_markup: { inline_keyboard: inlineKeyboard },
+      })).body,
+    )?.message_id;
+  const urlKeyboard = [[{ text: 'Track', url: 'https://example.com/track' }]];
+  const callbackKeyboard = [[{ text: 'Track', url: 'https://example.com/track' }, {
+    text: 'Cancel',
+    callback_data: 'cancel',
+  }]];
+  const forwardedMarkups = [];
+  for (const inlineKeyboard of [urlKeyboard, callbackKeyboard]) {
+    const messageId = await sendMenu(inlineKeyboard);
+    forwardedMarkups.push(
+      botApiResult(
+        (await forwardMessage({
+          chat_id: supergroup.id,
+          from_chat_id: owner.id,
+          message_id: messageId,
+        })).body,
+      )?.reply_markup,
+    );
+  }
+  if (
+    JSON.stringify(forwardedMarkups) !==
+      JSON.stringify([{ inline_keyboard: urlKeyboard }, undefined])
+  ) {
+    throw new Error(`Expected only URL keyboards on forwards, received ${forwardedMarkups}`);
+  }
+
+  // A forward cannot be edited.
+  const editOfForward = await callBotApi(api, `${bot.botApiPath}/editMessageText`, {
+    chat_id: supergroup.id,
+    message_id: forward.message_id,
+    text: 'Edited',
+  });
+  if (
+    !isBadRequestResponse(editOfForward.body) ||
+    editOfForward.body.description !== "Bad Request: message can't be edited"
+  ) {
+    throw new Error(
+      `Expected a forward to be uneditable, received ${JSON.stringify(editOfForward)}`,
+    );
+  }
+
+  const protectedMessageId = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+      chat_id: owner.id,
+      text: 'Your code is 1234',
+      protect_content: true,
+    })).body,
+  )?.message_id;
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: Array<{ message_id: number }>;
+  };
+  const serviceMessageId = history.messages[0].message_id;
+  const expectFailure = async (
+    parameters: Record<string, unknown>,
+    status: number,
+    description: string,
+  ) => {
+    const { status: actualStatus, body } = await forwardMessage(parameters);
+    const actualDescription = (body as { description?: unknown }).description;
+    if (actualStatus !== status || actualDescription !== description) {
+      throw new Error(
+        `Expected forwardMessage to fail with "${description}", received ${JSON.stringify(body)}`,
+      );
+    }
+  };
+  await expectFailure(
+    { chat_id: supergroup.id, message_id: accountMessage.message_id },
+    400,
+    'Bad Request: parameter "from_chat_id" is required',
+  );
+  await expectFailure(
+    { from_chat_id: owner.id, message_id: accountMessage.message_id },
+    400,
+    'Bad Request: chat_id is empty',
+  );
+  await expectFailure(
+    { chat_id: supergroup.id, from_chat_id: owner.id + 1_000, message_id: 1 },
+    400,
+    'Bad Request: chat not found',
+  );
+  await expectFailure(
+    { chat_id: supergroup.id, from_chat_id: owner.id },
+    400,
+    'Bad Request: message to forward not found',
+  );
+  await expectFailure(
+    { chat_id: supergroup.id, from_chat_id: supergroup.id, message_id: 1_000 },
+    400,
+    'Bad Request: message to forward not found',
+  );
+  await expectFailure(
+    { chat_id: supergroup.id, from_chat_id: owner.id, message_id: protectedMessageId },
+    400,
+    "Bad Request: the message can't be forwarded",
+  );
+  await expectFailure(
+    { chat_id: owner.id, from_chat_id: supergroup.id, message_id: serviceMessageId },
+    400,
+    "Bad Request: the message can't be forwarded",
+  );
+  // A supergroup the bot never joined is unknown to it.
+  const outsider = await createBot(api, sessionPath, 'outsider_bot');
+  const { body: outsiderBody } = await callBotApi(api, `${outsider.botApiPath}/forwardMessage`, {
+    chat_id: owner.id,
+    from_chat_id: supergroup.id,
+    message_id: forward.message_id,
+  });
+  if (
+    !isBadRequestResponse(outsiderBody) ||
+    outsiderBody.description !== 'Bad Request: chat not found'
+  ) {
+    throw new Error(
+      `Expected a non-member not to find the supergroup, received ${JSON.stringify(outsiderBody)}`,
+    );
+  }
+});
+
+Deno.test('copyMessage copies messages without their origin and follows Telegram checks', async () => {
+  const { api, sessionPath, owner, bot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const photoResponse = await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', {
+      to: { type: 'private', botId: bot.bot.id },
+      photo: { content_base64: gifImage(4, 3).toBase64() },
+      caption: 'Receipt',
+    }),
+  );
+  const { message: photoMessage } = await photoResponse.json() as {
+    message: { message_id: number; photo: Array<{ file_unique_id: string }> };
+  };
+  const copyMessage = (parameters: Record<string, unknown>) =>
+    callBotApi(api, `${bot.botApiPath}/copyMessage`, parameters);
+  const readSupergroupMessage = async (messageId: unknown) => {
+    const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+      messages: Array<Record<string, unknown>>;
+    };
+    return history.messages.find((message) => message.message_id === messageId);
+  };
+
+  const copies = [];
+  for (
+    const captionParameters of [
+      {},
+      { caption: '<b>Paid</b> receipt', parse_mode: 'HTML', show_caption_above_media: true },
+      { caption: '' },
+    ]
+  ) {
+    const { status, body } = await copyMessage({
+      chat_id: supergroup.id,
+      from_chat_id: owner.id,
+      message_id: photoMessage.message_id,
+      ...captionParameters,
+    });
+    const result = botApiResult(body);
+    if (status !== 200 || result === undefined || Object.keys(result).join() !== 'message_id') {
+      throw new Error(
+        `Expected copyMessage to answer a message ID, received ${JSON.stringify(body)}`,
+      );
+    }
+    const copy = await readSupergroupMessage(result.message_id);
+    const { from, caption, caption_entities, show_caption_above_media, forward_origin } = copy ??
+      {};
+    copies.push({
+      fromId: (from as { id: number } | undefined)?.id,
+      fileUniqueId: photoSizeOf(copy)?.file_unique_id,
+      caption,
+      caption_entities,
+      show_caption_above_media,
+      forward_origin,
+    });
+  }
+  const photoFileUniqueId = photoMessage.photo[0].file_unique_id;
+  const expectedCopies = [
+    { fromId: bot.bot.id, fileUniqueId: photoFileUniqueId, caption: 'Receipt' },
+    {
+      fromId: bot.bot.id,
+      fileUniqueId: photoFileUniqueId,
+      caption: 'Paid receipt',
+      caption_entities: [{ type: 'bold', offset: 0, length: 4 }],
+      show_caption_above_media: true,
+    },
+    { fromId: bot.bot.id, fileUniqueId: photoFileUniqueId },
+  ];
+  if (JSON.stringify(copies) !== JSON.stringify(expectedCopies)) {
+    throw new Error(`Expected copies with the chosen captions, received ${JSON.stringify(copies)}`);
+  }
+
+  // A copy takes the reply and keyboard of the request, keeps text as it is, and a bot may copy a
+  // protected message; a copy of a forward does not show the forward's origin.
+  const protectedMessageId = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+      chat_id: owner.id,
+      text: 'Your code is 1234',
+      protect_content: true,
+    })).body,
+  )?.message_id;
+  const forwardId = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/forwardMessage`, {
+      chat_id: supergroup.id,
+      from_chat_id: owner.id,
+      message_id: photoMessage.message_id,
+    })).body,
+  )?.message_id;
+  const inlineKeyboard = [[{ text: 'Done', callback_data: 'done' }]];
+  const textCopyId = botApiResult(
+    (await copyMessage({
+      chat_id: supergroup.id,
+      from_chat_id: owner.id,
+      message_id: protectedMessageId,
+      caption: 'Ignored for text',
+      reply_parameters: { message_id: forwardId },
+      reply_markup: { inline_keyboard: inlineKeyboard },
+    })).body,
+  )?.message_id;
+  const textCopy = await readSupergroupMessage(textCopyId);
+  const copyOfForwardId = botApiResult(
+    (await copyMessage({ chat_id: owner.id, from_chat_id: supergroup.id, message_id: forwardId }))
+      .body,
+  )?.message_id;
+  const privateHistory = await (await api.request(
+    `${sessionPath}/accounts/${owner.id}/conversations/private/${bot.bot.id}/messages`,
+  )).json() as { messages: Array<Record<string, unknown>> };
+  const copyOfForward = privateHistory.messages.find(({ message_id }) =>
+    message_id === copyOfForwardId
+  );
+  if (
+    textCopy?.text !== 'Your code is 1234' || textCopy.has_protected_content !== undefined ||
+    (textCopy.reply_to_message as { message_id?: number } | undefined)?.message_id !==
+      forwardId ||
+    JSON.stringify(textCopy.reply_markup) !== JSON.stringify({ inline_keyboard: inlineKeyboard }) ||
+    copyOfForward === undefined || 'forward_origin' in copyOfForward ||
+    copyOfForward.caption !== 'Receipt'
+  ) {
+    throw new Error(
+      `Expected copies to take the request's options, received ${
+        JSON.stringify({ textCopy, copyOfForward })
+      }`,
+    );
+  }
+
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: Array<{ message_id: number }>;
+  };
+  const expectFailure = async (
+    parameters: Record<string, unknown>,
+    status: number,
+    description: string,
+  ) => {
+    const { status: actualStatus, body } = await copyMessage(parameters);
+    const actualDescription = (body as { description?: unknown }).description;
+    if (actualStatus !== status || actualDescription !== description) {
+      throw new Error(
+        `Expected copyMessage to fail with "${description}", received ${JSON.stringify(body)}`,
+      );
+    }
+  };
+  await expectFailure(
+    { chat_id: supergroup.id, from_chat_id: owner.id, message_id: 1_000 },
+    400,
+    'Bad Request: message to copy not found',
+  );
+  await expectFailure(
+    { chat_id: owner.id, from_chat_id: supergroup.id, message_id: history.messages[0].message_id },
+    400,
+    "Bad Request: the message can't be copied",
+  );
+  await expectFailure(
+    {
+      chat_id: supergroup.id,
+      from_chat_id: owner.id,
+      message_id: photoMessage.message_id,
+      caption: 'x'.repeat(1_025),
+    },
+    400,
+    'Bad Request: message caption is too long',
+  );
+  await expectFailure(
+    {
+      chat_id: supergroup.id,
+      from_chat_id: owner.id,
+      message_id: photoMessage.message_id,
+      reply_markup: { keyboard: [[{ text: 'Yes' }]] },
+    },
+    400,
+    'Bad Request: reply keyboards, keyboard removals, and forced replies are not supported in groups',
+  );
+  await api.request(`${sessionPath}/accounts/${owner.id}/blocked-bots/${bot.bot.id}`, {
+    method: 'PUT',
+  });
+  await expectFailure(
+    { chat_id: owner.id, from_chat_id: owner.id, message_id: photoMessage.message_id },
+    403,
+    'Forbidden: bot was blocked by the user',
+  );
+});
+
+Deno.test('an account forwards messages to bots, which receive their origin', async () => {
+  const { api, sessionPath, owner, member, bot, supergroup, supergroupPath, sendSupergroupText } =
+    await createSupergroupFixture();
+  const readUpdates = createUpdateReader(api);
+  const supergroupChat = { type: 'supergroup', chatId: supergroup.id };
+  const privateChat = { type: 'private', botId: bot.bot.id };
+  const groupMessage = await sendSupergroupText(member.id, 'Lunch at noon?');
+  await readUpdates(bot.botApiPath);
+  const forward = (accountId: number, body: Record<string, unknown>) =>
+    api.request(`${sessionPath}/accounts/${accountId}/messages`, jsonRequest('POST', body));
+
+  const forwardResponse = await forward(owner.id, {
+    to: privateChat,
+    forward: { chat: supergroupChat, message_id: groupMessage.message_id },
+  });
+  const { message: shownForward } = await forwardResponse.json() as {
+    message: Record<string, unknown>;
+  };
+  const [update] = await readUpdates(bot.botApiPath);
+  const receivedForward = update?.message as Record<string, unknown> | undefined;
+  const expectedOrigin = { type: 'user', sender_user: member, date: groupMessage.date };
+  if (
+    forwardResponse.status !== 201 ||
+    JSON.stringify(shownForward.forward_origin) !== JSON.stringify(expectedOrigin) ||
+    JSON.stringify(receivedForward) !== JSON.stringify(shownForward) ||
+    (receivedForward?.from as { id?: number } | undefined)?.id !== owner.id ||
+    receivedForward?.text !== 'Lunch at noon?'
+  ) {
+    throw new Error(
+      `Expected the bot to receive the account's forward, received ${
+        JSON.stringify({ status: forwardResponse.status, shownForward, update })
+      }`,
+    );
+  }
+
+  // The account edits nothing of a forward, and cannot forward protected content.
+  const editResponse = await api.request(
+    `${sessionPath}/accounts/${owner.id}/conversations/private/${bot.bot.id}/messages/${shownForward.message_id}`,
+    jsonRequest('PATCH', { text: 'Edited' }),
+  );
+  const protectedMessageId = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+      chat_id: owner.id,
+      text: 'Your code is 1234',
+      protect_content: true,
+    })).body,
+  )?.message_id;
+  const outsider = await createAccount(api, sessionPath, 'Linus');
+  const failureStatuses = [
+    editResponse.status,
+    (await forward(owner.id, {
+      to: supergroupChat,
+      forward: { chat: privateChat, message_id: protectedMessageId },
+    })).status,
+    (await forward(owner.id, {
+      to: supergroupChat,
+      forward: { chat: privateChat, message_id: 1_000 },
+    })).status,
+    (await forward(outsider.id, {
+      to: privateChat,
+      forward: { chat: supergroupChat, message_id: groupMessage.message_id },
+    })).status,
+    (await forward(owner.id, {
+      to: privateChat,
+      forward: { chat: supergroupChat, message_id: groupMessage.message_id },
+      text: 'Also text',
+    })).status,
+  ];
+  if (JSON.stringify(failureStatuses) !== JSON.stringify([400, 400, 404, 403, 400])) {
+    throw new Error(`Expected forwards to be refused, received ${failureStatuses}`);
+  }
+
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: unknown[];
+  };
+  if (history.messages.length !== 4) {
+    throw new Error(`Expected refused forwards to leave the supergroup, received ${history}`);
+  }
+});
+
+Deno.test('a grammY support bot forwards questions to its team and copies answers back', async () => {
+  const { api, sessionPath, member, bot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const customer = await createAccount(api, sessionPath, 'Linus');
+  const grammyBot = new Bot(bot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const answerCopied = Promise.withResolvers<void>();
+  const questionForwarded = Promise.withResolvers<void>();
+  grammyBot.chatType('private').on('message', async (context) => {
+    await context.forwardMessage(supergroup.id);
+    questionForwarded.resolve();
+  });
+  grammyBot.chatType('supergroup').on('message', async (context) => {
+    const origin = context.message.reply_to_message?.forward_origin;
+    if (origin?.type === 'user') {
+      await context.copyMessage(origin.sender_user.id);
+      answerCopied.resolve();
+    }
+  });
+  const polling = grammyBot.start();
+
+  try {
+    await api.request(
+      `${sessionPath}/accounts/${customer.id}/messages`,
+      jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: 'Is it open?' }),
+    );
+    await Promise.race([questionForwarded.promise, polling]);
+    const teamHistory = await (await api.request(`${supergroupPath(member.id)}/messages`))
+      .json() as { messages: Array<{ message_id: number }> };
+    const question = teamHistory.messages.at(-1);
+    await api.request(
+      `${sessionPath}/accounts/${member.id}/messages`,
+      jsonRequest('POST', {
+        to: { type: 'supergroup', chatId: supergroup.id },
+        text: 'Yes, until 6pm.',
+        reply_to_message_id: question?.message_id,
+      }),
+    );
+    await Promise.race([answerCopied.promise, polling]);
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+
+  const customerHistory = await (await api.request(
+    `${sessionPath}/accounts/${customer.id}/conversations/private/${bot.bot.id}/messages`,
+  )).json() as { messages: Array<{ from: { id: number }; text: string }> };
+  const shownMessages = customerHistory.messages.map(({ from, text }) => [from.id, text]);
+  if (
+    JSON.stringify(shownMessages) !==
+      JSON.stringify([[customer.id, 'Is it open?'], [bot.bot.id, 'Yes, until 6pm.']])
+  ) {
+    throw new Error(`Expected the team's answer to be copied back, received ${shownMessages}`);
+  }
+});
+
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,

@@ -13,6 +13,7 @@ import type {
   BotApiMessage,
   BotApiMessageContent,
   BotApiMessageEntity,
+  BotApiMessageOriginUser,
   BotApiMyChatMemberUpdated,
   BotApiPhotoSize,
   BotApiPrivateChat,
@@ -69,8 +70,13 @@ interface MessageProjectionContext {
    * other messages.
    */
   readonly changedMembers?: readonly BotApiUser[];
-  /** The bot through whose inline mode the message was sent; omitted for other messages. */
+  /**
+   * The bot through whose inline mode the message, or the original of a forward, was sent;
+   * omitted for other messages.
+   */
   readonly viaBot?: BotApiBotUser;
+  /** The sender of a forward's original message; omitted for a message that is no forward. */
+  readonly forwardSender?: BotApiUser;
 }
 
 export interface PrivateMessageForBotProjectionInput {
@@ -152,13 +158,14 @@ export function projectSupergroupMessage(
 function projectMessageBody<Content extends BotApiSupergroupMessageContent, RepliedMessage>(
   message: ChatMessage,
   content: Content,
-  { viaBot }: MessageProjectionContext,
+  { viaBot, forwardSender }: MessageProjectionContext,
   repliedMessage: RepliedMessage | undefined,
 ) {
   return {
     ...(message.contentEditedAtUnixSeconds === undefined
       ? {}
       : { edit_date: message.contentEditedAtUnixSeconds }),
+    ...projectForward(message, forwardSender),
     ...(repliedMessage === undefined ? {} : { reply_to_message: repliedMessage }),
     ...content,
     ...(message.inlineKeyboard === undefined
@@ -167,6 +174,23 @@ function projectMessageBody<Content extends BotApiSupergroupMessageContent, Repl
     ...(viaBot === undefined ? {} : { via_bot: viaBot }),
     ...(message.isContentProtected ? { has_protected_content: true as const } : {}),
   };
+}
+
+/** Shows where a forward first appeared, followed by Telegram's legacy fields for it. */
+function projectForward(message: ChatMessage, forwardSender: BotApiUser | undefined) {
+  if (message.forwardInfo === undefined) {
+    return {};
+  }
+  if (forwardSender === undefined) {
+    throw new Error(`Expected the original sender of forward ${message.id} to be provided`);
+  }
+  const date = message.forwardInfo.originalSentAtUnixSeconds;
+  const forwardOrigin: BotApiMessageOriginUser = {
+    type: 'user',
+    sender_user: forwardSender,
+    date,
+  };
+  return { forward_origin: forwardOrigin, forward_from: forwardSender, forward_date: date };
 }
 
 function projectSupergroupMessageContent(

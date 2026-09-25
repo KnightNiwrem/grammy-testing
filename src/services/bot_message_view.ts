@@ -40,6 +40,7 @@ import {
   type CanonicalMessageId,
   type ChatMessage,
   getContentText,
+  type MessageForwardInfo,
   type PrivateMessage,
   type SupergroupMessage,
   type SupergroupMessageAuthor,
@@ -324,14 +325,14 @@ export class BotMessageViewService {
   }
 
   /**
-   * Resolves the users a message mentions, the bot it was sent through, its file, and the members a
-   * service message names, as the observer sees them.
+   * Resolves the users a message mentions, the bot it was sent through, a forward's original
+   * sender, its file, and the members a service message names, as the observer sees them.
    */
   #resolveProjectionContext(message: ChatMessage, observerId: number) {
     const context = {
       observerId,
       mentionedUsers: this.#findMentionedUsers(message),
-      ...(message.viaBot === undefined ? {} : { viaBot: this.#findViaBot(message) }),
+      ...this.#resolveProvenance(message),
     };
     const { content } = message;
     switch (content.kind) {
@@ -357,14 +358,43 @@ export class BotMessageViewService {
     }
   }
 
+  /**
+   * Looks up where a message came from: the inline bot that it, or a forward's original, was sent
+   * through, and the original sender of a forward.
+   */
+  #resolveProvenance(
+    message: ChatMessage,
+  ): { readonly viaBot?: BotApiBotUser; readonly forwardSender?: BotApiUser } {
+    const viaBotId = message.viaBot?.botId ?? message.forwardInfo?.viaBotId;
+    return {
+      ...(viaBotId === undefined ? {} : { viaBot: this.#findViaBot(viaBotId, message) }),
+      ...(message.forwardInfo === undefined
+        ? {}
+        : { forwardSender: this.#findForwardSender(message.forwardInfo, message) }),
+    };
+  }
+
   /** Looks up the inline bot a message was sent through, which exists as long as the session does. */
-  #findViaBot(message: ChatMessage): BotApiBotUser {
-    const botId = message.viaBot?.botId;
-    const bot = botId === undefined ? undefined : this.#bots.getById(botId);
+  #findViaBot(botId: number, message: ChatMessage): BotApiBotUser {
+    const bot = this.#bots.getById(botId);
     if (bot === undefined) {
       throw new Error(`Inline bot ${botId} of message ${message.id} does not exist`);
     }
     return projectBotAsUser(bot.profile);
+  }
+
+  /** Looks up the sender of a forward's original, which exists as long as the session does. */
+  #findForwardSender(
+    { originalSenderId }: MessageForwardInfo,
+    message: ChatMessage,
+  ): BotApiUser {
+    const sender = this.#findUser(originalSenderId);
+    if (sender === undefined) {
+      throw new Error(
+        `Original sender ${originalSenderId} of forward ${message.id} does not exist`,
+      );
+    }
+    return sender;
   }
 
   /** Looks up the members a service message names, which exist as long as the session does. */

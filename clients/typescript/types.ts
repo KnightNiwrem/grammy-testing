@@ -109,6 +109,14 @@ export interface AccountSendDocumentInput<Target extends MessageTarget = Message
   readonly reply_to_message_id?: number;
 }
 
+export interface AccountForwardMessageInput<Target extends MessageTarget = MessageTarget> {
+  /** The chat of the message to forward. */
+  readonly from: MessageTarget;
+  /** The ID of the message to forward, as message history shows it. */
+  readonly message_id: number;
+  readonly to: Target;
+}
+
 export interface CreateSupergroupInput {
   readonly title: string;
   readonly description?: string;
@@ -386,6 +394,13 @@ export type SupergroupMessageContent =
   | (MessageContent & NoMembershipChange)
   | MembershipChangeContent;
 
+/** Who first sent a forwarded message, and when. */
+export interface MessageOriginUser {
+  readonly type: 'user';
+  readonly sender_user: VirtualAccountProfile | MessageSenderBot;
+  readonly date: number;
+}
+
 /** The fields that precede a message's reply and content. */
 interface MessageHeader<Chat> {
   readonly message_id: number;
@@ -394,6 +409,12 @@ interface MessageHeader<Chat> {
   readonly date: number;
   /** Present once the message's author has edited its text or caption. */
   readonly edit_date?: number;
+  /** Present for a forward. */
+  readonly forward_origin?: MessageOriginUser;
+  /** Telegram's legacy form of the origin's sender, present for a forward. */
+  readonly forward_from?: VirtualAccountProfile | MessageSenderBot;
+  /** Telegram's legacy form of the origin's date, present for a forward. */
+  readonly forward_date?: number;
 }
 
 /** The fields that follow a message's content. */
@@ -587,6 +608,14 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
   /** Sends a file as a document, with an optional caption, as `sendMessage` sends text. */
   sendDocument<Target extends MessageTarget>(
     input: AccountSendDocumentInput<Target>,
+  ): Promise<MessageIn<Target>>;
+  /**
+   * Forwards a message of one of this account's chats to a chat it can write to, as the account's
+   * message, which shows who first sent it. The chat's bots receive it as `sendMessage` describes.
+   * Messages protected from forwarding and service messages cannot be forwarded.
+   */
+  forwardMessage<Target extends MessageTarget>(
+    input: AccountForwardMessageInput<Target>,
   ): Promise<MessageIn<Target>>;
   /**
    * Edits the text of a message this account sent, which sends the chat's bots an
