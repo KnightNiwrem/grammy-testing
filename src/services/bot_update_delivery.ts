@@ -194,8 +194,10 @@ export class BotUpdateDeliveryService {
 
   /**
    * A supergroup message, and each edit of it, is observed by the supergroup's bots that can read
-   * it. As on Telegram, bots never observe messages of bots, their own included, and a bot in
-   * privacy mode observes only messages addressed to it, unless it is an administrator.
+   * it. As on Telegram, a bot never observes its own messages. Nor does it observe other bots'
+   * messages, which Telegram delivers only to bots that enable bot-to-bot communication, a setting
+   * the emulator does not model. A bot in privacy mode observes only messages addressed to it,
+   * unless it is an administrator.
    *
    * Telegram lets a message reach only one bot in privacy mode, the one it is explicitly meant
    * for, if any, as `#findPrivacyModeAddressee` finds it. Only a message meant for no bot in

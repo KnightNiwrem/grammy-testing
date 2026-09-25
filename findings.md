@@ -64,7 +64,6 @@ recommendation is not a claim that an unsupported method is a severe implementat
 |    8 |    P2    | Extend upstream-derived fixtures into a differential conformance harness | Fidelity assurance recommendation                         |
 |   10 |    P3    | Bound webhook workers and avoid repeated full-backlog scans              | Source-verified scalability risk                          |
 |   13 |    P3    | Make the development and CI dependency baseline reproducible             | Build reproducibility risk                                |
-|   14 |    P3    | Qualify the blanket “bots never see other bots” claim                    | Documentation / capability-boundary correction            |
 
 ## Findings, in priority order
 
@@ -342,29 +341,6 @@ baseline.
 
 **Scope/cost.** Small. This does not require a build-system rewrite.
 
-### 14. P3 — Qualify the claim that bots never receive messages from other bots
-
-**Context and evidence.** The supergroup delivery service unconditionally skips bot-authored content
-messages, and comments/documentation describe bot-to-bot visibility as universally impossible.
-Telegram's more specific current bot-to-bot documentation describes supported, opt-in contexts in
-which bots can receive other bots' messages. The older/general FAQ still contains broader language,
-so treating that FAQ sentence as the complete current rule is unsafe.
-[Current emulator rule][delivery] · [supergroup guide][group-doc] ·
-[specific Telegram feature documentation][bot-to-bot] · [general FAQ][faq-privacy].
-
-**Recommendation.** First fix the capability description: the emulator models ordinary bot-message
-exclusion and does not yet model opt-in bot-to-bot communication. Keep the default behavior
-unchanged. Add an explicit supported/unsupported capability entry rather than claiming Telegram can
-never do it.
-
-Only implement the feature when consumers need it, with the relevant bot capability settings and
-positive/negative routing tests. Simply deleting the unconditional guard would be incorrect because
-it would also enable communication in scenarios that should remain excluded. Loop-related test
-controls would need to be considered when that scope is added.
-
-**Scope/cost.** Small for the documentation correction; larger and intentionally deferred for
-implementation. This should not displace basic message/entity work.
-
 ## Architecture and behavior worth preserving
 
 The proposed changes do not require abandoning the current model. Canonical messages are separate
@@ -500,7 +476,6 @@ references; the C++ references are pinned to the stated comparison baseline.
 [webhook-reply]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/api/sessions/bot_api/webhook_reply.ts
 [format-doc]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/docs/features/text-formatting.md
 [message-doc]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/docs/features/messages.md
-[group-doc]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/docs/features/supergroups.md
 [updates-doc]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/docs/features/updates.md
 [delivery-tests]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/tests/bot_update_delivery_service_test.ts
 [webhook-tests]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/tests/bot_webhook_service_test.ts
@@ -511,6 +486,4 @@ references; the C++ references are pinned to the stated comparison baseline.
 [cpp-entities]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp
 [api-getchat]: https://core.telegram.org/bots/api#getchat
 [api-chatfull]: https://core.telegram.org/bots/api#chatfullinfo
-[faq-privacy]: https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
-[bot-to-bot]: https://core.telegram.org/api/bots/bot-to-bot
 [deno-lock]: https://docs.deno.com/examples/dependency_lockfile_tutorial/

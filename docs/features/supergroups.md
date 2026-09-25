@@ -22,8 +22,9 @@ fails with `403 Forbidden: bot was kicked from the supergroup chat`. A bot that 
 ## Privacy mode
 
 Administrator bots and bots created with `can_read_all_group_messages: true` receive all account
-messages. Bots never receive ordinary messages from other bots, including themselves. Privacy mode
-is enabled by default for other bots.
+messages. A bot never receives its own messages. Nor does it receive other bots' messages: the
+emulator behaves as if no bot enabled Telegram's opt-in [bot-to-bot communication][bot-to-bot],
+which is a [real gap](#real-gaps). Privacy mode is enabled by default for other bots.
 
 For an account message, the emulator first resolves an explicit recipient: replies to a bot's
 message or to a message meant for it, then `via_bot`, then a leading command naming a bot. Such a
@@ -134,6 +135,12 @@ production read permissions.
   privacy-enabled bots. Telegram's [Bot FAQ][privacy-faq] describes at most one such recipient and
   gives replies highest priority. Tests need single-recipient routing; the FAQ does not specify
   every tie-break, so the exact selection among competing mentions requires further verification.
+- **Bot-to-bot communication.** Telegram delivers a bot's group message to another bot that enabled
+  Bot-to-Bot Communication Mode in BotFather when it is a command addressed to that bot or a reply
+  to one of its messages, and every bot message to such a bot that is an administrator with privacy
+  mode disabled. Bots have no such setting in the emulator, which never delivers messages of bots to
+  other bots. Tests of cooperating bots need the setting and its routing. Telegram's servers apply
+  these rules; the Bot API and TDLib source at the comparison baseline show no trace of the setting.
 
 - **Administrator rights enforcement.** Rights other than `can_delete_messages` and
   `can_restrict_members` are stored without corresponding enforcement. Tests need their behavioral
@@ -168,6 +175,7 @@ production read permissions.
 [supergroup messaging tests](../../tests/supergroup_messaging_service_test.ts).
 
 [privacy-faq]: https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
+[bot-to-bot]: https://core.telegram.org/api/bots/bot-to-bot
 [mention-matching]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L267-L310
 [protected-content]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8145-L8148
 [protection-toggle]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogManager.cpp#L2721-L2745
