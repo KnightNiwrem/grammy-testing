@@ -1,5 +1,4 @@
 import { type Context, Hono } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 
 import {
@@ -38,6 +37,12 @@ import {
   inlineKeyboardMarkupParameter,
   messageReplyMarkupParameter,
 } from './reply_markup_parameter.ts';
+import {
+  botApiError,
+  type BotApiMethodAnswer,
+  type BotApiMethodContext,
+  botApiResult,
+} from './method_call.ts';
 import {
   booleanParameter,
   type BotApiRequestParameters,
@@ -513,8 +518,6 @@ interface BotApiRouteContextTypes {
   readonly Variables: BotApiRouteVariables;
 }
 
-type BotApiRouteContext = Context<BotApiRouteContextTypes>;
-
 /** The outcome of any edit method; each fails for a subset of the reasons. */
 type MessageEditResult =
   | ReturnType<EmulationSession['botApi']['editMessageText']>
@@ -578,17 +581,17 @@ type MyCommandsTargetFailureReason = Extract<
 
 type FormattedTextReadingResult = ReturnType<EmulationSession['botApi']['readFormattedText']>;
 
-/** Message text with the entities its bot specified, or the error response for reading it. */
+/** Message text with the entities its bot specified, or the error answer for reading it. */
 type SpecifiedFormattedTextReading =
   | Extract<FormattedTextReadingResult, { readonly read: true }>
-  | { readonly read: false; readonly response: Response };
+  | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer };
 
 /** Text with the entities its bot specified, or Telegram's description of why it is unreadable. */
 type FormattedTextParametersReading =
   | Extract<FormattedTextReadingResult, { readonly read: true }>
   | { readonly read: false; readonly description: string };
 
-/** Where an edit method finds the message it edits, or the error response for its parameters. */
+/** Where an edit method finds the message it edits, or the error answer for its parameters. */
 type EditedMessageTargetReading =
   | {
     readonly read: true;
@@ -596,13 +599,13 @@ type EditedMessageTargetReading =
       | { readonly kind: 'chat_message'; readonly chatId: number; readonly messageId: number }
       | { readonly kind: 'inline_message'; readonly inlineMessageId: string };
   }
-  | { readonly read: false; readonly response: Response };
+  | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer };
 
 type BotApiMethodHandler = (
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
   uploadedFiles: BotApiUploadedFiles,
-) => Response | Promise<Response>;
+) => BotApiMethodAnswer | Promise<BotApiMethodAnswer>;
 
 /** Keyed by lowercase name, because Telegram matches method names case-insensitively. */
 const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHandler>([
@@ -654,12 +657,15 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
       ? undefined
       : botApi.downloadFile(authenticatedBot, context.req.param(FILE_PATH_PARAMETER));
     return file === undefined
-      ? botApiError(context, 404, 'Not Found')
+      ? botApiResponse(context, botApiError(404, 'Not Found'))
       : fileDownloadResponse(context, file);
   });
 
   // Telegram rejects a path without a method segment before it checks the token.
-  botApiRoutes.all(BOT_TOKEN_PATH, (context) => botApiError(context, 404, 'Not Found'));
+  botApiRoutes.all(
+    BOT_TOKEN_PATH,
+    (context) => botApiResponse(context, botApiError(404, 'Not Found')),
+  );
 
   // Telegram rejects an invalid token before it resolves the method or validates parameters.
   botApiRoutes.use(BOT_API_SUBRESOURCE_PATH, async (context, next) => {
@@ -667,7 +673,7 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
     const token = botTokenPathSegment.slice(BOT_TOKEN_PATH_PREFIX.length);
     const authenticatedBot = context.get('emulationSession').botApi.authenticate(token);
     if (authenticatedBot === undefined) {
-      return botApiError(context, 401, 'Unauthorized');
+      return botApiResponse(context, botApiError(401, 'Unauthorized'));
     }
 
     context.set('authenticatedBot', authenticatedBot);
@@ -680,50 +686,61 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
       context.req.param(BOT_API_METHOD_NAME_PARAMETER).toLowerCase(),
     );
     if (methodHandler === undefined) {
-      return botApiError(context, 404, 'Not Found: method not found');
+      return botApiResponse(context, botApiError(404, 'Not Found: method not found'));
     }
 
     const parametersDecoding = await decodeBotApiRequestParameters(context.req.raw);
     if (!parametersDecoding.decoded) {
-      return botApiError(context, 400, parametersDecoding.description);
+      return botApiResponse(context, botApiError(400, parametersDecoding.description));
     }
-    return methodHandler(
+    const methodContext: BotApiMethodContext = {
+      session: context.get('emulationSession'),
+      bot: context.get('authenticatedBot'),
+      signal: context.req.raw.signal,
+    };
+    return botApiResponse(
       context,
-      parametersDecoding.parameters,
-      parametersDecoding.uploadedFiles,
+      await methodHandler(
+        methodContext,
+        parametersDecoding.parameters,
+        parametersDecoding.uploadedFiles,
+      ),
     );
   });
 
   // Telegram answers every other path in its Bot API namespace with a Bot API error.
-  botApiRoutes.all('*', (context) => botApiError(context, 404, 'Not Found'));
+  botApiRoutes.all('*', (context) => botApiResponse(context, botApiError(404, 'Not Found')));
 
   return botApiRoutes;
 }
 
-function handleGetMe(context: BotApiRouteContext, parameters: BotApiRequestParameters): Response {
+function handleGetMe(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
   if (!getMeParametersSchema.safeParse(parameters).success) {
-    return botApiError(context, 400, 'Bad Request: invalid getMe parameters');
+    return botApiError(400, 'Bad Request: invalid getMe parameters');
   }
-  return context.json({ ok: true as const, result: context.get('authenticatedBot') });
+  return botApiResult(context.bot);
 }
 
 async function handleGetUpdates(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Promise<Response> {
+): Promise<BotApiMethodAnswer> {
   const parsedParameters = getUpdatesParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid getUpdates parameters');
+    return botApiError(400, 'Bad Request: invalid getUpdates parameters');
   }
 
-  const result = await context.get('emulationSession').botApi.getUpdates(
-    context.get('authenticatedBot'),
+  const result = await context.session.botApi.getUpdates(
+    context.bot,
     {
       offset: parsedParameters.data.offset,
       limit: parsedParameters.data.limit,
       timeoutSeconds: parsedParameters.data.timeout,
       allowedUpdates: parsedParameters.data.allowed_updates,
-      signal: context.req.raw.signal,
+      signal: context.signal,
     },
   );
   if (!result.retrieved) {
@@ -732,42 +749,42 @@ async function handleGetUpdates(
     const { reason } = result;
     switch (reason) {
       case 'terminated_by_other_long_poll':
-        return botApiError(context, 409, TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION);
+        return botApiError(409, TERMINATED_BY_OTHER_LONG_POLL_DESCRIPTION);
       case 'terminated_by_webhook':
-        return botApiError(context, 409, TERMINATED_BY_WEBHOOK_DESCRIPTION);
+        return botApiError(409, TERMINATED_BY_WEBHOOK_DESCRIPTION);
       case 'webhook_active':
-        return botApiError(context, 409, WEBHOOK_ACTIVE_DESCRIPTION);
+        return botApiError(409, WEBHOOK_ACTIVE_DESCRIPTION);
       default: {
         const unhandledReason: never = reason;
         throw new Error(`Unhandled getUpdates failure: ${unhandledReason}`);
       }
     }
   }
-  return context.json({ ok: true as const, result: result.updates });
+  return botApiResult(result.updates);
 }
 
 function handleSetWebhook(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
   uploadedFiles: BotApiUploadedFiles,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = setWebhookParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid setWebhook parameters');
+    return botApiError(400, 'Bad Request: invalid setWebhook parameters');
   }
   const { data } = parsedParameters;
   if (data.ip_address.length > 0) {
-    return botApiError(context, 400, WEBHOOK_IP_ADDRESS_UNSUPPORTED_DESCRIPTION);
+    return botApiError(400, WEBHOOK_IP_ADDRESS_UNSUPPORTED_DESCRIPTION);
   }
   // Telegram reads the certificate from a part of that name or through `attach://`.
   const specifiesCertificate = (data.certificate !== undefined && data.certificate.length > 0) ||
     uploadedFiles.has('certificate');
   if (specifiesCertificate) {
-    return botApiError(context, 400, WEBHOOK_CERTIFICATE_UNSUPPORTED_DESCRIPTION);
+    return botApiError(400, WEBHOOK_CERTIFICATE_UNSUPPORTED_DESCRIPTION);
   }
 
-  const result = context.get('emulationSession').botApi.setWebhook(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.setWebhook(
+    context.bot,
     {
       url: data.url,
       secretToken: data.secret_token,
@@ -777,56 +794,45 @@ function handleSetWebhook(
     },
   );
   if (!result.accepted) {
-    return botApiError(context, 400, SET_WEBHOOK_REJECTION_DESCRIPTIONS[result.reason]);
+    return botApiError(400, SET_WEBHOOK_REJECTION_DESCRIPTIONS[result.reason]);
   }
-  return context.json({
-    ok: true as const,
-    result: true as const,
-    description: SET_WEBHOOK_OUTCOME_DESCRIPTIONS[result.outcome],
-  });
+  return botApiResult(true, SET_WEBHOOK_OUTCOME_DESCRIPTIONS[result.outcome]);
 }
 
 function handleGetWebhookInfo(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   if (!getWebhookInfoParametersSchema.safeParse(parameters).success) {
-    return botApiError(context, 400, 'Bad Request: invalid getWebhookInfo parameters');
+    return botApiError(400, 'Bad Request: invalid getWebhookInfo parameters');
   }
-  return context.json({
-    ok: true as const,
-    result: context.get('emulationSession').botApi.getWebhookInfo(context.get('authenticatedBot')),
-  });
+  return botApiResult(context.session.botApi.getWebhookInfo(context.bot));
 }
 
 function handleDeleteWebhook(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = deleteWebhookParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid deleteWebhook parameters');
+    return botApiError(400, 'Bad Request: invalid deleteWebhook parameters');
   }
 
-  const outcome = context.get('emulationSession').botApi.deleteWebhook(
-    context.get('authenticatedBot'),
+  const outcome = context.session.botApi.deleteWebhook(
+    context.bot,
     { dropPendingUpdates: parsedParameters.data.drop_pending_updates },
   );
-  return context.json({
-    ok: true as const,
-    result: true as const,
-    description: SET_WEBHOOK_OUTCOME_DESCRIPTIONS[outcome],
-  });
+  return botApiResult(true, SET_WEBHOOK_OUTCOME_DESCRIPTIONS[outcome]);
 }
 
 function handleSendMessage(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid sendMessage parameters';
   const parsedParameters = sendMessageParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, invalidParametersDescription);
+    return botApiError(400, invalidParametersDescription);
   }
   const { text, parse_mode: parseMode, entities } = parsedParameters.data;
   // Telegram reads the text and its formatting before it looks at the chat.
@@ -836,101 +842,92 @@ function handleSendMessage(
     invalidParametersDescription,
   );
   if (!formattedTextReading.read) {
-    return formattedTextReading.response;
+    return formattedTextReading.errorAnswer;
   }
-  const optionsReading = readSendOptions(context, parsedParameters.data);
+  const optionsReading = readSendOptions(parsedParameters.data);
   if (!optionsReading.read) {
-    return optionsReading.response;
+    return optionsReading.errorAnswer;
   }
 
-  return sendResponse(
-    context,
-    context.get('emulationSession').botApi.sendMessage(context.get('authenticatedBot'), {
-      ...optionsReading.options,
-      ...formattedTextReading.formattedText,
-    }),
-  );
+  return sendMethodAnswer(context.session.botApi.sendMessage(context.bot, {
+    ...optionsReading.options,
+    ...formattedTextReading.formattedText,
+  }));
 }
 
 function handleSendPhoto(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
   uploadedFiles: BotApiUploadedFiles,
-): Response {
+): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid sendPhoto parameters';
   const parsedParameters = sendPhotoParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, invalidParametersDescription);
+    return botApiError(400, invalidParametersDescription);
   }
   const { data } = parsedParameters;
   // Telegram reads the file, then the caption and its formatting, before it looks at the chat.
   const photoReading = readInputFileParameter('photo', data.photo, uploadedFiles);
   if (!photoReading.read) {
-    return inputFileError(context, photoReading.reason, 'photo');
+    return inputFileError(photoReading.reason, 'photo');
   }
   const captionReading = readSpecifiedCaption(context, data, invalidParametersDescription);
   if (!captionReading.read) {
-    return captionReading.response;
+    return captionReading.errorAnswer;
   }
-  const optionsReading = readSendOptions(context, data);
+  const optionsReading = readSendOptions(data);
   if (!optionsReading.read) {
-    return optionsReading.response;
+    return optionsReading.errorAnswer;
   }
 
-  return sendResponse(
-    context,
-    context.get('emulationSession').botApi.sendPhoto(context.get('authenticatedBot'), {
-      ...optionsReading.options,
-      photo: photoReading.inputFile,
-      caption: captionReading.formattedText,
-      hasSpoiler: data.has_spoiler,
-      showsCaptionAboveMedia: data.show_caption_above_media,
-    }),
-  );
+  return sendMethodAnswer(context.session.botApi.sendPhoto(context.bot, {
+    ...optionsReading.options,
+    photo: photoReading.inputFile,
+    caption: captionReading.formattedText,
+    hasSpoiler: data.has_spoiler,
+    showsCaptionAboveMedia: data.show_caption_above_media,
+  }));
 }
 
 function handleSendDocument(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
   uploadedFiles: BotApiUploadedFiles,
-): Response {
+): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid sendDocument parameters';
   const parsedParameters = sendDocumentParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, invalidParametersDescription);
+    return botApiError(400, invalidParametersDescription);
   }
   const { data } = parsedParameters;
   // Telegram reads the file, then the caption and its formatting, before it looks at the chat.
   const documentReading = readInputFileParameter('document', data.document, uploadedFiles);
   if (!documentReading.read) {
-    return inputFileError(context, documentReading.reason, 'document');
+    return inputFileError(documentReading.reason, 'document');
   }
   const captionReading = readSpecifiedCaption(context, data, invalidParametersDescription);
   if (!captionReading.read) {
-    return captionReading.response;
+    return captionReading.errorAnswer;
   }
-  const optionsReading = readSendOptions(context, data);
+  const optionsReading = readSendOptions(data);
   if (!optionsReading.read) {
-    return optionsReading.response;
+    return optionsReading.errorAnswer;
   }
 
-  return sendResponse(
-    context,
-    context.get('emulationSession').botApi.sendDocument(context.get('authenticatedBot'), {
-      ...optionsReading.options,
-      document: documentReading.inputFile,
-      caption: captionReading.formattedText,
-    }),
-  );
+  return sendMethodAnswer(context.session.botApi.sendDocument(context.bot, {
+    ...optionsReading.options,
+    document: documentReading.inputFile,
+    caption: captionReading.formattedText,
+  }));
 }
 
 function handleForwardMessage(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = forwardMessageParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid forwardMessage parameters');
+    return botApiError(400, 'Bad Request: invalid forwardMessage parameters');
   }
   const {
     chat_id: chatId,
@@ -939,16 +936,16 @@ function handleForwardMessage(
     protect_content: isContentProtected,
   } = parsedParameters.data;
   if (fromChatId === undefined) {
-    return botApiError(context, 400, FROM_CHAT_ID_REQUIRED_DESCRIPTION);
+    return botApiError(400, FROM_CHAT_ID_REQUIRED_DESCRIPTION);
   }
   // Telegram looks for the forwarded message before it looks at chat_id; the emulator reports a
   // missing chat_id first.
   if (chatId === undefined) {
-    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+    return botApiError(400, CHAT_ID_EMPTY_DESCRIPTION);
   }
 
-  const result = context.get('emulationSession').botApi.forwardMessage(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.forwardMessage(
+    context.bot,
     {
       chatId,
       forwardedMessage: { chatId: fromChatId, messageId: messageIdOrNone(messageId) },
@@ -956,30 +953,30 @@ function handleForwardMessage(
     },
   );
   if (result.sent) {
-    return sendResponse(context, result);
+    return sendMethodAnswer(result);
   }
   switch (result.reason) {
     case 'repeated_message_not_found':
-      return botApiError(context, 400, MESSAGE_TO_FORWARD_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, MESSAGE_TO_FORWARD_NOT_FOUND_DESCRIPTION);
     case 'message_not_forwardable':
-      return botApiError(context, 400, MESSAGE_NOT_FORWARDABLE_DESCRIPTION);
+      return botApiError(400, MESSAGE_NOT_FORWARDABLE_DESCRIPTION);
     default:
-      return sendResponse(context, result);
+      return sendMethodAnswer(result);
   }
 }
 
 function handleCopyMessage(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid copyMessage parameters';
   const parsedParameters = copyMessageParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, invalidParametersDescription);
+    return botApiError(400, invalidParametersDescription);
   }
   const { data } = parsedParameters;
   if (data.from_chat_id === undefined) {
-    return botApiError(context, 400, FROM_CHAT_ID_REQUIRED_DESCRIPTION);
+    return botApiError(400, FROM_CHAT_ID_REQUIRED_DESCRIPTION);
   }
   // Telegram reads a new caption and its formatting before it looks at either chat.
   const { caption } = data;
@@ -987,16 +984,16 @@ function handleCopyMessage(
     ? undefined
     : readSpecifiedCaption(context, { ...data, caption }, invalidParametersDescription);
   if (captionReading?.read === false) {
-    return captionReading.response;
+    return captionReading.errorAnswer;
   }
   // As for forwardMessage, the emulator reports a missing chat_id before the copied message.
-  const optionsReading = readSendOptions(context, data);
+  const optionsReading = readSendOptions(data);
   if (!optionsReading.read) {
-    return optionsReading.response;
+    return optionsReading.errorAnswer;
   }
 
-  const result = context.get('emulationSession').botApi.copyMessage(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.copyMessage(
+    context.bot,
     {
       ...optionsReading.options,
       copiedMessage: { chatId: data.from_chat_id, messageId: messageIdOrNone(data.message_id) },
@@ -1005,15 +1002,15 @@ function handleCopyMessage(
     },
   );
   if (result.sent) {
-    return context.json({ ok: true as const, result: { message_id: result.messageId } });
+    return botApiResult({ message_id: result.messageId });
   }
   switch (result.reason) {
     case 'repeated_message_not_found':
-      return botApiError(context, 400, MESSAGE_TO_COPY_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, MESSAGE_TO_COPY_NOT_FOUND_DESCRIPTION);
     case 'message_not_copyable':
-      return botApiError(context, 400, MESSAGE_NOT_COPYABLE_DESCRIPTION);
+      return botApiError(400, MESSAGE_NOT_COPYABLE_DESCRIPTION);
     default:
-      return sendResponse(context, result);
+      return sendMethodAnswer(result);
   }
 }
 
@@ -1021,22 +1018,19 @@ function handleCopyMessage(
  * Reads where and how a send method sends its message. A reply to a message of another chat,
  * which Telegram supports, is rejected as unsupported.
  */
-function readSendOptions(
-  context: BotApiRouteContext,
-  parameters: SendOptionsParameters,
-):
+function readSendOptions(parameters: SendOptionsParameters):
   | { readonly read: true; readonly options: SendRequestOptions }
-  | { readonly read: false; readonly response: Response } {
+  | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
   const { chat_id: chatId, protect_content: isContentProtected, reply_markup: replyMarkup } =
     parameters;
   if (chatId === undefined) {
-    return { read: false, response: botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION) };
+    return { read: false, errorAnswer: botApiError(400, CHAT_ID_EMPTY_DESCRIPTION) };
   }
   const replyTarget = selectSpecifiedReplyTarget(parameters);
   if (replyTarget?.chatId !== undefined && replyTarget.chatId !== chatId) {
     return {
       read: false,
-      response: botApiError(context, 400, CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION),
+      errorAnswer: botApiError(400, CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION),
     };
   }
   return {
@@ -1055,53 +1049,51 @@ function readSendOptions(
 
 /** The error for a file parameter that names no uploaded file or holds a URL. */
 function inputFileError(
-  context: BotApiRouteContext,
   reason: 'file_missing' | 'url_unsupported',
   parameterName: 'photo' | 'document',
-): Response {
+): BotApiMethodAnswer {
   return reason === 'file_missing'
-    ? botApiError(context, 400, `Bad Request: there is no ${parameterName} in the request`)
-    : botApiError(context, 400, FILE_URL_UNSUPPORTED_DESCRIPTION);
+    ? botApiError(400, `Bad Request: there is no ${parameterName} in the request`)
+    : botApiError(400, FILE_URL_UNSUPPORTED_DESCRIPTION);
 }
 
-function sendResponse(context: BotApiRouteContext, result: SendResult | SendFailure): Response {
+function sendMethodAnswer(result: SendResult | SendFailure): BotApiMethodAnswer {
   if (result.sent) {
-    return context.json({ ok: true as const, result: result.message });
+    return botApiResult(result.message);
   }
   switch (result.reason) {
     case 'message_text_empty':
-      return botApiError(context, 400, MESSAGE_TEXT_EMPTY_DESCRIPTION);
+      return botApiError(400, MESSAGE_TEXT_EMPTY_DESCRIPTION);
     case 'text_invalid':
-      return botApiError(context, 400, badRequestDescription(result.textError));
+      return botApiError(400, badRequestDescription(result.textError));
     case 'chat_not_found':
-      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'bot_not_a_member':
-      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+      return botApiError(403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
     case 'bot_kicked':
-      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
+      return botApiError(403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'reply_message_not_found':
-      return botApiError(context, 400, REPLY_MESSAGE_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, REPLY_MESSAGE_NOT_FOUND_DESCRIPTION);
     case 'message_text_too_long':
-      return botApiError(context, 400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
+      return botApiError(400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
     case 'caption_too_long':
-      return botApiError(context, 400, CAPTION_TOO_LONG_DESCRIPTION);
+      return botApiError(400, CAPTION_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':
-      return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
+      return botApiError(400, BUTTON_DATA_INVALID_DESCRIPTION);
     case 'bot_blocked':
-      return botApiError(context, 403, BOT_BLOCKED_DESCRIPTION);
+      return botApiError(403, BOT_BLOCKED_DESCRIPTION);
     case 'reply_interface_unsupported_in_groups':
-      return botApiError(context, 400, GROUP_REPLY_INTERFACE_UNSUPPORTED_DESCRIPTION);
+      return botApiError(400, GROUP_REPLY_INTERFACE_UNSUPPORTED_DESCRIPTION);
     case 'file_empty':
-      return botApiError(context, 400, FILE_EMPTY_DESCRIPTION);
+      return botApiError(400, FILE_EMPTY_DESCRIPTION);
     case 'image_invalid':
-      return botApiError(context, 400, IMAGE_INVALID_DESCRIPTION);
+      return botApiError(400, IMAGE_INVALID_DESCRIPTION);
     case 'photo_dimensions_invalid':
-      return botApiError(context, 400, PHOTO_DIMENSIONS_INVALID_DESCRIPTION);
+      return botApiError(400, PHOTO_DIMENSIONS_INVALID_DESCRIPTION);
     case 'file_id_invalid':
-      return botApiError(context, 400, FILE_ID_INVALID_DESCRIPTION);
+      return botApiError(400, FILE_ID_INVALID_DESCRIPTION);
     case 'file_type_mismatch':
       return botApiError(
-        context,
         400,
         `Bad Request: can't use file of type ${TDLIB_FILE_TYPE_NAMES[result.actualFileType]} as ${
           TDLIB_FILE_TYPE_NAMES[result.expectedFileType]
@@ -1115,13 +1107,13 @@ function sendResponse(context: BotApiRouteContext, result: SendResult | SendFail
 }
 
 function handleEditMessageText(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid editMessageText parameters';
   const parsedParameters = editMessageTextParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, invalidParametersDescription);
+    return botApiError(400, invalidParametersDescription);
   }
   const { text, parse_mode: parseMode, entities, reply_markup: inlineKeyboard } =
     parsedParameters.data;
@@ -1132,92 +1124,78 @@ function handleEditMessageText(
     invalidParametersDescription,
   );
   if (!formattedTextReading.read) {
-    return formattedTextReading.response;
+    return formattedTextReading.errorAnswer;
   }
-  const targetReading = readEditedMessageTarget(context, parsedParameters.data);
+  const targetReading = readEditedMessageTarget(parsedParameters.data);
   if (!targetReading.read) {
-    return targetReading.response;
+    return targetReading.errorAnswer;
   }
 
   const { target } = targetReading;
-  const { botApi } = context.get('emulationSession');
+  const { botApi } = context.session;
   const edit = { ...formattedTextReading.formattedText, inlineKeyboard };
   return target.kind === 'inline_message'
-    ? inlineMessageEditResponse(
-      context,
-      botApi.editInlineMessageText(context.get('authenticatedBot'), { ...target, ...edit }),
-    )
-    : editMessageResponse(
-      context,
-      botApi.editMessageText(context.get('authenticatedBot'), { ...target, ...edit }),
-    );
+    ? inlineMessageEditAnswer(botApi.editInlineMessageText(context.bot, { ...target, ...edit }))
+    : editMessageAnswer(botApi.editMessageText(context.bot, { ...target, ...edit }));
 }
 
 function handleEditMessageCaption(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid editMessageCaption parameters';
   const parsedParameters = editMessageCaptionParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, invalidParametersDescription);
+    return botApiError(400, invalidParametersDescription);
   }
   const { data } = parsedParameters;
   // Telegram reads the caption and its formatting before it looks for the message.
   const captionReading = readSpecifiedCaption(context, data, invalidParametersDescription);
   if (!captionReading.read) {
-    return captionReading.response;
+    return captionReading.errorAnswer;
   }
-  const targetReading = readEditedMessageTarget(context, data);
+  const targetReading = readEditedMessageTarget(data);
   if (!targetReading.read) {
-    return targetReading.response;
+    return targetReading.errorAnswer;
   }
 
   const { target } = targetReading;
-  const { botApi } = context.get('emulationSession');
+  const { botApi } = context.session;
   const edit = {
     caption: captionReading.formattedText,
     showsCaptionAboveMedia: data.show_caption_above_media,
     inlineKeyboard: data.reply_markup,
   };
   return target.kind === 'inline_message'
-    ? inlineMessageEditResponse(
-      context,
-      botApi.editInlineMessageCaption(context.get('authenticatedBot'), { ...target, ...edit }),
+    ? inlineMessageEditAnswer(
+      botApi.editInlineMessageCaption(context.bot, { ...target, ...edit }),
     )
-    : editMessageResponse(
-      context,
-      botApi.editMessageCaption(context.get('authenticatedBot'), { ...target, ...edit }),
-    );
+    : editMessageAnswer(botApi.editMessageCaption(context.bot, { ...target, ...edit }));
 }
 
 function handleEditMessageReplyMarkup(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = editMessageReplyMarkupParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid editMessageReplyMarkup parameters');
+    return botApiError(400, 'Bad Request: invalid editMessageReplyMarkup parameters');
   }
-  const targetReading = readEditedMessageTarget(context, parsedParameters.data);
+  const targetReading = readEditedMessageTarget(parsedParameters.data);
   if (!targetReading.read) {
-    return targetReading.response;
+    return targetReading.errorAnswer;
   }
 
   const { target } = targetReading;
-  const { botApi } = context.get('emulationSession');
+  const { botApi } = context.session;
   const inlineKeyboard = parsedParameters.data.reply_markup;
   return target.kind === 'inline_message'
-    ? inlineMessageEditResponse(
-      context,
-      botApi.editInlineMessageReplyMarkup(context.get('authenticatedBot'), {
-        ...target,
-        inlineKeyboard,
-      }),
-    )
-    : editMessageResponse(
-      context,
-      botApi.editMessageReplyMarkup(context.get('authenticatedBot'), { ...target, inlineKeyboard }),
+    ? inlineMessageEditAnswer(botApi.editInlineMessageReplyMarkup(context.bot, {
+      ...target,
+      inlineKeyboard,
+    }))
+    : editMessageAnswer(
+      botApi.editMessageReplyMarkup(context.bot, { ...target, inlineKeyboard }),
     );
 }
 
@@ -1226,7 +1204,7 @@ function handleEditMessageReplyMarkup(
  * text or formatting it cannot read.
  */
 function readSpecifiedFormattedText(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   specifiedText: {
     readonly text: string;
     readonly parseMode: string | undefined;
@@ -1235,10 +1213,9 @@ function readSpecifiedFormattedText(
   invalidParametersDescription: string,
 ): SpecifiedFormattedTextReading {
   if (specifiedText.text.length === 0) {
-    return { read: false, response: botApiError(context, 400, MESSAGE_TEXT_EMPTY_DESCRIPTION) };
+    return { read: false, errorAnswer: botApiError(400, MESSAGE_TEXT_EMPTY_DESCRIPTION) };
   }
-  return toResponseReading(
-    context,
+  return withErrorAnswer(
     readFormattedTextParameters(context, specifiedText, invalidParametersDescription),
   );
 }
@@ -1248,7 +1225,7 @@ function readSpecifiedFormattedText(
  * caption is none.
  */
 function readSpecifiedCaption(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   { caption, parse_mode: parseMode, caption_entities: captionEntities }: {
     readonly caption: string;
     readonly parse_mode?: string;
@@ -1256,23 +1233,17 @@ function readSpecifiedCaption(
   },
   invalidParametersDescription: string,
 ): SpecifiedFormattedTextReading {
-  return toResponseReading(
+  return withErrorAnswer(readFormattedTextParameters(
     context,
-    readFormattedTextParameters(
-      context,
-      { text: caption, parseMode, entities: captionEntities },
-      invalidParametersDescription,
-    ),
-  );
+    { text: caption, parseMode, entities: captionEntities },
+    invalidParametersDescription,
+  ));
 }
 
-function toResponseReading(
-  context: BotApiRouteContext,
-  reading: FormattedTextParametersReading,
-): SpecifiedFormattedTextReading {
+function withErrorAnswer(reading: FormattedTextParametersReading): SpecifiedFormattedTextReading {
   return reading.read
     ? reading
-    : { read: false, response: botApiError(context, 400, reading.description) };
+    : { read: false, errorAnswer: botApiError(400, reading.description) };
 }
 
 /**
@@ -1283,7 +1254,7 @@ function toResponseReading(
  * entities are rejected in either case to surface the bot's mistake in tests.
  */
 function readFormattedTextParameters(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   { text, parseMode, entities }: {
     readonly text: string;
     readonly parseMode: string | undefined;
@@ -1303,7 +1274,7 @@ function readFormattedTextParameters(
     return failure(entitiesReading.description);
   }
 
-  const result = context.get('emulationSession').botApi.readFormattedText({
+  const result = context.session.botApi.readFormattedText({
     text,
     parseMode,
     entities: entitiesReading.entities,
@@ -1335,7 +1306,6 @@ function readFormattedTextParameters(
  * `inline_message_id`, which it reports missing as an unspecified message identifier.
  */
 function readEditedMessageTarget(
-  context: BotApiRouteContext,
   { chat_id: chatId, message_id: messageId, inline_message_id: inlineMessageId }: {
     readonly chat_id?: number;
     readonly message_id?: number;
@@ -1346,12 +1316,12 @@ function readEditedMessageTarget(
     return inlineMessageId.length === 0
       ? {
         read: false,
-        response: botApiError(context, 400, MESSAGE_IDENTIFIER_NOT_SPECIFIED_DESCRIPTION),
+        errorAnswer: botApiError(400, MESSAGE_IDENTIFIER_NOT_SPECIFIED_DESCRIPTION),
       }
       : { read: true, target: { kind: 'inline_message', inlineMessageId } };
   }
   if (chatId === undefined) {
-    return { read: false, response: botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION) };
+    return { read: false, errorAnswer: botApiError(400, CHAT_ID_EMPTY_DESCRIPTION) };
   }
   return {
     read: true,
@@ -1363,37 +1333,37 @@ function messageIdOrNone(messageId: number | undefined): number {
   return messageId === undefined || messageId <= 0 ? NO_MESSAGE_ID : messageId;
 }
 
-function editMessageResponse(context: BotApiRouteContext, result: MessageEditResult): Response {
+function editMessageAnswer(result: MessageEditResult): BotApiMethodAnswer {
   if (result.edited) {
-    return context.json({ ok: true as const, result: result.message });
+    return botApiResult(result.message);
   }
   switch (result.reason) {
     case 'message_text_empty':
-      return botApiError(context, 400, MESSAGE_TEXT_EMPTY_DESCRIPTION);
+      return botApiError(400, MESSAGE_TEXT_EMPTY_DESCRIPTION);
     case 'text_invalid':
-      return botApiError(context, 400, badRequestDescription(result.textError));
+      return botApiError(400, badRequestDescription(result.textError));
     case 'chat_not_found':
-      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'bot_not_a_member':
-      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+      return botApiError(403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
     case 'bot_kicked':
-      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
+      return botApiError(403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'message_not_found':
-      return botApiError(context, 400, MESSAGE_TO_EDIT_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, MESSAGE_TO_EDIT_NOT_FOUND_DESCRIPTION);
     case 'message_not_editable':
-      return botApiError(context, 400, MESSAGE_NOT_EDITABLE_DESCRIPTION);
+      return botApiError(400, MESSAGE_NOT_EDITABLE_DESCRIPTION);
     case 'message_has_no_text':
-      return botApiError(context, 400, MESSAGE_HAS_NO_TEXT_DESCRIPTION);
+      return botApiError(400, MESSAGE_HAS_NO_TEXT_DESCRIPTION);
     case 'message_has_no_caption':
-      return botApiError(context, 400, MESSAGE_HAS_NO_CAPTION_DESCRIPTION);
+      return botApiError(400, MESSAGE_HAS_NO_CAPTION_DESCRIPTION);
     case 'message_text_too_long':
-      return botApiError(context, 400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
+      return botApiError(400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
     case 'caption_too_long':
-      return botApiError(context, 400, CAPTION_TOO_LONG_DESCRIPTION);
+      return botApiError(400, CAPTION_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':
-      return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
+      return botApiError(400, BUTTON_DATA_INVALID_DESCRIPTION);
     case 'message_not_modified':
-      return botApiError(context, 400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
+      return botApiError(400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
     default: {
       const unhandledFailure: never = result;
       throw new Error(`Unhandled message edit failure: ${JSON.stringify(unhandledFailure)}`);
@@ -1402,32 +1372,29 @@ function editMessageResponse(context: BotApiRouteContext, result: MessageEditRes
 }
 
 /** Answers a successful edit of an inline message with `true`, as Telegram does. */
-function inlineMessageEditResponse(
-  context: BotApiRouteContext,
-  result: InlineMessageEditResult,
-): Response {
+function inlineMessageEditAnswer(result: InlineMessageEditResult): BotApiMethodAnswer {
   if (result.edited) {
-    return context.json({ ok: true as const, result: true as const });
+    return botApiResult(true);
   }
   switch (result.reason) {
     case 'inline_message_not_found':
-      return botApiError(context, 400, INLINE_MESSAGE_ID_INVALID_DESCRIPTION);
+      return botApiError(400, INLINE_MESSAGE_ID_INVALID_DESCRIPTION);
     case 'message_text_empty':
-      return botApiError(context, 400, MESSAGE_TEXT_EMPTY_DESCRIPTION);
+      return botApiError(400, MESSAGE_TEXT_EMPTY_DESCRIPTION);
     case 'text_invalid':
-      return botApiError(context, 400, badRequestDescription(result.textError));
+      return botApiError(400, badRequestDescription(result.textError));
     case 'message_has_no_text':
-      return botApiError(context, 400, MESSAGE_HAS_NO_TEXT_DESCRIPTION);
+      return botApiError(400, MESSAGE_HAS_NO_TEXT_DESCRIPTION);
     case 'message_has_no_caption':
-      return botApiError(context, 400, MESSAGE_HAS_NO_CAPTION_DESCRIPTION);
+      return botApiError(400, MESSAGE_HAS_NO_CAPTION_DESCRIPTION);
     case 'message_text_too_long':
-      return botApiError(context, 400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
+      return botApiError(400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
     case 'caption_too_long':
-      return botApiError(context, 400, CAPTION_TOO_LONG_DESCRIPTION);
+      return botApiError(400, CAPTION_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':
-      return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
+      return botApiError(400, BUTTON_DATA_INVALID_DESCRIPTION);
     case 'message_not_modified':
-      return botApiError(context, 400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
+      return botApiError(400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
     default: {
       const unhandledFailure: never = result;
       throw new Error(`Unhandled inline message edit failure: ${JSON.stringify(unhandledFailure)}`);
@@ -1436,37 +1403,37 @@ function inlineMessageEditResponse(
 }
 
 function handleDeleteMessage(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = deleteMessageParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid deleteMessage parameters');
+    return botApiError(400, 'Bad Request: invalid deleteMessage parameters');
   }
   const { chat_id: chatId, message_id: messageId } = parsedParameters.data;
   // Telegram looks at the chat before the message.
   if (chatId === undefined) {
-    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+    return botApiError(400, CHAT_ID_EMPTY_DESCRIPTION);
   }
 
-  const result = context.get('emulationSession').botApi.deleteMessage(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.deleteMessage(
+    context.bot,
     { chatId, messageId: messageIdOrNone(messageId) },
   );
   if (result.deleted) {
-    return context.json({ ok: true as const, result: true as const });
+    return botApiResult(true);
   }
   switch (result.reason) {
     case 'chat_not_found':
-      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'bot_not_a_member':
-      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+      return botApiError(403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
     case 'bot_kicked':
-      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
+      return botApiError(403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'message_not_found':
-      return botApiError(context, 400, MESSAGE_TO_DELETE_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, MESSAGE_TO_DELETE_NOT_FOUND_DESCRIPTION);
     case 'message_not_deletable':
-      return botApiError(context, 400, MESSAGE_NOT_DELETABLE_DESCRIPTION);
+      return botApiError(400, MESSAGE_NOT_DELETABLE_DESCRIPTION);
     default: {
       const unhandledReason: never = result.reason;
       throw new Error(`Unhandled deleteMessage failure: ${unhandledReason}`);
@@ -1475,44 +1442,44 @@ function handleDeleteMessage(
 }
 
 function handleDeleteMessages(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = deleteMessagesParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid deleteMessages parameters');
+    return botApiError(400, 'Bad Request: invalid deleteMessages parameters');
   }
   const { chat_id: chatId, message_ids: messageIds } = parsedParameters.data;
   // Telegram checks the message identifiers before it looks at the chat.
   if (messageIds === undefined) {
-    return botApiError(context, 400, MESSAGE_IDENTIFIERS_NOT_SPECIFIED_DESCRIPTION);
+    return botApiError(400, MESSAGE_IDENTIFIERS_NOT_SPECIFIED_DESCRIPTION);
   }
   if (messageIds.length > MAX_DELETE_MESSAGES_COUNT) {
-    return botApiError(context, 400, TOO_MANY_MESSAGE_IDENTIFIERS_DESCRIPTION);
+    return botApiError(400, TOO_MANY_MESSAGE_IDENTIFIERS_DESCRIPTION);
   }
   if (messageIds.some((messageId) => messageId <= 0)) {
-    return botApiError(context, 400, INVALID_MESSAGE_IDENTIFIER_DESCRIPTION);
+    return botApiError(400, INVALID_MESSAGE_IDENTIFIER_DESCRIPTION);
   }
   if (chatId === undefined) {
-    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+    return botApiError(400, CHAT_ID_EMPTY_DESCRIPTION);
   }
 
-  const result = context.get('emulationSession').botApi.deleteMessages(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.deleteMessages(
+    context.bot,
     { chatId, messageIds },
   );
   if (result.deleted) {
-    return context.json({ ok: true as const, result: true as const });
+    return botApiResult(true);
   }
   switch (result.reason) {
     case 'chat_not_found':
-      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'bot_not_a_member':
-      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+      return botApiError(403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
     case 'bot_kicked':
-      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
+      return botApiError(403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'message_not_deletable':
-      return botApiError(context, 400, MESSAGE_NOT_DELETABLE_DESCRIPTION);
+      return botApiError(400, MESSAGE_NOT_DELETABLE_DESCRIPTION);
     default: {
       const unhandledReason: never = result.reason;
       throw new Error(`Unhandled deleteMessages failure: ${unhandledReason}`);
@@ -1521,30 +1488,30 @@ function handleDeleteMessages(
 }
 
 function handleGetFile(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = getFileParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid getFile parameters');
+    return botApiError(400, 'Bad Request: invalid getFile parameters');
   }
   const { file_id: fileId } = parsedParameters.data;
   if (fileId.length === 0) {
-    return botApiError(context, 400, FILE_ID_NOT_SPECIFIED_DESCRIPTION);
+    return botApiError(400, FILE_ID_NOT_SPECIFIED_DESCRIPTION);
   }
 
-  const result = context.get('emulationSession').botApi.getFile(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.getFile(
+    context.bot,
     fileId,
   );
   if (result.found) {
-    return context.json({ ok: true as const, result: result.file });
+    return botApiResult(result.file);
   }
   switch (result.reason) {
     case 'file_id_invalid':
-      return botApiError(context, 400, GET_FILE_ID_INVALID_DESCRIPTION);
+      return botApiError(400, GET_FILE_ID_INVALID_DESCRIPTION);
     case 'file_too_big':
-      return botApiError(context, 400, FILE_TOO_BIG_DESCRIPTION);
+      return botApiError(400, FILE_TOO_BIG_DESCRIPTION);
     default: {
       const unhandledReason: never = result.reason;
       throw new Error(`Unhandled getFile failure: ${unhandledReason}`);
@@ -1553,16 +1520,16 @@ function handleGetFile(
 }
 
 function handleAnswerCallbackQuery(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = answerCallbackQueryParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid answerCallbackQuery parameters');
+    return botApiError(400, 'Bad Request: invalid answerCallbackQuery parameters');
   }
 
-  const result = context.get('emulationSession').botApi.answerCallbackQuery(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.answerCallbackQuery(
+    context.bot,
     {
       callbackQueryId: parsedParameters.data.callback_query_id,
       text: parsedParameters.data.text,
@@ -1571,45 +1538,45 @@ function handleAnswerCallbackQuery(
     },
   );
   if (!result.answered) {
-    return botApiError(context, 400, QUERY_ID_INVALID_DESCRIPTION);
+    return botApiError(400, QUERY_ID_INVALID_DESCRIPTION);
   }
-  return context.json({ ok: true as const, result: true as const });
+  return botApiResult(true);
 }
 
 function handleSendChatAction(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = sendChatActionParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid sendChatAction parameters');
+    return botApiError(400, 'Bad Request: invalid sendChatAction parameters');
   }
   const { chat_id: chatId, action: actionName } = parsedParameters.data;
   // Telegram reads the action before it looks at the chat.
   const action = CHAT_ACTIONS_BY_NAME.get(actionName.toLowerCase());
   if (action === undefined) {
-    return botApiError(context, 400, CHAT_ACTION_INVALID_DESCRIPTION);
+    return botApiError(400, CHAT_ACTION_INVALID_DESCRIPTION);
   }
   if (chatId === undefined) {
-    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+    return botApiError(400, CHAT_ID_EMPTY_DESCRIPTION);
   }
 
-  const result = context.get('emulationSession').botApi.sendChatAction(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.sendChatAction(
+    context.bot,
     { chatId, action },
   );
   if (result.sent) {
-    return context.json({ ok: true as const, result: true as const });
+    return botApiResult(true);
   }
   switch (result.reason) {
     case 'chat_not_found':
-      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'bot_not_a_member':
-      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+      return botApiError(403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
     case 'bot_kicked':
-      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
+      return botApiError(403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'bot_blocked':
-      return botApiError(context, 403, BOT_BLOCKED_DESCRIPTION);
+      return botApiError(403, BOT_BLOCKED_DESCRIPTION);
     default: {
       const unhandledReason: never = result.reason;
       throw new Error(`Unhandled sendChatAction failure: ${unhandledReason}`);
@@ -1618,34 +1585,34 @@ function handleSendChatAction(
 }
 
 function handleLeaveChat(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = leaveChatParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid leaveChat parameters');
+    return botApiError(400, 'Bad Request: invalid leaveChat parameters');
   }
   const { chat_id: chatId } = parsedParameters.data;
   if (chatId === undefined) {
-    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+    return botApiError(400, CHAT_ID_EMPTY_DESCRIPTION);
   }
 
-  const result = context.get('emulationSession').botApi.leaveChat(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.leaveChat(
+    context.bot,
     { chatId },
   );
   if (result.left) {
-    return context.json({ ok: true as const, result: true as const });
+    return botApiResult(true);
   }
   switch (result.reason) {
     case 'chat_not_found':
-      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'bot_not_a_member':
-      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+      return botApiError(403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
     case 'bot_kicked':
-      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
+      return botApiError(403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'private_chat_not_leavable':
-      return botApiError(context, 400, badRequestDescription("Can't leave private chats"));
+      return botApiError(400, badRequestDescription("Can't leave private chats"));
     default: {
       const unhandledReason: never = result.reason;
       throw new Error(`Unhandled leaveChat failure: ${unhandledReason}`);
@@ -1654,113 +1621,105 @@ function handleLeaveChat(
 }
 
 function handleGetChatMember(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = getChatMemberParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid getChatMember parameters');
+    return botApiError(400, 'Bad Request: invalid getChatMember parameters');
   }
-  const targetReading = readChatMemberTarget(context, parsedParameters.data);
+  const targetReading = readChatMemberTarget(parsedParameters.data);
   if (!targetReading.read) {
-    return targetReading.response;
+    return targetReading.errorAnswer;
   }
 
-  const result = context.get('emulationSession').botApi.getChatMember(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.getChatMember(
+    context.bot,
     targetReading.target,
   );
-  return result.found
-    ? context.json({ ok: true as const, result: result.member })
-    : chatMemberFailureResponse(context, result.reason);
+  return result.found ? botApiResult(result.member) : chatMemberFailureAnswer(result.reason);
 }
 
 function handleGetChatAdministrators(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = getChatAdministratorsParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid getChatAdministrators parameters');
+    return botApiError(400, 'Bad Request: invalid getChatAdministrators parameters');
   }
   const { chat_id: chatId, return_bots: includesOtherBots } = parsedParameters.data;
   if (chatId === undefined) {
-    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+    return botApiError(400, CHAT_ID_EMPTY_DESCRIPTION);
   }
 
-  const result = context.get('emulationSession').botApi.getChatAdministrators(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.getChatAdministrators(
+    context.bot,
     { chatId, includesOtherBots },
   );
   return result.found
-    ? context.json({ ok: true as const, result: result.administrators })
-    : chatMemberFailureResponse(context, result.reason);
+    ? botApiResult(result.administrators)
+    : chatMemberFailureAnswer(result.reason);
 }
 
 function handleGetChatMemberCount(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = getChatMemberCountParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid getChatMemberCount parameters');
+    return botApiError(400, 'Bad Request: invalid getChatMemberCount parameters');
   }
   const { chat_id: chatId } = parsedParameters.data;
   if (chatId === undefined) {
-    return botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION);
+    return botApiError(400, CHAT_ID_EMPTY_DESCRIPTION);
   }
 
-  const result = context.get('emulationSession').botApi.getChatMemberCount(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.getChatMemberCount(
+    context.bot,
     { chatId },
   );
-  return result.found
-    ? context.json({ ok: true as const, result: result.memberCount })
-    : chatMemberFailureResponse(context, result.reason);
+  return result.found ? botApiResult(result.memberCount) : chatMemberFailureAnswer(result.reason);
 }
 
 function handleBanChatMember(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = banChatMemberParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid banChatMember parameters');
+    return botApiError(400, 'Bad Request: invalid banChatMember parameters');
   }
-  const targetReading = readChatMemberTarget(context, parsedParameters.data);
+  const targetReading = readChatMemberTarget(parsedParameters.data);
   if (!targetReading.read) {
-    return targetReading.response;
+    return targetReading.errorAnswer;
   }
 
-  const result = context.get('emulationSession').botApi.banChatMember(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.banChatMember(
+    context.bot,
     { ...targetReading.target, untilUnixSeconds: parsedParameters.data.until_date },
   );
-  return result.banned
-    ? context.json({ ok: true as const, result: true as const })
-    : chatMemberFailureResponse(context, result.reason);
+  return result.banned ? botApiResult(true) : chatMemberFailureAnswer(result.reason);
 }
 
 function handleUnbanChatMember(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const parsedParameters = unbanChatMemberParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, 'Bad Request: invalid unbanChatMember parameters');
+    return botApiError(400, 'Bad Request: invalid unbanChatMember parameters');
   }
-  const targetReading = readChatMemberTarget(context, parsedParameters.data);
+  const targetReading = readChatMemberTarget(parsedParameters.data);
   if (!targetReading.read) {
-    return targetReading.response;
+    return targetReading.errorAnswer;
   }
 
-  const result = context.get('emulationSession').botApi.unbanChatMember(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.unbanChatMember(
+    context.bot,
     { ...targetReading.target, onlyIfBanned: parsedParameters.data.only_if_banned },
   );
-  return result.unbanned
-    ? context.json({ ok: true as const, result: true as const })
-    : chatMemberFailureResponse(context, result.reason);
+  return result.unbanned ? botApiResult(true) : chatMemberFailureAnswer(result.reason);
 }
 
 /**
@@ -1768,47 +1727,43 @@ function handleUnbanChatMember(
  * a missing or non-positive `user_id` as 0, which identifies no user.
  */
 function readChatMemberTarget(
-  context: BotApiRouteContext,
   { chat_id: chatId, user_id: userId }: { readonly chat_id?: number; readonly user_id?: number },
 ):
   | { readonly read: true; readonly target: { readonly chatId: number; readonly userId: number } }
-  | { readonly read: false; readonly response: Response } {
+  | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
   if (userId === undefined || userId <= 0) {
-    return { read: false, response: botApiError(context, 400, USER_ID_INVALID_DESCRIPTION) };
+    return { read: false, errorAnswer: botApiError(400, USER_ID_INVALID_DESCRIPTION) };
   }
   if (chatId === undefined) {
-    return { read: false, response: botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION) };
+    return { read: false, errorAnswer: botApiError(400, CHAT_ID_EMPTY_DESCRIPTION) };
   }
   return { read: true, target: { chatId, userId } };
 }
 
-function chatMemberFailureResponse(
-  context: BotApiRouteContext,
-  reason: ChatMemberFailureReason,
-): Response {
+function chatMemberFailureAnswer(reason: ChatMemberFailureReason): BotApiMethodAnswer {
   switch (reason) {
     case 'chat_not_found':
-      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'bot_not_a_member':
-      return botApiError(context, 403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+      return botApiError(403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
     case 'bot_kicked':
-      return botApiError(context, 403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
+      return botApiError(403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'member_not_found':
-      return botApiError(context, 400, MEMBER_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, MEMBER_NOT_FOUND_DESCRIPTION);
     case 'private_chat_has_no_administrators':
-      return botApiError(context, 400, PRIVATE_CHAT_HAS_NO_ADMINISTRATORS_DESCRIPTION);
+      return botApiError(400, PRIVATE_CHAT_HAS_NO_ADMINISTRATORS_DESCRIPTION);
     case 'private_chat_members_not_bannable':
-      return botApiError(context, 400, PRIVATE_CHAT_MEMBERS_NOT_BANNABLE_DESCRIPTION);
+      return botApiError(400, PRIVATE_CHAT_MEMBERS_NOT_BANNABLE_DESCRIPTION);
     case 'method_unavailable_in_private_chats':
-      return botApiError(context, 400, METHOD_UNAVAILABLE_IN_PRIVATE_CHATS_DESCRIPTION);
+      return botApiError(400, METHOD_UNAVAILABLE_IN_PRIVATE_CHATS_DESCRIPTION);
     case 'cannot_restrict_self':
-      return botApiError(context, 400, CANNOT_RESTRICT_SELF_DESCRIPTION);
+      return botApiError(400, CANNOT_RESTRICT_SELF_DESCRIPTION);
     case 'member_is_owner':
-      return botApiError(context, 400, MEMBER_IS_OWNER_DESCRIPTION);
+      return botApiError(400, MEMBER_IS_OWNER_DESCRIPTION);
     case 'not_enough_rights':
-      return botApiError(context, 400, NOT_ENOUGH_RIGHTS_TO_RESTRICT_DESCRIPTION);
+      return botApiError(400, NOT_ENOUGH_RIGHTS_TO_RESTRICT_DESCRIPTION);
     case 'member_is_administrator':
-      return botApiError(context, 400, MEMBER_IS_ADMINISTRATOR_DESCRIPTION);
+      return botApiError(400, MEMBER_IS_ADMINISTRATOR_DESCRIPTION);
     default: {
       const unhandledReason: never = reason;
       throw new Error(`Unhandled chat member failure: ${unhandledReason}`);
@@ -1817,121 +1772,107 @@ function chatMemberFailureResponse(
 }
 
 function handleSetMyCommands(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid setMyCommands parameters';
   const parsedParameters = setMyCommandsParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, invalidParametersDescription);
+    return botApiError(400, invalidParametersDescription);
   }
   const { commands, scope, language_code: languageCode } = parsedParameters.data;
-  const targetReading = readMyCommandsTarget(
-    context,
-    { scope, languageCode },
-    invalidParametersDescription,
-  );
+  const targetReading = readMyCommandsTarget({ scope, languageCode }, invalidParametersDescription);
   if (!targetReading.read) {
-    return targetReading.response;
+    return targetReading.errorAnswer;
   }
 
-  const result = context.get('emulationSession').botApi.setMyCommands(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.setMyCommands(
+    context.bot,
     { commands, ...targetReading.target },
   );
   if (result.set) {
-    return context.json({ ok: true as const, result: true as const });
+    return botApiResult(true);
   }
   switch (result.reason) {
     case 'chat_not_found':
     case 'scope_not_allowed_in_private_chats':
     case 'language_code_invalid':
-      return myCommandsTargetError(context, result.reason);
+      return myCommandsTargetError(result.reason);
     default:
-      return botApiError(context, 400, BOT_COMMAND_FAILURE_DESCRIPTIONS[result.reason]);
+      return botApiError(400, BOT_COMMAND_FAILURE_DESCRIPTIONS[result.reason]);
   }
 }
 
 function handleGetMyCommands(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid getMyCommands parameters';
   const parsedParameters = myCommandsTargetParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, invalidParametersDescription);
+    return botApiError(400, invalidParametersDescription);
   }
-  const targetReading = readMyCommandsTarget(
-    context,
-    { scope: parsedParameters.data.scope, languageCode: parsedParameters.data.language_code },
-    invalidParametersDescription,
-  );
+  const targetReading = readMyCommandsTarget({
+    scope: parsedParameters.data.scope,
+    languageCode: parsedParameters.data.language_code,
+  }, invalidParametersDescription);
   if (!targetReading.read) {
-    return targetReading.response;
+    return targetReading.errorAnswer;
   }
 
-  const result = context.get('emulationSession').botApi.getMyCommands(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.getMyCommands(
+    context.bot,
     targetReading.target,
   );
-  return result.found
-    ? context.json({ ok: true as const, result: result.commands })
-    : myCommandsTargetError(context, result.reason);
+  return result.found ? botApiResult(result.commands) : myCommandsTargetError(result.reason);
 }
 
 function handleDeleteMyCommands(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid deleteMyCommands parameters';
   const parsedParameters = myCommandsTargetParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, invalidParametersDescription);
+    return botApiError(400, invalidParametersDescription);
   }
-  const targetReading = readMyCommandsTarget(
-    context,
-    { scope: parsedParameters.data.scope, languageCode: parsedParameters.data.language_code },
-    invalidParametersDescription,
-  );
+  const targetReading = readMyCommandsTarget({
+    scope: parsedParameters.data.scope,
+    languageCode: parsedParameters.data.language_code,
+  }, invalidParametersDescription);
   if (!targetReading.read) {
-    return targetReading.response;
+    return targetReading.errorAnswer;
   }
 
-  const result = context.get('emulationSession').botApi.deleteMyCommands(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.deleteMyCommands(
+    context.bot,
     targetReading.target,
   );
-  return result.deleted
-    ? context.json({ ok: true as const, result: true as const })
-    : myCommandsTargetError(context, result.reason);
+  return result.deleted ? botApiResult(true) : myCommandsTargetError(result.reason);
 }
 
 /** Reads the scope and language that address one of the bot's command lists. */
 function readMyCommandsTarget(
-  context: BotApiRouteContext,
   { scope, languageCode }: { readonly scope: unknown; readonly languageCode: string },
   invalidParametersDescription: string,
 ):
   | { readonly read: true; readonly target: MyCommandsTarget }
-  | { readonly read: false; readonly response: Response } {
+  | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
   const scopeReading = readBotCommandScopeParameter(scope, invalidParametersDescription);
   if (!scopeReading.read) {
-    return { read: false, response: botApiError(context, 400, scopeReading.description) };
+    return { read: false, errorAnswer: botApiError(400, scopeReading.description) };
   }
   return { read: true, target: { scope: scopeReading.scope, languageCode } };
 }
 
-function myCommandsTargetError(
-  context: BotApiRouteContext,
-  reason: MyCommandsTargetFailureReason,
-): Response {
+function myCommandsTargetError(reason: MyCommandsTargetFailureReason): BotApiMethodAnswer {
   switch (reason) {
     case 'chat_not_found':
-      return botApiError(context, 400, CHAT_NOT_FOUND_DESCRIPTION);
+      return botApiError(400, CHAT_NOT_FOUND_DESCRIPTION);
     case 'scope_not_allowed_in_private_chats':
-      return botApiError(context, 400, SCOPE_NOT_ALLOWED_IN_PRIVATE_CHATS_DESCRIPTION);
+      return botApiError(400, SCOPE_NOT_ALLOWED_IN_PRIVATE_CHATS_DESCRIPTION);
     case 'language_code_invalid':
-      return botApiError(context, 400, LANGUAGE_CODE_INVALID_DESCRIPTION);
+      return botApiError(400, LANGUAGE_CODE_INVALID_DESCRIPTION);
     default: {
       const unhandledReason: never = reason;
       throw new Error(`Unhandled command list failure: ${unhandledReason}`);
@@ -1940,13 +1881,13 @@ function myCommandsTargetError(
 }
 
 function handleAnswerInlineQuery(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
-): Response {
+): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid answerInlineQuery parameters';
   const parsedParameters = answerInlineQueryParametersSchema.safeParse(parameters);
   if (!parsedParameters.success) {
-    return botApiError(context, 400, invalidParametersDescription);
+    return botApiError(400, invalidParametersDescription);
   }
   const { data } = parsedParameters;
   const resultsReading = readInlineQueryResultsParameter(
@@ -1954,13 +1895,13 @@ function handleAnswerInlineQuery(
     invalidParametersDescription,
   );
   if (!resultsReading.read) {
-    return botApiError(context, 400, resultsReading.description);
+    return botApiError(400, resultsReading.description);
   }
   const results: InlineQueryResultRequest[] = [];
   for (const result of resultsReading.results) {
     const resultReading = readInlineQueryResultText(context, result, invalidParametersDescription);
     if (!resultReading.read) {
-      return botApiError(context, 400, resultReading.description);
+      return botApiError(400, resultReading.description);
     }
     results.push(resultReading.result);
   }
@@ -1970,8 +1911,8 @@ function handleAnswerInlineQuery(
     startParameter: data.switch_pm_parameter,
   });
 
-  const result = context.get('emulationSession').botApi.answerInlineQuery(
-    context.get('authenticatedBot'),
+  const result = context.session.botApi.answerInlineQuery(
+    context.bot,
     {
       inlineQueryId: data.inline_query_id,
       results,
@@ -1982,21 +1923,20 @@ function handleAnswerInlineQuery(
     },
   );
   if (result.answered) {
-    return context.json({ ok: true as const, result: true as const });
+    return botApiResult(true);
   }
   switch (result.reason) {
     case 'text_invalid':
-      return botApiError(context, 400, badRequestDescription(result.textError));
+      return botApiError(400, badRequestDescription(result.textError));
     case 'file_type_mismatch':
       return botApiError(
-        context,
         400,
         `Bad Request: can't use file of type ${TDLIB_FILE_TYPE_NAMES[result.actualFileType]} as ${
           TDLIB_FILE_TYPE_NAMES[result.expectedFileType]
         }`,
       );
     default:
-      return botApiError(context, 400, ANSWER_INLINE_QUERY_FAILURE_DESCRIPTIONS[result.reason]);
+      return botApiError(400, ANSWER_INLINE_QUERY_FAILURE_DESCRIPTIONS[result.reason]);
   }
 }
 
@@ -2005,7 +1945,7 @@ function handleAnswerInlineQuery(
  * caption, with their parse mode or entities.
  */
 function readInlineQueryResultText(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   result: InlineQueryResultParameter,
   invalidParametersDescription: string,
 ):
@@ -2068,7 +2008,7 @@ function readInlineQueryResultText(
  * reports text it cannot read as a result it cannot read, prefixing Telegram's own description.
  */
 function readInlineQueryResultFormattedText(
-  context: BotApiRouteContext,
+  context: BotApiMethodContext,
   { text, parseMode, entities }: UnreadFormattedText,
   invalidParametersDescription: string,
 ): { readonly read: true; readonly formattedText: SpecifiedFormattedText } | {
@@ -2110,10 +2050,8 @@ function badRequestDescription(tdlibErrorMessage: string): string {
 }
 
 /** Telegram's error body, whose `error_code` repeats the HTTP status. */
-function botApiError(
-  context: Context,
-  errorCode: ContentfulStatusCode,
-  description: string,
-): Response {
-  return context.json({ ok: false as const, error_code: errorCode, description }, errorCode);
+
+/** Sends a Bot API method's answer as the JSON body of an HTTP response. */
+function botApiResponse(context: Context, { status, body }: BotApiMethodAnswer): Response {
+  return context.json(body, status);
 }
