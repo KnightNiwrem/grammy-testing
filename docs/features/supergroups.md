@@ -31,9 +31,15 @@ message goes only to that recipient among privacy-enabled bots. A reply to bot A
 commands bot B therefore goes to A. Without an explicit recipient, a mention or an unqualified
 leading command can cause delivery.
 
-Unqualified command routing and multiple-recipient mention routing are [real gaps](#real-gaps).
-Ranking `via_bot` before an addressed command is an
-[intentional routing rule](#intentional-deviations).
+As Telegram's [Bot FAQ][privacy-faq] describes, an unqualified command such as `/start` reaches only
+the bot that last sent a message to the group. Only bots' own messages count: not an account's
+message sent through an inline bot, nor a membership service message a bot causes. When that bot
+already receives all messages, as an administrator or with privacy mode disabled, no privacy-enabled
+bot receives the command. Before any bot has sent a message, every privacy-enabled bot receives it,
+an [intentional routing rule](#intentional-deviations).
+
+Multiple-recipient mention routing is a [real gap](#real-gaps). Ranking `via_bot` before an
+addressed command is also an intentional routing rule.
 
 Changing subscriptions does not change which bot a message is addressed to. This prevents an
 unsubscribed recipient from redirecting a reply to another privacy-enabled bot.
@@ -97,6 +103,11 @@ addressed to another bot, giving tests a deterministic rule. Public Bot API/TDLi
 does not establish Telegram's ordering, so this is a deliberate emulator contract rather than a
 confirmed difference from Telegram.
 
+**Unqualified commands before any bot writes.** Telegram's documentation names no recipient for an
+unqualified command in a group where no bot has sent a message yet, and its servers decide it, not
+the public Bot API or TDLib source. The emulator delivers such a command to every privacy-enabled
+bot, so a test of a newly added bot receives `/start` without first making the bot speak.
+
 **Explicit ban removal.** Membership changes remain under explicit test control. `until_date` is
 normalized using the less-than-30-seconds / more-than-366-days permanent-ban rule, but a ban remains
 in effect after its date passes. TDLib also normalizes the date and later clears elapsed
@@ -116,9 +127,6 @@ production read permissions.
 
 ## Real gaps
 
-- **Unqualified command routing.** The emulator sends unqualified commands to every privacy-enabled
-  bot. Telegram's [Bot FAQ][privacy-faq] limits them to the bot that last sent a message to the
-  group. Tests of multiple bots need that recipient selection.
 - **Single recipient for mentions.** Mention matching can deliver one message to several
   privacy-enabled bots. Telegram's [Bot FAQ][privacy-faq] describes at most one such recipient and
   gives replies highest priority. Tests need single-recipient routing; the FAQ does not specify

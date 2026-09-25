@@ -15,12 +15,12 @@ post:
     is meant for, if any, and replies take precedence: the bot a replied message was meant
     for (its author, the bot it was sent through, or the bot it was meant for in turn), then
     the bot the message is sent through, then the bot its leading command names. Only a
-    message meant for no bot in particular reaches bots in privacy mode that it mentions, or
-    all of them when its text or caption starts with a command without a bot's username. As
-    on Telegram, a bot that is an administrator of the supergroup receives every message,
-    privacy mode notwithstanding. Telegram documents that a command without a bot's username
-    reaches only the bot that last wrote to the group; the emulator delivers it to every bot
-    in privacy mode.
+    message meant for no bot in particular reaches bots in privacy mode that it mentions, and,
+    when its text or caption starts with a command without a bot's username, the bot that last
+    sent a message to the supergroup if that bot is in privacy mode; before any bot has sent
+    one, the emulator delivers such a command to every bot in privacy mode. As on Telegram, a
+    bot that is an administrator of the supergroup receives every message, privacy mode
+    notwithstanding.
   requestBody:
     required: true
     content:

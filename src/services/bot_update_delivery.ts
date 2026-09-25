@@ -112,6 +112,11 @@ export class BotUpdateDeliveryService {
   readonly #bots: BotLookup;
   readonly #sharedChats: ChatMemberLookup;
   readonly #messages: SupergroupMessageLookup;
+  /**
+   * The bot that last sent a content message to each supergroup, which alone of the bots in
+   * privacy mode receives commands without a username there.
+   */
+  readonly #lastMessageSendingBotIds = new Map<number, number>();
 
   constructor(
     { botMessageViews, botUpdates, updateSubscriptions, bots, sharedChats, messages }:
@@ -194,8 +199,9 @@ export class BotUpdateDeliveryService {
    *
    * Telegram lets a message reach only one bot in privacy mode, the one it is explicitly meant
    * for, if any, as `#findPrivacyModeAddressee` finds it. Only a message meant for no bot in
-   * particular reaches bots in privacy mode through a mention or a command without a username.
-   * Which bots subscribe to the update does not change who the message is meant for.
+   * particular reaches bots in privacy mode through a mention or a command without a username, as
+   * `#isImplicitlyAddressedToBot` decides. Which bots subscribe to the update does not change who
+   * the message is meant for.
    */
   #deliverSupergroupMessage(
     message: SupergroupMessage,
@@ -206,6 +212,9 @@ export class BotUpdateDeliveryService {
       return;
     }
     if (message.author.kind === 'bot') {
+      if (updateType === 'message') {
+        this.#lastMessageSendingBotIds.set(message.chatId, message.author.botId);
+      }
       return;
     }
     const addressee = this.#findPrivacyModeAddressee(message);
@@ -216,7 +225,7 @@ export class BotUpdateDeliveryService {
       }
       const readsMessage = this.#readsAllGroupMessages(bot, message.chatId) ||
         (addressee === undefined
-          ? isImplicitlyAddressedToBot(message, bot)
+          ? this.#isImplicitlyAddressedToBot(message, bot)
           : isPrivacyModeAddressee(addressee, bot));
       if (!readsMessage || !this.#isSubscribed(bot.id, updateType)) {
         continue;
@@ -393,6 +402,27 @@ export class BotUpdateDeliveryService {
   }
 
   /**
+   * Whether an account's supergroup message that is meant for no bot in particular reaches a bot
+   * in privacy mode: through a mention of the bot, or a command without a username at the start of
+   * the text or caption, which, as Telegram documents, reaches only the bot that last sent a
+   * message to the group. That bot may be one that reads all messages anyway, in which case no bot
+   * in privacy mode receives the command.
+   *
+   * Telegram does not document who receives such a command before any bot has sent a message to
+   * the group; the emulator delivers it to every bot in privacy mode then.
+   */
+  #isImplicitlyAddressedToBot(message: SupergroupMessage, bot: VirtualBotProfile): boolean {
+    if (mentionsUser(message.content, bot)) {
+      return true;
+    }
+    if (!startsWithCommandWithoutUsername(message)) {
+      return false;
+    }
+    const lastMessageSendingBotId = this.#lastMessageSendingBotIds.get(message.chatId);
+    return lastMessageSendingBotId === undefined || lastMessageSendingBotId === bot.id;
+  }
+
+  /**
    * Whether a bot receives every message of a group it is a member of: with privacy mode disabled,
    * or, as Telegram documents, as one of the group's administrators.
    */
@@ -414,18 +444,6 @@ function isPrivacyModeAddressee(addressee: PrivacyModeAddressee, bot: VirtualBot
   return addressee.kind === 'bot'
     ? addressee.botId === bot.id
     : addressee.username.toLowerCase() === bot.username.toLowerCase();
-}
-
-/**
- * Whether an account's supergroup message that is meant for no bot in particular reaches a bot in
- * privacy mode: through a command without a username at the start of the text or caption, or a
- * mention of the bot.
- *
- * Telegram documents that a command without a bot's username reaches only the bot that last wrote
- * to the group; the emulator delivers it to every bot in privacy mode.
- */
-function isImplicitlyAddressedToBot(message: SupergroupMessage, bot: VirtualBotProfile): boolean {
-  return startsWithCommandWithoutUsername(message) || mentionsUser(message.content, bot);
 }
 
 /**

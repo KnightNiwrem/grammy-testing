@@ -859,13 +859,110 @@ Deno.test('BotUpdateDeliveryService lets a message reach only the privacy-mode b
   // Only a message meant for no bot in particular reaches bots through mentions and commands.
   send(byAccount, 'Hello @a_bot and @b_bot');
   expectRecipients('Hello @a_bot and @b_bot', ['a', 'b', 'admin']);
+  // A bot wrote to the group last, so only that bot in privacy mode receives a general command.
   send(byAccount, '/start');
-  expectRecipients('/start', ['a', 'b', 'c', 'admin']);
+  expectRecipients('/start', ['a', 'admin']);
 
   // A bot that does not subscribe to messages still keeps them from other bots in privacy mode.
   updateSubscriptions.setAllowedUpdateTypes(botA.profile.id, new Set(['callback_query']));
   send(byAccount, '/help@b_bot to unsubscribed A', { replyToMessageId: questionOfA.id });
   expectRecipients('/help@b_bot to unsubscribed A', ['admin']);
+});
+
+Deno.test('BotUpdateDeliveryService sends general commands to the bot that last wrote to the group', () => {
+  const { virtualUsers, sharedChats, messages, messageBoxes, botUpdates, botUpdateDelivery } =
+    createDeliveryFixture();
+  const owner = createAccount(virtualUsers);
+  const botA = createBot(virtualUsers, 'a_bot');
+  const botB = createBot(virtualUsers, 'b_bot');
+  const inlineBot = createInlineBot(virtualUsers, 'inline_bot', false);
+  const administratorBot = createBot(virtualUsers, 'admin_bot');
+  const supergroup = {
+    kind: 'supergroup',
+    id: -1_000_000_000_001,
+    title: 'Team',
+    chatInstance: '-42',
+    hasProtectedContent: false,
+  } as const;
+  sharedChats.registerSupergroup(supergroup, owner.profile.id);
+  for (const bot of [botA, botB, inlineBot, administratorBot]) {
+    sharedChats.addChatMember(supergroup.id, bot.profile.id);
+  }
+  sharedChats.updateChatMemberStatus(supergroup.id, administratorBot.profile.id, {
+    status: 'administrator',
+    rights: grantSupergroupAdministratorRights([]),
+  });
+  const bots = { a: botA, b: botB, inline: inlineBot, admin: administratorBot };
+  const send = (
+    author: { readonly kind: 'account'; readonly accountId: number } | {
+      readonly kind: 'bot';
+      readonly botId: number;
+    },
+    text: string,
+    viaBotId?: number,
+  ) => {
+    const message = messages.addSupergroupMessage({
+      chatId: supergroup.id,
+      author,
+      sentAtUnixSeconds: 1_700_000_000,
+      content: {
+        kind: 'text',
+        text,
+        entities: text.startsWith('/')
+          ? [{ type: 'bot_command', offset: 0, length: text.split(' ')[0].length }]
+          : [],
+      },
+      viaBotId,
+    });
+    messageBoxes.assignMessageId(supergroup.id, message.id);
+    botUpdateDelivery.publish({ type: 'message_created', message });
+    return message;
+  };
+  const byAccount = { kind: 'account', accountId: owner.profile.id } as const;
+  const expectRecipients = (text: string, expected: readonly string[]) => {
+    const received = Object.entries(bots).flatMap(([name, bot]) =>
+      botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 }).some((update) =>
+          textContentOf(messageFromUpdate(update))?.text === text
+        )
+        ? [name]
+        : []
+    );
+    if (JSON.stringify(received) !== JSON.stringify(expected)) {
+      throw new Error(
+        `Expected ${JSON.stringify(text)} to reach ${JSON.stringify(expected)}, received ${
+          JSON.stringify(received)
+        }`,
+      );
+    }
+  };
+
+  // Before any bot writes to the group, every bot in privacy mode receives general commands.
+  send(byAccount, '/start first');
+  expectRecipients('/start first', ['a', 'b', 'inline', 'admin']);
+
+  send({ kind: 'bot', botId: botA.profile.id }, 'A speaks');
+  send(byAccount, 'Chatter of the account');
+  send(byAccount, '/start after A');
+  expectRecipients('/start after A', ['a', 'admin']);
+
+  send({ kind: 'bot', botId: botB.profile.id }, 'B speaks');
+  send(byAccount, '/start after B');
+  expectRecipients('/start after B', ['b', 'admin']);
+  // Mentions and commands naming a bot still reach other bots.
+  send(byAccount, 'Hello @a_bot');
+  expectRecipients('Hello @a_bot', ['a', 'admin']);
+  send(byAccount, '/start@a_bot');
+  expectRecipients('/start@a_bot', ['a', 'admin']);
+
+  // An account's message sent through an inline bot is not written by that bot.
+  send(byAccount, 'Through the inline bot', inlineBot.profile.id);
+  send(byAccount, '/start after the inline message');
+  expectRecipients('/start after the inline message', ['b', 'admin']);
+
+  // When a bot that reads every message wrote last, no bot in privacy mode receives the command.
+  send({ kind: 'bot', botId: administratorBot.profile.id }, 'The administrator bot speaks');
+  send(byAccount, '/start after the administrator bot');
+  expectRecipients('/start after the administrator bot', ['admin']);
 });
 
 Deno.test('BotUpdateDeliveryService delivers chat_member updates to subscribed administrator bots', () => {
