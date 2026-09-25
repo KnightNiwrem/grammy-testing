@@ -174,13 +174,17 @@ paths:
         supergroup the account is a member of; or forwards a message of such a chat there, as the
         account's message that shows who first sent it. Messages protected from forwarding and
         service messages cannot be forwarded, and, as on Telegram, a forward cannot be edited. In
-        a supergroup, the supergroup's bots receive the
-        message unless it is not addressed to a bot in privacy mode: such a bot receives only
-        messages whose text or caption starts with a command not addressed to another bot, replies
-        to one of its messages, or mentions it. As on Telegram, a bot that is an administrator of
-        the supergroup receives every message, privacy mode notwithstanding.
-        Telegram documents that a command without a bot's username reaches only the bot that last
-        wrote to the group; the emulator delivers it to every bot in privacy mode.
+        a supergroup, the supergroup's bots receive the message unless it is not addressed to a
+        bot in privacy mode. As on Telegram, a message reaches only the one bot in privacy mode it
+        is meant for, if any, and replies take precedence: the bot a replied message was meant
+        for (its author, the bot it was sent through, or the bot it was meant for in turn), then
+        the bot the message is sent through, then the bot its leading command names. Only a
+        message meant for no bot in particular reaches bots in privacy mode that it mentions, or
+        all of them when its text or caption starts with a command without a bot's username. As
+        on Telegram, a bot that is an administrator of the supergroup receives every message,
+        privacy mode notwithstanding. Telegram documents that a command without a bot's username
+        reaches only the bot that last wrote to the group; the emulator delivers it to every bot
+        in privacy mode.
       requestBody:
         required: true
         content:
@@ -871,7 +875,8 @@ paths:
       Telegram Bot API method for delivering the bot's updates to a webhook, or, with an empty URL,
       for removing it. The emulator posts each update to the URL as JSON, with the
       `X-Telegram-Bot-Api-Secret-Token` header when a secret token is set, one update at a time
-      and in order, and confirms it once the webhook answers with a 2xx status. A failed update
+      and in order, and confirms it once the webhook answers with a 2xx status. An update the
+      webhook has not answered after 60 seconds fails with `Read timeout expired`. A failed update
       is sent again at once, then after delays doubling from 2 up to 60 seconds, and holds back
       later updates. Unlike Telegram, the emulator delivers to plain HTTP URLs on any port, and
       ignores a Bot API method that the webhook names in its response. Setting a new webhook
@@ -1576,7 +1581,7 @@ paths:
   /sessions/{sessionId}/bot-api/bot{token}/editMessageText:
     description: >-
       Telegram Bot API method for editing the text of a message the bot sent to a private chat or a
-      supergroup. As on Telegram, the text is formatted and normalized as by `sendMessage`, the edited message
+      supergroup, or that an account sent there through the bot's inline mode. As on Telegram, the text is formatted and normalized as by `sendMessage`, the edited message
       keeps only the inline keyboard given in `reply_markup`, and the bot receives no update for
       its own edit. The edit date changes only when the text or its entities do. Without `chat_id`
       and `message_id`, the method edits a message an account sent through the bot's inline mode,
@@ -1635,8 +1640,11 @@ paths:
             MESSAGE_ID_INVALID`); `chat_id` is missing (`Bad Request: chat_id is empty`); the chat
             is not one the bot can
             address, as for `sendMessage` (`Bad Request: chat not found`); the chat has no message
-            with that ID (`Bad Request: message to edit not found`); another user wrote the message
-            (`Bad Request: message can't be edited`); the message is a photo or document (`Bad
+            with that ID (`Bad Request: message to edit not found`); as in TDLib, the bot may not
+            edit the message, because another user wrote it and it was not sent through the bot's
+            inline mode, another bot's inline mode sent it, it is a forward, or it carries a reply
+            keyboard, a forced reply, or a keyboard removal (`Bad Request: message can't be
+            edited`); the message is a photo or document (`Bad
             Request: there is no text in the message to edit`); the text and its entities
             cannot be normalized, as for `sendMessage`; the normalized text is longer than 4096
             characters (`Bad Request: message is too long`); a button's callback data exceeds 64
@@ -2058,8 +2066,8 @@ paths:
     description: >-
       Telegram Bot API method for leaving a supergroup the bot is a member of. The bot receives a
       my_chat_member update, from `member` to `left`, from itself, and then the service message
-      from itself that records the change with `left_chat_member`; as on Telegram, other bots never
-      receive a bot's messages, so they do not learn of the departure. The bot's later requests to
+      from itself that records the change with `left_chat_member`, which, as a service message,
+      the supergroup's other bots receive too. The bot's later requests to
       the supergroup fail with `403 Forbidden: bot is not a member of the supergroup chat`.
     parameters:
       - $ref: '#/components/parameters/SessionId'
@@ -2297,8 +2305,8 @@ paths:
     description: >-
       Telegram Bot API method for banning a user from a supergroup, which needs the
       `can_restrict_members` administrator right. A member is removed, which a service message
-      from the bot records with `left_chat_member`; as on Telegram, only the bot receives it,
-      since bots never receive other bots' messages. A removed bot receives a my_chat_member
+      from the bot records with `left_chat_member`; as on Telegram, every bot of the supergroup
+      receives it, as it does any service message. A removed bot receives a my_chat_member
       update showing it as `kicked`. A user that is not a member is banned before it can join.
       A ban shorter than 30 seconds or longer than 366 days lasts until it is lifted, as on
       Telegram; the emulator never lifts a ban when its `until_date` passes. Banning a user as
