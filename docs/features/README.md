@@ -16,8 +16,8 @@ make the behavior available or establish an implementation schedule.
 
 An area can contain both. For example, sessions intentionally omit Telegram's production traffic
 thresholds, which tests replace with
-[queued rate limit answers](sessions-and-requests.md#rate-limit-answers), while
-[public chat usernames](sessions-and-requests.md#real-gaps) are a real gap.
+[queued rate limit answers](sessions-and-requests.md#rate-limit-answers), while changing
+[BotFather-style settings](sessions-and-requests.md#real-gaps) after creation is a real gap.
 
 ## Feature guide
 
@@ -66,8 +66,8 @@ The official [method registry][upstream-methods] includes these broader areas ab
 emulator. They are real gaps in the intended testing coverage. This list groups them; the inventory
 above determines whether an individual method is available.
 
-- Basic groups, channels, public chat usernames, forum topics, direct messages of channels, and chat
-  migration. Supergroups are the only shared chat kind exposed by the HTTP server.
+- Basic groups, channels, forum topics, direct messages of channels, and chat migration. Supergroups
+  are the only shared chat kind exposed by the HTTP server.
 - Media other than photos and documents, albums, stickers and sticker sets, polls, dice, locations,
   venues, contacts, games, checklists, rich messages, ephemeral messages, drafts and stories.
 - Reactions, pins, chat metadata and photos, `getChat`, invite links, join requests, member

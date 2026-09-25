@@ -348,19 +348,24 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     has_private_forwards: true,
   });
 
-  const supergroup = await owner.createSupergroup({ title: 'Team', description: 'Our team' });
+  const supergroup = await owner.createSupergroup({
+    title: 'Team',
+    username: 'our_team',
+    description: 'Our team',
+  });
   const chat = { type: 'supergroup', chatId: supergroup.id } as const;
   await owner.addChatMember({ chat, userId: member.id });
   await owner.addChatMember({ chat, userId: bot.id });
   await owner.addChatMember({ chat, userId: bot.id });
+  const greeting = await member.sendMessage({ to: chat, text: 'Hello team' });
   if (
     !bot.can_read_all_group_messages || supergroup.type !== 'supergroup' ||
-    supergroup.title !== 'Team' || supergroup.description !== 'Our team'
+    supergroup.title !== 'Team' || supergroup.username !== 'our_team' ||
+    supergroup.description !== 'Our team' || greeting.chat.username !== 'our_team'
   ) {
     throw new Error('Expected the client to create a reading bot and a supergroup');
   }
 
-  const greeting = await member.sendMessage({ to: chat, text: 'Hello team' });
   const botApiPath = `/sessions/${session.id}/bot-api/bot${token}`;
   const menuResponse = await api.request(`${botApiPath}/sendMessage`, {
     method: 'POST',

@@ -48,6 +48,8 @@ import {
   booleanParameter,
   type BotApiRequestParameters,
   type BotApiUploadedFiles,
+  CHAT_USERNAME_PREFIX,
+  type ChatIdentifier,
   decodeBotApiRequestParameters,
   integerParameter,
   jsonParameter,
@@ -320,9 +322,8 @@ const linkPreviewParametersShape = {
   disable_web_page_preview: booleanParameter().optional(),
 };
 
-// Telegram also accepts an `@username` chat_id, which it resolves only for bots and public
-// supergroups and channels; the emulator's supergroups have no usernames, so it accepts only
-// numeric chat IDs. `reply_to_message_id` and `allow_sending_without_reply` are the older form of
+// An `@username` chat_id reaches here already resolved by `resolveChatUsernameParameters`.
+// `reply_to_message_id` and `allow_sending_without_reply` are the older form of
 // `reply_parameters`, which Telegram still accepts.
 const sendOptionsParametersShape = {
   chat_id: integerParameter(z.int()).optional(),
@@ -733,9 +734,59 @@ export async function callBotApiMethod(
     context.bot.id,
     name,
   );
-  return retryAfterSeconds === undefined
-    ? await handler(context, parameters, uploadedFiles)
-    : botApiRetryAfterError(retryAfterSeconds);
+  if (retryAfterSeconds !== undefined) {
+    return botApiRetryAfterError(retryAfterSeconds);
+  }
+  const chatResolution = resolveChatUsernameParameters(context, parameters);
+  return chatResolution.resolved
+    ? await handler(context, chatResolution.parameters, uploadedFiles)
+    : chatResolution.errorAnswer;
+}
+
+/** The parameters that name a chat, which the official Bot API server reads with `check_chat`. */
+const CHAT_PARAMETER_NAMES = ['chat_id', 'from_chat_id'] as const;
+
+/**
+ * Replaces a public username after `@` in the parameters that name a chat with the ID of the chat
+ * it names, as the official Bot API server's `check_chat` resolves it before using the chat; a
+ * username that names no chat a bot may address fails with `Bad Request: chat not found`.
+ *
+ * Telegram resolves the username when it checks the chat, after reading most other parameters;
+ * the emulator resolves it first, so a request that has another fault too may fail for the
+ * username instead.
+ */
+function resolveChatUsernameParameters(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+):
+  | { readonly resolved: true; readonly parameters: BotApiRequestParameters }
+  | { readonly resolved: false; readonly errorAnswer: BotApiMethodAnswer } {
+  let resolvedParameters = parameters;
+  for (const parameterName of CHAT_PARAMETER_NAMES) {
+    const chatIdentifier = parameters[parameterName];
+    if (!chatIdentifier?.startsWith(CHAT_USERNAME_PREFIX)) {
+      continue;
+    }
+    const chatId = resolveChatIdentifier(context, chatIdentifier);
+    if (chatId === undefined) {
+      return { resolved: false, errorAnswer: botApiError(400, CHAT_NOT_FOUND_DESCRIPTION) };
+    }
+    resolvedParameters = { ...resolvedParameters, [parameterName]: String(chatId) };
+  }
+  return { resolved: true, parameters: resolvedParameters };
+}
+
+/**
+ * Finds the ID of the chat a JSON field names by its ID or by a public username after `@`, as
+ * `check_chat` does; `undefined` for a username that names no chat a bot may address.
+ */
+function resolveChatIdentifier(
+  context: BotApiMethodContext,
+  chatIdentifier: ChatIdentifier,
+): number | undefined {
+  return typeof chatIdentifier === 'number'
+    ? chatIdentifier
+    : context.session.botApi.findPublicChatId(chatIdentifier.slice(CHAT_USERNAME_PREFIX.length));
 }
 
 export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
@@ -1247,6 +1298,12 @@ function readSendOptions(
   if (!keyboardReading.read) {
     return keyboardReading;
   }
+  const replyChatId = replyTarget?.chatId === undefined
+    ? undefined
+    : resolveChatIdentifier(context, replyTarget.chatId);
+  if (replyTarget?.chatId !== undefined && replyChatId === undefined) {
+    return { read: false, errorAnswer: botApiError(400, CHAT_NOT_FOUND_DESCRIPTION) };
+  }
   return {
     read: true,
     options: {
@@ -1256,9 +1313,7 @@ function readSendOptions(
       chatId,
       replyTo: replyTarget === undefined ? undefined : {
         messageId: replyTarget.messageId,
-        ...(replyTarget.chatId === undefined || replyTarget.chatId === chatId
-          ? {}
-          : { chatId: replyTarget.chatId }),
+        ...(replyChatId === undefined || replyChatId === chatId ? {} : { chatId: replyChatId }),
         allowSendingWithoutReply: replyTarget.allowSendingWithoutReply,
         ...(replyTarget.quote === undefined || quoteReading === undefined ? {} : {
           quote: { ...quoteReading.formattedText, position: replyTarget.quote.position },
@@ -2087,7 +2142,11 @@ function handleSetMyCommands(
     return botApiError(400, invalidParametersDescription);
   }
   const { commands, scope, language_code: languageCode } = parsedParameters.data;
-  const targetReading = readMyCommandsTarget({ scope, languageCode }, invalidParametersDescription);
+  const targetReading = readMyCommandsTarget(
+    context,
+    { scope, languageCode },
+    invalidParametersDescription,
+  );
   if (!targetReading.read) {
     return targetReading.errorAnswer;
   }
@@ -2120,7 +2179,7 @@ function handleGetMyCommands(
   if (!parsedParameters.success) {
     return botApiError(400, invalidParametersDescription);
   }
-  const targetReading = readMyCommandsTarget({
+  const targetReading = readMyCommandsTarget(context, {
     scope: parsedParameters.data.scope,
     languageCode: parsedParameters.data.language_code,
   }, invalidParametersDescription);
@@ -2144,7 +2203,7 @@ function handleDeleteMyCommands(
   if (!parsedParameters.success) {
     return botApiError(400, invalidParametersDescription);
   }
-  const targetReading = readMyCommandsTarget({
+  const targetReading = readMyCommandsTarget(context, {
     scope: parsedParameters.data.scope,
     languageCode: parsedParameters.data.language_code,
   }, invalidParametersDescription);
@@ -2161,12 +2220,17 @@ function handleDeleteMyCommands(
 
 /** Reads the scope and language that address one of the bot's command lists. */
 function readMyCommandsTarget(
+  context: BotApiMethodContext,
   { scope, languageCode }: { readonly scope: unknown; readonly languageCode: string },
   invalidParametersDescription: string,
 ):
   | { readonly read: true; readonly target: MyCommandsTarget }
   | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
-  const scopeReading = readBotCommandScopeParameter(scope, invalidParametersDescription);
+  const scopeReading = readBotCommandScopeParameter(
+    scope,
+    invalidParametersDescription,
+    (chatIdentifier) => resolveChatIdentifier(context, chatIdentifier),
+  );
   if (!scopeReading.read) {
     return { read: false, errorAnswer: botApiError(400, scopeReading.description) };
   }

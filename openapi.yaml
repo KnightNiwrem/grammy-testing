@@ -354,7 +354,9 @@ paths:
       summary: Create a supergroup owned by a virtual account
       description: >-
         Creates a supergroup whose only member is the account, as its owner. The owner adds
-        accounts and bots to it as members.
+        accounts and bots to it as members. With a `username`, the supergroup is public: bots see
+        the username in its chat and can address it as `@username` wherever a Bot API method
+        takes a chat.
       requestBody:
         required: true
         content:
@@ -372,6 +374,8 @@ paths:
           description: The request body is malformed or does not match the supergroup schema.
         '404':
           description: The session or account does not exist.
+        '409':
+          description: Another account, bot, or supergroup of the session has the username.
         '507':
           description: The test session cannot allocate another supergroup identifier.
   /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/members/{userId}:
@@ -3499,6 +3503,12 @@ components:
         title:
           type: string
           minLength: 1
+        username:
+          type: string
+          minLength: 1
+          description: >-
+            Makes the supergroup public under this username, which must be unique among the
+            session's usernames, compared without case; omitted for a private supergroup.
         description:
           type: string
           minLength: 1
@@ -3523,6 +3533,9 @@ components:
               const: supergroup
             title:
               type: string
+            username:
+              type: string
+              description: The username of a public supergroup; omitted for a private one.
             description:
               type: string
     SendAccountMessageRequest:
@@ -3673,6 +3686,9 @@ components:
           $ref: '#/components/schemas/SupergroupChatId'
         title:
           type: string
+        username:
+          type: string
+          description: The username of a public supergroup; omitted for a private one.
         type:
           type: string
           const: supergroup
@@ -4759,6 +4775,18 @@ components:
           description: Legacy alias of `can_manage_video_chats`.
         custom_title:
           $ref: '#/components/schemas/CustomTitle'
+    ChatIdentifier:
+      description: >-
+        A chat as a Bot API method names it: by its identifier, or, as the official server's
+        `check_chat` reads it, by `@` followed by a public username. A username names a public
+        supergroup, or the private chat with a bot; any other username fails with `Bad Request:
+        chat not found`. The emulator resolves a username in `chat_id` or `from_chat_id` before
+        reading the method's other parameters, so a request with another fault may fail for the
+        username instead.
+      oneOf:
+        - type: integer
+        - type: string
+          pattern: '^@'
     CustomTitle:
       type: string
       minLength: 1
@@ -4786,7 +4814,7 @@ components:
         - user_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
             where the method is unavailable, the account's user ID.
@@ -5178,11 +5206,10 @@ components:
         - text
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
-            its negative chat ID. Telegram's `@username` form is not accepted, because Telegram
-            resolves it only for bots and public supergroups and channels.
+            its negative chat ID, or `@` followed by the username of a public supergroup.
         text:
           type: string
           minLength: 1
@@ -5452,7 +5479,7 @@ components:
           type: integer
           description: Identifier of the replied message in the bot's chat.
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the replied message's chat, a private chat with an account that has
             written to the bot or a supergroup the bot is a member of; omitted for the chat the
@@ -5516,7 +5543,7 @@ components:
         - text
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
             its negative chat ID.
@@ -5554,7 +5581,7 @@ components:
         - chat_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat, as for `sendMessage`: for a private chat, the account's user
             ID; for a supergroup, its negative chat ID.
@@ -5614,12 +5641,12 @@ components:
         - message_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat to forward to, as for `sendMessage`: for a private chat, the
             account's user ID; for a supergroup, its negative chat ID.
         from_chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: Identifier of the chat of the forwarded message, as for `chat_id`.
         message_id:
           type: integer
@@ -5645,10 +5672,10 @@ components:
         - message_ids
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: Identifier of the chat to forward to, as for `forwardMessage`.
         from_chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: Identifier of the chat of the forwarded messages, as for `chat_id`.
         message_ids:
           $ref: '#/components/schemas/RepeatedMessageIds'
@@ -5676,10 +5703,10 @@ components:
         - message_ids
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: Identifier of the chat to copy to, as for `forwardMessage`.
         from_chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: Identifier of the chat of the copied messages, as for `chat_id`.
         message_ids:
           $ref: '#/components/schemas/RepeatedMessageIds'
@@ -5721,10 +5748,10 @@ components:
         - message_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: Identifier of the chat to copy to, as for `forwardMessage`.
         from_chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: Identifier of the chat of the copied message, as for `chat_id`.
         message_id:
           type: integer
@@ -5778,7 +5805,7 @@ components:
         - chat_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: Identifier of the chat, as for `sendMessage`.
         document:
           type: string
@@ -5842,7 +5869,7 @@ components:
         bot's inline mode by `inline_message_id`.
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
             its negative chat ID.
@@ -5916,7 +5943,7 @@ components:
         bot's inline mode by `inline_message_id`.
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
             its negative chat ID.
@@ -6011,7 +6038,7 @@ components:
         - message_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
             its negative chat ID.
@@ -6026,7 +6053,7 @@ components:
         - message_ids
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
             its negative chat ID.
@@ -6151,7 +6178,7 @@ components:
         - user_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
             its negative chat ID.
@@ -6164,7 +6191,7 @@ components:
         - chat_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
             which has no administrators, the account's user ID.
@@ -6179,7 +6206,7 @@ components:
         - chat_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
             its negative chat ID.
@@ -6191,7 +6218,7 @@ components:
         - user_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
             whose members cannot be banned, the account's user ID.
@@ -6213,7 +6240,7 @@ components:
         - user_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
             where the method is unavailable, the account's user ID.
@@ -6269,7 +6296,7 @@ components:
         - chat_id
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
             which cannot be left, the account's user ID.
@@ -6281,7 +6308,7 @@ components:
         - action
       properties:
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: >-
             Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
             its negative chat ID.
@@ -6341,7 +6368,7 @@ components:
             - chat_administrators
             - chat_member
         chat_id:
-          type: integer
+          $ref: '#/components/schemas/ChatIdentifier'
           description: Required for `chat`, `chat_administrators`, and `chat_member`.
         user_id:
           type: integer

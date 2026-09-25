@@ -187,6 +187,8 @@ const setCustomTitleRequestSchema = z.strictObject({
 
 const createSupergroupRequestSchema = z.strictObject({
   title: z.string().min(1),
+  /** Makes the supergroup public under this username, unique among the session's usernames. */
+  username: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
 });
 
@@ -366,13 +368,26 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 400);
     }
 
+    const { title, username, description } = parsedRequest.data;
     const result = context.get('emulationSession').sharedChatAdministration.createSupergroup({
       creatorAccountId: accountId.data,
-      title: parsedRequest.data.title,
-      description: parsedRequest.data.description,
+      title,
+      ...(username === undefined ? {} : { username }),
+      description,
     });
     if (!result.created) {
-      return context.body(null, result.reason === 'creator_account_not_found' ? 404 : 507);
+      switch (result.reason) {
+        case 'creator_account_not_found':
+          return context.body(null, 404);
+        case 'username_taken':
+          return context.body(null, 409);
+        case 'identity_limit_reached':
+          return context.body(null, 507);
+        default: {
+          const unhandledReason: never = result.reason;
+          throw new Error(`Unhandled supergroup creation failure: ${unhandledReason}`);
+        }
+      }
     }
     return context.json({ supergroup: presentSupergroup(result.supergroup) }, 201);
   });
@@ -1377,11 +1392,12 @@ function setSupergroupContentProtection(
 }
 
 /** Shows a supergroup as the Bot API shows a chat, with its description when it has one. */
-function presentSupergroup({ id, title, description }: Supergroup) {
+function presentSupergroup({ id, title, username, description }: Supergroup) {
   return {
     id,
     type: 'supergroup' as const,
     title,
+    ...(username === undefined ? {} : { username }),
     ...(description === undefined ? {} : { description }),
   };
 }

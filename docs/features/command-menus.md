@@ -47,8 +47,8 @@ entities are handled separately by [text formatting](text-formatting.md).
 Changing supported BotFather-style settings after bot creation is also a
 [real gap](sessions-and-requests.md#real-gaps).
 
-Username chat targets are [missing](sessions-and-requests.md#real-gaps). Menu buttons, bot
-descriptions and default administrator rights are also real gaps; these methods are not implemented.
+Menu buttons, bot descriptions and default administrator rights are also real gaps; these methods
+are not implemented.
 
 ## Local evidence
 

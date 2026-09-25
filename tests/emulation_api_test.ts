@@ -5051,6 +5051,123 @@ Deno.test('the owner protects all supergroup content from forwarding and saving'
   }
 });
 
+Deno.test('bots address public supergroups by their usernames', async () => {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const sessionPath = (await api.request('/sessions', { method: 'POST' })).headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const owner = await createAccount(api, sessionPath, 'Ada');
+  await api.request(
+    `${sessionPath}/accounts`,
+    jsonRequest('POST', { first_name: 'Grace', username: 'grace' }),
+  );
+  const bot = await createBot(api, sessionPath, 'team_bot');
+  const createSupergroup = (body: Record<string, unknown>) =>
+    api.request(`${sessionPath}/accounts/${owner.id}/supergroups`, jsonRequest('POST', body));
+  const createResponse = await createSupergroup({ title: 'Team', username: 'team_chat' });
+  const { supergroup } = await createResponse.json() as {
+    supergroup: { id: number; username?: string };
+  };
+  const duplicateStatuses = [
+    (await createSupergroup({ title: 'Copy', username: 'TEAM_CHAT' })).status,
+    (await createSupergroup({ title: 'Copy', username: 'grace' })).status,
+  ];
+  await api.request(
+    `${sessionPath}/accounts/${owner.id}/conversations/supergroup/${supergroup.id}/members/${bot.bot.id}`,
+    { method: 'PUT' },
+  );
+  await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: '/start' }),
+  );
+  if (
+    createResponse.status !== 201 || supergroup.username !== 'team_chat' ||
+    JSON.stringify(duplicateStatuses) !== JSON.stringify([409, 409])
+  ) {
+    throw new Error(
+      `Expected a public supergroup with a unique username, received ${
+        JSON.stringify({ supergroup, duplicateStatuses })
+      }`,
+    );
+  }
+
+  const callBot = (method: string, parameters: Record<string, unknown>) =>
+    callBotApi(api, `${bot.botApiPath}/${method}`, parameters).then(({ body }) => body);
+  const sent = botApiResult(await callBot('sendMessage', { chat_id: '@Team_Chat', text: 'Hi' }));
+  const forward = botApiResult(
+    await callBot('forwardMessage', {
+      chat_id: owner.id,
+      from_chat_id: '@team_chat',
+      message_id: sent?.message_id,
+    }),
+  );
+  const externalReply = botApiResult(
+    await callBot('sendMessage', {
+      chat_id: owner.id,
+      text: 'About that',
+      reply_parameters: { chat_id: '@team_chat', message_id: sent?.message_id },
+    }),
+  );
+  const member = botApiResult(
+    await callBot('getChatMember', { chat_id: '@team_chat', user_id: owner.id }),
+  );
+  const commandsSet = await callBot('setMyCommands', {
+    commands: [{ command: 'plan', description: 'Plan the week' }],
+    scope: { type: 'chat', chat_id: '@team_chat' },
+  });
+  const commands = botApiResult(
+    await callBot('getMyCommands', { scope: { type: 'chat', chat_id: supergroup.id } }),
+  ) as unknown;
+  const expectedChat = {
+    id: supergroup.id,
+    title: 'Team',
+    username: 'team_chat',
+    type: 'supergroup',
+  };
+  if (
+    JSON.stringify(sent?.chat) !== JSON.stringify(expectedChat) ||
+    forward?.text !== 'Hi' ||
+    (externalReply?.external_reply as { chat?: unknown } | undefined)?.chat === undefined ||
+    member?.status !== 'creator' ||
+    JSON.stringify(commandsSet) !== JSON.stringify({ ok: true, result: true }) ||
+    JSON.stringify(commands) !==
+      JSON.stringify([{ command: 'plan', description: 'Plan the week' }])
+  ) {
+    throw new Error(
+      `Expected the username to name the supergroup, received ${
+        JSON.stringify({ sent, forward, externalReply, member, commandsSet, commands })
+      }`,
+    );
+  }
+
+  // As Telegram's check_chat does, only public supergroups and bots are found by username.
+  const failures = [
+    await callBot('sendMessage', { chat_id: '@grace', text: 'Hi' }),
+    await callBot('sendMessage', { chat_id: '@nobody', text: 'Hi' }),
+    await callBot('sendMessage', { chat_id: '@team_bot', text: 'Hi' }),
+    await callBot('copyMessage', { chat_id: owner.id, from_chat_id: '@nobody', message_id: 1 }),
+    await callBot('sendMessage', {
+      chat_id: owner.id,
+      text: 'Hi',
+      reply_parameters: { chat_id: '@nobody', message_id: 1 },
+    }),
+    await callBot('getMyCommands', { scope: { type: 'chat', chat_id: '@nobody' } }),
+  ];
+  if (
+    failures.some((failure) =>
+      !isBadRequestResponse(failure) || failure.description !== 'Bad Request: chat not found'
+    )
+  ) {
+    throw new Error(
+      `Expected unknown usernames to name no chat, received ${JSON.stringify(failures)}`,
+    );
+  }
+});
+
 Deno.test('administrator bots that request chat_member updates observe members joining', async () => {
   const { api, sessionPath, owner, bot, readerBot, supergroup, supergroupPath } =
     await createSupergroupFixture();

@@ -8,7 +8,10 @@ import type {
   NonOwnerMemberStatus,
   SharedChatRegistrationResult,
 } from '../repositories/shared_chat.ts';
-import type { IdentityReservationResult } from '../repositories/telegram_identity.ts';
+import type {
+  IdentityReservationResult,
+  TelegramIdentity,
+} from '../repositories/telegram_identity.ts';
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import {
   type ChatMembership,
@@ -62,12 +65,15 @@ export type BasicGroupCreationResult =
 
 export interface CreateSupergroupInput {
   readonly title: string;
+  /** Makes the supergroup public under this username; omitted for a private supergroup. */
+  readonly username?: string;
   readonly description?: string;
   readonly creatorAccountId: number;
 }
 
 export type SupergroupCreationFailureReason =
   | 'creator_account_not_found'
+  | 'username_taken'
   | 'identity_limit_reached';
 
 export type SupergroupCreationResult =
@@ -337,7 +343,10 @@ interface BotLookup {
 }
 
 interface SharedChatIdentityReservationStore {
-  reserveIdentity(input: { readonly kind: SharedChat['kind'] }): IdentityReservationResult;
+  reserveIdentity(
+    input: { readonly kind: SharedChat['kind']; readonly username?: string },
+  ): IdentityReservationResult;
+  getByUsername(username: string): TelegramIdentity | undefined;
 }
 
 interface BasicGroupStore {
@@ -487,14 +496,21 @@ export class SharedChatAdministrationService {
       return { created: false, reason: 'creator_account_not_found' };
     }
 
-    const supergroupId = this.#reserveSharedChatId('supergroup');
-    if (supergroupId === undefined) {
-      return { created: false, reason: 'identity_limit_reached' };
+    const identityReservation = this.#identities.reserveIdentity({
+      kind: 'supergroup',
+      ...(input.username === undefined ? {} : { username: input.username }),
+    });
+    if (!identityReservation.reserved) {
+      return { created: false, reason: identityReservation.reason };
+    }
+    if (identityReservation.identity.kind !== 'supergroup') {
+      throw new Error('Supergroup identity reservation returned a different identity kind');
     }
     const supergroup: Supergroup = {
       kind: 'supergroup',
-      id: supergroupId,
+      id: identityReservation.identity.id,
       title: input.title,
+      ...(input.username === undefined ? {} : { username: input.username }),
       description: input.description,
       chatInstance: createChatInstance(),
       hasProtectedContent: false,
@@ -859,6 +875,22 @@ export class SharedChatAdministrationService {
       throw new Error(`Supergroup ${input.chatId} could not be updated`);
     }
     return { set: true };
+  }
+
+  /**
+   * Finds the chat a bot addresses by a public username, as the official Bot API server's
+   * `check_chat` finds it with `searchPublicChat`: a public supergroup, or the private chat with a
+   * bot, whose ID is the bot's. An account's username names no chat a bot may address this way.
+   */
+  findPublicChatId(username: string): number | undefined {
+    const identity = this.#identities.getByUsername(username);
+    switch (identity?.kind) {
+      case 'supergroup':
+      case 'bot':
+        return identity.id;
+      default:
+        return undefined;
+    }
   }
 
   /** Resolves a member of a supergroup that the acting account owns, for the owner to manage. */

@@ -112,6 +112,7 @@ const privateChatSchema = z.strictObject({
 const supergroupChatSchema = z.strictObject({
   id: supergroupIdSchema,
   title: z.string(),
+  username: z.string().min(1).optional(),
   type: z.literal('supergroup'),
 });
 
@@ -380,6 +381,7 @@ const supergroupSchema: z.ZodType<Supergroup> = z.strictObject({
   id: supergroupIdSchema,
   type: z.literal('supergroup'),
   title: z.string().min(1),
+  username: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
 });
 

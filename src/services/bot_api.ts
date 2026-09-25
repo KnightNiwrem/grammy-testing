@@ -1136,8 +1136,13 @@ interface BotApiServiceDependencies {
   readonly inlineMessages: InlineMessageLookup;
   readonly botCommands: BotCommandLists;
   readonly chatActions: ChatActions;
+  readonly publicChats: PublicChatDirectory;
   /** Hides the accounts whose privacy settings keep forwards from linking to them. */
   readonly getPrivateForwardName: PrivateForwardNameLookup;
+}
+
+interface PublicChatDirectory {
+  findPublicChatId(username: string): number | undefined;
 }
 
 /**
@@ -1162,6 +1167,7 @@ export class BotApiService {
   readonly #inlineMessages: InlineMessageLookup;
   readonly #botCommands: BotCommandLists;
   readonly #chatActions: ChatActions;
+  readonly #publicChats: PublicChatDirectory;
   readonly #getPrivateForwardName: PrivateForwardNameLookup;
 
   constructor(
@@ -1179,6 +1185,7 @@ export class BotApiService {
       inlineMessages,
       botCommands,
       chatActions,
+      publicChats,
       getPrivateForwardName,
     }: BotApiServiceDependencies,
   ) {
@@ -1195,7 +1202,17 @@ export class BotApiService {
     this.#inlineMessages = inlineMessages;
     this.#botCommands = botCommands;
     this.#chatActions = chatActions;
+    this.#publicChats = publicChats;
     this.#getPrivateForwardName = getPrivateForwardName;
+  }
+
+  /**
+   * Finds the chat that a bot addresses by a public username, as the official Bot API server's
+   * `check_chat` finds it: a public supergroup, or the private chat with a bot. Returns
+   * `undefined` for any other username, which Telegram answers as a chat it cannot find.
+   */
+  findPublicChatId(username: string): number | undefined {
+    return this.#publicChats.findPublicChatId(username);
   }
 
   /** Returns the profile of the bot that owns `token`, or `undefined` if no bot does. */

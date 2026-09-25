@@ -64,6 +64,12 @@ export interface BasicGroup extends SharedChatBase {
 
 export interface Supergroup extends SharedChatBase {
   readonly kind: 'supergroup';
+  /**
+   * The public username that makes the supergroup public, by which bots can address it as
+   * `@username`; omitted for a private supergroup. It is unique among the session's usernames,
+   * compared without case.
+   */
+  readonly username?: string;
   readonly description?: string;
   /** Telegram's `chat_instance` of the supergroup, as `PrivateConversation` describes it. */
   readonly chatInstance: string;

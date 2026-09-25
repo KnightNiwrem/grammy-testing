@@ -145,8 +145,6 @@ production read permissions.
   messaging workflow for these chat kinds. See the
   [feature inventory](README.md#unimplemented-areas).
 
-- **Public usernames.** Public chat usernames and username targets are
-  [missing](sessions-and-requests.md#real-gaps).
 - **Topics.** Forum topics and channel direct-message topics are unsupported.
 - **Chat migration.** Basic-group-to-supergroup migration and its API effects are unsupported.
 

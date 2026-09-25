@@ -27,6 +27,18 @@ the body. Top-level JSON values are converted to parameter text: `chat_id: 123` 
 work alike, and structured parameters may be JSON values or JSON-encoded strings. This follows
 TDLib's [HTTP parameter reader][http-reader] and the Bot API's [query handling][query-source].
 
+### Chat usernames
+
+A supergroup created with a `username` is public. Wherever a method takes a chat, in `chat_id`,
+`from_chat_id`, `reply_parameters` or a command scope, a bot can name it as `@username`, compared
+without case. As the official server's [`Client::check_chat`][check-chat] finds a username with
+`searchPublicChat`, a username names a public supergroup or the private chat with a bot; an
+account's username, or one that nobody has, fails with `Bad Request: chat not found`. Supergroup
+usernames share the session's username namespace with accounts and bots, and chats of public
+supergroups show `username`, as the server's [`JsonChat`][json-chat] does. Telegram resolves a
+username when it checks the chat; the emulator resolves `chat_id` and `from_chat_id` before reading
+the method's other parameters, so a request with another fault may fail for the username instead.
+
 Responses use Telegram's `ok`/`result` or `ok`/`error_code`/`description` envelope. An unknown
 virtual token gives `401 Unauthorized`; an unimplemented method gives
 `404 Not Found: method not found`. Requests under an absent session use the emulation API's plain
@@ -109,10 +121,6 @@ The linked feature pages describe these differences in context.
 
 ## Real gaps
 
-**Public usernames and chat targets.** Only numeric chat IDs work; public supergroup/channel
-usernames and username targets are missing. The official server resolves username targets in
-[`Client::check_chat`][check-chat].
-
 **Additional feature parameters.** Options for unimplemented features, including
 `business_connection_id`, `message_thread_id`, `direct_messages_topic_id`, ephemeral parameters and
 `allow_paid_broadcast`, are rejected. These belong to the
@@ -142,4 +150,5 @@ managing individual profiles is missing.
 [subscriptions]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L18310-L18364
 [polling]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L16926-L16949
 [check-chat]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L8869-L8895
+[json-chat]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L1554-L1700
 [retry-after-error]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Query.cpp#L120-L127

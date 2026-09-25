@@ -152,6 +152,11 @@ export interface AccountForwardMessageInput<Target extends MessageTarget = Messa
 
 export interface CreateSupergroupInput {
   readonly title: string;
+  /**
+   * Makes the supergroup public under this username, unique among the session's usernames, so
+   * that bots can address it as `@username`; omitted for a private supergroup.
+   */
+  readonly username?: string;
   readonly description?: string;
 }
 
@@ -161,6 +166,8 @@ export interface Supergroup {
   readonly id: number;
   readonly type: 'supergroup';
   readonly title: string;
+  /** Omitted for a private supergroup. */
+  readonly username?: string;
   readonly description?: string;
 }
 
@@ -281,6 +288,8 @@ export interface PrivateChat {
 export interface SupergroupChat {
   readonly id: number;
   readonly title: string;
+  /** Omitted for a private supergroup. */
+  readonly username?: string;
   readonly type: 'supergroup';
 }
 

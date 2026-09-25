@@ -189,6 +189,7 @@ export function createEmulationSession(id: string): EmulationSession {
     inlineMessages: messages,
     botCommands,
     chatActions,
+    publicChats: sharedChatAdministration,
     getPrivateForwardName: getAccountPrivateForwardName,
   });
 

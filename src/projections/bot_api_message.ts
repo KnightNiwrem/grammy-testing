@@ -685,8 +685,9 @@ function projectGroupChat(chat: BasicGroup | Supergroup): BotApiGroupChat {
     : { id: chat.id, title: chat.title, type: 'group' };
 }
 
-function projectSupergroupChat({ id, title }: Supergroup): BotApiSupergroupChat {
-  return { id, title, type: 'supergroup' };
+/** Shows a supergroup as the official Bot API server's `JsonChat` does, with its username. */
+function projectSupergroupChat({ id, title, username }: Supergroup): BotApiSupergroupChat {
+  return { id, title, ...(username === undefined ? {} : { username }), type: 'supergroup' };
 }
 
 function projectTextEntity(

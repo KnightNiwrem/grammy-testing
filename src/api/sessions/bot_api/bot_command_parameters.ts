@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import type { BotCommandScope } from '../../../types/bot_command.ts';
-import { jsonParameter } from './request_parameters.ts';
+import { type ChatIdentifier, chatIdentifierSchema, jsonParameter } from './request_parameters.ts';
 
 const botCommandParameterSchema = z.strictObject({
   command: z.string(),
@@ -34,17 +34,18 @@ const scopeTypeSchema = z.looseObject({ type: z.string() });
 const chatlessScopeSchema = z.strictObject({
   type: z.enum(['default', 'all_private_chats', 'all_group_chats', 'all_chat_administrators']),
 });
-// Telegram also accepts an `@username` chat_id, which it resolves only for public supergroups and
-// channels; the emulator's supergroups have no usernames, so it accepts only numeric chat IDs.
 const chatScopeSchema = z.strictObject({
   type: z.enum(['chat', 'chat_administrators']),
-  chat_id: z.int(),
+  chat_id: chatIdentifierSchema,
 });
 const chatMemberScopeSchema = z.strictObject({
   type: z.literal('chat_member'),
-  chat_id: z.int(),
+  chat_id: chatIdentifierSchema,
   user_id: z.int(),
 });
+
+/** The description Telegram gives for a scope whose `@username` names no chat. */
+const CHAT_NOT_FOUND_DESCRIPTION = 'Bad Request: chat not found';
 
 /**
  * Reads a `scope` parameter as the official Bot API server's `get_bot_command_scope` does, with
@@ -52,11 +53,13 @@ const chatMemberScopeSchema = z.strictObject({
  * scope is the default scope.
  *
  * `invalidParametersDescription` answers scopes that Telegram would read leniently, such as chat
- * IDs written as strings, which are rejected instead to surface the bot's mistake in tests.
+ * IDs written as strings, which are rejected instead to surface the bot's mistake in tests. A
+ * chat named by a public username is found with `findChatId`, as `check_chat` finds it.
  */
 export function readBotCommandScopeParameter(
   value: unknown,
   invalidParametersDescription: string,
+  findChatId: (chatIdentifier: ChatIdentifier) => number | undefined,
 ): BotCommandScopeParameterReading {
   const scopeError = (error: string): BotCommandScopeParameterReading => ({
     read: false,
@@ -88,20 +91,27 @@ export function readBotCommandScopeParameter(
     case 'chat':
     case 'chat_administrators': {
       const scope = chatScopeSchema.safeParse(value);
-      return scope.success
-        ? { read: true, scope: { type: scope.data.type, chatId: scope.data.chat_id } }
-        : malformedScope;
+      if (!scope.success) {
+        return malformedScope;
+      }
+      const chatId = findChatId(scope.data.chat_id);
+      return chatId === undefined
+        ? { read: false, description: CHAT_NOT_FOUND_DESCRIPTION }
+        : { read: true, scope: { type: scope.data.type, chatId } };
     }
     case 'chat_member': {
       const scope = chatMemberScopeSchema.safeParse(value);
       if (!scope.success) {
         return malformedScope;
       }
-      const { chat_id: chatId, user_id: userId } = scope.data;
+      const { chat_id: chatIdentifier, user_id: userId } = scope.data;
       if (userId <= 0) {
         return scopeError('Invalid user_id specified');
       }
-      return { read: true, scope: { type: 'chat_member', chatId, userId } };
+      const chatId = findChatId(chatIdentifier);
+      return chatId === undefined
+        ? { read: false, description: CHAT_NOT_FOUND_DESCRIPTION }
+        : { read: true, scope: { type: 'chat_member', chatId, userId } };
     }
     default:
       return scopeError('Unsupported type specified');

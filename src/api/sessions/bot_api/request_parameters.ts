@@ -215,3 +215,18 @@ export function jsonParameter<Output>(valueSchema: z.ZodType<Output>) {
     }
   }).pipe(valueSchema);
 }
+
+/** The prefix that marks a chat named by its public username rather than its ID. */
+export const CHAT_USERNAME_PREFIX = '@';
+
+/**
+ * A chat that a JSON object names, as the official Bot API server's `check_chat` reads it: by its
+ * ID, or by a public username after `@`. Telegram also reads an ID written as a string; the
+ * emulator requires a JSON number, to surface the bot's mistake in tests.
+ */
+export const chatIdentifierSchema = z.union([
+  z.int(),
+  z.string().startsWith(CHAT_USERNAME_PREFIX),
+]);
+
+export type ChatIdentifier = z.infer<typeof chatIdentifierSchema>;

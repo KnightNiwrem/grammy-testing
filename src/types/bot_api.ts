@@ -22,6 +22,8 @@ export interface BotApiBasicGroupChat {
 export interface BotApiSupergroupChat {
   readonly id: number;
   readonly title: string;
+  /** Present only for a public supergroup. */
+  readonly username?: string;
   readonly type: 'supergroup';
 }
 

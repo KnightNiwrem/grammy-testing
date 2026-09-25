@@ -202,6 +202,15 @@ function createBotApiFixture() {
     callbackQueries: new CallbackQueryRepository(),
     events,
   });
+  const sharedChatAdministration = new SharedChatAdministrationService({
+    identities,
+    accounts,
+    bots,
+    sharedChats,
+    supergroupMessages: supergroupMessaging,
+    events,
+    currentUnixTimeSeconds: () => 1_700_000_000,
+  });
   const botApi = new BotApiService({
     bots,
     updatePolling: new BotUpdatePollingService({ botUpdates, updateSubscriptions }),
@@ -217,15 +226,7 @@ function createBotApiFixture() {
     }),
     botMessages: privateMessaging,
     supergroupBotMessages: supergroupMessaging,
-    chatMemberships: new SharedChatAdministrationService({
-      identities,
-      accounts,
-      bots,
-      sharedChats,
-      supergroupMessages: supergroupMessaging,
-      events,
-      currentUnixTimeSeconds: () => 1_700_000_000,
-    }),
+    chatMemberships: sharedChatAdministration,
     botMessageViews,
     mediaFiles: new MediaFileService({ files }),
     callbackQueries,
@@ -254,6 +255,7 @@ function createBotApiFixture() {
       chatActions: new ChatActionRepository(),
       currentTimeMilliseconds: () => 1_700_000_000_000,
     }),
+    publicChats: sharedChatAdministration,
     getPrivateForwardName: () => undefined,
   });
   return { virtualUsers, privateMessaging, botApi };
