@@ -1,5 +1,5 @@
 import type { FormattedText, TextEntity } from '../types/virtual_message.ts';
-import { findBotCommandEntities } from './bot_command.ts';
+import { findDetectedEntities } from './detected_entities.ts';
 import {
   isRemovedCharacter,
   isReplacedWithSpace,
@@ -57,8 +57,8 @@ const EMPTY_TEXT_PATTERN =
 /**
  * Validates entity arguments, then cleans the text, trims it, and makes entities consistent:
  * sorted, properly nested, with same-type formatting merged and split around links and code.
- * Finally marks the bot commands that Telegram detects in chats with bots, which every emulated
- * chat is.
+ * Finally marks the entities that Telegram detects in text by itself, as `findDetectedEntities`
+ * finds them.
  *
  * Text links to `tg://user?id=` become text mentions, as on Telegram.
  */
@@ -145,7 +145,7 @@ export function fixFormattedText(
     fixed: true,
     formattedText: {
       text: fixedText,
-      entities: mergeDetectedEntities(entities, findBotCommandEntities(fixedText)),
+      entities: mergeDetectedEntities(entities, findDetectedEntities(fixedText)),
     },
     trimmedLeadingLength: trimmedStart,
   };
@@ -357,7 +357,13 @@ function getEntityCategory(entity: TextEntity): TextEntityCategory {
     case 'code':
     case 'date_time':
       return 'pre';
+    case 'mention':
+    case 'hashtag':
+    case 'cashtag':
     case 'bot_command':
+    case 'url':
+    case 'email':
+    case 'bank_card_number':
     case 'text_link':
     case 'text_mention':
     case 'custom_emoji':

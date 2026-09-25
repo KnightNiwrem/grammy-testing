@@ -124,7 +124,13 @@ const messageEntitySchema: z.ZodType<MessageEntity> = z.union([
   z.strictObject({
     type: z.enum(
       [
+        'mention',
+        'hashtag',
+        'cashtag',
         'bot_command',
+        'url',
+        'email',
+        'bank_card_number',
         'bold',
         'italic',
         'underline',

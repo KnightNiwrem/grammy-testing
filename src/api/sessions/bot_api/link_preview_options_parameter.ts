@@ -5,8 +5,8 @@ import { jsonParameter } from './request_parameters.ts';
 /**
  * A `LinkPreviewOptions` object.
  *
- * The emulator does not detect links or generate link previews, so it validates the options and
- * otherwise ignores them, and messages never carry `link_preview_options`.
+ * The emulator does not generate link previews, so it validates the options and otherwise ignores
+ * them, and messages never carry `link_preview_options`.
  */
 export const linkPreviewOptionsSchema = z.strictObject({
   is_disabled: z.boolean().optional(),

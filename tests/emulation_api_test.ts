@@ -1159,6 +1159,60 @@ Deno.test('URL buttons follow Telegram link rules', async () => {
   }
 });
 
+Deno.test('messages carry the entities Telegram detects in their text', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const linkReceived = Promise.withResolvers<readonly string[]>();
+  grammyBot.on('message::url', (context) => {
+    linkReceived.resolve(context.entities('url').map(({ text }) => text));
+  });
+  const polling = grammyBot.start();
+  try {
+    await api.request(
+      `${sessionPath}/accounts/${accountId}/messages`,
+      jsonRequest('POST', {
+        to: { type: 'private', botId: createdBot.bot.id },
+        text: 'Docs at https://grammy.dev/guide and grammy.dev #help',
+      }),
+    );
+    const receivedLinks = await Promise.race([linkReceived.promise, polling.then(() => [])]);
+    if (
+      JSON.stringify(receivedLinks) !== JSON.stringify(['https://grammy.dev/guide', 'grammy.dev'])
+    ) {
+      throw new Error(`Expected the bot to receive both links, received ${receivedLinks}`);
+    }
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+
+  const reply = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Write to @grammy_team or support@grammy.dev',
+    entities: [{ type: 'url', offset: 0, length: 5 }],
+  });
+  const expectedEntities = [
+    { type: 'mention', offset: 9, length: 12 },
+    { type: 'email', offset: 25, length: 18 },
+  ];
+  if (
+    JSON.stringify(botApiResult(reply.body)?.entities) !== JSON.stringify(expectedEntities)
+  ) {
+    throw new Error(
+      `Expected detected entities instead of the supplied one, received ${
+        JSON.stringify(reply.body)
+      }`,
+    );
+  }
+});
+
 Deno.test('keyboard buttons keep their style and custom emoji icon', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
     await createPrivateConversationFixture();

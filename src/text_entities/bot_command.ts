@@ -15,8 +15,8 @@ const WORD_CHARACTER_PATTERN = /^[\p{L}\p{N}_]$/u;
  *
  * Mirrors TDLib's `match_bot_commands` in `td/telegram/MessageEntity.cpp`: a command is
  * `/[A-Za-z0-9_]{1,64}` with an optional `@[A-Za-z0-9_]{3,32}` address, and it must not touch a
- * word character, `/`, `<`, or `>` on either side. This covers bot commands only; it does not
- * detect any other Telegram entity type.
+ * word character, `/`, `<`, or `>` on either side. `findDetectedEntities` detects the other
+ * entity types.
  */
 export function findBotCommandEntities(text: string): TextEntity[] {
   const entities: TextEntity[] = [];

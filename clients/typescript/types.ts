@@ -272,9 +272,18 @@ interface MessageEntitySpan {
   readonly length: number;
 }
 
-/** Entity types that carry nothing beyond their span. */
+/**
+ * Entity types that carry nothing beyond their span. Telegram detects mentions, hashtags,
+ * cashtags, bot commands, URLs, email addresses and bank card numbers in text by itself.
+ */
 export type PlainMessageEntityType =
+  | 'mention'
+  | 'hashtag'
+  | 'cashtag'
   | 'bot_command'
+  | 'url'
+  | 'email'
+  | 'bank_card_number'
   | 'bold'
   | 'italic'
   | 'underline'

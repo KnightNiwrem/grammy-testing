@@ -291,6 +291,33 @@ Deno.test('fixFormattedText marks bot commands around formatting', () => {
   assertFixed(fixFormattedText('/start', [textLink(0, 6)], context), '/start', [textLink(0, 6)]);
 });
 
+Deno.test('fixFormattedText marks the entities Telegram detects outside code and links', () => {
+  assertFixed(
+    fixFormattedText('ask @grammy_team at grammy.dev #help', [italic(0, 36)], context),
+    'ask @grammy_team at grammy.dev #help',
+    [
+      italic(0, 4),
+      { type: 'mention', offset: 4, length: 12 },
+      italic(4, 12),
+      italic(16, 4),
+      { type: 'url', offset: 20, length: 10 },
+      italic(20, 10),
+      italic(30, 1),
+      { type: 'hashtag', offset: 31, length: 5 },
+      italic(31, 5),
+    ],
+  );
+  assertFixed(
+    fixFormattedText(
+      'see grammy.dev and ada@example.com',
+      [{ type: 'code', offset: 4, length: 10 }, textLink(19, 15)],
+      context,
+    ),
+    'see grammy.dev and ada@example.com',
+    [{ type: 'code', offset: 4, length: 10 }, textLink(19, 15)],
+  );
+});
+
 Deno.test('fixFormattedText validates entity arguments as TDLib does', () => {
   assertFixed(
     fixFormattedText(

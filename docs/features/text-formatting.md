@@ -18,8 +18,6 @@ must not split a surrogate pair.
 Supported explicit entities are `bold`, `italic`, `underline`, `strikethrough`, `spoiler`, `code`,
 `pre` (with optional language), `blockquote`, `expandable_blockquote`, `text_link`, `text_mention`,
 `custom_emoji` and `date_time`. `tg://user?id=…` text links become mentions of known session users.
-Bot commands such as `/start` are detected automatically, allowing bot framework command handlers to
-match them.
 
 Date and time entities come from explicit `date_time` entities, HTML `<tg-time>` tags or MarkdownV2
 `![…](tg://time?…)` links. As in [`Client::get_text_entity_type`][entity-input], a
@@ -33,6 +31,25 @@ Normalized message text is limited to 4,096 Unicode code points; captions to 1,0
 formatted input has an additional 32,768-byte UTF-8 limit before markup parsing, following
 [`Client::get_formatted_text`][formatted-input].
 
+### Detected entities
+
+Telegram marks some entities in text by itself, and the emulator detects them in every message text
+and caption, from bots and accounts alike: `mention`, `hashtag`, `cashtag`, `bot_command`, `url`,
+`email` and `bank_card_number`. Bot framework handlers for commands, mentions or links therefore
+match as they do on Telegram. The Bot API ignores these types when a sender supplies them, as
+[`Client::get_text_entity_type`][entity-input] does, so entities copied from a received message can
+be sent back, and they are detected again.
+
+The rules are those of TDLib's [`find_entities`][entity-detection], checked against the cases of
+TDLib's own [entity tests](../../tests/fixtures/tdlib_detected_entity_cases.ts). Mentions need a
+username of at least four characters, or one of Telegram's short usernames, and a URL without a
+protocol needs a known top-level domain. Bank card numbers must pass the Luhn checksum. Detected
+entities that overlap supplied ones, or each other, are dropped, and none are detected in code. As
+in TDLib's [`merge_new_entities`][entity-merging], formatting splits around them.
+
+Telegram's servers detect these entities in the messages they receive; TDLib reproduces their rules
+for displaying messages. Phone numbers are a [real gap](#real-gaps).
+
 ## Intentional deviations
 
 - **One set of account limits.** Premium account differences are not modeled. Tests use the same
@@ -41,18 +58,14 @@ formatted input has an additional 32,768-byte UTF-8 limit before markup parsing,
   emulator does not fetch preview content, and returned messages omit `link_preview_options`.
   TDLib's [`get_message_content_object`][preview-options] derives that object from the preview
   Telegram generated: for bots, a message with a preview reports its URL. It also depends on whether
-  the text contains a URL, which automatic entity detection does not find. Without previews,
-  simulated options would differ from what Telegram returns, so tests should not expect them.
+  the text contains a URL. Without previews, simulated options would differ from what Telegram
+  returns, so tests should not expect them.
 
 ## Real gaps
 
-- **Automatic entity detection is partial.** The Bot API ignores explicitly supplied detected entity
-  types such as `url`, `mention`, `hashtag`, `cashtag`, `email`, `phone_number`, `bank_card_number`
-  and `bot_command`, then TDLib can rediscover entities from the text. The emulator likewise ignores
-  them in Bot API input but redetects only bot commands. Sending an existing Telegram entity list
-  therefore does not preserve automatically detected URLs or mentions. See
-  [`Client::get_text_entity_type`][entity-input] and [`TDLib::find_entities`][entity-detection].
-
+- **Phone number detection.** Telegram's servers also mark `phone_number` entities, by rules that
+  the open-source code does not contain; TDLib's `find_entities` leaves them to the servers. The
+  emulator detects none, so handlers for phone numbers do not match.
 - **Mention access and privacy.** A text mention may reference any known account or bot in the
   session. Simulated access and privacy restrictions are missing, so tests cannot exercise them.
   TDLib resolves mentioned users in [`get_message_entities`][message-entities]; the exact remote
@@ -64,22 +77,26 @@ formatted input has an additional 32,768-byte UTF-8 limit before markup parsing,
 ## Comparison limits
 
 TDLib is not linked into the emulator. The
-[markup fixtures](../../tests/fixtures/tdlib_markup_cases.ts) and normalization tests provide
-regression coverage, not proof that every input has the same output upstream. Nested JSON fields
-also follow the emulator's intentional
-[stricter validation](sessions-and-requests.md#strict-request-validation).
+[markup fixtures](../../tests/fixtures/tdlib_markup_cases.ts), detection fixtures and normalization
+tests provide regression coverage, not proof that every input has the same output upstream.
+Detection uses the Unicode tables of the JavaScript runtime, which can differ from TDLib's for
+characters added in later Unicode versions. Nested JSON fields also follow the emulator's
+intentional [stricter validation](sessions-and-requests.md#strict-request-validation).
 
 ## Local evidence
 
 [Parse mode dispatch](../../src/text_entities/parse_mode.ts),
 [normalization](../../src/text_entities/formatted_text.ts),
+[entity detection](../../src/text_entities/detected_entities.ts),
 [Bot API entity input](../../src/api/sessions/bot_api/message_entities_parameter.ts),
-[markup tests](../../tests/text_markup_test.ts) and
-[normalization tests](../../tests/formatted_text_test.ts).
+[markup tests](../../tests/text_markup_test.ts),
+[normalization tests](../../tests/formatted_text_test.ts) and
+[detection tests](../../tests/detected_entities_test.ts).
 
 [formatted-input]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L11955-L12000
 [entity-input]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L11872-L11952
 [formatted-date]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/FormattedDate.cpp#L106-L132
-[entity-detection]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L1740-L1800
+[entity-detection]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L1742-L1781
+[entity-merging]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L4440-L4475
 [message-entities]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L3650-L3800
 [preview-options]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageContent.cpp#L11420-L11449

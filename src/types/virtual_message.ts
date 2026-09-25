@@ -57,9 +57,18 @@ interface TextSpan {
   readonly length: number;
 }
 
-/** Entity types that carry nothing beyond their span. */
+/**
+ * Entity types that carry nothing beyond their span. Telegram detects mentions, hashtags,
+ * cashtags, bot commands, URLs, email addresses and bank card numbers in text by itself.
+ */
 export type PlainTextEntityType =
+  | 'mention'
+  | 'hashtag'
+  | 'cashtag'
   | 'bot_command'
+  | 'url'
+  | 'email'
+  | 'bank_card_number'
   | 'bold'
   | 'italic'
   | 'underline'
@@ -125,7 +134,7 @@ export interface DateTimeEntity extends TextSpan {
   readonly format?: DateTimeFormat;
 }
 
-/** A marked span of message text: formatting, a link, or a detected bot command. */
+/** A marked span of message text: formatting, a link, or an entity Telegram detected. */
 export type TextEntity =
   | PlainTextEntity
   | PreTextEntity

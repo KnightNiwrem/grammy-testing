@@ -19,7 +19,13 @@ function getTypePriority(entity: TextEntity): number {
     case 'text_link':
     case 'text_mention':
       return 49;
+    case 'mention':
+    case 'hashtag':
+    case 'cashtag':
     case 'bot_command':
+    case 'url':
+    case 'email':
+    case 'bank_card_number':
       return 50;
     case 'bold':
       return 90;
