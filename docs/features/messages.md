@@ -45,9 +45,9 @@ and skips missing messages. In private chats, the bot may delete either particip
 supergroups, it may delete its own content; `can_delete_messages` allows deleting other members'
 messages and membership service messages.
 
-Message deletion does not consider message age; the missing age limits are a [real gap](#real-gaps).
-Account edits have no age limit. Scheduled messages and automatic deletion timers are absent. These
-timing simplifications are [intentional](#intentional-deviations).
+Message deletion does not consider message age, and account edits have no age limit. Scheduled
+messages and automatic deletion timers are absent. These timing simplifications are
+[intentional](#intentional-deviations).
 
 Media edits are limited to captions and inline keyboards. Replacing media and deleting messages as
 an account are [real gaps](#real-gaps).
@@ -92,6 +92,10 @@ are [real gaps](#real-gaps), as are video start timestamps and media albums.
   their age, so the emulator does not apply TDLib's configurable account edit time limit. Upstream
   already exempts bots editing their own outgoing messages; a blanket "all edits expire after 48
   hours" rule would be incorrect. See [`MessagesManager::can_edit_message`][edit-permissions].
+- **Deletion regardless of age.** Bot deletion checks ownership and rights without considering
+  message age. TDLib's [`can_delete_channel_message` and `can_revoke_message`][delete-permissions]
+  stop bots from deleting messages older than two days in production. Test sessions do not run that
+  long, so the limit could not be exercised.
 - **Immediate sends only.** The account emulation API does not expose scheduled messages. Tests only
   need immediately sent messages, so scheduling is outside the intended account simulation.
 - **No automatic message deletion.** Message fixtures remain available until explicitly deleted or
@@ -107,10 +111,6 @@ are [real gaps](#real-gaps), as are video start timestamps and media albums.
 - **Checklist and poll reply targets.** Replies cannot target an individual checklist task or poll
   option. These targets are also supported by the upstream reply parser and are missing from the
   emulator.
-- **Deletion age limits.** Bot deletion checks ownership and rights without considering message age.
-  Tests therefore cannot exercise Telegram's age-based rejection. TDLib's
-  [`can_delete_channel_message` and `can_revoke_message`][delete-permissions] impose a two-day bot
-  deletion limit in normal production operation.
 - **Replacing media.** `editMessageMedia` is not implemented, preventing tests from exercising bots
   that replace message media.
 - **Account-side deletion.** The account emulation API has no message deletion operation. Tests

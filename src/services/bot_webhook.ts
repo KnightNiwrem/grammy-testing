@@ -19,7 +19,8 @@ const SECRET_TOKEN_HEADER = 'X-Telegram-Bot-Api-Secret-Token';
 
 /**
  * The longest wait before an update is sent again. Telegram caps it at a random value between 60
- * and 120 seconds; the emulator always caps it at 60.
+ * and 120 seconds; the emulator always caps it at 60, so that retries are timed the same way in
+ * every test run.
  */
 const MAX_RETRY_DELAY_SECONDS = 60;
 

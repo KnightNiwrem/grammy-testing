@@ -49,6 +49,14 @@ grammY and Telegraf.
   registration and queued updates intact, preventing invalid test setup from discarding state. In
   [`Client::do_set_webhook`][set-webhook], some URL/token validation happens after removing the
   previous webhook and dropping updates.
+- **Fixed retry cap.** A failed update is retried at once, then after 2, 4, 8, … seconds, capped at
+  60 seconds. Upstream draws the cap at random between 60 and 120 seconds for each retry; see
+  [retry calculation][webhook-retry]. The fixed cap keeps retry timing reproducible in tests, and a
+  test reaches it only after about a minute of consecutive failures.
+- **No removal after sustained HTTP 410.** Failed deliveries keep retrying until the webhook is
+  deleted or replaced or the session ends. Upstream closes the webhook once HTTP 410 responses have
+  continued for [23 hours][webhook-drop-timeout]; see [response handling][webhook-response]. Test
+  sessions do not run that long, so the rule could not be exercised.
 - **No custom certificate uploads.** Local HTTP or trusted TLS is sufficient for webhook tests, so
   `setWebhook` does not accept custom certificates and `getWebhookInfo` always reports
   `has_custom_certificate: false`. Upstream accepts certificate uploads in
@@ -63,15 +71,9 @@ There is no Telegram synchronization error state because sessions have no Telegr
   has no effect on concurrency. Tests need concurrent delivery across chats that honors this
   setting. Upstream uses [multiple connections and separate queues][webhook-queues]; its
   [`max_connections` limit][max-connections] rises to 100,000 in local mode.
-- **Retry jitter and `Retry-After`.** Retries happen immediately, then after 2, 4, 8, … seconds,
-  capped at a fixed 60 seconds. The emulator neither randomizes the cap nor honors `Retry-After`
-  response headers. Both behaviors are missing for webhook retry tests: upstream uses a randomized
-  cap between 60 and 120 seconds and supports the header. See [retry calculation][webhook-retry] and
-  [response handling][webhook-response].
-- **Removal after persistent HTTP 410.** Failed deliveries keep retrying until deletion, replacement
-  or session end. Sustained HTTP 410 responses should be able to remove the webhook registration, as
-  in [upstream response handling][webhook-response]. This is separate from the intentional retention
-  of unconfirmed updates.
+- **`Retry-After`.** The emulator ignores `Retry-After` headers on failed deliveries. Upstream waits
+  the header's number of seconds, up to an hour, instead of the next backoff delay. See
+  [retry calculation][webhook-retry] and [`HttpQuery::get_retry_after`][retry-after].
 - **Complete response before confirmation.** A 2xx response confirms delivery even if reading its
   body later fails or times out. Confirmation should require a complete response so tests can
   exercise incomplete deliveries. Upstream completes HTTP response parsing before delivering the
@@ -92,6 +94,8 @@ There is no Telegram synchronization error state because sessions have no Telegr
 [webhook-network]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L685-L790
 [webhook-queues]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L365-L425
 [webhook-retry]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L493-L520
+[webhook-drop-timeout]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.h#L75-L76
+[retry-after]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/tdnet/td/net/HttpQuery.cpp#L36-L47
 [max-connections]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17215-L17225
 [set-webhook]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17227-L17340
 [http-connection]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/tdnet/td/net/HttpConnectionBase.cpp#L39-L154
