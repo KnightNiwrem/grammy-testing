@@ -3,6 +3,7 @@ import type {
   ChatMemberAdditionResult,
   ChatMemberRemovalResult,
   ChatMemberStatusUpdateResult,
+  CustomTitleUpdateResult,
   FormerMemberStatusUpdateResult,
   NonOwnerMemberStatus,
   SharedChatRegistrationResult,
@@ -171,12 +172,16 @@ export interface PromoteChatMemberInput {
   readonly rights: SupergroupAdministratorRights;
 }
 
-export type ChatMemberRoleChangeFailureReason =
+/** Why the owner of a supergroup cannot manage one of its members. */
+type OwnerMemberManagementFailureReason =
   | 'actor_account_not_found'
   | 'chat_not_found'
   | 'actor_not_authorized'
   | 'member_not_found'
-  | 'not_a_member'
+  | 'not_a_member';
+
+export type ChatMemberRoleChangeFailureReason =
+  | OwnerMemberManagementFailureReason
   | 'member_is_owner';
 
 export type PromoteChatMemberFailureReason =
@@ -186,6 +191,23 @@ export type PromoteChatMemberFailureReason =
 export type PromoteChatMemberResult =
   | { readonly promoted: true }
   | { readonly promoted: false; readonly reason: PromoteChatMemberFailureReason };
+
+export interface SetCustomTitleInput {
+  /** The owner, who alone sets custom titles here. */
+  readonly actorAccountId: number;
+  readonly chatId: number;
+  /** The owner itself or an administrator. */
+  readonly memberId: number;
+  /** The new title; empty removes it. */
+  readonly customTitle: string;
+}
+
+export type SetCustomTitleResult =
+  | { readonly set: true }
+  | {
+    readonly set: false;
+    readonly reason: OwnerMemberManagementFailureReason | 'not_an_administrator';
+  };
 
 export interface DemoteChatMemberInput {
   /** The owner, who alone demotes administrators here. */
@@ -335,6 +357,11 @@ interface ChatMembershipStore {
     memberId: number,
     status: NonOwnerMemberStatus,
   ): ChatMemberStatusUpdateResult;
+  setCustomTitle(
+    chatId: number,
+    memberId: number,
+    customTitle: string | undefined,
+  ): CustomTitleUpdateResult;
   removeChatMember(
     chatId: number,
     memberId: number,
@@ -617,26 +644,70 @@ export class SharedChatAdministrationService {
 
   /**
    * Promotes a member of a supergroup to administrator as its owner, or changes the rights of an
-   * administrator. A promotion that changes nothing succeeds without effect.
+   * administrator, who keeps its custom title. A promotion that changes nothing succeeds without
+   * effect.
    */
   promoteChatMember(input: PromoteChatMemberInput): PromoteChatMemberResult {
     if (input.rights.size === 0) {
       return { promoted: false, reason: 'no_rights_granted' };
     }
-    const change = this.#changeMemberRoleAsOwner(input, {
+    const change = this.#changeMemberRoleAsOwner(input, (membership) => ({
       status: 'administrator',
       rights: input.rights,
-    });
+      ...(membership.status === 'administrator' && membership.customTitle !== undefined
+        ? { customTitle: membership.customTitle }
+        : {}),
+    }));
     return change.changed ? { promoted: true } : { promoted: false, reason: change.reason };
   }
 
   /**
-   * Demotes an administrator of a supergroup to a member as its owner. Demoting a member that is
-   * no administrator succeeds without effect.
+   * Demotes an administrator of a supergroup to a member as its owner, which drops its custom
+   * title. Demoting a member that is no administrator succeeds without effect.
    */
   demoteChatMember(input: DemoteChatMemberInput): DemoteChatMemberResult {
-    const change = this.#changeMemberRoleAsOwner(input, { status: 'member' });
+    const change = this.#changeMemberRoleAsOwner(input, () => ({ status: 'member' }));
     return change.changed ? { demoted: true } : { demoted: false, reason: change.reason };
+  }
+
+  /**
+   * Sets the custom title that clients show for the owner of a supergroup or an administrator in
+   * place of its role, as the owner. Setting the title it has succeeds without effect.
+   */
+  setCustomTitle(input: SetCustomTitleInput): SetCustomTitleResult {
+    const target = this.#resolveMemberAsOwner(input);
+    if (!target.resolved) {
+      return { set: false, reason: target.reason };
+    }
+    const { chat, membership } = target;
+    if (membership.status === 'member') {
+      return { set: false, reason: 'not_an_administrator' };
+    }
+    const newCustomTitle = input.customTitle === '' ? undefined : input.customTitle;
+    if (membership.customTitle === newCustomTitle) {
+      return { set: true };
+    }
+    const { customTitle: _, ...untitledMembership } = membership;
+    const newStatus: ChatMembership = newCustomTitle === undefined
+      ? untitledMembership
+      : { ...untitledMembership, customTitle: newCustomTitle };
+
+    const update = this.#sharedChats.setCustomTitle(chat.id, input.memberId, newCustomTitle);
+    if (!update.updated) {
+      throw new Error(
+        `Custom title of member ${input.memberId} of chat ${chat.id} could not be set: ${update.reason}`,
+      );
+    }
+    this.#events.publish({
+      type: 'chat_member_status_changed',
+      chat,
+      actorId: input.actorAccountId,
+      memberId: input.memberId,
+      oldStatus: membership,
+      newStatus,
+      changedAtUnixSeconds: this.#currentUnixTimeSeconds(),
+    });
+    return { set: true };
   }
 
   /**
@@ -749,36 +820,56 @@ export class SharedChatAdministrationService {
   }
 
   /** Changes the role of a supergroup member that is not the owner, as the owner. */
-  #changeMemberRoleAsOwner(
+  /** Resolves a member of a supergroup that the acting account owns, for the owner to manage. */
+  #resolveMemberAsOwner(
     { actorAccountId, chatId, memberId }: {
       readonly actorAccountId: number;
       readonly chatId: number;
       readonly memberId: number;
     },
-    newStatus: NonOwnerMemberStatus,
   ):
-    | { readonly changed: true }
-    | { readonly changed: false; readonly reason: ChatMemberRoleChangeFailureReason } {
+    | { readonly resolved: true; readonly chat: Supergroup; readonly membership: ChatMembership }
+    | { readonly resolved: false; readonly reason: OwnerMemberManagementFailureReason } {
     if (this.#accounts.getById(actorAccountId) === undefined) {
-      return { changed: false, reason: 'actor_account_not_found' };
+      return { resolved: false, reason: 'actor_account_not_found' };
     }
     const chat = this.#sharedChats.getSharedChat(chatId);
     if (chat?.kind !== 'supergroup') {
-      return { changed: false, reason: 'chat_not_found' };
+      return { resolved: false, reason: 'chat_not_found' };
     }
     if (this.#sharedChats.getChatMembership(chatId, actorAccountId)?.status !== 'owner') {
-      return { changed: false, reason: 'actor_not_authorized' };
+      return { resolved: false, reason: 'actor_not_authorized' };
     }
     if (this.#identifyUser(memberId) === undefined) {
-      return { changed: false, reason: 'member_not_found' };
+      return { resolved: false, reason: 'member_not_found' };
     }
     const membership = this.#sharedChats.getChatMembership(chatId, memberId);
     if (membership === undefined) {
-      return { changed: false, reason: 'not_a_member' };
+      return { resolved: false, reason: 'not_a_member' };
     }
+    return { resolved: true, chat, membership };
+  }
+
+  #changeMemberRoleAsOwner(
+    input: {
+      readonly actorAccountId: number;
+      readonly chatId: number;
+      readonly memberId: number;
+    },
+    getNewStatus: (membership: NonOwnerMemberStatus) => NonOwnerMemberStatus,
+  ):
+    | { readonly changed: true }
+    | { readonly changed: false; readonly reason: ChatMemberRoleChangeFailureReason } {
+    const target = this.#resolveMemberAsOwner(input);
+    if (!target.resolved) {
+      return { changed: false, reason: target.reason };
+    }
+    const { actorAccountId, chatId, memberId } = input;
+    const { chat, membership } = target;
     if (membership.status === 'owner') {
       return { changed: false, reason: 'member_is_owner' };
     }
+    const newStatus = getNewStatus(membership);
     if (isSameChatMemberStatus(membership, newStatus)) {
       return { changed: true };
     }

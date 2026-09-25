@@ -580,8 +580,9 @@ function projectGroupChatBotMember(
 }
 
 /**
- * Projects a user's standing in a group as the Bot API shows it to a bot. Bots never promote
- * administrators here, so no bot may change an administrator's rights.
+ * Projects a user's standing in a group as the Bot API shows it to a bot, in the field order of
+ * the official Bot API server's `JsonChatMember`. Bots never promote administrators here, so no
+ * bot may change an administrator's rights.
  */
 export function projectChatMember<User extends BotApiUser>(
   user: User,
@@ -589,7 +590,12 @@ export function projectChatMember<User extends BotApiUser>(
 ): BotApiChatMember<User> {
   switch (status.status) {
     case 'owner':
-      return { user, status: 'creator', is_anonymous: false };
+      return {
+        user,
+        status: 'creator',
+        ...projectCustomTitle(status.customTitle),
+        is_anonymous: false,
+      };
     case 'administrator':
       return {
         user,
@@ -597,6 +603,7 @@ export function projectChatMember<User extends BotApiUser>(
         can_be_edited: false,
         ...projectSupergroupAdministratorRights(status.rights),
         can_manage_voice_chats: status.rights.has('can_manage_video_chats'),
+        ...projectCustomTitle(status.customTitle),
       };
     case 'member':
     case 'left':
@@ -608,6 +615,12 @@ export function projectChatMember<User extends BotApiUser>(
       throw new Error(`Unhandled chat member status: ${JSON.stringify(unhandledStatus)}`);
     }
   }
+}
+
+function projectCustomTitle(
+  customTitle: string | undefined,
+): { readonly custom_title?: string } {
+  return customTitle === undefined ? {} : { custom_title: customTitle };
 }
 
 /** Shows every supergroup right, held or not, in the order the Bot API shows them. */

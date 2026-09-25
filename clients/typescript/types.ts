@@ -214,6 +214,14 @@ export interface DemoteChatMemberInput {
   readonly userId: number;
 }
 
+export interface SetCustomTitleInput {
+  readonly chat: SupergroupMessageTarget;
+  /** The owner itself or an administrator, account or bot. */
+  readonly userId: number;
+  /** At most 16 characters without emoji; empty removes the title. */
+  readonly customTitle: string;
+}
+
 export interface AccountEditMessageInput<Target extends MessageTarget = MessageTarget> {
   readonly chat: Target;
   /** The ID of the account's message to edit, as message history shows it. */
@@ -888,6 +896,12 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    * administrator has no effect.
    */
   demoteChatMember(input: DemoteChatMemberInput): Promise<void>;
+  /**
+   * Sets this account's own custom title in a supergroup it owns, or an administrator's, which
+   * bots see as `custom_title` in its chat member. An administrator keeps its title when its
+   * rights change, and loses it when demoted.
+   */
+  setCustomTitle(input: SetCustomTitleInput): Promise<void>;
   /**
    * Blocks a bot, which Telegram calls stopping it. The bot receives a `my_chat_member` update
    * showing it as `kicked`, its messages to this account fail with `403 Forbidden: bot was

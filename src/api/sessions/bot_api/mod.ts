@@ -274,6 +274,12 @@ const PRIVATE_CHAT_MEMBERS_NOT_BANNABLE_DESCRIPTION =
 const METHOD_UNAVAILABLE_IN_PRIVATE_CHATS_DESCRIPTION =
   'Bad Request: method is available only in supergroup and channel chats';
 const CANNOT_RESTRICT_SELF_DESCRIPTION = "Bad Request: can't restrict self";
+const METHOD_UNAVAILABLE_OUTSIDE_GROUPS_DESCRIPTION =
+  'Bad Request: method is available only in groups and supergroups';
+const OWNER_CUSTOM_TITLE_DESCRIPTION = 'Bad Request: only the owner can edit their custom title';
+const MEMBER_IS_NOT_ADMINISTRATOR_DESCRIPTION = 'Bad Request: user is not an administrator';
+const CUSTOM_TITLE_NOT_EDITABLE_DESCRIPTION =
+  'Bad Request: not enough rights to change custom title of the user';
 const MEMBER_IS_OWNER_DESCRIPTION = "Bad Request: can't remove chat owner";
 const NOT_ENOUGH_RIGHTS_TO_RESTRICT_DESCRIPTION =
   'Bad Request: not enough rights to restrict/unrestrict chat member';
@@ -517,6 +523,12 @@ const banChatMemberParametersSchema = z.strictObject({
   revoke_messages: booleanParameter().optional(),
 });
 
+const setChatAdministratorCustomTitleParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  user_id: integerParameter(z.int()).optional(),
+  custom_title: z.string().optional(),
+});
+
 const unbanChatMemberParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   user_id: integerParameter(z.int()).optional(),
@@ -681,6 +693,10 @@ const BOT_API_METHODS: readonly BotApiMethod[] = [
   { name: 'sendDocument', handler: handleSendDocument },
   { name: 'sendMessage', handler: handleSendMessage },
   { name: 'sendPhoto', handler: handleSendPhoto },
+  {
+    name: 'setChatAdministratorCustomTitle',
+    handler: handleSetChatAdministratorCustomTitle,
+  },
   { name: 'setMyCommands', handler: handleSetMyCommands },
   { name: 'setWebhook', handler: handleSetWebhook },
   { name: 'unbanChatMember', handler: handleUnbanChatMember },
@@ -1981,6 +1997,41 @@ function handleUnbanChatMember(
  * Reads the chat and the user a member method addresses. Telegram reads the user first, and reads
  * a missing or non-positive `user_id` as 0, which identifies no user.
  */
+/**
+ * Answers `setChatAdministratorCustomTitle`, which always fails here: bots may edit only the titles
+ * of administrators they promoted, and they promote none.
+ */
+function handleSetChatAdministratorCustomTitle(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const parsedParameters = setChatAdministratorCustomTitleParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, 'Bad Request: invalid setChatAdministratorCustomTitle parameters');
+  }
+  const targetReading = readChatMemberTarget(parsedParameters.data);
+  if (!targetReading.read) {
+    return targetReading.errorAnswer;
+  }
+
+  const reason = context.session.botApi.setChatAdministratorCustomTitle(
+    context.bot,
+    targetReading.target,
+  );
+  switch (reason) {
+    case 'method_unavailable_outside_groups':
+      return botApiError(400, METHOD_UNAVAILABLE_OUTSIDE_GROUPS_DESCRIPTION);
+    case 'member_is_owner':
+      return botApiError(400, OWNER_CUSTOM_TITLE_DESCRIPTION);
+    case 'member_is_not_administrator':
+      return botApiError(400, MEMBER_IS_NOT_ADMINISTRATOR_DESCRIPTION);
+    case 'custom_title_not_editable':
+      return botApiError(400, CUSTOM_TITLE_NOT_EDITABLE_DESCRIPTION);
+    default:
+      return chatMemberFailureAnswer(reason);
+  }
+}
+
 function readChatMemberTarget(
   { chat_id: chatId, user_id: userId }: { readonly chat_id?: number; readonly user_id?: number },
 ):

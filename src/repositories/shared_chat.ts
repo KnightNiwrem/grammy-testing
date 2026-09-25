@@ -57,6 +57,13 @@ export type ChatMemberStatusUpdateResult =
     readonly reason: ChatMemberStatusUpdateFailureReason;
   };
 
+export type CustomTitleUpdateResult =
+  | { readonly updated: true }
+  | {
+    readonly updated: false;
+    readonly reason: 'chat_not_found' | 'not_a_member' | 'not_an_administrator';
+  };
+
 export type FormerMemberStatusUpdateResult =
   | { readonly updated: true }
   | {
@@ -193,6 +200,32 @@ export class SharedChatRepository {
     }
 
     membershipsByIdentityId.set(memberId, status);
+    return { updated: true };
+  }
+
+  /** Sets the custom title of the owner or an administrator; `undefined` removes it. */
+  setCustomTitle(
+    chatId: number,
+    memberId: number,
+    customTitle: string | undefined,
+  ): CustomTitleUpdateResult {
+    const membershipsByIdentityId = this.#sharedChatMembershipsByChatId.get(chatId);
+    if (membershipsByIdentityId === undefined) {
+      return { updated: false, reason: 'chat_not_found' };
+    }
+    const membership = membershipsByIdentityId.get(memberId);
+    if (membership === undefined) {
+      return { updated: false, reason: 'not_a_member' };
+    }
+    if (membership.status === 'member') {
+      return { updated: false, reason: 'not_an_administrator' };
+    }
+
+    const { customTitle: _, ...untitledMembership } = membership;
+    membershipsByIdentityId.set(
+      memberId,
+      customTitle === undefined ? untitledMembership : { ...untitledMembership, customTitle },
+    );
     return { updated: true };
   }
 

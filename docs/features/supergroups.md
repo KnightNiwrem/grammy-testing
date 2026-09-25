@@ -60,6 +60,17 @@ Removed members lose access to history; their prior messages remain visible to o
 supergroup path changes participant status. The public client code does not establish additional
 remote history processing.
 
+The owner also sets its own custom title or an administrator's through the emulation API, and an
+empty title removes it. Bots see it as `custom_title` of the owner and administrators, in the field
+order of the official server's [`JsonChatMember`][chat-member-json], and a bot whose title changes
+receives `my_chat_member`. An administrator keeps its title when its rights change and loses it when
+demoted. Titles hold at most 16 characters without emoji, as the Bot API documents; the emulator
+refuses others. The official server's
+[`process_set_chat_administrator_custom_title_query`][custom-title-method] lets a bot set only the
+title of an administrator it may edit, which is one it promoted. Bots promote no one here, so
+`setChatAdministratorCustomTitle` always fails with Telegram's error for the case, such as
+`Bad Request: not enough rights to change custom title of the user`.
+
 `getChatMember`, `getChatAdministrators` and `getChatMemberCount` expose stored membership.
 `getChatAdministrators` excludes bot administrators by default and accepts `return_bots: true`, as
 the pinned official [response callback][administrator-list] does. Administrator bots subscribed to
@@ -112,7 +123,6 @@ production read permissions.
 - **Bot-driven promotion and demotion.** `promoteChatMember` is not implemented. Only the owner can
   change administrators through the emulation API.
 - **Anonymous administrators.** Anonymous administration and its message attribution are absent.
-- **Administrator titles.** Custom titles cannot be set or inspected.
 - **Administrator delegation.** The emulator has no delegated administrator hierarchy for deciding
   who can edit another administrator's status.
 - **Invitation and joining workflows.** Invite links, join requests and account self-joining are
@@ -141,6 +151,8 @@ production read permissions.
 [supergroup messaging tests](../../tests/supergroup_messaging_service_test.ts).
 
 [privacy-faq]: https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
+[chat-member-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L5802-L5872
+[custom-title-method]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L16451-L16482
 [participant-checks]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogParticipantManager.cpp#L2820-L3065
 [administrator-list]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L7925-L7995
 [ban-expiry]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogParticipant.cpp#L595-L715

@@ -4826,6 +4826,130 @@ Deno.test('the owner promotes administrators, whom bots find with getChatMember 
   }
 });
 
+Deno.test('the owner sets custom titles, which bots see but cannot change', async () => {
+  const { api, sessionPath, owner, member, bot, readerBot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const readNewUpdates = createUpdateReader(api);
+  const administratorsPath = `${supergroupPath(owner.id)}/administrators`;
+  const setCustomTitle = async (userId: number, customTitle: unknown, actorId = owner.id) =>
+    (await api.request(
+      `${supergroupPath(actorId)}/administrators/${userId}/custom-title`,
+      jsonRequest('PUT', { custom_title: customTitle }),
+    )).status;
+  const getChatMember = (userId: number) =>
+    callBotApi(api, `${bot.botApiPath}/getChatMember`, { chat_id: supergroup.id, user_id: userId })
+      .then(({ body }) => botApiResult(body));
+  const botUser = {
+    id: readerBot.bot.id,
+    is_bot: true,
+    first_name: readerBot.bot.first_name,
+    username: readerBot.bot.username,
+  };
+
+  await api.request(
+    `${administratorsPath}/${bot.bot.id}`,
+    jsonRequest('PUT', { can_delete_messages: true }),
+  );
+  await api.request(
+    `${administratorsPath}/${readerBot.bot.id}`,
+    jsonRequest('PUT', { can_pin_messages: true }),
+  );
+  await readNewUpdates(readerBot.botApiPath);
+  const titleStatuses = [
+    await setCustomTitle(owner.id, 'Founder'),
+    await setCustomTitle(readerBot.bot.id, 'Pin keeper'),
+  ];
+  const [titleUpdate] = await readNewUpdates(readerBot.botApiPath);
+  const titledAdministrator = {
+    ...administratorMember(botUser, ['can_manage_chat', 'can_pin_messages']),
+    custom_title: 'Pin keeper',
+  };
+  const titleChange = titleUpdate?.my_chat_member as Record<string, unknown> | undefined;
+  if (
+    JSON.stringify(titleStatuses) !== JSON.stringify([204, 204]) ||
+    JSON.stringify(await getChatMember(owner.id)) !== JSON.stringify({
+        user: owner,
+        status: 'creator',
+        custom_title: 'Founder',
+        is_anonymous: false,
+      }) ||
+    JSON.stringify(await getChatMember(readerBot.bot.id)) !== JSON.stringify(titledAdministrator) ||
+    JSON.stringify(titleChange?.new_chat_member) !== JSON.stringify(titledAdministrator)
+  ) {
+    throw new Error(
+      `Expected bots to see the custom titles, received ${JSON.stringify(titleUpdate)}`,
+    );
+  }
+
+  // New rights keep the title, while demotion and an empty title drop it.
+  await api.request(
+    `${administratorsPath}/${readerBot.bot.id}`,
+    jsonRequest('PUT', { can_pin_messages: true, can_invite_users: true }),
+  );
+  const repromoted = await getChatMember(readerBot.bot.id);
+  await api.request(`${administratorsPath}/${readerBot.bot.id}`, { method: 'DELETE' });
+  await api.request(
+    `${administratorsPath}/${readerBot.bot.id}`,
+    jsonRequest('PUT', { can_pin_messages: true }),
+  );
+  const untitledStatus = await setCustomTitle(owner.id, '');
+  const administrators = await callBotApi(api, `${bot.botApiPath}/getChatAdministrators`, {
+    chat_id: supergroup.id,
+    return_bots: true,
+  }).then(({ body }) => botApiResult(body) as unknown as Array<{ custom_title?: string }>);
+  if (
+    repromoted?.custom_title !== 'Pin keeper' || untitledStatus !== 204 ||
+    administrators.some((administrator) => administrator.custom_title !== undefined)
+  ) {
+    throw new Error(
+      `Expected new rights to keep a title and demotion to drop it, received ${
+        JSON.stringify([repromoted, administrators])
+      }`,
+    );
+  }
+
+  const failedStatuses = [
+    await setCustomTitle(readerBot.bot.id, 'x'.repeat(17)),
+    await setCustomTitle(readerBot.bot.id, 'Pin keeper 📌'),
+    await setCustomTitle(readerBot.bot.id, 16),
+    await setCustomTitle(member.id, 'Guest'),
+    await setCustomTitle(readerBot.bot.id, 'Mine', member.id),
+  ];
+  if (JSON.stringify(failedStatuses) !== JSON.stringify([400, 400, 400, 409, 403])) {
+    throw new Error(`Expected invalid titles to be refused, received ${failedStatuses}`);
+  }
+
+  const setByBot = async (chatId: number, userId: number) => {
+    const { body } = await callBotApi(
+      api,
+      `${bot.botApiPath}/setChatAdministratorCustomTitle`,
+      { chat_id: chatId, user_id: userId, custom_title: 'Helper' },
+    );
+    return isBadRequestResponse(body) ? body.description : JSON.stringify(body);
+  };
+  await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: '/start' }),
+  );
+  const botFailures = [
+    await setByBot(supergroup.id, owner.id),
+    await setByBot(supergroup.id, member.id),
+    await setByBot(supergroup.id, readerBot.bot.id),
+    await setByBot(supergroup.id, bot.bot.id),
+    await setByBot(owner.id, owner.id),
+  ];
+  const expectedFailures = [
+    'Bad Request: only the owner can edit their custom title',
+    'Bad Request: user is not an administrator',
+    'Bad Request: not enough rights to change custom title of the user',
+    'Bad Request: not enough rights to change custom title of the user',
+    'Bad Request: method is available only in groups and supergroups',
+  ];
+  if (JSON.stringify(botFailures) !== JSON.stringify(expectedFailures)) {
+    throw new Error(`Expected Telegram's custom title errors, received ${botFailures}`);
+  }
+});
+
 Deno.test('administrator bots that request chat_member updates observe members joining', async () => {
   const { api, sessionPath, owner, bot, readerBot, supergroup, supergroupPath } =
     await createSupergroupFixture();

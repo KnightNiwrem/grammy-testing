@@ -80,6 +80,7 @@ export type {
   ReplyKeyboardButton,
   ReplyKeyboardInterface,
   SendInlineQueryInput,
+  SetCustomTitleInput,
   Supergroup,
   SupergroupAdministratorRight,
   SupergroupBotCommands,

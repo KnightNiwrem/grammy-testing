@@ -7,6 +7,7 @@ import type { BotCommand } from '../../../types/bot_command.ts';
 import type { CallbackQuery } from '../../../types/callback_query.ts';
 import {
   grantSupergroupAdministratorRights,
+  MAX_CUSTOM_TITLE_LENGTH,
   SUPERGROUP_ADMINISTRATOR_RIGHTS,
 } from '../../../types/chat_membership.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
@@ -72,6 +73,7 @@ const SUPERGROUP_MEMBER_PATH =
   `${SUPERGROUP_CONVERSATION_PATH}/members/:${USER_ID_PARAMETER}` as const;
 const SUPERGROUP_ADMINISTRATOR_PATH =
   `${SUPERGROUP_CONVERSATION_PATH}/administrators/:${USER_ID_PARAMETER}` as const;
+const SUPERGROUP_CUSTOM_TITLE_PATH = `${SUPERGROUP_ADMINISTRATOR_PATH}/custom-title` as const;
 
 const telegramUserIdSchema = z.number().int()
   .min(MIN_TELEGRAM_USER_ID)
@@ -170,6 +172,16 @@ const promoteChatMemberRequestSchema = z.partialRecord(
   z.enum(SUPERGROUP_ADMINISTRATOR_RIGHTS),
   z.boolean(),
 );
+
+/**
+ * A custom title of at most 16 characters, counted by code point, without emoji, as the Bot API
+ * documents it; empty removes the title.
+ */
+const setCustomTitleRequestSchema = z.strictObject({
+  custom_title: z.string()
+    .refine((title) => [...title].length <= MAX_CUSTOM_TITLE_LENGTH)
+    .refine((title) => !/\p{Extended_Pictographic}/u.test(title)),
+});
 
 const createSupergroupRequestSchema = z.strictObject({
   title: z.string().min(1),
@@ -492,6 +504,50 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     return result.reason === 'no_rights_granted'
       ? context.body(null, 400)
       : context.body(null, memberRoleChangeFailureStatus(result.reason));
+  });
+
+  // The owner sets its own custom title or an administrator's; an empty title removes it.
+  accountRoutes.put(SUPERGROUP_CUSTOM_TITLE_PATH, async (context) => {
+    const memberPath = supergroupMemberPathSchema.safeParse(context.req.param());
+    if (!memberPath.success) {
+      return context.body(null, 400);
+    }
+    let requestBody: unknown;
+    try {
+      requestBody = await context.req.json();
+    } catch {
+      return context.body(null, 400);
+    }
+    const parsedRequest = setCustomTitleRequestSchema.safeParse(requestBody);
+    if (!parsedRequest.success) {
+      return context.body(null, 400);
+    }
+    const { accountId, chatId, userId } = memberPath.data;
+
+    const result = context.get('emulationSession').sharedChatAdministration.setCustomTitle({
+      actorAccountId: accountId,
+      chatId,
+      memberId: userId,
+      customTitle: parsedRequest.data.custom_title,
+    });
+    if (result.set) {
+      return context.body(null, 204);
+    }
+    switch (result.reason) {
+      case 'actor_account_not_found':
+      case 'chat_not_found':
+      case 'member_not_found':
+        return context.body(null, 404);
+      case 'actor_not_authorized':
+        return context.body(null, 403);
+      case 'not_a_member':
+      case 'not_an_administrator':
+        return context.body(null, 409);
+      default: {
+        const unhandledReason: never = result.reason;
+        throw new Error(`Unhandled custom title failure: ${unhandledReason}`);
+      }
+    }
   });
 
   // The owner demotes an administrator to a member; demoting a member changes nothing.

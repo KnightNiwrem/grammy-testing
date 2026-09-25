@@ -62,6 +62,7 @@ import type {
   RemoveChatMemberInput,
   ReplyInterface,
   SendInlineQueryInput,
+  SetCustomTitleInput,
   Supergroup,
   SupergroupBotCommands,
   SupergroupMessage,
@@ -343,6 +344,16 @@ function createVirtualAccountClient(
           encodeURIComponent(input.userId)
         }`,
         expectedStatus: HTTP_STATUS_NO_CONTENT,
+      });
+    },
+    async setCustomTitle(input: SetCustomTitleInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'PUT',
+        url: `${conversationUrl(accountUrl, input.chat)}/administrators/${
+          encodeURIComponent(input.userId)
+        }/custom-title`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+        body: { custom_title: input.customTitle },
       });
     },
     async blockBot(input: BotBlockInput): Promise<void> {

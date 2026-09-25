@@ -504,10 +504,22 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     });
   const deletionBeforePromotion = await deleteGreeting();
   await owner.promoteChatMember({ chat, userId: bot.id, rights: { can_delete_messages: true } });
+  await owner.setCustomTitle({ chat, userId: bot.id, customTitle: 'Janitor' });
+  const titledMemberResponse = await api.request(`${botApiPath}/getChatMember`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: supergroup.id, user_id: bot.id }),
+  });
+  const { result: titledMember } = await titledMemberResponse.json() as {
+    result: { custom_title?: string };
+  };
   const deletionAfterPromotion = await deleteGreeting();
   await owner.demoteChatMember({ chat, userId: bot.id });
   await owner.demoteChatMember({ chat, userId: bot.id });
-  if (deletionBeforePromotion.status !== 400 || deletionAfterPromotion.status !== 200) {
+  if (
+    deletionBeforePromotion.status !== 400 || deletionAfterPromotion.status !== 200 ||
+    titledMember.custom_title !== 'Janitor'
+  ) {
     throw new Error(
       `Expected the promoted bot to delete the greeting, received ${
         [deletionBeforePromotion.status, deletionAfterPromotion.status].join()

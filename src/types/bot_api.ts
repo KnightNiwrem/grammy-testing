@@ -412,7 +412,13 @@ export type BotApiSupergroupAdministratorRights =
  * are not supported.
  */
 export type BotApiChatMember<User extends BotApiUser = BotApiUser> =
-  | { readonly user: User; readonly status: 'creator'; readonly is_anonymous: false }
+  | {
+    readonly user: User;
+    readonly status: 'creator';
+    /** Omitted for none. */
+    readonly custom_title?: string;
+    readonly is_anonymous: false;
+  }
   | (
     & {
       readonly user: User;
@@ -424,6 +430,8 @@ export type BotApiChatMember<User extends BotApiUser = BotApiUser> =
     & {
       /** Legacy alias of `can_manage_video_chats`. */
       readonly can_manage_voice_chats: boolean;
+      /** Omitted for none. */
+      readonly custom_title?: string;
     }
   )
   | { readonly user: User; readonly status: 'member' }

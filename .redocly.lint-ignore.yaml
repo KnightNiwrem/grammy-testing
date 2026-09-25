@@ -4,6 +4,10 @@ openapi.yaml:
   # Creating a session reads no request input, so no client error can occur.
   operation-4xx-response:
     - '#/paths/~1sessions/post/responses'
+  # Bots may set only the titles of administrators they promoted, and bots promote none here, so
+  # the method has no success response.
+  operation-2xx-response:
+    - '#/paths/~1sessions~1{sessionId}~1bot-api~1bot{token}~1setChatAdministratorCustomTitle/post/responses'
   # Private-chat and supergroup alternatives differ in the constant `type` of their nested `chat`,
   # which the rule does not inspect, so they are mutually exclusive.
   no-illogical-composition-keywords:

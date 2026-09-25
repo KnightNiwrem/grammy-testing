@@ -41,13 +41,21 @@ export function grantSupergroupAdministratorRights(
   return rights;
 }
 
+/** The Bot API's documented limit on an administrator's custom title. */
+export const MAX_CUSTOM_TITLE_LENGTH = 16;
+
 /**
  * A current member's standing in a shared chat. Only supergroups have administrators, whom the
- * owner promotes.
+ * owner promotes. The owner and administrators may carry a custom title that clients show instead
+ * of their role; it is omitted for none.
  */
 export type ChatMembership =
-  | { readonly status: 'owner' }
-  | { readonly status: 'administrator'; readonly rights: SupergroupAdministratorRights }
+  | { readonly status: 'owner'; readonly customTitle?: string }
+  | {
+    readonly status: 'administrator';
+    readonly rights: SupergroupAdministratorRights;
+    readonly customTitle?: string;
+  }
   | { readonly status: 'member' };
 
 /**
@@ -94,18 +102,20 @@ export function holdsSupergroupAdministratorRight(
   }
 }
 
-/** Whether two standings in a chat are the same, rights and ban end included. */
+/** Whether two standings in a chat are the same, rights, custom title and ban end included. */
 export function isSameChatMemberStatus(
   first: ChatMemberStatus,
   second: ChatMemberStatus,
 ): boolean {
   switch (first.status) {
     case 'owner':
+      return second.status === 'owner' && first.customTitle === second.customTitle;
     case 'member':
     case 'left':
       return first.status === second.status;
     case 'administrator':
-      return second.status === 'administrator' && first.rights.size === second.rights.size &&
+      return second.status === 'administrator' && first.customTitle === second.customTitle &&
+        first.rights.size === second.rights.size &&
         [...first.rights].every((right) => second.rights.has(right));
     case 'kicked':
       return second.status === 'kicked' &&

@@ -40,19 +40,19 @@ This is the complete inventory from the
 [HTTP method registry](../../src/api/sessions/bot_api/mod.ts). Method names are case-insensitive.
 The two legacy aliases below are also accepted.
 
-| Area             | Methods                                                                                                         |
-| ---------------- | --------------------------------------------------------------------------------------------------------------- |
-| Identity         | `getMe`                                                                                                         |
-| Updates          | `getUpdates`, `setWebhook`, `deleteWebhook`, `getWebhookInfo`                                                   |
-| Sending          | `sendMessage`, `sendPhoto`, `sendDocument`, `sendChatAction`                                                    |
-| Reusing messages | `forwardMessage`, `forwardMessages`, `copyMessage`, `copyMessages`                                              |
-| Editing          | `editMessageText`, `editMessageCaption`, `editMessageReplyMarkup`                                               |
-| Deletion         | `deleteMessage`, `deleteMessages`                                                                               |
-| Files            | `getFile`, plus HTTP file downloads                                                                             |
-| Interaction      | `answerCallbackQuery`, `answerInlineQuery`                                                                      |
-| Commands         | `setMyCommands`, `getMyCommands`, `deleteMyCommands`                                                            |
-| Membership       | `leaveChat`, `getChatMember`, `getChatAdministrators`, `getChatMemberCount`, `banChatMember`, `unbanChatMember` |
-| Legacy aliases   | `getChatMembersCount` → `getChatMemberCount`, `kickChatMember` → `banChatMember`                                |
+| Area             | Methods                                                                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity         | `getMe`                                                                                                                                            |
+| Updates          | `getUpdates`, `setWebhook`, `deleteWebhook`, `getWebhookInfo`                                                                                      |
+| Sending          | `sendMessage`, `sendPhoto`, `sendDocument`, `sendChatAction`                                                                                       |
+| Reusing messages | `forwardMessage`, `forwardMessages`, `copyMessage`, `copyMessages`                                                                                 |
+| Editing          | `editMessageText`, `editMessageCaption`, `editMessageReplyMarkup`                                                                                  |
+| Deletion         | `deleteMessage`, `deleteMessages`                                                                                                                  |
+| Files            | `getFile`, plus HTTP file downloads                                                                                                                |
+| Interaction      | `answerCallbackQuery`, `answerInlineQuery`                                                                                                         |
+| Commands         | `setMyCommands`, `getMyCommands`, `deleteMyCommands`                                                                                               |
+| Membership       | `leaveChat`, `getChatMember`, `getChatAdministrators`, `getChatMemberCount`, `banChatMember`, `unbanChatMember`, `setChatAdministratorCustomTitle` |
+| Legacy aliases   | `getChatMembersCount` → `getChatMemberCount`, `kickChatMember` → `banChatMember`                                                                   |
 
 Methods outside this inventory return `404` with a Bot API error body. For supported methods,
 unknown parameters usually produce `400`, including parameters that the official method supports but

@@ -589,6 +589,24 @@ export type GetChatMemberResult =
     readonly reason: ChatMemberAccessFailureReason | 'member_not_found';
   };
 
+export interface SetChatAdministratorCustomTitleRequest {
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
+  readonly chatId: number;
+  readonly userId: number;
+}
+
+/**
+ * Why a bot cannot set an administrator's custom title. Telegram lets a bot set only the titles of
+ * administrators it promoted, and bots promote none here, so the method always fails.
+ */
+export type SetChatAdministratorCustomTitleFailureReason =
+  | ChatMemberAccessFailureReason
+  | 'member_not_found'
+  | 'method_unavailable_outside_groups'
+  | 'member_is_owner'
+  | 'member_is_not_administrator'
+  | 'custom_title_not_editable';
+
 export interface GetChatAdministratorsRequest {
   /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
   readonly chatId: number;
@@ -1952,6 +1970,39 @@ export class BotApiService {
       return { found: false, reason: excludeMissingBotFailure(authenticatedBot, result.reason) };
     }
     return { found: true, member: this.#viewChatMember(userId, result.status) };
+  }
+
+  /**
+   * Refuses to set the custom title of a supergroup administrator, for the reason the official Bot
+   * API server's `process_set_chat_administrator_custom_title_query` gives: the chat must be a
+   * group, the owner alone edits its own title, the user must be an administrator, and the bot must
+   * be allowed to edit it. A bot may edit only administrators it promoted, which no bot is here.
+   */
+  setChatAdministratorCustomTitle(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, userId }: SetChatAdministratorCustomTitleRequest,
+  ): SetChatAdministratorCustomTitleFailureReason {
+    if (isUserId(chatId)) {
+      return this.#isPrivateChatKnown(authenticatedBot, chatId)
+        ? 'method_unavailable_outside_groups'
+        : 'chat_not_found';
+    }
+    const result = this.#chatMemberships.getChatMemberStatus({
+      observerBotId: authenticatedBot.id,
+      chatId,
+      userId,
+    });
+    if (!result.found) {
+      return excludeMissingBotFailure(authenticatedBot, result.reason);
+    }
+    switch (result.status.status) {
+      case 'owner':
+        return 'member_is_owner';
+      case 'administrator':
+        return 'custom_title_not_editable';
+      default:
+        return 'member_is_not_administrator';
+    }
   }
 
   /**
