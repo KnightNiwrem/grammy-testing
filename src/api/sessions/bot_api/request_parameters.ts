@@ -57,19 +57,38 @@ export async function decodeBotApiRequestParameters(
   if (!bodyDecoding.decoded) {
     return bodyDecoding;
   }
-  parameterEntries.push(...bodyDecoding.parameterEntries);
+  return collectParameters(
+    [...parameterEntries, ...bodyDecoding.parameterEntries],
+    bodyDecoding.uploadedFiles,
+  );
+}
 
+/**
+ * Collects parameters from a message body alone, as `decodeBotApiRequestParameters` reads a
+ * request's body. The official Bot API server reads a webhook's response to an update this way,
+ * for the method the webhook may name in it.
+ */
+export async function decodeBotApiBodyParameters(
+  message: Request | Response,
+): Promise<BotApiRequestParametersDecoding> {
+  const bodyDecoding = await decodeBodyParameterEntries(message);
+  return bodyDecoding.decoded
+    ? collectParameters(bodyDecoding.parameterEntries, bodyDecoding.uploadedFiles)
+    : bodyDecoding;
+}
+
+/** Keeps the first value of each parameter name, as Telegram does. */
+function collectParameters(
+  parameterEntries: ReadonlyArray<readonly [string, string]>,
+  uploadedFiles: BotApiUploadedFiles,
+): BotApiRequestParametersDecoding {
   const parameters = new Map<string, string>();
   for (const [name, value] of parameterEntries) {
     if (!parameters.has(name)) {
       parameters.set(name, value);
     }
   }
-  return {
-    decoded: true,
-    parameters: Object.fromEntries(parameters),
-    uploadedFiles: bodyDecoding.uploadedFiles,
-  };
+  return { decoded: true, parameters: Object.fromEntries(parameters), uploadedFiles };
 }
 
 type BodyParameterEntriesDecoding =
@@ -83,14 +102,14 @@ type BodyParameterEntriesDecoding =
 const NO_UPLOADED_FILES: BotApiUploadedFiles = new Map();
 
 async function decodeBodyParameterEntries(
-  request: Request,
+  message: Request | Response,
 ): Promise<BodyParameterEntriesDecoding> {
-  const mediaType = request.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase();
+  const mediaType = message.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase();
 
   if (mediaType === MULTIPART_FORM_MEDIA_TYPE) {
     let formData: FormData;
     try {
-      formData = await request.formData();
+      formData = await message.formData();
     } catch {
       return { decoded: false, description: 'Bad Request: invalid multipart/form-data body' };
     }
@@ -109,7 +128,7 @@ async function decodeBodyParameterEntries(
     return { decoded: true, parameterEntries, uploadedFiles };
   }
 
-  const body = await request.text();
+  const body = await message.text();
   if (body.length === 0) {
     return { decoded: true, parameterEntries: [], uploadedFiles: NO_UPLOADED_FILES };
   }

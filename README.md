@@ -53,8 +53,11 @@ webhook that has not answered after 60 seconds fails with Telegram's `Read timeo
 Telegram times out only a webhook that sends nothing for that long. Unlike Telegram, the emulator
 accepts plain HTTP URLs on any port, so a test can run the bot's webhook server on its own machine,
 and it sends one update at a time, so a failing update holds back later ones, where Telegram sends
-updates of different chats in parallel. It does not run a Bot API method that a webhook names in its
-response, as Telegram does, and does not support `ip_address` or custom certificates. Ending a
+updates of different chats in parallel. As on Telegram, a webhook can also answer an update with a
+Bot API method call in its 2xx response, as the webhook replies of grammY and Telegraf do: the
+emulator runs the method named by its `method` parameter, apart from `setWebhook`, `deleteWebhook`,
+`close`, `logOut`, and methods whose names start with `get`, and the method's answer, even a
+failure, goes nowhere. The emulator does not support `ip_address` or custom certificates. Ending a
 session stops its webhooks.
 
 Bots and accounts also exchange photos and documents with captions. A bot sends them with

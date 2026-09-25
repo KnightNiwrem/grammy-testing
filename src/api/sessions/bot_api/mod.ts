@@ -601,7 +601,7 @@ type EditedMessageTargetReading =
   }
   | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer };
 
-type BotApiMethodHandler = (
+export type BotApiMethodHandler = (
   context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
   uploadedFiles: BotApiUploadedFiles,
@@ -643,6 +643,11 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['unbanchatmember', handleUnbanChatMember],
 ]);
 
+/** Finds a Bot API method by name, which Telegram matches case-insensitively. */
+export function findBotApiMethodHandler(methodName: string): BotApiMethodHandler | undefined {
+  return BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME.get(methodName.toLowerCase());
+}
+
 export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
   const botApiRoutes = new Hono<BotApiRouteContextTypes>();
 
@@ -682,8 +687,8 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
 
   // Telegram accepts both HTTP methods for every Bot API method.
   botApiRoutes.on(['GET', 'POST'], BOT_API_METHOD_PATH, async (context) => {
-    const methodHandler = BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME.get(
-      context.req.param(BOT_API_METHOD_NAME_PARAMETER).toLowerCase(),
+    const methodHandler = findBotApiMethodHandler(
+      context.req.param(BOT_API_METHOD_NAME_PARAMETER),
     );
     if (methodHandler === undefined) {
       return botApiResponse(context, botApiError(404, 'Not Found: method not found'));

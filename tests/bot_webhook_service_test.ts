@@ -219,7 +219,7 @@ Deno.test('BotWebhookService fails an attempt that outlasts its timeout and retr
       // The first request ignores its abort, as a sender might; the second hangs until aborted.
       (request, requestIndex) =>
         requestIndex === 0 ? new Promise<Response>(() => {}) : respondOnlyByAborting(request),
-      20,
+      { attemptTimeoutMilliseconds: 20 },
     );
 
   try {
@@ -243,6 +243,60 @@ Deno.test('BotWebhookService fails an attempt that outlasts its timeout and retr
           JSON.stringify({ receivedRequests, webhookInfo })
         }`,
       );
+    }
+  } finally {
+    botWebhooks.endDelivery();
+  }
+});
+
+Deno.test('BotWebhookService runs the reply of an accepted update only', async () => {
+  const replyBody = JSON.stringify({ method: 'sendMessage', chat_id: 1, text: 'Hi' });
+  const { botUpdates, botWebhooks, receivedReplies, waitForRequestCount } = createWebhookFixture(
+    (_request, requestIndex) =>
+      requestIndex === 0
+        ? new Response(replyBody, { status: 500, statusText: 'Internal Server Error' })
+        : new Response(replyBody, { headers: { 'Content-Type': 'application/json' } }),
+  );
+
+  try {
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
+    botWebhooks.setWebhook(BOT_ID, webhookRequest());
+    await waitForRequestCount(2);
+    await waitUntil(() => botWebhooks.getWebhookInfo(BOT_ID).pending_update_count === 0);
+
+    if (JSON.stringify(receivedReplies) !== JSON.stringify([{ botId: BOT_ID, body: replyBody }])) {
+      throw new Error(
+        `Expected only the accepted update's reply to run, received ${
+          JSON.stringify(receivedReplies)
+        }`,
+      );
+    }
+  } finally {
+    botWebhooks.endDelivery();
+  }
+});
+
+Deno.test('BotWebhookService confirms an accepted update whose reply fails', async () => {
+  const { botUpdates, botWebhooks, receivedRequests, waitForRequestCount } = createWebhookFixture(
+    () =>
+      new Response('{"method":"sendMessage"}', { headers: { 'Content-Type': 'application/json' } }),
+    { runWebhookReply: () => Promise.reject(new Error('The reply method failed')) },
+  );
+
+  try {
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(2));
+    botWebhooks.setWebhook(BOT_ID, webhookRequest());
+    await waitForRequestCount(2);
+    await waitUntil(() => botWebhooks.getWebhookInfo(BOT_ID).pending_update_count === 0);
+
+    const webhookInfo = botWebhooks.getWebhookInfo(BOT_ID);
+    if (
+      JSON.stringify(receivedRequests.map(({ body }) => body.update_id)) !==
+        JSON.stringify([1, 2]) ||
+      'last_error_message' in webhookInfo
+    ) {
+      throw new Error('Expected a failing reply to leave its update delivered without an error');
     }
   } finally {
     botWebhooks.endDelivery();
@@ -336,8 +390,16 @@ interface ReceivedWebhookRequest {
  */
 function createWebhookFixture(
   respond: (request: Request, requestIndex: number) => Response | Promise<Response>,
-  attemptTimeoutMilliseconds = WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
+  options: {
+    readonly attemptTimeoutMilliseconds?: number;
+    /** Records each reply's body when omitted. */
+    readonly runWebhookReply?: (botId: number, reply: Response) => Promise<void>;
+  } = {},
 ) {
+  const receivedReplies: Array<{ readonly botId: number; readonly body: string }> = [];
+  const runWebhookReply = options.runWebhookReply ?? (async (botId: number, reply: Response) => {
+    receivedReplies.push({ botId, body: await reply.text() });
+  });
   const botUpdates = new BotUpdateRepository();
   const receivedRequests: ReceivedWebhookRequest[] = [];
   const receivedSignals: AbortSignal[] = [];
@@ -355,7 +417,9 @@ function createWebhookFixture(
       }
       return await respond(request, receivedRequests.length - 1);
     },
-    attemptTimeoutMilliseconds,
+    runWebhookReply,
+    attemptTimeoutMilliseconds: options.attemptTimeoutMilliseconds ??
+      WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
     currentUnixTimeSeconds: () => NOW_UNIX_SECONDS,
   });
 
@@ -384,7 +448,25 @@ function createWebhookFixture(
     return Promise.race([received, timeout]).finally(() => clearTimeout(timeoutId));
   };
 
-  return { botUpdates, botWebhooks, receivedRequests, receivedSignals, waitForRequestCount };
+  return {
+    botUpdates,
+    botWebhooks,
+    receivedRequests,
+    receivedSignals,
+    receivedReplies,
+    waitForRequestCount,
+  };
+}
+
+/** Resolves once `condition` holds, checking every few milliseconds and failing after a second. */
+async function waitUntil(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!condition()) {
+    if (Date.now() > deadline) {
+      throw new Error('Expected the condition to hold within a second');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 /** Leaves the webhook request unanswered until it is aborted, as a hanging webhook would. */

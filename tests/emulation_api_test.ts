@@ -745,6 +745,125 @@ Deno.test('a grammY bot receives updates through its webhook and replies', async
   }
 });
 
+Deno.test('a webhook runs a Bot API method by naming it in its response', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  const replies = [
+    Response.json({ method: 'sendMessage', chat_id: accountId, text: 'JSON reply' }),
+    // A reply cannot change the webhook.
+    Response.json({ method: 'setWebhook', url: '' }),
+    new Response(
+      new URLSearchParams({
+        method: 'SENDMESSAGE',
+        chat_id: String(accountId),
+        text: 'Form reply',
+      }),
+    ),
+    new Response('ok'),
+    // A failing method changes nothing, and the update still counts as delivered.
+    Response.json({ method: 'sendMessage', chat_id: 999, text: 'Lost reply' }),
+  ];
+  let requestCount = 0;
+  const webhookServer = Deno.serve(
+    { hostname: '127.0.0.1', port: 0, onListen: () => {} },
+    () => replies[requestCount++] ?? new Response(null),
+  );
+  const readHistory = async () =>
+    ((await (await api.request(
+      `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/messages`,
+    )).json()) as { messages: Array<{ text?: string }> }).messages.map(({ text }) => text);
+  const readWebhookInfo = async () =>
+    (await callBotApi(api, `${botApiPath}/getWebhookInfo`, {})).body as {
+      result: { url: string; pending_update_count: number; last_error_message?: string };
+    };
+
+  try {
+    await callBotApi(api, `${botApiPath}/setWebhook`, {
+      url: `http://127.0.0.1:${webhookServer.addr.port}/webhook`,
+    });
+    for (const [index, text] of ['one', 'two', 'three', 'four', 'five'].entries()) {
+      await sendText(text);
+      await expectSettlementWithin(
+        (async () => {
+          while (
+            requestCount <= index || (await readWebhookInfo()).result.pending_update_count > 0
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          }
+        })(),
+        1_000,
+        `Expected the webhook to accept the update of "${text}"`,
+      );
+    }
+
+    const history = await readHistory();
+    const { result: webhookInfo } = await readWebhookInfo();
+    if (
+      JSON.stringify(history) !==
+        JSON.stringify(['one', 'JSON reply', 'two', 'three', 'Form reply', 'four', 'five']) ||
+      webhookInfo.url.length === 0 || webhookInfo.last_error_message !== undefined
+    ) {
+      throw new Error(
+        `Expected the webhook's replies to run, received ${
+          JSON.stringify({ history, webhookInfo })
+        }`,
+      );
+    }
+  } finally {
+    await api.request(sessionPath, { method: 'DELETE' });
+    await webhookServer.shutdown();
+  }
+});
+
+Deno.test('a grammY bot replies through its webhook response', async () => {
+  const { api, sessionPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+      canUseWebhookReply: (method) => method === 'sendMessage',
+    },
+  });
+  grammyBot.command('start', (context) => context.reply('Hello through the webhook reply!'));
+  const handleWebhookRequest = webhookCallback(grammyBot, 'std/http');
+  const webhookServer = Deno.serve(
+    { hostname: '127.0.0.1', port: 0, onListen: () => {} },
+    (request) => handleWebhookRequest(request),
+  );
+  const historyPath =
+    `${sessionPath}/accounts/${createdAccount.account.id}/conversations/private/${createdBot.bot.id}/messages`;
+
+  try {
+    await grammyBot.api.setWebhook(`http://127.0.0.1:${webhookServer.addr.port}/webhook`);
+    await sendText('/start');
+    const history = await expectSettlementWithin(
+      (async () => {
+        for (;;) {
+          const { messages } = await (await api.request(historyPath)).json() as {
+            messages: Array<{ text?: string }>;
+          };
+          if (messages.length > 1) {
+            return messages.map(({ text }) => text);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      })(),
+      5_000,
+      'Expected the bot to reply in its webhook response',
+    );
+    if (
+      JSON.stringify(history) !== JSON.stringify(['/start', 'Hello through the webhook reply!'])
+    ) {
+      throw new Error(`Expected the reply in history, received ${JSON.stringify(history)}`);
+    }
+  } finally {
+    await api.request(sessionPath, { method: 'DELETE' });
+    await webhookServer.shutdown();
+  }
+});
+
 Deno.test('sendMessage replies only in private chats the account has started', async () => {
   const { api, botApiPath, createdBot, createdAccount, sendText } =
     await createPrivateConversationFixture();

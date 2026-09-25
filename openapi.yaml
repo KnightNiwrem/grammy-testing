@@ -878,8 +878,12 @@ paths:
       and in order, and confirms it once the webhook answers with a 2xx status. An update the
       webhook has not answered after 60 seconds fails with `Read timeout expired`. A failed update
       is sent again at once, then after delays doubling from 2 up to 60 seconds, and holds back
-      later updates. Unlike Telegram, the emulator delivers to plain HTTP URLs on any port, and
-      ignores a Bot API method that the webhook names in its response. Setting a new webhook
+      later updates. As on Telegram, a 2xx response may call a Bot API method, named by its
+      `method` parameter, with the response's other parameters in any encoding a request may use;
+      the method runs before the next update is sent, and nothing receives its answer.
+      `setWebhook`, `deleteWebhook`, `close`, `logOut`, and methods whose names start with `get`
+      are ignored. Unlike Telegram, the emulator delivers to plain HTTP URLs on any port. Setting
+      a new webhook
       ends the bot's waiting getUpdates request with a conflict. Ending the session stops
       delivery; undelivered updates stay pending.
     parameters:

@@ -57,55 +57,6 @@ The findings and recommendations are presented in one priority order, not groupe
 
 ---
 
-## 7. P2 — Extract transport-independent method execution, then support webhook-response methods
-
-**Locations:**
-
-- [`src/api/sessions/bot_api/mod.ts`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/src/api/sessions/bot_api/mod.ts)
-- [`src/services/bot_webhook.ts`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/src/services/bot_webhook.ts)
-
-### Finding and context
-
-The webhook implementation explicitly discards response bodies. Thus a successful webhook response
-containing a supported Bot API operation can acknowledge the incoming update without performing the
-requested operation.
-
-Telegram’s webhook actor recognizes an eligible method in a successful response and dispatches it.
-This is an alternate invocation path for existing methods, not merely a cosmetic parameter.
-
-**References:**
-[Bot API — making requests when getting updates](https://core.telegram.org/bots/api#making-requests-when-getting-updates),
-[Telegram Bot API server `WebhookActor.cpp`](https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/WebhookActor.cpp).
-
-### Practical impact and architectural context
-
-Implementing this can unblock existing webhook-based bot configurations while reusing methods such
-as `sendMessage` that already work. It does not require another large family of message types.
-
-It also exposes the most useful SRP improvement in the transport layer. The Bot API route module
-currently combines parameter schemas, handler registration, HTTP context access, method handling,
-and response construction. Those responsibilities are closely related, but keeping execution tied to
-Hono makes a second invocation path unnecessarily difficult.
-
-### Recommendation
-
-Introduce a transport-independent execution boundary shared by ordinary HTTP calls and
-webhook-response operations. Keep decoding and response writing in the adapters, with
-feature-specific parameter readers and error/result translation alongside the corresponding method
-implementation.
-
-This does **not** require one class per method, nor does the size of `BotApiService` alone make it
-an SRP violation. A façade can legitimately coordinate multiple features.
-
-Make the extraction behavior-preserving first. Add webhook-response execution in a separate change,
-following upstream restrictions on which methods may run this way.
-
-### Regression coverage
-
-A successful response containing `sendMessage` should create one message. Separately test that
-webhook acknowledgement and the embedded method’s success are not incorrectly treated as the same
-outcome.
-
 ## 9. P2 — Implement a narrow `getChat` before less frequently exercised options
 
 **Classification:** Capability recommendation.
@@ -266,11 +217,9 @@ beneath an otherwise identical source revision.
 
 ## Bottom line
 
-The most important SRP improvements are not “split every large service.” They are more specific:
-make method execution reusable across transports, and distinguish faithful emulation from strict
-diagnostics.
+The most important SRP improvement is not “split every large service.” It is more specific:
+distinguish faithful emulation from strict diagnostics.
 
-After those corrections, webhook-response execution and a narrow `getChat` implementation offer
-useful coverage without requiring comprehensive Telegram emulation. Notification behavior and less
-frequently tested options can remain lower priority while these changes make the supported workflows
-substantially more trustworthy.
+A narrow `getChat` implementation offers useful coverage without requiring comprehensive Telegram
+emulation. Notification behavior and less frequently tested options can remain lower priority while
+these changes make the supported workflows substantially more trustworthy.

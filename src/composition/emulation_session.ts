@@ -1,3 +1,4 @@
+import { runWebhookReply } from '../api/sessions/bot_api/webhook_reply.ts';
 import type { EmulationSession } from '../types/emulation_session.ts';
 import { AccountRepository } from '../repositories/account.ts';
 import { BlockedUserRepository } from '../repositories/blocked_user.ts';
@@ -138,6 +139,12 @@ export function createEmulationSession(id: string): EmulationSession {
     pendingUpdates: botUpdates,
     updateSubscriptions,
     sendWebhookRequest: (request) => fetch(request),
+    runWebhookReply: async (botId, reply, signal) => {
+      const bot = bots.getById(botId);
+      if (bot !== undefined) {
+        await runWebhookReply({ session, bot: bot.profile, signal }, reply);
+      }
+    },
     attemptTimeoutMilliseconds: WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
     currentUnixTimeSeconds,
   });
@@ -156,7 +163,7 @@ export function createEmulationSession(id: string): EmulationSession {
     botCommands,
   });
 
-  return {
+  const session: EmulationSession = {
     id,
     virtualUsers,
     sharedChatAdministration,
@@ -175,4 +182,5 @@ export function createEmulationSession(id: string): EmulationSession {
       botWebhooks.endDelivery();
     },
   };
+  return session;
 }

@@ -101,6 +101,11 @@ interface BotWebhookServiceDependencies {
   /** Sends a webhook request over the network, as `fetch` does. */
   readonly sendWebhookRequest: (request: Request) => Promise<Response>;
   /**
+   * Runs the Bot API method, if any, that the bot's webhook names in its successful response to
+   * an update, reading the response body. `signal` aborts when the delivery attempt ends.
+   */
+  readonly runWebhookReply: (botId: number, reply: Response, signal: AbortSignal) => Promise<void>;
+  /**
    * How long an attempt to deliver an update may take before it is aborted and fails, which is
    * `WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS` outside tests.
    */
@@ -125,6 +130,7 @@ export class BotWebhookService {
   readonly #pendingUpdates: PendingUpdateQueue;
   readonly #updateSubscriptions: BotUpdateSubscriptionStore;
   readonly #sendWebhookRequest: (request: Request) => Promise<Response>;
+  readonly #runWebhookReply: (botId: number, reply: Response, signal: AbortSignal) => Promise<void>;
   readonly #attemptTimeoutMilliseconds: number;
   readonly #currentUnixTimeSeconds: () => number;
   /** Aborting a bot's controller stops delivery to its webhook, including a request in flight. */
@@ -138,6 +144,7 @@ export class BotWebhookService {
       pendingUpdates,
       updateSubscriptions,
       sendWebhookRequest,
+      runWebhookReply,
       attemptTimeoutMilliseconds,
       currentUnixTimeSeconds,
     }: BotWebhookServiceDependencies,
@@ -146,6 +153,7 @@ export class BotWebhookService {
     this.#pendingUpdates = pendingUpdates;
     this.#updateSubscriptions = updateSubscriptions;
     this.#sendWebhookRequest = sendWebhookRequest;
+    this.#runWebhookReply = runWebhookReply;
     this.#attemptTimeoutMilliseconds = attemptTimeoutMilliseconds;
     this.#currentUnixTimeSeconds = currentUnixTimeSeconds;
   }
@@ -301,7 +309,7 @@ export class BotWebhookService {
         continue;
       }
 
-      const deliveryErrorMessage = await this.#sendUpdate(webhook, update, signal);
+      const deliveryErrorMessage = await this.#sendUpdate(botId, webhook, update, signal);
       if (signal.aborted) {
         return;
       }
@@ -328,10 +336,12 @@ export class BotWebhookService {
    * returns Telegram's description of the failure, or `undefined` when the webhook accepted it.
    * The attempt ends when `deliverySignal` aborts, or fails once it outlasts its timeout.
    *
-   * Telegram also runs a Bot API method that a webhook names in its response body; the emulator
-   * does not, and ignores the body.
+   * As on Telegram, a successful response may name a Bot API method, which runs before the next
+   * update is sent. The status alone decides the outcome of the delivery: the method's failure, or
+   * a response body that cannot be read in time, leaves the update delivered.
    */
   async #sendUpdate(
+    botId: number,
     webhook: BotWebhook,
     update: BotApiUpdate,
     deliverySignal: AbortSignal,
@@ -348,12 +358,18 @@ export class BotWebhookService {
         // Telegram reports other failures to connect without their cause.
         return timeout.signal.aborted ? READ_TIMEOUT_ERROR_MESSAGE : "Can't connect to the webhook";
       }
+      const isAccepted = response.status >= 200 && response.status <= 299;
       try {
-        await settleUnlessAborted(response.body?.cancel() ?? Promise.resolve(), attemptSignal);
+        await settleUnlessAborted(
+          isAccepted
+            ? this.#runWebhookReply(botId, response, attemptSignal)
+            : response.body?.cancel() ?? Promise.resolve(),
+          attemptSignal,
+        );
       } catch {
-        // The status alone decides the outcome, so a body that fails to close changes nothing.
+        // The status alone decides the outcome, so neither the reply nor the body changes it.
       }
-      return response.status >= 200 && response.status <= 299
+      return isAccepted
         ? undefined
         : `Wrong response from the webhook: ${response.status} ${response.statusText}`;
     } finally {
