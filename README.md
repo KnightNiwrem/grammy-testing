@@ -290,6 +290,8 @@ try {
 - `deno task fmt:check` — check formatting
 - `deno task check` — type-check source and test files
 - `deno task openapi:lint` — lint `openapi.yaml` with Redocly's recommended rules
+- `deno task architecture:check` — check that imports respect the layer boundaries set in
+  `.fallowrc.json`
 
 ## Environment
 

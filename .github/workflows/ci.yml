@@ -23,6 +23,8 @@ jobs:
             task: test
           - task_name: openapi:lint
             task: openapi:lint
+          - task_name: architecture:check
+            task: architecture:check
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -459,33 +459,6 @@ configuration framework. The important result is that “Telegram rejects this,�
 not implement this,” and “strict diagnostics discourage this” no longer collapse into the same
 generic invalid-parameters response.
 
-## 12. P2 — Run the architecture check in the required CI path
-
-**Locations:**
-
-- [`deno.json`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/deno.json)
-- [`.fallowrc.json`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/.fallowrc.json)
-- [`.github/workflows/ci.yml`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/.github/workflows/ci.yml)
-
-### Finding and context
-
-There is already an `architecture:check` task and a detailed boundary configuration covering
-repositories, domain services, projections, delivery, composition, and transport. The checked-in CI
-matrix runs formatting, linting, type checking, tests, and OpenAPI linting, but does not include
-that architecture task.
-
-### Recommendation
-
-Add the existing architecture check to the required CI path.
-
-This is a small change with immediate value because the project already invested in specifying its
-boundaries. Without executing that check, a new import can bypass the intended layering while every
-listed CI task remains green.
-
-Also keep its purpose precise: import-boundary enforcement can prevent a transport module from
-depending on the wrong layer, but it cannot prove SRP. The responsibility questions in findings 1,
-7, and 11 still require design review.
-
 ## 13. P3 — Complete the clock-injection seam with a session-level scheduler
 
 **Locations:**
