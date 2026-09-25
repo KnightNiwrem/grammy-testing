@@ -60,12 +60,15 @@ for displaying messages. Phone numbers are a [real gap](#real-gaps).
   Telegram generated: for bots, a message with a preview reports its URL. It also depends on whether
   the text contains a URL. Without previews, simulated options would differ from what Telegram
   returns, so tests should not expect them.
+- **No phone number detection.** Telegram's servers mark `phone_number` entities by rules that are
+  not published: TDLib's [`find_entities`][entity-detection] only has a placeholder for them, TDLib
+  drops `phone_number` entities that clients specify, and the Bot API server ignores bots'. A
+  guessed detector would match numbers differently from Telegram, so tests could pass against the
+  emulator and fail in production. The emulator detects none, and handlers for phone numbers do not
+  match.
 
 ## Real gaps
 
-- **Phone number detection.** Telegram's servers also mark `phone_number` entities, by rules that
-  the open-source code does not contain; TDLib's `find_entities` leaves them to the servers. The
-  emulator detects none, so handlers for phone numbers do not match.
 - **Mention access and privacy.** A text mention may reference any known account or bot in the
   session. Simulated access and privacy restrictions are missing, so tests cannot exercise them.
   TDLib resolves mentioned users in [`get_message_entities`][message-entities]; the exact remote
