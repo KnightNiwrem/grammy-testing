@@ -110,8 +110,8 @@ export type UnpositionedBotActivityEntry =
 
 /**
  * Which entries a reader looks for; an entry must satisfy every criterion given. Criteria that
- * only calls have, `method`, `ok` and `parameters`, match no update entry, and `userId` matches
- * no call.
+ * only calls have, `method`, `ok` and `parameters`, match no update entry, and criteria that only
+ * updates have, `userId` and `updateId`, match no call.
  */
 export interface BotActivityFilter {
   readonly botId?: number;
@@ -120,6 +120,8 @@ export interface BotActivityFilter {
   readonly method?: string;
   readonly chatId?: number;
   readonly userId?: number;
+  /** The ID of the update delivered or confirmed; bots number their updates independently. */
+  readonly updateId?: number;
   /** Whether the call's answer was successful. */
   readonly ok?: boolean;
   /** Parameter text the call must have sent, by parameter name, compared exactly. */
@@ -140,11 +142,14 @@ export function matchesBotActivityFilter(
     return false;
   }
   if (entry.kind === 'bot_api_call') {
-    return filter.userId === undefined && matchesBotApiCallCriteria(entry, filter);
+    return filter.userId === undefined && filter.updateId === undefined &&
+      matchesBotApiCallCriteria(entry, filter);
   }
+  const updateId = entry.kind === 'update_delivered' ? entry.update.update_id : entry.updateId;
   return (
     filter.method === undefined && filter.ok === undefined && filter.parameters === undefined &&
-    (filter.userId === undefined || entry.userId === filter.userId)
+    (filter.userId === undefined || entry.userId === filter.userId) &&
+    (filter.updateId === undefined || updateId === filter.updateId)
   );
 }
 

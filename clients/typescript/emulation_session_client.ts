@@ -39,7 +39,8 @@ import type {
   AccountSendPhotoInput,
   AccountSupergroupBotCommandsInput,
   AddChatMemberInput,
-  BotActivityFilter,
+  BotActivityCriteria,
+  BotActivityFilterFor,
   BotActivityLog,
   BotActivityLogOptions,
   BotBlockInput,
@@ -104,7 +105,10 @@ export interface EmulationSessionClient extends EmulationSession {
    * and the updates delivered to and confirmed by them. `filter` applies to every read of the
    * view, such as `{ bot_id }` for one bot's activity.
    */
-  botActivity(filter?: BotActivityFilter, options?: BotActivityLogOptions): BotActivityLog;
+  botActivity<const Criteria extends BotActivityCriteria>(
+    filter?: BotActivityFilterFor<Criteria>,
+    options?: BotActivityLogOptions,
+  ): BotActivityLog;
 }
 
 export function createEmulationSessionClient(
@@ -211,7 +215,10 @@ class HttpEmulationSessionClient implements EmulationSessionClient {
     });
   }
 
-  botActivity(filter: BotActivityFilter = {}, options: BotActivityLogOptions = {}): BotActivityLog {
+  botActivity<const Criteria extends BotActivityCriteria>(
+    filter?: BotActivityFilterFor<Criteria>,
+    options: BotActivityLogOptions = {},
+  ): BotActivityLog {
     return createBotActivityLog(`${this.#sessionUrl}/bot-activity`, this.#fetch, filter, options);
   }
 }

@@ -7,6 +7,7 @@ import {
   TelegramEmulationClient,
   UnexpectedBotActivityError,
 } from './mod.ts';
+import type { BotActivityCriteria } from './mod.ts';
 
 Deno.test('BotActivityLog waits for entries after the same position in either order', async () => {
   for (const order of [['B', 'C'], ['C', 'B']]) {
@@ -56,7 +57,7 @@ Deno.test('BotActivityLog keeps waiting past entries its where predicate rejects
   const reply = activity.waitFor(
     {
       method: 'sendMessage',
-      where: (entry) => entry.kind === 'bot_api_call' && entry.parameters.text === 'second',
+      where: (entry) => entry.parameters.text === 'second',
     },
     { after: start },
   );
@@ -65,6 +66,52 @@ Deno.test('BotActivityLog keeps waiting past entries its where predicate rejects
   const entry = await reply;
   if (entry.parameters.text !== 'second' || entry.position !== 2) {
     throw new Error('Expected the wait to skip the rejected entry and find the later one');
+  }
+  await session.end();
+});
+
+Deno.test('BotActivityLog gives a view where predicate the entries its criteria can match', async () => {
+  const { session, callBot } = await createFixture();
+  const activity = session.botActivity({
+    kind: 'bot_api_call',
+    where: (entry) => entry.method !== 'sendChatAction',
+  });
+  await callBot('sendChatAction', { action: 'typing' });
+  await callBot('sendMessage', { text: 'Hello' });
+
+  const call = await activity.waitFor({ ok: true }, { after: 0 });
+  if (call.method !== 'sendMessage' || call.position !== 2) {
+    throw new Error('Expected the view where predicate to skip the chat action');
+  }
+  await session.end();
+});
+
+Deno.test('BotActivityLog finds the confirmation of a delivered update by its ID', async () => {
+  const { session, bot, account, getUpdates } = await createFixture();
+  await account.sendMessage({ to: { type: 'private', botId: bot.id }, text: 'Second' });
+  await getUpdates({});
+  await getUpdates({ offset: 3 });
+  const activity = session.botActivity({ bot_id: bot.id });
+
+  const delivered = await activity.waitFor(
+    {
+      kind: 'update_delivered',
+      where: (entry) =>
+        (entry.update.message as { readonly text?: string } | undefined)?.text === 'Second',
+    },
+    { after: 0 },
+  );
+  const confirmed = await activity.waitFor(
+    { kind: 'update_confirmed', update_id: delivered.update.update_id },
+    { after: delivered },
+  );
+  const firstOfUpdate = await activity.waitFor({ update_id: 2 }, { after: 0 });
+
+  if (confirmed.update_id !== 2 || confirmed.position !== 4) {
+    throw new Error('Expected to skip the confirmation of the first update and find the second');
+  }
+  if (firstOfUpdate.position !== delivered.position || firstOfUpdate.via !== 'polling') {
+    throw new Error('Expected the update ID alone to find the delivery first');
   }
   await session.end();
 });
@@ -144,7 +191,11 @@ Deno.test('BotActivityLog rejects a read whose filter conflicts with the log fil
   const activity = session.botActivity({ bot_id: bot.id, method: 'sendMessage' });
 
   await activity.assertNone({ method: 'SENDMESSAGE' }, { after: 0, before: 1 });
-  for (const filter of [{ bot_id: bot.id + 1 }, { method: 'deleteMessage' }]) {
+  const conflictingFilters: BotActivityCriteria[] = [
+    { bot_id: bot.id + 1 },
+    { method: 'deleteMessage' },
+  ];
+  for (const filter of conflictingFilters) {
     try {
       await activity.assertNone(filter, { after: 0, before: 1 });
     } catch (error) {
@@ -193,7 +244,15 @@ async function createFixture() {
       body: JSON.stringify({ chat_id: account.id, ...parameters }),
     });
   };
-  return { session, bot, account, callBot };
+  /** Polls the bot's updates, which delivers them and confirms those before `offset`. */
+  const getUpdates = async (parameters: { readonly offset?: number }) => {
+    await fetch(`${session.botApiRoot}/bot${token}/getUpdates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parameters),
+    });
+  };
+  return { session, bot, account, callBot, getUpdates };
 }
 
 function createInProcessFetch(

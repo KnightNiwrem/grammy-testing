@@ -50,10 +50,12 @@ Entries are kept until the session ends.
 
 `GET /sessions/{sessionId}/bot-activity` answers with the earliest entries after `after`, and before
 `before` if given, that match every filter given, with `head_position`, the latest position. The
-filters are `bot_id`, `kind`, `method`, `chat_id`, `user_id`, `ok` and `parameters`, which matches
-parameter text exactly, as in `parameters[callback_query_id]=123`. A method matches without regard
-to case, and an older name finds its calls too. Filters that only calls have, `method`, `ok` and
-`parameters`, match no update entry, and `user_id` matches no call.
+filters are `bot_id`, `kind`, `method`, `chat_id`, `user_id`, `update_id`, `ok` and `parameters`,
+which matches parameter text exactly, as in `parameters[callback_query_id]=123`. A method matches
+without regard to case, and an older name finds its calls too. Filters that only calls have,
+`method`, `ok` and `parameters`, match no update entry, and filters that only updates have,
+`user_id` and `update_id`, match no call. Each bot numbers its updates independently, so an
+`update_id` names one update only together with `bot_id`.
 
 A read without `before` that finds nothing is held for up to `wait_ms` milliseconds, at most 10
 minutes, until a matching entry is recorded or the session ends. A read with `before` covers a range
@@ -67,7 +69,10 @@ parameter.
 `session.botActivity(filter?, options?)` returns a view of the log. The view's filter applies to
 every read in addition to the read's own filter. Filters use the entries' field names, such as
 `bot_id` and `chat_id`. A `where` predicate checks the entries that match the other criteria, on the
-client.
+client, and receives only the kinds of entry those criteria can match: a `BotApiCallEntry` when they
+name a `method`, an `UpdateDeliveredEntry` when they name that `kind`. A list of different filters
+needs a declared type, such as `BotActivityCriteria[]`, as TypeScript infers the narrowed type from
+a single filter only.
 
 - `position()` returns the head position.
 - `waitFor(filter, { after })` returns the first matching entry after a position. It holds one
@@ -98,8 +103,26 @@ const [b, c] = await Promise.all([
 await activity.waitFor(reply('D'), { after: latest(b, c) });
 ```
 
-A filter that names a `kind`, or criteria only calls have, returns a correspondingly narrowed entry
-type, so `reply('A')` finds a `BotApiCallEntry` whose `answer` can be read directly.
+A filter that names a `kind`, or criteria only calls or only updates have, returns a correspondingly
+narrowed entry type, so `reply('A')` finds a `BotApiCallEntry` whose `answer` can be read directly.
+
+A delivery's `update_id` finds that update's confirmation. The wait below asserts that the bot
+received the account's message, then that it confirmed it:
+
+```ts
+const delivered = await activity.waitFor(
+  {
+    kind: 'update_delivered',
+    chat_id: account.id,
+    where: (entry) => (entry.update.message as { text?: string } | undefined)?.text === '/pair',
+  },
+  { after: start },
+);
+await activity.waitFor(
+  { kind: 'update_confirmed', update_id: delivered.update.update_id },
+  { after: delivered },
+);
+```
 
 ## Asserting that something did not happen
 

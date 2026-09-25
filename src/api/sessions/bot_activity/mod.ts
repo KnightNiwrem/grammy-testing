@@ -29,6 +29,7 @@ const readBotActivityQuerySchema = z.strictObject({
   method: z.string().min(1).optional(),
   chat_id: integerParameter(z.int()).optional(),
   user_id: integerParameter(z.int()).optional(),
+  update_id: integerParameter(z.int()).optional(),
   ok: z.enum(['true', 'false']).transform((text) => text === 'true').optional(),
   limit: integerParameter(z.int().min(0).max(MAX_READ_LIMIT)).default(DEFAULT_READ_LIMIT),
   wait_ms: integerParameter(z.int().min(0).max(MAX_WAIT_MILLISECONDS)).default(0),
@@ -98,6 +99,7 @@ function toBotActivityFilter(query: ReadBotActivityQuery): BotActivityFilter {
       : { method: findBotApiMethod(query.method)?.name ?? query.method }),
     ...(query.chat_id === undefined ? {} : { chatId: query.chat_id }),
     ...(query.user_id === undefined ? {} : { userId: query.user_id }),
+    ...(query.update_id === undefined ? {} : { updateId: query.update_id }),
     ...(query.ok === undefined ? {} : { ok: query.ok }),
     ...(Object.keys(query.parameters).length === 0 ? {} : { parameters: query.parameters }),
   };

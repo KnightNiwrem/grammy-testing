@@ -1354,33 +1354,56 @@ export type BotActivityEntry = BotApiCallEntry | UpdateDeliveredEntry | UpdateCo
 export type BotActivityPosition = number | { readonly position: number };
 
 /**
- * Which entries to look for; an entry must satisfy every criterion given. Criteria that only calls
- * have, `method`, `ok` and `parameters`, match no update entry, and `user_id` matches no call.
- * The server applies every criterion but `where`.
+ * Which entries to look for, which the server applies; an entry must satisfy every criterion
+ * given. Criteria that only calls have, `method`, `ok` and `parameters`, match no update entry, and
+ * criteria that only updates have, `user_id` and `update_id`, match no call.
  */
-export interface BotActivityFilter {
+export interface BotActivityCriteria {
   readonly bot_id?: number;
   readonly kind?: BotActivityKind;
   /** A method name, compared without regard to case; an older name finds its calls too. */
   readonly method?: string;
   readonly chat_id?: number;
   readonly user_id?: number;
+  /**
+   * The ID of the update delivered or confirmed. Each bot numbers its updates independently, so
+   * an ID names one update only together with `bot_id`.
+   */
+  readonly update_id?: number;
   /** Whether the call's answer was successful. */
   readonly ok?: boolean;
   /** Parameter text the call must have sent, by parameter name, compared exactly. */
   readonly parameters?: Readonly<Record<string, string>>;
-  /** Checked by the client on entries that satisfy every other criterion. */
-  readonly where?: (entry: BotActivityEntry) => boolean;
 }
 
-/** The entries a filter can match, judged from the criteria it gives. */
-export type BotActivityEntryMatching<Filter extends BotActivityFilter> = Filter extends
+/** Criteria, and a predicate the client checks on the entries that satisfy them. */
+export interface BotActivityFilter<Entry extends BotActivityEntry = BotActivityEntry>
+  extends BotActivityCriteria {
+  readonly where?: (entry: Entry) => boolean;
+}
+
+/**
+ * A filter whose `where` predicate receives only the entries its criteria can match, such as a
+ * `BotApiCallEntry` for criteria that name a `method`.
+ *
+ * The criteria are spelled as a mapped type so that TypeScript infers them from an object literal
+ * whose `where` predicate leaves its parameter untyped; it infers nothing from a plain intersection
+ * with such a literal. It infers them from one filter only, so a union of different filters needs
+ * a declared type, such as `BotActivityCriteria`.
+ */
+export type BotActivityFilterFor<Criteria extends BotActivityCriteria> =
+  & { readonly [Name in keyof Criteria]: Criteria[Name] }
+  & BotActivityFilter<BotActivityEntryMatching<NoInfer<Criteria>>>;
+
+/** The entries criteria can match, judged from the criteria they give. */
+export type BotActivityEntryMatching<Criteria extends BotActivityCriteria> = Criteria extends
   { readonly kind: infer Kind extends BotActivityKind } ? Extract<BotActivityEntry, { kind: Kind }>
-  : Filter extends
+  : Criteria extends
     | { readonly method: string }
     | { readonly ok: boolean }
     | { readonly parameters: Readonly<Record<string, string>> } ? BotApiCallEntry
-  : Filter extends { readonly user_id: number } ? UpdateDeliveredEntry | UpdateConfirmedEntry
+  : Criteria extends { readonly user_id: number } | { readonly update_id: number }
+    ? UpdateDeliveredEntry | UpdateConfirmedEntry
   : BotActivityEntry;
 
 export interface BotActivityLogOptions {
@@ -1416,15 +1439,18 @@ export interface BotActivityLog {
    * Returns the first matching entry after `after`, waiting for one to be recorded, and fails
    * with `BotActivityTimeoutError` when none is recorded in time.
    */
-  waitFor<const Filter extends BotActivityFilter>(
-    filter: Filter,
+  waitFor<const Criteria extends BotActivityCriteria>(
+    filter: BotActivityFilterFor<Criteria>,
     options: WaitForBotActivityOptions,
-  ): Promise<BotActivityEntryMatching<Filter>>;
+  ): Promise<BotActivityEntryMatching<Criteria>>;
   /**
    * Checks that no entry between the positions matches, without waiting, and fails with
    * `UnexpectedBotActivityError` listing the entries that do.
    */
-  assertNone(filter: BotActivityFilter, range: BotActivityRange): Promise<void>;
+  assertNone<const Criteria extends BotActivityCriteria>(
+    filter: BotActivityFilterFor<Criteria>,
+    range: BotActivityRange,
+  ): Promise<void>;
   /** A cursor that starts after `after` and moves past each entry it finds. */
   cursor(options: { readonly after: BotActivityPosition }): BotActivityCursor;
 }
@@ -1434,10 +1460,10 @@ export interface BotActivityCursor {
   /** The position the next search starts after. */
   readonly position: number;
   /** Waits for the first matching entry after the cursor, and moves the cursor to it. */
-  next<const Filter extends BotActivityFilter>(
-    filter: Filter,
+  next<const Criteria extends BotActivityCriteria>(
+    filter: BotActivityFilterFor<Criteria>,
     options?: { readonly timeoutMs?: number },
-  ): Promise<BotActivityEntryMatching<Filter>>;
+  ): Promise<BotActivityEntryMatching<Criteria>>;
 }
 
 export type HttpMethod = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';

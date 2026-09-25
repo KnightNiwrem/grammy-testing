@@ -93,13 +93,19 @@ Deno.test('BotActivityService filters entries by every criterion given', async (
     botId: OTHER_BOT_ID,
     answer: { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' },
   });
+  botActivity.recordUpdateConfirmations(BOT_ID, [privateMessageUpdate(1)], 'polling');
+  botActivity.recordUpdateDeliveries(OTHER_BOT_ID, [privateMessageUpdate(2)], 'polling');
 
   const cases: { filter: BotActivityFilter; expected: number[] }[] = [
-    { filter: { botId: BOT_ID }, expected: [1, 2, 3] },
+    { filter: { botId: BOT_ID }, expected: [1, 2, 3, 5] },
     { filter: { kind: 'bot_api_call' }, expected: [2, 3, 4] },
     { filter: { method: 'SENDMESSAGE' }, expected: [2, 4] },
-    { filter: { chatId: ADA_ID }, expected: [1, 2, 4] },
-    { filter: { userId: ADA_ID }, expected: [1] },
+    { filter: { chatId: ADA_ID }, expected: [1, 2, 4, 5, 6] },
+    { filter: { userId: ADA_ID }, expected: [1, 5, 6] },
+    { filter: { updateId: 1 }, expected: [1, 5] },
+    { filter: { updateId: 1, kind: 'update_confirmed' }, expected: [5] },
+    { filter: { updateId: 2 }, expected: [6] },
+    { filter: { updateId: 2, botId: BOT_ID }, expected: [] },
     { filter: { ok: false }, expected: [4] },
     { filter: { parameters: { callback_query_id: 'press' } }, expected: [3] },
     { filter: { parameters: { text: 'Hello' }, botId: BOT_ID }, expected: [2] },

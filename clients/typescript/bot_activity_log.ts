@@ -1,10 +1,12 @@
 import { HTTP_STATUS_OK } from './constants.ts';
 import { botActivityReadResponseSchema } from './schemas.ts';
 import type {
+  BotActivityCriteria,
   BotActivityCursor,
   BotActivityEntry,
   BotActivityEntryMatching,
   BotActivityFilter,
+  BotActivityFilterFor,
   BotActivityLog,
   BotActivityLogOptions,
   BotActivityPosition,
@@ -70,14 +72,19 @@ export class UnexpectedBotActivityError extends Error {
   }
 }
 
-export function createBotActivityLog(
+export function createBotActivityLog<Criteria extends BotActivityCriteria>(
   activityUrl: string,
   fetchImplementation: typeof globalThis.fetch,
-  baseFilter: BotActivityFilter,
+  baseFilter: BotActivityFilterFor<Criteria> | undefined,
   { timeoutMs = DEFAULT_TIMEOUT_MILLISECONDS }: BotActivityLogOptions,
 ): BotActivityLog {
   validateTimeout(timeoutMs);
-  return new HttpBotActivityLog(activityUrl, fetchImplementation, baseFilter, timeoutMs);
+  return new HttpBotActivityLog(
+    activityUrl,
+    fetchImplementation,
+    baseFilter === undefined ? {} : acceptingAnyEntry(baseFilter),
+    timeoutMs,
+  );
 }
 
 interface BotActivityRead {
@@ -111,12 +118,12 @@ class HttpBotActivityLog implements BotActivityLog {
     return head_position;
   }
 
-  async waitFor<const Filter extends BotActivityFilter>(
-    filter: Filter,
+  async waitFor<const Criteria extends BotActivityCriteria>(
+    filter: BotActivityFilterFor<Criteria>,
     { after, timeoutMs = this.#defaultTimeoutMilliseconds }: WaitForBotActivityOptions,
-  ): Promise<BotActivityEntryMatching<Filter>> {
+  ): Promise<BotActivityEntryMatching<Criteria>> {
     validateTimeout(timeoutMs);
-    const combinedFilter = combineFilters(this.#baseFilter, filter);
+    const combinedFilter = combineFilters(this.#baseFilter, acceptingAnyEntry(filter));
     const afterPosition = toPositionNumber(after);
     const deadline = performance.now() + timeoutMs;
     let unreadAfter = afterPosition;
@@ -130,12 +137,7 @@ class HttpBotActivityLog implements BotActivityLog {
       });
       const match = entries.find((entry) => combinedFilter.where?.(entry) ?? true);
       if (match !== undefined) {
-        if (!isEntryMatching(match, filter)) {
-          throw new TypeError(
-            `The emulator answered a read for ${describeFilter(filter)} with an entry of kind ` +
-              match.kind,
-          );
-        }
+        assertEntryMatching(match, filter);
         return match;
       }
       // A read that filled its limit may have left later entries unread, which are checked even
@@ -150,8 +152,11 @@ class HttpBotActivityLog implements BotActivityLog {
     }
   }
 
-  async assertNone(filter: BotActivityFilter, { after, before }: BotActivityRange): Promise<void> {
-    const combinedFilter = combineFilters(this.#baseFilter, filter);
+  async assertNone<const Criteria extends BotActivityCriteria>(
+    filter: BotActivityFilterFor<Criteria>,
+    { after, before }: BotActivityRange,
+  ): Promise<void> {
+    const combinedFilter = combineFilters(this.#baseFilter, acceptingAnyEntry(filter));
     const afterPosition = toPositionNumber(after);
     const beforePosition = toPositionNumber(before);
     const matchingEntries: BotActivityEntry[] = [];
@@ -188,10 +193,10 @@ class HttpBotActivityLog implements BotActivityLog {
       get position() {
         return position;
       },
-      async next<const Filter extends BotActivityFilter>(
-        filter: Filter,
+      async next<const Criteria extends BotActivityCriteria>(
+        filter: BotActivityFilterFor<Criteria>,
         options: { readonly timeoutMs?: number } = {},
-      ): Promise<BotActivityEntryMatching<Filter>> {
+      ): Promise<BotActivityEntryMatching<Criteria>> {
         const entry = await waitFor(filter, { after: position, ...options });
         position = entry.position;
         return entry;
@@ -207,8 +212,8 @@ class HttpBotActivityLog implements BotActivityLog {
     if (waitMilliseconds !== undefined) {
       query.set('wait_ms', String(waitMilliseconds));
     }
-    const { bot_id, kind, method, chat_id, user_id, ok, parameters } = filter;
-    const criteria = { bot_id, kind, method, chat_id, user_id, ok };
+    const { bot_id, kind, method, chat_id, user_id, update_id, ok, parameters } = filter;
+    const criteria = { bot_id, kind, method, chat_id, user_id, update_id, ok };
     for (const [name, value] of Object.entries(criteria)) {
       if (value !== undefined) {
         query.set(name, String(value));
@@ -253,6 +258,7 @@ function combineFilters(
     ),
     chat_id: combineCriterion('chat_id', logFilter.chat_id, readFilter.chat_id),
     user_id: combineCriterion('user_id', logFilter.user_id, readFilter.user_id),
+    update_id: combineCriterion('update_id', logFilter.update_id, readFilter.update_id),
     ok: combineCriterion('ok', logFilter.ok, readFilter.ok),
     ...(Object.keys(parameters).length === 0 ? {} : { parameters }),
     ...(logWhere === undefined || readWhere === undefined
@@ -290,20 +296,47 @@ function assertCompatibleCriteria<Value>(
 }
 
 /**
- * Checks that an entry the server matched is of a kind the filter can match, as its type
- * promises.
+ * Adapts a filter whose `where` predicate expects only the entries its criteria can match to one
+ * that checks any entry. It is applied to entries the server matched against the criteria, so an
+ * entry of another kind means the server broke its answer's contract.
  */
-function isEntryMatching<Filter extends BotActivityFilter>(
+function acceptingAnyEntry<Criteria extends BotActivityCriteria>(
+  filter: BotActivityFilterFor<Criteria>,
+): BotActivityFilter {
+  const { where } = filter;
+  return {
+    ...filter,
+    where: where === undefined ? undefined : (entry) => {
+      assertEntryMatching(entry, filter);
+      return where(entry);
+    },
+  };
+}
+
+/** Checks that an entry the server matched is of a kind the criteria can match. */
+function assertEntryMatching<Criteria extends BotActivityCriteria>(
   entry: BotActivityEntry,
-  filter: Filter,
-): entry is BotActivityEntryMatching<Filter> {
-  if (filter.kind !== undefined) {
-    return entry.kind === filter.kind;
+  criteria: Criteria,
+): asserts entry is BotActivityEntryMatching<Criteria> {
+  if (!isEntryMatching(entry, criteria)) {
+    throw new TypeError(
+      `The emulator answered a read for ${describeFilter(criteria)} with an entry of kind ` +
+        entry.kind,
+    );
   }
-  if (filter.method !== undefined || filter.ok !== undefined || filter.parameters !== undefined) {
+}
+
+function isEntryMatching(entry: BotActivityEntry, criteria: BotActivityCriteria): boolean {
+  if (criteria.kind !== undefined) {
+    return entry.kind === criteria.kind;
+  }
+  if (
+    criteria.method !== undefined || criteria.ok !== undefined ||
+    criteria.parameters !== undefined
+  ) {
     return entry.kind === 'bot_api_call';
   }
-  if (filter.user_id !== undefined) {
+  if (criteria.user_id !== undefined || criteria.update_id !== undefined) {
     return entry.kind !== 'bot_api_call';
   }
   return true;
@@ -323,7 +356,7 @@ function validateTimeout(timeoutMs: number): void {
   }
 }
 
-function describeFilter(filter: BotActivityFilter): string {
+function describeFilter(filter: BotActivityCriteria & { readonly where?: unknown }): string {
   const { where, ...criteria } = filter;
   return `${JSON.stringify(criteria)}${where === undefined ? '' : ' and its where predicate'}`;
 }

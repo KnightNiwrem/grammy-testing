@@ -13,9 +13,10 @@ get:
   description: >-
     Answers with the earliest entries after `after`, and before `before` if given, that match
     every filter given. Filters that only calls have, `method`, `ok`, and `parameters`, match no
-    update entry, and `user_id` matches no call. A read without `before` that finds no matching
-    entry is held until one is recorded, `wait_ms` elapses, or the session ends. A read with
-    `before` covers a range that is already complete and is answered at once.
+    update entry, and filters that only updates have, `user_id` and `update_id`, match no call. A
+    read without `before` that finds no matching entry is held until one is recorded, `wait_ms`
+    elapses, or the session ends. A read with `before` covers a range that is already complete and
+    is answered at once.
   parameters:
     - name: after
       in: query
@@ -58,6 +59,13 @@ get:
         type: integer
     - name: user_id
       in: query
+      schema:
+        type: integer
+    - name: update_id
+      in: query
+      description: >-
+        The ID of the update delivered or confirmed. Each bot numbers its updates independently,
+        so an ID names one update only together with `bot_id`.
       schema:
         type: integer
     - name: ok

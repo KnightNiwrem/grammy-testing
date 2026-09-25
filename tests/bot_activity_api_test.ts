@@ -146,6 +146,8 @@ Deno.test('GET bot-activity filters entries by query parameters', async () => {
     { query: 'method=sendMessage&parameters[text]=Two', expected: [3] },
     { query: `chat_id=${account.id}`, expected: [1, 2, 3] },
     { query: `user_id=${account.id}`, expected: [1] },
+    { query: 'update_id=1', expected: [1] },
+    { query: 'update_id=2', expected: [] },
     { query: 'ok=false', expected: [4] },
     { query: 'kind=update_delivered', expected: [1] },
     { query: 'after=1&before=4', expected: [2, 3] },
@@ -196,6 +198,7 @@ Deno.test('GET bot-activity rejects malformed queries and positions beyond the h
     'wait_ms=600001',
     'limit=1001',
     'ok=yes',
+    'update_id=first',
     'kind=update',
     'method=',
   ];
