@@ -37,8 +37,12 @@ formatted input has an additional 32,768-byte UTF-8 limit before markup parsing,
 
 - **One set of account limits.** Premium account differences are not modeled. Tests use the same
   text and caption limits for every account.
-- **No external link-preview fetching.** Tests should not depend on third-party websites, so the
-  emulator does not fetch preview content. Simulated preview metadata remains a real gap.
+- **No link previews or preview metadata.** Tests should not depend on third-party websites, so the
+  emulator does not fetch preview content, and returned messages omit `link_preview_options`.
+  TDLib's [`get_message_content_object`][preview-options] derives that object from the preview
+  Telegram generated: for bots, a message with a preview reports its URL. It also depends on whether
+  the text contains a URL, which automatic entity detection does not find. Without previews,
+  simulated options would differ from what Telegram returns, so tests should not expect them.
 
 ## Real gaps
 
@@ -48,9 +52,6 @@ formatted input has an additional 32,768-byte UTF-8 limit before markup parsing,
   them in Bot API input but redetects only bot commands. Sending an existing Telegram entity list
   therefore does not preserve automatically detected URLs or mentions. See
   [`Client::get_text_entity_type`][entity-input] and [`TDLib::find_entities`][entity-detection].
-- **Simulated link-preview metadata.** Returned messages omit `link_preview_options`; tests need a
-  simulated representation of that object. Upstream passes these options into message content via
-  [`Client::get_input_message_text`][input-text].
 
 - **Mention access and privacy.** A text mention may reference any known account or bot in the
   session. Simulated access and privacy restrictions are missing, so tests cannot exercise them.
@@ -80,5 +81,5 @@ also follow the emulator's intentional
 [entity-input]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L11872-L11952
 [formatted-date]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/FormattedDate.cpp#L106-L132
 [entity-detection]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L1740-L1800
-[input-text]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L12000-L12080
 [message-entities]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L3650-L3800
+[preview-options]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageContent.cpp#L11420-L11449

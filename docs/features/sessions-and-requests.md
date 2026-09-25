@@ -48,8 +48,10 @@ virtual token gives `401 Unauthorized`; an unimplemented method gives
 - **No production rate thresholds.** Telegram's traffic limits are not reproduced automatically.
   Rate-limit scenarios should be controlled by the test, so bot developers can exercise error
   handling without generating production-scale traffic or depending on Telegram's limit figures.
-- **No external link-preview fetching.** Tests should not depend on fetching third-party websites to
-  generate previews. Simulating the returned preview metadata is a separate requirement.
+- **No link previews or preview metadata.** Tests should not depend on fetching third-party websites
+  to generate previews. Returned messages also omit `link_preview_options`, whose value Telegram
+  derives from the generated preview; see
+  [text formatting](text-formatting.md#intentional-deviations).
 
 ### Strict request validation
 
@@ -78,7 +80,7 @@ accepted upstream; low-level HTTP errors and size limits can still fail there.
 | Option or method                                          | Emulator behavior                               | Classification and details                                                                      |
 | --------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `disable_notification`                                    | Validated; no notification state                | [Real gap](#real-gaps)                                                                          |
-| `link_preview_options`, `disable_web_page_preview`        | Validated; no preview or returned options       | Fetching intentionally omitted; [metadata gap](#real-gaps)                                      |
+| `link_preview_options`, `disable_web_page_preview`        | Validated; no preview or returned options       | [Intentional](#intentional-deviations)                                                          |
 | `sendChatAction`                                          | Validates action/access; no typing/upload state | [Real gap](#real-gaps)                                                                          |
 | `disable_content_type_detection`                          | Documents always remain documents               | [Real gap](media-and-files.md#real-gaps)                                                        |
 | Webhook `max_connections`                                 | Clamped and reported; delivery remains serial   | [Real gap](webhooks.md#real-gaps)                                                               |
@@ -112,9 +114,6 @@ typing or upload state. Tests need to inspect that state.
 **Observable notification behavior.** `disable_notification` is accepted and validated, but tests
 cannot inspect its effect on notification state. The emulator needs to make that behavior
 observable.
-
-**Simulated link-preview metadata.** Returned messages omit `link_preview_options`. Tests need a
-simulated representation of that object while preview fetching remains intentionally disabled.
 
 **Configurable rate-limit responses.** There is no test configuration that makes selected Bot API
 calls return `429` with `parameters.retry_after`. Bot developers need this control to test

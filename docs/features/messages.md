@@ -52,8 +52,9 @@ chosen, searching in the order of TDLib's `MessageQuote::search_quote`. A chosen
 automatic quote of a reply to another chat.
 
 Replies to checklist tasks or poll options are [real gaps](#real-gaps). Text and captions follow the
-[formatting limits](text-formatting.md). Observable notification behavior and simulated link-preview
-metadata are also [missing](sessions-and-requests.md#real-gaps).
+[formatting limits](text-formatting.md). Observable notification behavior is also
+[missing](sessions-and-requests.md#real-gaps); link-preview metadata is
+[intentionally absent](text-formatting.md#intentional-deviations).
 
 Private message IDs come from each observer's message box; a supergroup has one sequence shared by
 all members. Private conversation history in the emulation API uses the **bot's** message IDs, so a
