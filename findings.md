@@ -147,49 +147,6 @@ service-message recipient selection.
 Account removal, bot removal, and voluntary bot departure should be tested with multiple observing
 bots. Distinguish `message.left_chat_member` from the separate `my_chat_member` update.
 
-## 4. P2 — Inline-message ownership works through inline IDs but not through chat/message IDs
-
-**Locations:** Both messaging services’ `#resolveEditableBotMessage` implementations:
-
-- [`src/services/private_messaging.ts`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/src/services/private_messaging.ts)
-- [`src/services/supergroup_messaging.ts`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/src/services/supergroup_messaging.ts)
-
-### Finding and context
-
-The new inline-ID branches correctly recognize ownership through `message.viaBot.botId`. However,
-the ordinary chat/message-ID branches still require ordinary bot authorship. In private chats they
-reject `authorRole !== 'bot'`; in supergroups they reject an account author even when `viaBot`
-identifies the editing bot.
-
-**Concrete scenario:** An account selects bot A’s inline result into a supergroup containing A. A
-receives the resulting ordinary message update, then tries to edit that message using its chat ID
-and message ID. The emulator rejects it as not editable.
-
-TDLib’s ordinary message-edit eligibility recognizes the owning inline bot, including for
-account-authored messages. That exception is not limited to the opaque inline-message-ID lookup
-path.
-
-**Reference:**
-[TDLib `MessagesManager.cpp`](https://github.com/tdlib/td/blob/master/td/telegram/MessagesManager.cpp).
-
-### Recommendation
-
-Separate **target lookup/access** from **message edit ownership**. After the chosen reference form
-resolves a message, apply consistent ownership rules that account for `viaBot`, followed by content
-and markup eligibility.
-
-Importantly, do **not** remove chat-access requirements from the chat/message-ID route merely
-because opaque inline IDs support editing outside the bot’s chats.
-
-This is a particularly worthwhile completion of the latest feature because it reuses ownership
-information the model already stores.
-
-### Regression coverage
-
-Exercise a bot-owned inline message through both reference forms, with private-chat and supergroup
-cases. Another bot must remain unable to edit it. Include a case where the bot has the ordinary
-message update but does not receive chosen-inline-result feedback.
-
 ## 6. P2 — Webhook delivery has no emulator-controlled per-attempt deadline
 
 **Location:**
@@ -473,8 +430,7 @@ beneath an otherwise identical source revision.
 ## Bottom line
 
 **Retain the architecture and fix the behavioral invariants first.** The highest-value corrections
-are privacy recipient selection, service-message visibility, consistent inline ownership, and
-bounded webhook attempts.
+are privacy recipient selection, service-message visibility, and bounded webhook attempts.
 
 The most important SRP improvements are not “split every large service.” They are more specific:
 separate recipient selection from update delivery, make method execution reusable across transports,

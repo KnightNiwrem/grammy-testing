@@ -4501,11 +4501,6 @@ Deno.test('an account sends an inline query, a bot answers, and the account send
       caption: 'A cat',
     }),
     callBotApi(api, `${inlineBot.botApiPath}/editMessageText`, { text: 'Cats' }),
-    callBotApi(api, `${inlineBot.botApiPath}/editMessageText`, {
-      chat_id: account.id,
-      message_id: message.message_id,
-      text: 'Cats',
-    }),
   ]);
   const failureDescriptions = failures.map(({ body }) =>
     isBadRequestResponse(body) ? body.description : JSON.stringify(body)
@@ -4517,10 +4512,30 @@ Deno.test('an account sends an inline query, a bot answers, and the account send
       'Bad Request: MESSAGE_ID_INVALID',
       'Bad Request: there is no caption in the message to edit',
       'Bad Request: message identifier is not specified',
-      "Bad Request: message can't be edited",
     ])
   ) {
     throw new Error(`Expected Telegram's inline edit errors, received ${failureDescriptions}`);
+  }
+
+  // As in TDLib, the inline bot also edits the message by its chat, which answers the message.
+  const chatEditResponse = await callBotApi(api, `${inlineBot.botApiPath}/editMessageText`, {
+    chat_id: account.id,
+    message_id: message.message_id,
+    text: 'Cats',
+  });
+  const chatEditResult = botApiResult(chatEditResponse.body);
+  if (
+    chatEditResponse.status !== 200 || chatEditResult === undefined ||
+    chatEditResult.message_id !== message.message_id ||
+    chatEditResult.text !== 'Cats' ||
+    JSON.stringify(chatEditResult.from) !== JSON.stringify(message.from) ||
+    JSON.stringify(chatEditResult.via_bot) !== JSON.stringify(message.via_bot)
+  ) {
+    throw new Error(
+      `Expected the inline bot to edit the message by its chat, received ${
+        JSON.stringify(chatEditResponse.body)
+      }`,
+    );
   }
 });
 

@@ -11,6 +11,7 @@ import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { ChatAction, Supergroup } from '../types/virtual_chat.ts';
 import {
+  canBotEditMessage,
   type CanonicalMessageId,
   type ChatMessage,
   type InlineMessageId,
@@ -806,9 +807,8 @@ export class SupergroupMessagingService {
   }
 
   /**
-   * Resolves the message an edit targets: a message of a supergroup the bot is a member of, which
-   * only the bot that sent it can edit, or a message sent through the bot's inline mode, which only
-   * that bot finds. A service message has no content to edit.
+   * Resolves the message an edit targets, found as `#findBotEditTarget` does, which the bot must
+   * be allowed to edit. A service message has no content to edit.
    */
   #resolveEditableBotMessage(
     target: EditSupergroupBotMessageTarget,
@@ -821,10 +821,32 @@ export class SupergroupMessagingService {
         | 'message_not_found'
         | 'message_not_editable';
     } {
+    const lookup = this.#findBotEditTarget(target);
+    if (!lookup.resolved) {
+      return lookup;
+    }
+    const { message } = lookup;
+    return isSupergroupContentMessage(message) && canBotEditMessage(message, target.fromBotId)
+      ? { resolved: true, message }
+      : { resolved: false, reason: 'message_not_editable' };
+  }
+
+  /**
+   * Finds the message an edit targets: a message of a supergroup the bot is a member of, or a
+   * message sent through the bot's inline mode, which only that bot finds by its inline message
+   * identifier, even outside its chats.
+   */
+  #findBotEditTarget(
+    target: EditSupergroupBotMessageTarget,
+  ):
+    | { readonly resolved: true; readonly message: SupergroupMessage }
+    | {
+      readonly resolved: false;
+      readonly reason: SupergroupBotAccessFailureReason | 'message_not_found';
+    } {
     if ('inlineMessageId' in target) {
       const message = this.#messages.getMessageByInlineMessageId(target.inlineMessageId);
-      return message?.kind === 'supergroup_message' && isSupergroupContentMessage(message) &&
-          message.viaBot?.botId === target.fromBotId
+      return message?.kind === 'supergroup_message' && message.viaBot?.botId === target.fromBotId
         ? { resolved: true, message }
         : { resolved: false, reason: 'message_not_found' };
     }
@@ -834,17 +856,9 @@ export class SupergroupMessagingService {
       return { resolved: false, reason: accessFailure };
     }
     const message = this.getMessageByChatMessageId(chatId, messageId);
-    if (message === undefined) {
-      return { resolved: false, reason: 'message_not_found' };
-    }
-    // As in TDLib, a forward cannot be edited.
-    if (
-      !isSupergroupContentMessage(message) || message.author.kind !== 'bot' ||
-      message.author.botId !== fromBotId || message.forwardInfo !== undefined
-    ) {
-      return { resolved: false, reason: 'message_not_editable' };
-    }
-    return { resolved: true, message };
+    return message === undefined
+      ? { resolved: false, reason: 'message_not_found' }
+      : { resolved: true, message };
   }
 
   /**

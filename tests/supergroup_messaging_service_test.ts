@@ -308,6 +308,82 @@ Deno.test("SupergroupMessagingService edits and deletes only the author's own me
   }
 });
 
+Deno.test('SupergroupMessagingService lets the inline bot edit a message sent through it by its chat', () => {
+  const {
+    supergroupMessaging,
+    virtualUsers,
+    sharedChatAdministration,
+    messageBoxes,
+    owner,
+    bot,
+    supergroup,
+  } = createSupergroupMessagingFixture();
+  const otherBot = createBot(virtualUsers, 'other_bot');
+  const outsiderBot = createBot(virtualUsers, 'outsider_bot');
+  sharedChatAdministration.addChatMember({
+    actorAccountId: owner.profile.id,
+    chatId: supergroup.id,
+    memberId: otherBot.profile.id,
+  });
+  const sendThrough = (viaBotId: number) => {
+    const message = expectSent(supergroupMessaging.sendAccountInlineResult({
+      fromAccountId: owner.profile.id,
+      chatId: supergroup.id,
+      viaBotId,
+      content: { kind: 'text', text: 'Cats', entities: [] },
+    }));
+    const messageId = messageBoxes.getMessageId(supergroup.id, message.id);
+    if (messageId === undefined || message.viaBot === undefined) {
+      throw new Error('Expected a numbered message sent through the inline bot');
+    }
+    return { message, messageId, inlineMessageId: message.viaBot.inlineMessageId };
+  };
+  const editText = (fromBotId: number, messageId: number, text: string) =>
+    supergroupMessaging.editBotMessageText({ fromBotId, chatId: supergroup.id, messageId, text });
+
+  const inlineMessage = sendThrough(bot.profile.id);
+  const textEdit = editText(bot.profile.id, inlineMessage.messageId, 'Dogs');
+  const keyboardEdit = supergroupMessaging.editBotMessageInlineKeyboard({
+    fromBotId: bot.profile.id,
+    chatId: supergroup.id,
+    messageId: inlineMessage.messageId,
+    inlineKeyboard: [[{ kind: 'callback', text: 'More', callbackData: 'more' }]],
+  });
+  if (
+    !textEdit.edited || getContentText(textEdit.message.content).text !== 'Dogs' ||
+    textEdit.message.author.kind !== 'account' || !keyboardEdit.edited
+  ) {
+    throw new Error(
+      `Expected the inline bot to edit the message by its chat, received ${
+        JSON.stringify([textEdit, keyboardEdit])
+      }`,
+    );
+  }
+  const otherBotEdit = editText(otherBot.profile.id, inlineMessage.messageId, 'Birds');
+  if (otherBotEdit.edited || otherBotEdit.reason !== 'message_not_editable') {
+    throw new Error('Expected another bot of the supergroup not to edit the inline message');
+  }
+
+  // Only its inline message identifier reaches a message outside the inline bot's chats.
+  const outsiderMessage = sendThrough(outsiderBot.profile.id);
+  const outsiderChatEdit = editText(outsiderBot.profile.id, outsiderMessage.messageId, 'Dogs');
+  const outsiderInlineEdit = supergroupMessaging.editBotMessageText({
+    fromBotId: outsiderBot.profile.id,
+    inlineMessageId: outsiderMessage.inlineMessageId,
+    text: 'Dogs',
+  });
+  if (
+    outsiderChatEdit.edited || outsiderChatEdit.reason !== 'chat_not_found' ||
+    !outsiderInlineEdit.edited
+  ) {
+    throw new Error(
+      `Expected the chat to stay closed to a bot outside it, received ${
+        JSON.stringify([outsiderChatEdit, outsiderInlineEdit])
+      }`,
+    );
+  }
+});
+
 Deno.test('SupergroupMessagingService lets bots with the right delete any message', () => {
   const { supergroupMessaging, sharedChatAdministration, owner, bot, supergroup } =
     createSupergroupMessagingFixture();

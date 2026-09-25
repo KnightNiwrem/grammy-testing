@@ -15,14 +15,15 @@ import type {
   PrivateConversationKey,
   PrivateConversationRole,
 } from '../types/virtual_chat.ts';
-import type {
-  CanonicalMessageId,
-  ChatMessage,
-  InlineMessageId,
-  MessageContent,
-  MessageForwardInfo,
-  PrivateMessage,
-  TextEntity,
+import {
+  canBotEditMessage,
+  type CanonicalMessageId,
+  type ChatMessage,
+  type InlineMessageId,
+  type MessageContent,
+  type MessageForwardInfo,
+  type PrivateMessage,
+  type TextEntity,
 } from '../types/virtual_message.ts';
 import {
   type AccountMessageContent,
@@ -1017,8 +1018,8 @@ export class PrivateMessagingService {
   }
 
   /**
-   * Resolves the message an edit targets: a message of the bot's chat, which only the bot that sent
-   * it can edit, or a message sent through the bot's inline mode, which only that bot finds.
+   * Resolves the message an edit targets, found as `#findBotEditTarget` does, which the bot must
+   * be allowed to edit.
    */
   #resolveEditableBotMessage(
     target: EditBotMessageTarget,
@@ -1031,6 +1032,27 @@ export class PrivateMessagingService {
         | 'conversation_not_started'
         | 'message_not_found'
         | 'message_not_editable';
+    } {
+    const lookup = this.#findBotEditTarget(target);
+    if (!lookup.resolved) {
+      return lookup;
+    }
+    return canBotEditMessage(lookup.message, target.fromBotId)
+      ? lookup
+      : { resolved: false, reason: 'message_not_editable' };
+  }
+
+  /**
+   * Finds the message an edit targets: a message of one of the bot's private chats, or a message
+   * sent through the bot's inline mode, which only that bot finds by its inline message identifier.
+   */
+  #findBotEditTarget(
+    target: EditBotMessageTarget,
+  ):
+    | { readonly resolved: true; readonly message: PrivateMessage }
+    | {
+      readonly resolved: false;
+      readonly reason: 'account_not_found' | 'conversation_not_started' | 'message_not_found';
     } {
     if ('inlineMessageId' in target) {
       const message = this.#findInlineMessage(target.inlineMessageId);
@@ -1047,18 +1069,9 @@ export class PrivateMessagingService {
       return { resolved: false, reason: 'conversation_not_started' };
     }
     const message = this.getPrivateMessageByBotMessageId(conversation, botMessageId);
-    if (message === undefined) {
-      return { resolved: false, reason: 'message_not_found' };
-    }
-    // As in TDLib, a forward cannot be edited, nor a message with reply markup other than an
-    // inline keyboard, even a keyboard removal or one the client no longer shows.
-    if (
-      message.authorRole !== 'bot' || message.forwardInfo !== undefined ||
-      message.replyInterfaceMarkup !== undefined
-    ) {
-      return { resolved: false, reason: 'message_not_editable' };
-    }
-    return { resolved: true, message };
+    return message === undefined
+      ? { resolved: false, reason: 'message_not_found' }
+      : { resolved: true, message };
   }
 
   /**

@@ -283,6 +283,35 @@ export function getInlineKeyboardOwnerId(message: ChatMessage): number | undefin
   }
 }
 
+/**
+ * Whether a bot may edit a message it has found, by its chat or by its inline message identifier,
+ * as TDLib's `can_edit_message` decides for bots. The inline bot edits a message sent through it,
+ * whoever sent it, and no other bot does; otherwise, a bot edits only its own messages. No one
+ * edits a forward, or a message whose reply markup is not an inline keyboard, such as a keyboard
+ * removal or a keyboard the client no longer shows.
+ */
+export function canBotEditMessage(message: ChatMessage, botId: number): boolean {
+  if (
+    message.forwardInfo !== undefined ||
+    (message.kind === 'private_message' && message.replyInterfaceMarkup !== undefined)
+  ) {
+    return false;
+  }
+  if (message.viaBot !== undefined) {
+    return message.viaBot.botId === botId;
+  }
+  switch (message.kind) {
+    case 'private_message':
+      return message.authorRole === 'bot' && message.conversation.botId === botId;
+    case 'supergroup_message':
+      return message.author.kind === 'bot' && message.author.botId === botId;
+    default: {
+      const unhandledMessage: never = message;
+      throw new Error(`Unhandled message: ${JSON.stringify(unhandledMessage)}`);
+    }
+  }
+}
+
 /** The account or bot that wrote a message, or made the change a service message records. */
 export function getMessageAuthorId(message: ChatMessage): number {
   switch (message.kind) {

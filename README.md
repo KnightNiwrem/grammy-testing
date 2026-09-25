@@ -95,11 +95,12 @@ sent through it. With `receives_chosen_inline_results`, which turns on BotFather
 the inline bot also receives a `chosen_inline_result` update. As on Telegram, the bot knows a
 message sent through it with an inline keyboard by its `inline_message_id`: presses of its callback
 buttons reach the inline bot as callback queries without the message, and the bot edits it with
-`editMessageText`, `editMessageCaption`, and `editMessageReplyMarkup`, which answer `true`. Results
-can be articles, which send text, and photos and documents the bot knows by `file_id`; other result
-types, results sending locations, contacts, or invoices, files given by URL, and user locations are
-not supported. The emulator does not expire inline queries or cache answers, and a test reads the
-button above the results but cannot press it.
+`editMessageText`, `editMessageCaption`, and `editMessageReplyMarkup`, which answer `true`. As in
+TDLib, an inline bot that can reach the message's chat also edits the message by its `chat_id` and
+`message_id`, and no other bot edits it. Results can be articles, which send text, and photos and
+documents the bot knows by `file_id`; other result types, results sending locations, contacts, or
+invoices, files given by URL, and user locations are not supported. The emulator does not expire
+inline queries or cache answers, and a test reads the button above the results but cannot press it.
 
 Bot API requests follow Telegram's conventions: GET or POST, case-insensitive method names, and
 parameters in the query string or a JSON, URL-encoded, or multipart body. Bot API failures,
@@ -116,7 +117,8 @@ default, receives only account messages addressed to it: commands not addressed 
 replies to its messages, and mentions of it. Telegram delivers a command without a bot's username
 only to the bot that last wrote to the group; the emulator delivers it to every bot in privacy mode.
 A bot created with `can_read_all_group_messages` receives every account message. In a supergroup, a
-bot edits only its own messages, and deletes only its own unless it is an administrator.
+bot edits only its own messages and those sent through it, and deletes only its own unless it is an
+administrator.
 
 Members join and leave supergroups as on Telegram, so tests can drive welcome and moderation bots.
 Each addition, departure, and removal is a service message in the supergroup's history, with
