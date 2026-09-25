@@ -9,10 +9,11 @@ import {
 } from './virtual_message.ts';
 
 /**
- * The most characters of a replied text or caption that Telegram quotes automatically, as TDLib's
- * `message_reply_quote_length_max` option sets it.
+ * The most characters of a replied text or caption that a quote holds: Telegram's documented limit
+ * on a chosen quote, and the length TDLib's `message_reply_quote_length_max` option gives an
+ * automatic one.
  */
-const MAX_AUTOMATIC_QUOTE_LENGTH = 1_024;
+export const MAX_QUOTE_LENGTH = 1_024;
 
 /** The entity types Telegram keeps in a quote, as TDLib's `is_allowed_quote_entity_type` lists them. */
 const QUOTE_ENTITY_TYPES: ReadonlySet<TextEntity['type']> = new Set([
@@ -25,50 +26,58 @@ const QUOTE_ENTITY_TYPES: ReadonlySet<TextEntity['type']> = new Set([
   'date_time',
 ]);
 
-/** A reply to a message of another chat, with the quote Telegram shows with it. */
-export interface ExternalReplyWithQuote {
+/** Whether Telegram keeps an entity in a quote. */
+export function isQuoteEntity(entity: TextEntity): boolean {
+  return QUOTE_ENTITY_TYPES.has(entity.type);
+}
+
+/** A message of another chat that a message being sent replies to, with the text it can quote. */
+export interface ExternalReplyTarget {
   readonly externalReply: ExternalReply;
-  /** Omitted when the replied message has no text or caption to quote. */
-  readonly quote?: TextQuote;
+  /** The replied message's text or caption, which is empty for media without a caption. */
+  readonly repliedText: FormattedText;
 }
 
 /**
  * Creates what a reply to a message of another chat shows of it, as TDLib's `RepliedMessageInfo`
  * does for a reply being sent: the replied message's origin, its supergroup message ID, and its
- * media, with its text or caption as an automatic quote. `messageIdInChat` is the replied message's
- * ID in its chat, which Telegram shows only for a supergroup message.
+ * media, whose caption is left to the reply's quote. `messageIdInChat` is the replied message's ID
+ * in its chat, which Telegram shows only for a supergroup message.
  */
 export function createExternalReply(
   repliedMessage: ContentMessage,
   messageIdInChat: number,
-): ExternalReplyWithQuote {
+): ExternalReplyTarget {
   const { content } = repliedMessage;
-  const quote = createAutomaticQuote(getContentText(content));
-  const externalReply: ExternalReply = {
-    origin: getMessageOrigin(repliedMessage),
-    ...(repliedMessage.kind === 'supergroup_message'
-      ? { supergroupMessage: { chatId: repliedMessage.chatId, messageId: messageIdInChat } }
-      : {}),
-    ...(content.kind === 'text'
-      ? {}
-      : { media: { ...content, caption: { text: '', entities: [] } } }),
+  const { text, entities } = getContentText(content);
+  return {
+    externalReply: {
+      origin: getMessageOrigin(repliedMessage),
+      ...(repliedMessage.kind === 'supergroup_message'
+        ? { supergroupMessage: { chatId: repliedMessage.chatId, messageId: messageIdInChat } }
+        : {}),
+      ...(content.kind === 'text'
+        ? {}
+        : { media: { ...content, caption: { text: '', entities: [] } } }),
+    },
+    repliedText: { text, entities },
   };
-  return { externalReply, ...(quote === undefined ? {} : { quote }) };
 }
 
 /**
- * Quotes a replied text or caption as Telegram does when the sender chose no quote: from its
- * start, truncated to Telegram's length as TDLib's `truncate_formatted_text` does, and with only
- * the entities Telegram allows in quotes. Returns `undefined` for empty text.
+ * Quotes a replied text or caption as Telegram does for a reply to a message of another chat whose
+ * sender chose no quote: from its start, truncated to Telegram's length as TDLib's
+ * `truncate_formatted_text` does, and with only the entities Telegram allows in quotes. Returns
+ * `undefined` for empty text.
  */
-function createAutomaticQuote({ text, entities }: FormattedText): TextQuote | undefined {
+export function createAutomaticQuote({ text, entities }: FormattedText): TextQuote | undefined {
   if (text.length === 0) {
     return undefined;
   }
-  const quotedText = [...text].slice(0, MAX_AUTOMATIC_QUOTE_LENGTH).join('');
+  const quotedText = [...text].slice(0, MAX_QUOTE_LENGTH).join('');
   const quotedLength = quotedText.length;
   const quotedEntities = entities.flatMap((entity): TextEntity[] => {
-    if (!QUOTE_ENTITY_TYPES.has(entity.type) || entity.offset >= quotedLength) {
+    if (!isQuoteEntity(entity) || entity.offset >= quotedLength) {
       return [];
     }
     if (entity.offset + entity.length <= quotedLength) {

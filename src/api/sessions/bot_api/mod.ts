@@ -106,6 +106,7 @@ const CHAT_NOT_FOUND_DESCRIPTION = 'Bad Request: chat not found';
 const REPLY_MESSAGE_NOT_FOUND_DESCRIPTION = 'Bad Request: message to be replied not found';
 const MESSAGE_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: message is too long';
 const BUTTON_DATA_INVALID_DESCRIPTION = 'Bad Request: BUTTON_DATA_INVALID';
+const QUOTE_TEXT_INVALID_DESCRIPTION = 'Bad Request: QUOTE_TEXT_INVALID';
 
 /** TDLib's descriptions for message effects in chats or requests that cannot use them. */
 const MESSAGE_EFFECT_NOT_ALLOWED_IN_CHAT_DESCRIPTION =
@@ -902,7 +903,11 @@ function handleSendMessage(
   if (!formattedTextReading.read) {
     return formattedTextReading.errorAnswer;
   }
-  const optionsReading = readSendOptions(parsedParameters.data);
+  const optionsReading = readSendOptions(
+    context,
+    parsedParameters.data,
+    invalidParametersDescription,
+  );
   if (!optionsReading.read) {
     return optionsReading.errorAnswer;
   }
@@ -933,7 +938,7 @@ function handleSendPhoto(
   if (!captionReading.read) {
     return captionReading.errorAnswer;
   }
-  const optionsReading = readSendOptions(data);
+  const optionsReading = readSendOptions(context, data, invalidParametersDescription);
   if (!optionsReading.read) {
     return optionsReading.errorAnswer;
   }
@@ -967,7 +972,7 @@ function handleSendDocument(
   if (!captionReading.read) {
     return captionReading.errorAnswer;
   }
-  const optionsReading = readSendOptions(data);
+  const optionsReading = readSendOptions(context, data, invalidParametersDescription);
   if (!optionsReading.read) {
     return optionsReading.errorAnswer;
   }
@@ -1047,7 +1052,7 @@ function handleCopyMessage(
     return captionReading.errorAnswer;
   }
   // As for forwardMessage, the emulator reports a missing chat_id before the copied message.
-  const optionsReading = readSendOptions(data);
+  const optionsReading = readSendOptions(context, data, invalidParametersDescription);
   if (!optionsReading.read) {
     return optionsReading.errorAnswer;
   }
@@ -1169,10 +1174,15 @@ function repeatMessagesAnswer(result: RepeatMessagesResult): BotApiMethodAnswer 
 
 /**
  * Reads where and how a send method sends its message. As the official Bot API server's
+ * `get_reply_parameters` does, the formatting of a quote is read before the chat; as its
  * `check_reply_parameters` does, a reply naming the chat the message is sent to replies in that
  * chat.
  */
-function readSendOptions(parameters: SendOptionsParameters):
+function readSendOptions(
+  context: BotApiMethodContext,
+  parameters: SendOptionsParameters,
+  invalidParametersDescription: string,
+):
   | { readonly read: true; readonly options: SendRequestOptions }
   | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
   const {
@@ -1181,10 +1191,19 @@ function readSendOptions(parameters: SendOptionsParameters):
     message_effect_id: messageEffectId,
     reply_markup: replyMarkup,
   } = parameters;
+  const replyTarget = selectSpecifiedReplyTarget(parameters);
+  const quote = replyTarget?.quote;
+  const quoteReading = quote === undefined ? undefined : readFormattedTextParameters(
+    context,
+    { text: quote.text, parseMode: quote.parseMode, entities: quote.entities },
+    invalidParametersDescription,
+  );
+  if (quoteReading?.read === false) {
+    return { read: false, errorAnswer: botApiError(400, quoteReading.description) };
+  }
   if (chatId === undefined) {
     return { read: false, errorAnswer: botApiError(400, CHAT_ID_EMPTY_DESCRIPTION) };
   }
-  const replyTarget = selectSpecifiedReplyTarget(parameters);
   return {
     read: true,
     options: {
@@ -1196,6 +1215,9 @@ function readSendOptions(parameters: SendOptionsParameters):
           ? {}
           : { chatId: replyTarget.chatId }),
         allowSendingWithoutReply: replyTarget.allowSendingWithoutReply,
+        ...(replyTarget.quote === undefined || quoteReading === undefined ? {} : {
+          quote: { ...quoteReading.formattedText, position: replyTarget.quote.position },
+        }),
       },
       isContentProtected,
       messageEffectId,
@@ -1238,6 +1260,8 @@ function sendMethodAnswer(result: SendResult | SendFailure): BotApiMethodAnswer 
       return botApiError(400, CAPTION_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':
       return botApiError(400, BUTTON_DATA_INVALID_DESCRIPTION);
+    case 'quote_invalid':
+      return botApiError(400, QUOTE_TEXT_INVALID_DESCRIPTION);
     case 'bot_blocked':
       return botApiError(403, BOT_BLOCKED_DESCRIPTION);
     case 'reply_interface_unsupported_in_groups':

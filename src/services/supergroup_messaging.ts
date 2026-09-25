@@ -6,6 +6,7 @@ import {
   type SupergroupMembershipLookup,
 } from '../types/chat_membership.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
+import type { ExternalReplyTarget } from '../types/message_reply.ts';
 import type { MessageForward } from '../types/message_forward.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
@@ -34,6 +35,7 @@ import {
   type ContentNormalizationFailure,
   type ContentReplacement,
   type FileUploadStore,
+  getReplyQuoteSource,
   hasOnlyValidCallbackData,
   isSameMessageContent,
   type NormalizedOutgoingContent,
@@ -43,7 +45,9 @@ import {
   replaceAccountMessageContent,
   replaceMessageCaption,
   replaceMessageText,
+  resolveReplyQuote,
   type SpecifiedCaption,
+  type SpecifiedQuote,
   storeOutgoingContent,
   type TextInvalidFailure,
   toOutgoingAccountContent,
@@ -121,9 +125,9 @@ export interface SendSupergroupBotMessageInput {
    * The message of another chat it replies to, which the caller resolved; omitted for a message
    * that replies to none there.
    */
-  readonly externalReply?: ExternalReply;
-  /** The quote of the message it replies to; omitted for none. */
-  readonly quote?: TextQuote;
+  readonly externalReply?: ExternalReplyTarget;
+  /** The quote the bot chose from the message it replies to; omitted for none. */
+  readonly quote?: SpecifiedQuote;
   /** Protects the message from forwarding and saving; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
   /** Where the content first appeared, for a forward; omitted for other messages. */
@@ -141,7 +145,8 @@ export type SendSupergroupBotMessageFailureReason =
   | SupergroupBotAccessFailureReason
   | 'reply_message_not_found'
   | 'message_effect_not_allowed_in_chat'
-  | 'callback_data_invalid';
+  | 'callback_data_invalid'
+  | 'quote_invalid';
 
 export type SendSupergroupBotMessageResult =
   | { readonly sent: true; readonly message: SupergroupMessage }
@@ -506,7 +511,7 @@ export class SupergroupMessagingService {
    * the replied message is looked up after it; a message effect is then refused, as TDLib's
    * `MessageSendOptions::get_message_send_options` refuses it outside private chats. The text or
    * caption is normalized with its entities next, and the result is checked for length. Callback
-   * data is checked last.
+   * data is checked next, and a quote last, as Telegram's servers check it.
    */
   sendBotMessage(input: SendSupergroupBotMessageInput): SendSupergroupBotMessageResult {
     if (this.#bots.getById(input.fromBotId) === undefined) {
@@ -538,6 +543,14 @@ export class SupergroupMessagingService {
     if (input.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(input.inlineKeyboard)) {
       return { sent: false, reason: 'callback_data_invalid' };
     }
+    const quoteResolution = resolveReplyQuote(
+      getReplyQuoteSource(repliedMessage, input.externalReply),
+      input.quote,
+      this.#textFixingContext,
+    );
+    if (!quoteResolution.resolved) {
+      return { sent: false, reason: quoteResolution.reason };
+    }
 
     return {
       sent: true,
@@ -546,8 +559,8 @@ export class SupergroupMessagingService {
         author: { kind: 'bot', botId: input.fromBotId },
         content: contentNormalization.content,
         replyToMessageId: repliedMessage?.id,
-        externalReply: input.externalReply,
-        quote: input.quote,
+        externalReply: input.externalReply?.externalReply,
+        quote: quoteResolution.quote,
         inlineKeyboard: input.inlineKeyboard,
         forwardInfo: input.forwardInfo,
         isContentProtected: input.isContentProtected,

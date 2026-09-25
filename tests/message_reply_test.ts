@@ -1,49 +1,43 @@
-import { createExternalReply } from '../src/types/message_reply.ts';
-import type { PrivateMessage, SupergroupContentMessage } from '../src/types/virtual_message.ts';
+import { resolveReplyQuote, type SpecifiedQuote } from '../src/services/message_content.ts';
+import { createAutomaticQuote, createExternalReply } from '../src/types/message_reply.ts';
+import type {
+  FormattedText,
+  PrivateMessage,
+  SupergroupContentMessage,
+} from '../src/types/virtual_message.ts';
 
 const ACCOUNT_ID = 1_000_001;
 const BOT_ID = 1_000_002;
 const SUPERGROUP_ID = -1_000_000_000_001;
 
-Deno.test('createExternalReply shows a supergroup text message as its origin and a quote', () => {
+const textFixingContext = { isMentionableUser: () => true };
+
+Deno.test('createExternalReply shows a supergroup message by its origin and ID', () => {
   const message: SupergroupContentMessage = {
     kind: 'supergroup_message',
     id: 'message',
     chatId: SUPERGROUP_ID,
     author: { kind: 'account', accountId: ACCOUNT_ID },
     sentAtUnixSeconds: 1_700_000_000,
-    content: {
-      kind: 'text',
-      text: 'Ship it now',
-      entities: [
-        { type: 'bold', offset: 0, length: 4 },
-        { type: 'code', offset: 8, length: 3 },
-      ],
-    },
+    content: { kind: 'text', text: 'Ship it', entities: [] },
     isContentProtected: false,
   };
 
-  const reply = createExternalReply(message, 42);
+  const target = createExternalReply(message, 42);
   const expected = {
     externalReply: {
       origin: { originalSenderId: ACCOUNT_ID, originalSentAtUnixSeconds: 1_700_000_000 },
       supergroupMessage: { chatId: SUPERGROUP_ID, messageId: 42 },
     },
-    quote: {
-      text: { text: 'Ship it now', entities: [{ type: 'bold', offset: 0, length: 4 }] },
-      position: 0,
-      isManual: false,
-    },
+    repliedText: { text: 'Ship it', entities: [] },
   };
-  if (JSON.stringify(reply) !== JSON.stringify(expected)) {
-    throw new Error(
-      `Expected the supergroup message and its quote, received ${JSON.stringify(reply)}`,
-    );
+  if (JSON.stringify(target) !== JSON.stringify(expected)) {
+    throw new Error(`Expected the supergroup message, received ${JSON.stringify(target)}`);
   }
 });
 
-Deno.test('createExternalReply keeps private media without its caption, which it quotes', () => {
-  const caption = `${'a'.repeat(1_023)}😀😀`;
+Deno.test('createExternalReply keeps private media without its caption', () => {
+  const caption = { text: 'A photo', entities: [] };
   const message: PrivateMessage = {
     kind: 'private_message',
     id: 'message',
@@ -53,52 +47,127 @@ Deno.test('createExternalReply keeps private media without its caption, which it
     content: {
       kind: 'photo',
       fileId: 'photo',
-      caption: {
-        text: caption,
-        // The quote keeps 1,024 characters: the first emoji ends it at UTF-16 offset 1,025.
-        entities: [
-          { type: 'italic', offset: 1_021, length: 4 },
-          { type: 'custom_emoji', offset: 1_023, length: 2, customEmojiId: '1' },
-          { type: 'custom_emoji', offset: 1_025, length: 2, customEmojiId: '2' },
-          { type: 'custom_emoji', offset: 1_023, length: 4, customEmojiId: '3' },
-          { type: 'bold', offset: 1_021, length: 6 },
-        ],
-      },
+      caption,
       hasSpoiler: true,
       showsCaptionAboveMedia: true,
     },
     isContentProtected: false,
   };
 
-  const { externalReply, quote } = createExternalReply(message, 7);
+  const { externalReply, repliedText } = createExternalReply(message, 7);
   const expectedMedia = {
-    kind: 'photo' as const,
+    kind: 'photo',
     fileId: 'photo',
     caption: { text: '', entities: [] },
     hasSpoiler: true,
     showsCaptionAboveMedia: true,
   };
+  if (
+    externalReply.supergroupMessage !== undefined ||
+    externalReply.origin.originalSenderId !== BOT_ID ||
+    JSON.stringify(externalReply.media) !== JSON.stringify(expectedMedia) ||
+    JSON.stringify(repliedText) !== JSON.stringify(caption)
+  ) {
+    throw new Error(
+      `Expected the photo without its caption, received ${JSON.stringify(externalReply)}`,
+    );
+  }
+});
+
+Deno.test('createAutomaticQuote truncates to 1,024 characters and keeps quote entities', () => {
+  // The quote keeps 1,024 characters: the first emoji ends it at UTF-16 offset 1,025.
+  const text: FormattedText = {
+    text: `${'a'.repeat(1_023)}😀😀`,
+    entities: [
+      { type: 'code', offset: 0, length: 3 },
+      { type: 'italic', offset: 1_021, length: 4 },
+      { type: 'custom_emoji', offset: 1_023, length: 2, customEmojiId: '1' },
+      { type: 'custom_emoji', offset: 1_025, length: 2, customEmojiId: '2' },
+      { type: 'custom_emoji', offset: 1_023, length: 4, customEmojiId: '3' },
+      { type: 'bold', offset: 1_021, length: 6 },
+    ],
+  };
+
+  const quote = createAutomaticQuote(text);
   const expectedEntities = [
     { type: 'italic', offset: 1_021, length: 4 },
     { type: 'custom_emoji', offset: 1_023, length: 2, customEmojiId: '1' },
     { type: 'bold', offset: 1_021, length: 4 },
   ];
   if (
-    externalReply.supergroupMessage !== undefined ||
-    externalReply.origin.originalSenderId !== BOT_ID ||
-    JSON.stringify(externalReply.media) !== JSON.stringify(expectedMedia) ||
-    quote?.text.text !== `${'a'.repeat(1_023)}😀` ||
+    quote?.text.text !== `${'a'.repeat(1_023)}😀` || quote.position !== 0 || quote.isManual ||
     JSON.stringify(quote.text.entities) !== JSON.stringify(expectedEntities)
   ) {
-    throw new Error(
-      `Expected the photo and its caption truncated to 1,024 characters, received ${
-        JSON.stringify({ externalReply, quote })
-      }`,
-    );
+    throw new Error(`Expected a truncated automatic quote, received ${JSON.stringify(quote)}`);
+  }
+  if (createAutomaticQuote({ text: '', entities: [] }) !== undefined) {
+    throw new Error('Expected empty text to have no quote');
+  }
+});
+
+Deno.test('resolveReplyQuote finds a chosen quote nearest to its position', () => {
+  const repliedText: FormattedText = {
+    text: 'go, go, go now',
+    entities: [{ type: 'bold', offset: 8, length: 6 }, { type: 'code', offset: 0, length: 2 }],
+  };
+  const resolve = (specifiedQuote: SpecifiedQuote | undefined, quotesAutomatically = false) =>
+    resolveReplyQuote({ repliedText, quotesAutomatically }, specifiedQuote, textFixingContext);
+
+  const nearest = resolve({ text: 'go', position: 5 });
+  const withFormatting = resolve({
+    text: '  go now',
+    entities: [{ type: 'bold', offset: 2, length: 6 }],
+    position: 6,
+  });
+  // The code entity is not kept in quotes, so it need not be quoted.
+  const first = resolve({ text: 'go,', position: 1_000_001 });
+  const expected = [
+    { text: { text: 'go', entities: [] }, position: 4, isManual: true },
+    {
+      text: { text: 'go now', entities: [{ type: 'bold', offset: 0, length: 6 }] },
+      position: 8,
+      isManual: true,
+    },
+    { text: { text: 'go,', entities: [] }, position: 0, isManual: true },
+  ];
+  const received = [nearest, withFormatting, first].map((resolution) =>
+    resolution.resolved ? resolution.quote : resolution.reason
+  );
+  if (JSON.stringify(received) !== JSON.stringify(expected)) {
+    throw new Error(`Expected the quotes to be found, received ${JSON.stringify(received)}`);
+  }
+});
+
+Deno.test('resolveReplyQuote rejects a quote that is not an exact part of the replied text', () => {
+  const repliedText: FormattedText = {
+    text: 'Ship it now',
+    entities: [{ type: 'bold', offset: 0, length: 4 }],
+  };
+  const resolve = (specifiedQuote: SpecifiedQuote | undefined, quotesAutomatically = false) =>
+    resolveReplyQuote({ repliedText, quotesAutomatically }, specifiedQuote, textFixingContext);
+
+  for (
+    const specifiedQuote of [
+      { text: 'ship', position: 0 },
+      // The replied text marks "Ship" bold, so the quote must too.
+      { text: 'Ship it', position: 0 },
+      { text: 'Ship it now!', position: 0 },
+    ]
+  ) {
+    const resolution = resolve(specifiedQuote);
+    if (resolution.resolved) {
+      throw new Error(`Expected ${JSON.stringify(specifiedQuote)} to be rejected`);
+    }
   }
 
-  const withoutCaption = createExternalReply({ ...message, content: expectedMedia }, 7);
-  if (withoutCaption.quote !== undefined) {
-    throw new Error('Expected media without a caption to have no quote');
+  const blank = resolve({ text: ' \n', position: 0 });
+  const blankFromAnotherChat = resolve({ text: ' ', position: 0 }, true);
+  const noReply = resolveReplyQuote(undefined, { text: 'x', position: 0 }, textFixingContext);
+  if (
+    !blank.resolved || blank.quote !== undefined || !blankFromAnotherChat.resolved ||
+    blankFromAnotherChat.quote?.isManual !== false || !noReply.resolved ||
+    noReply.quote !== undefined
+  ) {
+    throw new Error('Expected an empty quote to be ignored, and no quote without a reply');
   }
 });

@@ -2,6 +2,18 @@ import { z } from 'zod';
 
 import { jsonParameter } from './request_parameters.ts';
 
+/** A quote as a bot specified it in `reply_parameters`, before its formatting is read. */
+export interface UnreadQuote {
+  /** The Bot API `quote`. */
+  readonly text: string;
+  /** The Bot API `quote_parse_mode`; omitted for none. */
+  readonly parseMode?: string;
+  /** The Bot API `quote_entities`, still to be read; omitted for none. */
+  readonly entities?: readonly unknown[];
+  /** The Bot API `quote_position`, in UTF-16 code units. */
+  readonly position: number;
+}
+
 /** A reply target as a bot specified it, before its chat is checked. */
 export interface SpecifiedReplyTarget {
   /** The replied message's ID in the bot's chat. */
@@ -9,6 +21,8 @@ export interface SpecifiedReplyTarget {
   /** The replied message's chat; omitted for the chat the message is sent to. */
   readonly chatId?: number;
   readonly allowSendingWithoutReply: boolean;
+  /** The part of the replied message the bot quotes; omitted for none. */
+  readonly quote?: UnreadQuote;
 }
 
 /** A parsed `reply_parameters` parameter, which may specify no reply. */
@@ -27,8 +41,8 @@ export interface ReplyTargetParameters {
  * A `reply_parameters` parameter: a JSON `ReplyParameters` object. As on Telegram, an empty
  * object or a non-positive message ID specifies no reply.
  *
- * Quotes, checklist tasks, and poll options are not supported, and Telegram's `@username` chat
- * IDs resolve only for chats the emulator does not support, so those fields are rejected.
+ * Checklist tasks and poll options are not supported, and Telegram's `@username` chat IDs resolve
+ * only for chats the emulator does not support, so those fields are rejected.
  */
 export function replyParametersParameter() {
   return jsonParameter(
@@ -36,14 +50,33 @@ export function replyParametersParameter() {
       message_id: z.int().optional(),
       chat_id: z.int().optional(),
       allow_sending_without_reply: z.boolean().default(false),
+      quote: z.string().optional(),
+      quote_parse_mode: z.string().optional(),
+      quote_entities: z.array(z.unknown()).optional(),
+      quote_position: z.int().default(0),
     }),
-  ).transform(({ message_id, chat_id, allow_sending_without_reply }): ReplyParameters => ({
-    replyTarget: message_id === undefined || message_id <= 0 ? undefined : {
-      messageId: message_id,
-      ...(chat_id === undefined ? {} : { chatId: chat_id }),
-      allowSendingWithoutReply: allow_sending_without_reply,
-    },
-  }));
+  ).transform((parameters): ReplyParameters => {
+    const { message_id, chat_id, allow_sending_without_reply, quote } = parameters;
+    return {
+      replyTarget: message_id === undefined || message_id <= 0 ? undefined : {
+        messageId: message_id,
+        ...(chat_id === undefined ? {} : { chatId: chat_id }),
+        allowSendingWithoutReply: allow_sending_without_reply,
+        ...(quote === undefined ? {} : {
+          quote: {
+            text: quote,
+            ...(parameters.quote_parse_mode === undefined
+              ? {}
+              : { parseMode: parameters.quote_parse_mode }),
+            ...(parameters.quote_entities === undefined
+              ? {}
+              : { entities: parameters.quote_entities }),
+            position: parameters.quote_position,
+          },
+        }),
+      },
+    };
+  });
 }
 
 /**

@@ -39,9 +39,21 @@ a reply to protected content or a service message of another chat without a repl
 resolves the replied message before the destination chat and text. When a request fails both ways,
 it fails for the reply.
 
-Chosen quotes and replies to checklist tasks or poll options are [real gaps](#real-gaps). Text and
-captions follow the [formatting limits](text-formatting.md). Observable notification behavior and
-simulated link-preview metadata are also [missing](sessions-and-requests.md#real-gaps).
+Bots can quote part of the replied message with `quote`, `quote_parse_mode` or `quote_entities`, and
+`quote_position`, which the reply shows as a `quote` with `is_manual`. As TDLib's
+[`MessageQuote`][message-quote] does, the quote is normalized like message text. A quote that cannot
+be normalized, or is empty, is ignored, and trimmed leading spaces shift its position. Telegram's
+servers then look the quote up in the replied text; that check is not in the open-source code. The
+emulator follows the documented contract. The quote must be an exact part of the replied text,
+including its bold, italic, underline, strikethrough, spoiler, custom emoji and date and time
+entities, and at most 1,024 characters long. Otherwise the send fails with
+`Bad Request: QUOTE_TEXT_INVALID`. Among several occurrences, the one nearest to `quote_position` is
+chosen, searching in the order of TDLib's `MessageQuote::search_quote`. A chosen quote replaces the
+automatic quote of a reply to another chat.
+
+Replies to checklist tasks or poll options are [real gaps](#real-gaps). Text and captions follow the
+[formatting limits](text-formatting.md). Observable notification behavior and simulated link-preview
+metadata are also [missing](sessions-and-requests.md#real-gaps).
 
 Private message IDs come from each observer's message box; a supergroup has one sequence shared by
 all members. Private conversation history in the emulation API uses the **bot's** message IDs, so a
@@ -131,12 +143,9 @@ albums are [real gaps](#real-gaps).
 
 ## Real gaps
 
-- **Reply quotes.** Replies cannot carry chosen quoted text, quote entities or a quote position.
-  These fields are needed to test quote handling and are read by the upstream reply parser,
-  [`Client::get_reply_parameters`][reply-parameters].
 - **Checklist and poll reply targets.** Replies cannot target an individual checklist task or poll
-  option. These targets are also supported by the upstream reply parser and are missing from the
-  emulator.
+  option. These targets are read by the upstream reply parser,
+  [`Client::get_reply_parameters`][reply-parameters], and are missing from the emulator.
 - **Replacing media.** `editMessageMedia` is not implemented, preventing tests from exercising bots
   that replace message media.
 - **Account-side deletion.** The account emulation API has no message deletion operation. Tests
@@ -161,6 +170,7 @@ albums are [real gaps](#real-gaps).
 [reply tests](../../tests/message_reply_test.ts).
 
 [check-reply]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L9144-L9207
+[message-quote]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageQuote.cpp#L54-L71
 [external-reply-input]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L21264-L21291
 [quote-entities]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L4840-L4853
 [replied-message-info]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/RepliedMessageInfo.cpp#L142-L200

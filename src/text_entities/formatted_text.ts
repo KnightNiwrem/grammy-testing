@@ -16,7 +16,15 @@ import { compareTextEntities } from './text_entity_order.ts';
  */
 
 export type FormattedTextFixing =
-  | { readonly fixed: true; readonly formattedText: FormattedText }
+  | {
+    readonly fixed: true;
+    readonly formattedText: FormattedText;
+    /**
+     * How many UTF-16 code units of spaces and line breaks were trimmed from the start of the
+     * cleaned text, as TDLib's `ltrim_count` counts them; 0 for text that became empty.
+     */
+    readonly trimmedLeadingLength: number;
+  }
   | { readonly fixed: false; readonly error: string };
 
 /**
@@ -91,7 +99,7 @@ export function fixFormattedText(
   if (lastVisibleIndex === -1) {
     return emptyTextTreatment === 'reject'
       ? { fixed: false, error: 'Text must be non-empty' }
-      : { fixed: true, formattedText: { text: '', entities: [] } };
+      : { fixed: true, formattedText: { text: '', entities: [] }, trimmedLeadingLength: 0 };
   }
   entities = fixEntities(entities);
 
@@ -123,7 +131,7 @@ export function fixFormattedText(
       case 'reject':
         return { fixed: false, error: 'Text must be non-empty' };
       case 'clear':
-        return { fixed: true, formattedText: { text: '', entities: [] } };
+        return { fixed: true, formattedText: { text: '', entities: [] }, trimmedLeadingLength: 0 };
       case 'keep_invisible_characters':
         break;
       default: {
@@ -139,6 +147,7 @@ export function fixFormattedText(
       text: fixedText,
       entities: mergeDetectedEntities(entities, findBotCommandEntities(fixedText)),
     },
+    trimmedLeadingLength: trimmedStart,
   };
 }
 

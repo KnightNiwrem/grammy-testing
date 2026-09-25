@@ -19,7 +19,7 @@ import {
 import type { InlineQueryId, InlineQueryResultsButton } from '../types/inline_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import { createMessageForward, isForwardable } from '../types/message_forward.ts';
-import { createExternalReply, type ExternalReplyWithQuote } from '../types/message_reply.ts';
+import { createExternalReply, type ExternalReplyTarget } from '../types/message_reply.ts';
 import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
 import { isUserId } from '../types/telegram_identity.ts';
@@ -28,7 +28,6 @@ import type { ChatAction } from '../types/virtual_chat.ts';
 import {
   type CanonicalMessageId,
   type ChatMessage,
-  type ExternalReply,
   type InlineMessageId,
   isContentMessage,
   type MessageContent,
@@ -36,7 +35,6 @@ import {
   type PrivateMessage,
   type SupergroupMessage,
   type TextEntity,
-  type TextQuote,
 } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
 import type {
@@ -64,6 +62,7 @@ import type {
   OutgoingDocument,
   OutgoingMessageContent,
   OutgoingPhoto,
+  SpecifiedQuote,
   TextInvalidFailure,
 } from './message_content.ts';
 
@@ -118,6 +117,8 @@ export interface ReplyTarget {
   readonly chatId?: number;
   /** Sends the message as no reply, rather than failing, when the target is not found. */
   readonly allowSendingWithoutReply: boolean;
+  /** The part of the replied message the bot chose to quote; omitted for none. */
+  readonly quote?: SpecifiedQuote;
 }
 
 /**
@@ -148,11 +149,17 @@ export type SendRequestOptions = SendDestinationOptions & {
 /**
  * What a message being sent replies to: a message of its own chat, which the chat's messaging
  * service looks up, or a resolved message of another chat; neither for a message that replies to
- * none.
+ * none. The messaging service finds the chosen quote in the replied message.
  */
 type OutgoingReply =
-  | { readonly replyTo?: ReplyTarget; readonly externalReply?: never; readonly quote?: never }
-  | (ExternalReplyWithQuote & { readonly replyTo?: never });
+  & (
+    | { readonly replyTo?: ReplyTarget; readonly externalReply?: never }
+    | { readonly externalReply: ExternalReplyTarget; readonly replyTo?: never }
+  )
+  & {
+    /** The part of the replied message the bot chose to quote; omitted for none. */
+    readonly quote?: SpecifiedQuote;
+  };
 
 export type SendMessageRequest = SpecifiedFormattedText & SendRequestOptions;
 
@@ -193,6 +200,7 @@ export type SendFailureReason =
   | 'message_text_too_long'
   | 'caption_too_long'
   | 'callback_data_invalid'
+  | 'quote_invalid'
   | 'bot_blocked'
   | 'reply_interface_unsupported_in_groups'
   | 'file_empty'
@@ -671,6 +679,7 @@ type BotMessageSendingResult =
       | 'conversation_not_started'
       | 'reply_message_not_found'
       | 'callback_data_invalid'
+      | 'quote_invalid'
       | 'bot_blocked';
   }
   | ({ readonly sent: false } & ContentNormalizationFailure);
@@ -743,8 +752,8 @@ interface BotMessaging {
         readonly botMessageId: number;
         readonly allowSendingWithoutReply: boolean;
       };
-      readonly externalReply?: ExternalReply;
-      readonly quote?: TextQuote;
+      readonly externalReply?: ExternalReplyTarget;
+      readonly quote?: SpecifiedQuote;
       readonly isContentProtected?: boolean;
       readonly forwardInfo?: MessageForwardInfo;
       readonly messageEffectId?: string;
@@ -833,8 +842,8 @@ interface SupergroupBotMessaging {
     readonly content: OutgoingMessageContent;
     readonly inlineKeyboard?: InlineKeyboard;
     readonly replyTo?: { readonly messageId: number; readonly allowSendingWithoutReply: boolean };
-    readonly externalReply?: ExternalReply;
-    readonly quote?: TextQuote;
+    readonly externalReply?: ExternalReplyTarget;
+    readonly quote?: SpecifiedQuote;
     readonly isContentProtected?: boolean;
     readonly forwardInfo?: MessageForwardInfo;
     readonly messageEffectId?: string;
@@ -849,7 +858,8 @@ interface SupergroupBotMessaging {
         | FormerSupergroupMemberFailureReason
         | 'reply_message_not_found'
         | 'message_effect_not_allowed_in_chat'
-        | 'callback_data_invalid';
+        | 'callback_data_invalid'
+        | 'quote_invalid';
     }
     | ({ readonly sent: false } & ContentNormalizationFailure);
   editBotMessageText(
@@ -1537,9 +1547,12 @@ export class BotApiService {
         | 'reply_message_not_found';
     } {
     if (replyTo?.chatId === undefined) {
-      return { resolved: true, reply: replyTo === undefined ? {} : { replyTo } };
+      return {
+        resolved: true,
+        reply: replyTo === undefined ? {} : { replyTo, quote: replyTo.quote },
+      };
     }
-    const { chatId, messageId, allowSendingWithoutReply } = replyTo;
+    const { chatId, messageId, allowSendingWithoutReply, quote } = replyTo;
     const lookup = this.#findRepeatedMessage(authenticatedBot, { chatId, messageId });
     if (!lookup.found) {
       if (lookup.reason !== 'repeated_message_not_found') {
@@ -1551,7 +1564,9 @@ export class BotApiService {
     }
     return {
       resolved: true,
-      reply: isForwardable(lookup.message) ? createExternalReply(lookup.message, messageId) : {},
+      reply: isForwardable(lookup.message)
+        ? { externalReply: createExternalReply(lookup.message, messageId), quote }
+        : {},
     };
   }
 
@@ -1592,6 +1607,7 @@ export class BotApiService {
       case 'message_text_too_long':
       case 'caption_too_long':
       case 'callback_data_invalid':
+      case 'quote_invalid':
       case 'bot_blocked':
         return { sent: false, reason: result.reason };
       // A bot can address a user only after the user has written to it. Telegram reports any
@@ -1655,6 +1671,7 @@ export class BotApiService {
       case 'message_text_too_long':
       case 'caption_too_long':
       case 'callback_data_invalid':
+      case 'quote_invalid':
         return { sent: false, reason: result.reason };
       case 'bot_not_found':
         throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);

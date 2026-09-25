@@ -2300,6 +2300,25 @@ Deno.test('sendMessage replies to messages of the chat and accepts Telegram mess
     throw new Error('Expected reply_parameters to override the older form and allow no reply');
   }
 
+  const quotedReply = await sendMessage({
+    reply_parameters: {
+      message_id: 1,
+      quote: 'Question',
+      quote_parse_mode: 'HTML',
+      quote_position: 3,
+    },
+  });
+  const quoteResult = botApiResult(quotedReply.body)?.quote;
+  if (
+    quotedReply.status !== 200 || repliedMessageIdOf(quotedReply.body) !== 1 ||
+    JSON.stringify(quoteResult) !==
+      JSON.stringify({ text: 'Question', position: 0, is_manual: true })
+  ) {
+    throw new Error(
+      `Expected a reply with a chosen quote, received ${JSON.stringify(quotedReply)}`,
+    );
+  }
+
   const rejections: [Record<string, unknown>, string][] = [
     [{ reply_parameters: { message_id: 99 } }, 'Bad Request: message to be replied not found'],
     // The chat is checked before the replied message.
@@ -2312,8 +2331,21 @@ Deno.test('sendMessage replies to messages of the chat and accepts Telegram mess
       { reply_parameters: { message_id: 1, chat_id: createdBot.bot.id } },
       'Bad Request: chat not found',
     ],
+    // A quote must be an exact part of the replied text.
     [
-      { reply_parameters: { message_id: 1, quote: 'Question' } },
+      { reply_parameters: { message_id: 1, quote: 'question' } },
+      'Bad Request: QUOTE_TEXT_INVALID',
+    ],
+    // Its formatting is read before the chat.
+    [
+      {
+        chat_id: 999,
+        reply_parameters: { message_id: 1, quote: '*x', quote_parse_mode: 'Markdown' },
+      },
+      "Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 0",
+    ],
+    [
+      { reply_parameters: { message_id: 1, checklist_task_id: 1 } },
       'Bad Request: invalid sendMessage parameters',
     ],
     [
@@ -3171,6 +3203,23 @@ Deno.test('bots reply to messages of their other chats with an external reply', 
     throw new Error(
       `Expected an external reply to the supergroup message, received ${
         JSON.stringify(privateReply.body)
+      }`,
+    );
+  }
+
+  // A chosen quote replaces the automatic one.
+  const quotedPrivateReply = await sendMessage({
+    chat_id: member.id,
+    text: 'Now?',
+    reply_parameters: { chat_id: supergroup.id, message_id: announcementId, quote: 'now' },
+  });
+  if (
+    JSON.stringify(quotedPrivateReply.message?.quote) !==
+      JSON.stringify({ text: 'now', position: 8, is_manual: true })
+  ) {
+    throw new Error(
+      `Expected the chosen quote of the supergroup message, received ${
+        JSON.stringify(quotedPrivateReply.body)
       }`,
     );
   }

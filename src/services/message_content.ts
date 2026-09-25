@@ -4,7 +4,14 @@ import {
   type FormattedTextFixingContext,
 } from '../text_entities/formatted_text.ts';
 import { areTextEntitiesEqual } from '../text_entities/text_entity_equality.ts';
+import { compareTextEntities } from '../text_entities/text_entity_order.ts';
 import { type InlineKeyboard, MAX_CALLBACK_DATA_BYTES } from '../types/inline_keyboard.ts';
+import {
+  createAutomaticQuote,
+  type ExternalReplyTarget,
+  isQuoteEntity,
+  MAX_QUOTE_LENGTH,
+} from '../types/message_reply.ts';
 import type {
   DocumentUpload,
   FileUpload,
@@ -15,14 +22,17 @@ import type {
   StoredPhotoFile,
 } from '../types/stored_file.ts';
 import {
+  type ChatMessage,
   countTextCharacters,
   type DocumentMessageContent,
   type FormattedText,
+  getContentText,
   MAX_CAPTION_LENGTH,
   MAX_TEXT_MESSAGE_LENGTH,
   type MessageContent,
   type PhotoMessageContent,
   type TextEntity,
+  type TextQuote,
 } from '../types/virtual_message.ts';
 
 // Telegram's rules for the content of messages, which apply alike in every chat type.
@@ -553,4 +563,148 @@ function areInlineKeyboardsEqual(
       }
     });
   });
+}
+
+/** The Bot API `quote_position` bound beyond which TDLib's `MessageQuote` reads position 0. */
+const MAX_SPECIFIED_QUOTE_POSITION = 1_000_000;
+
+/** A quote a sender chose from the message it replies to, before Telegram's normalization. */
+export interface SpecifiedQuote {
+  readonly text: string;
+  /** Formatting the sender specified; omitted for none. */
+  readonly entities?: readonly TextEntity[];
+  /** Where the sender says the quote starts in the replied text, in UTF-16 code units. */
+  readonly position: number;
+}
+
+/** The replied message's text, and whether Telegram quotes it when the sender chose no quote. */
+export interface ReplyQuoteSource {
+  /** The replied text or caption, which is empty for media without a caption. */
+  readonly repliedText: FormattedText;
+  /** True for a reply to a message of another chat, which Telegram quotes automatically. */
+  readonly quotesAutomatically: boolean;
+}
+
+/**
+ * The text a reply can quote: that of a message of another chat it replies to, or else that of the
+ * message of its own chat; `undefined` for a message that replies to none.
+ */
+export function getReplyQuoteSource(
+  repliedMessage: ChatMessage | undefined,
+  externalReply: ExternalReplyTarget | undefined,
+): ReplyQuoteSource | undefined {
+  if (externalReply !== undefined) {
+    return { repliedText: externalReply.repliedText, quotesAutomatically: true };
+  }
+  return repliedMessage === undefined
+    ? undefined
+    : { repliedText: getContentText(repliedMessage.content), quotesAutomatically: false };
+}
+
+export type ReplyQuoteResolution =
+  | { readonly resolved: true; readonly quote?: TextQuote }
+  | { readonly resolved: false; readonly reason: 'quote_invalid' };
+
+/**
+ * Decides the quote a reply shows. A chosen quote is normalized as TDLib's `MessageQuote` does,
+ * which drops it silently when it cannot be normalized or becomes empty, and shifts its position by
+ * the leading spaces trimmed from it. Telegram then requires it to be an exact part of the replied
+ * text, formatting included, and places it at the occurrence nearest to the position the sender
+ * gave; a quote that is not found, or longer than 1,024 characters, fails the send. Without a
+ * chosen quote, a reply to a message of another chat quotes its text automatically. A message
+ * that replies to none has no quote.
+ */
+export function resolveReplyQuote(
+  source: ReplyQuoteSource | undefined,
+  specifiedQuote: SpecifiedQuote | undefined,
+  context: FormattedTextFixingContext,
+): ReplyQuoteResolution {
+  if (source === undefined) {
+    return { resolved: true };
+  }
+  const { repliedText, quotesAutomatically } = source;
+  const fixing = specifiedQuote === undefined
+    ? undefined
+    : fixFormattedText(specifiedQuote.text, specifiedQuote.entities ?? [], context, 'clear');
+  if (specifiedQuote === undefined || !fixing?.fixed || fixing.formattedText.text.length === 0) {
+    const automaticQuote = quotesAutomatically ? createAutomaticQuote(repliedText) : undefined;
+    return { resolved: true, ...(automaticQuote === undefined ? {} : { quote: automaticQuote }) };
+  }
+
+  const quoteText: FormattedText = {
+    text: fixing.formattedText.text,
+    entities: fixing.formattedText.entities.filter(isQuoteEntity),
+  };
+  if (countTextCharacters(quoteText.text) > MAX_QUOTE_LENGTH) {
+    return { resolved: false, reason: 'quote_invalid' };
+  }
+  const { position } = specifiedQuote;
+  const quotePosition = findQuotePosition(
+    repliedText,
+    quoteText,
+    position >= 0 && position <= MAX_SPECIFIED_QUOTE_POSITION
+      ? position + fixing.trimmedLeadingLength
+      : 0,
+  );
+  return quotePosition === undefined
+    ? { resolved: false, reason: 'quote_invalid' }
+    : { resolved: true, quote: { text: quoteText, position: quotePosition, isManual: true } };
+}
+
+/**
+ * Finds where a quote appears in the replied text with the same formatting, searching outward from
+ * the given position in the order TDLib's `MessageQuote::search_quote` does.
+ */
+function findQuotePosition(
+  repliedText: FormattedText,
+  quote: FormattedText,
+  position: number,
+): number | undefined {
+  const textLength = repliedText.text.length;
+  const quoteLength = quote.text.length;
+  if (quoteLength > textLength) {
+    return undefined;
+  }
+  const quotesAt = (candidate: number) =>
+    candidate >= 0 && candidate <= textLength - quoteLength &&
+    !isLowSurrogate(repliedText.text.charCodeAt(candidate)) &&
+    repliedText.text.startsWith(quote.text, candidate) &&
+    areTextEntitiesEqual(
+      getQuotedEntities(repliedText.entities, candidate, quoteLength),
+      [...quote.entities].sort(compareTextEntities),
+    );
+  const start = Math.min(Math.max(position, 0), textLength - 1);
+  for (
+    let distance = 0;
+    start - distance >= 0 || start + distance + 1 <= textLength - quoteLength;
+    distance++
+  ) {
+    if (quotesAt(start - distance)) {
+      return start - distance;
+    }
+    if (quotesAt(start + distance + 1)) {
+      return start + distance + 1;
+    }
+  }
+  return undefined;
+}
+
+/** The quotable entities of a text that a span covers, cut to the span and relative to its start. */
+function getQuotedEntities(
+  entities: readonly TextEntity[],
+  spanOffset: number,
+  spanLength: number,
+): TextEntity[] {
+  const spanEnd = spanOffset + spanLength;
+  return entities.flatMap((entity) => {
+    const start = Math.max(entity.offset, spanOffset);
+    const end = Math.min(entity.offset + entity.length, spanEnd);
+    return isQuoteEntity(entity) && start < end
+      ? [{ ...entity, offset: start - spanOffset, length: end - start }]
+      : [];
+  }).sort(compareTextEntities);
+}
+
+function isLowSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
 }

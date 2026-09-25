@@ -1,5 +1,6 @@
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
+import type { ExternalReplyTarget } from '../types/message_reply.ts';
 import type { MessageForward } from '../types/message_forward.ts';
 import type {
   BotMessageReplyMarkup,
@@ -34,6 +35,7 @@ import {
   type ContentNormalizationFailure,
   type ContentReplacement,
   type FileUploadStore,
+  getReplyQuoteSource,
   hasOnlyValidCallbackData,
   isSameMessageContent,
   normalizeOutgoingContent,
@@ -42,7 +44,9 @@ import {
   replaceAccountMessageContent,
   replaceMessageCaption,
   replaceMessageText,
+  resolveReplyQuote,
   type SpecifiedCaption,
+  type SpecifiedQuote,
   storeOutgoingContent,
   type TextInvalidFailure,
   toOutgoingAccountContent,
@@ -153,9 +157,9 @@ export type SendBotMessageInput = BotMessageReplyMarkup & {
    * The message of another chat it replies to, which the caller resolved; omitted for a message
    * that replies to none there.
    */
-  readonly externalReply?: ExternalReply;
-  /** The quote of the message it replies to; omitted for none. */
-  readonly quote?: TextQuote;
+  readonly externalReply?: ExternalReplyTarget;
+  /** The quote the bot chose from the message it replies to; omitted for none. */
+  readonly quote?: SpecifiedQuote;
   /** Protects the message from forwarding and saving; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
   /** Where the content first appeared, for a forward; omitted for other messages. */
@@ -171,6 +175,7 @@ export type SendBotMessageFailureReason =
   | 'conversation_not_started'
   | 'reply_message_not_found'
   | 'callback_data_invalid'
+  | 'quote_invalid'
   | 'bot_blocked';
 
 export type SendBotMessageResult =
@@ -627,8 +632,8 @@ export class PrivateMessagingService {
    * Checks follow Telegram's order: text is checked for emptiness before the recipient is
    * resolved, and the replied message is looked up after it; the text or caption is then
    * normalized with its entities, and the result is checked for length. Callback data is checked
-   * next. A block by the account is checked last, as Telegram's servers refuse the message only
-   * after the Bot API server has checked everything it can.
+   * next. A quote and a block by the account are checked last, as Telegram's servers refuse the
+   * message only after the Bot API server has checked everything it can.
    */
   sendBotMessage(input: SendBotMessageInput): SendBotMessageResult {
     const bot = this.#bots.getById(input.fromBotId);
@@ -660,6 +665,14 @@ export class PrivateMessagingService {
     if (input.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(input.inlineKeyboard)) {
       return { sent: false, reason: 'callback_data_invalid' };
     }
+    const quoteResolution = resolveReplyQuote(
+      getReplyQuoteSource(replyResolution.repliedMessage, input.externalReply),
+      input.quote,
+      this.#textFixingContext,
+    );
+    if (!quoteResolution.resolved) {
+      return { sent: false, reason: quoteResolution.reason };
+    }
     if (this.#blockedUsers.isBlocked(account.profile.id, bot.profile.id)) {
       return { sent: false, reason: 'bot_blocked' };
     }
@@ -672,8 +685,8 @@ export class PrivateMessagingService {
         authorRole: 'bot',
         content: storeOutgoingContent(contentNormalization.content, this.#files),
         replyToMessageId: replyResolution.repliedMessage?.id,
-        externalReply: input.externalReply,
-        quote: input.quote,
+        externalReply: input.externalReply?.externalReply,
+        quote: quoteResolution.quote,
         inlineKeyboard: input.inlineKeyboard,
         replyInterfaceMarkup: input.replyInterfaceMarkup,
         forwardInfo: input.forwardInfo,

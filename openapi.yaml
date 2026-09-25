@@ -1120,7 +1120,9 @@ paths:
             not one the bot can read (`Bad Request: chat not found`, or the membership errors of
             a supergroup the bot left or was removed from), or the replied message is not found
             and sending without a reply is not allowed (`Bad Request: message to be replied not
-            found`). Reply keyboards, keyboard removals, and forced replies in supergroups (`Bad Request: reply keyboards, keyboard removals, and
+            found`). A chosen quote that is not an exact part of the replied message fails last,
+            as Telegram's servers check it (`Bad Request: QUOTE_TEXT_INVALID`). Reply keyboards,
+            keyboard removals, and forced replies in supergroups (`Bad Request: reply keyboards, keyboard removals, and
             forced replies are not supported in groups`) are not supported.
           content:
             application/json:
@@ -3366,9 +3368,10 @@ components:
       type: object
       additionalProperties: false
       description: >-
-        The quoted part of the replied message's text or caption. A reply to another chat's
-        message quotes up to 1,024 characters of it automatically, keeping only bold, italic,
-        underline, strikethrough, spoiler, custom emoji, and date and time entities.
+        The quoted part of the replied message's text or caption: the part the sender chose, or,
+        for a reply to another chat's message without one, up to its first 1,024 characters.
+        Quotes keep only bold, italic, underline, strikethrough, spoiler, custom emoji, and date
+        and time entities.
       required:
         - text
         - position
@@ -4688,7 +4691,7 @@ components:
       additionalProperties: false
       description: >-
         The message to reply to. An empty object, or a `message_id` that is not positive,
-        specifies no reply. Quotes, checklist tasks, and poll options are not supported.
+        specifies no reply. Checklist tasks and poll options are not supported.
       properties:
         message_id:
           type: integer
@@ -4707,6 +4710,30 @@ components:
           description: >-
             Sends the message as no reply, instead of failing, when the replied message is not
             found.
+        quote:
+          type: string
+          description: >-
+            The part of the replied message to quote, formatted by `quote_parse_mode` or
+            `quote_entities`. As TDLib's `MessageQuote` does, it is normalized like message text,
+            and ignored when that fails or leaves it empty. It must then be an exact part of the
+            replied text or caption, including its bold, italic, underline, strikethrough,
+            spoiler, custom emoji, and date and time entities, and at most 1,024 characters long,
+            or the message is not sent (`Bad Request: QUOTE_TEXT_INVALID`). Other entities are
+            left out of the quote.
+        quote_parse_mode:
+          type: string
+          description: How to parse `quote`'s formatting, as `parse_mode` parses message text.
+        quote_entities:
+          type: array
+          description: The entities of `quote`, instead of `quote_parse_mode`.
+          items:
+            $ref: '#/components/schemas/MessageEntity'
+        quote_position:
+          type: integer
+          default: 0
+          description: >-
+            Where the quote starts in the replied text, in UTF-16 code units. The quote is placed
+            at its occurrence nearest to this position, searching as TDLib's `search_quote` does.
     LinkPreviewOptions:
       type: object
       additionalProperties: false
