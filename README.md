@@ -48,12 +48,14 @@ with the `X-Telegram-Bot-Api-Secret-Token` header when the bot set a `secret_tok
 the update once the webhook answers with a 2xx status. As on Telegram, a failed update is sent again
 at once and then after growing delays, `getWebhookInfo` reports the pending updates and the latest
 failure, such as `Wrong response from the webhook: 500 Internal Server Error`, `getUpdates` fails
-with `409 Conflict` while a webhook is set, and setting one ends the bot's waiting long poll. Unlike
-Telegram, the emulator accepts plain HTTP URLs on any port, so a test can run the bot's webhook
-server on its own machine, and it sends one update at a time, so a failing update holds back later
-ones, where Telegram sends updates of different chats in parallel. It does not run a Bot API method
-that a webhook names in its response, as Telegram does, and does not support `ip_address` or custom
-certificates. Ending a session stops its webhooks.
+with `409 Conflict` while a webhook is set, and setting one ends the bot's waiting long poll. A
+webhook that has not answered after 60 seconds fails with Telegram's `Read timeout expired`, though
+Telegram times out only a webhook that sends nothing for that long. Unlike Telegram, the emulator
+accepts plain HTTP URLs on any port, so a test can run the bot's webhook server on its own machine,
+and it sends one update at a time, so a failing update holds back later ones, where Telegram sends
+updates of different chats in parallel. It does not run a Bot API method that a webhook names in its
+response, as Telegram does, and does not support `ip_address` or custom certificates. Ending a
+session stops its webhooks.
 
 Bots and accounts also exchange photos and documents with captions. A bot sends them with
 `sendPhoto` and `sendDocument`, uploading a file as a multipart part, directly or through

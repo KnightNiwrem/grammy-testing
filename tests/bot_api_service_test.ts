@@ -20,7 +20,10 @@ import { MediaFileService } from '../src/services/media_file.ts';
 import { SharedChatAdministrationService } from '../src/services/shared_chat_administration.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../src/services/bot_update_polling.ts';
-import { BotWebhookService } from '../src/services/bot_webhook.ts';
+import {
+  BotWebhookService,
+  WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
+} from '../src/services/bot_webhook.ts';
 import { CallbackQueryService } from '../src/services/callback_query.ts';
 import { InlineQueryService } from '../src/services/inline_query.ts';
 import { PrivateMessagingService } from '../src/services/private_messaging.ts';
@@ -206,6 +209,7 @@ function createBotApiFixture() {
       pendingUpdates: botUpdates,
       updateSubscriptions,
       sendWebhookRequest: () => Promise.reject(new Error('Unexpected webhook request')),
+      attemptTimeoutMilliseconds: WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
       currentUnixTimeSeconds: () => 1_700_000_000,
     }),
     botMessages: privateMessaging,

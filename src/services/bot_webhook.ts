@@ -23,6 +23,15 @@ const SECRET_TOKEN_HEADER = 'X-Telegram-Bot-Api-Secret-Token';
  */
 const MAX_RETRY_DELAY_SECONDS = 60;
 
+/**
+ * How long a webhook may take to answer an update. Telegram's webhook connections give up after 60
+ * seconds without data from the webhook.
+ */
+export const WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS = 60_000;
+
+/** Telegram's description of a webhook that answered nothing in time. */
+const READ_TIMEOUT_ERROR_MESSAGE = 'Read timeout expired';
+
 /** Update types that `getWebhookInfo` never lists, as the official Bot API server's `JsonUpdateTypes`. */
 const UNLISTED_UPDATE_TYPES: readonly BotApiUpdateType[] = ['custom_event', 'custom_query'];
 
@@ -91,6 +100,11 @@ interface BotWebhookServiceDependencies {
   readonly updateSubscriptions: BotUpdateSubscriptionStore;
   /** Sends a webhook request over the network, as `fetch` does. */
   readonly sendWebhookRequest: (request: Request) => Promise<Response>;
+  /**
+   * How long an attempt to deliver an update may take before it is aborted and fails, which is
+   * `WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS` outside tests.
+   */
+  readonly attemptTimeoutMilliseconds: number;
   readonly currentUnixTimeSeconds: () => number;
 }
 
@@ -101,12 +115,17 @@ interface BotWebhookServiceDependencies {
  * failed update is sent again after a growing delay. Telegram sends updates of different chats
  * over up to `max_connections` connections at once; the emulator sends one update at a time, in
  * order, so a failing update holds back later ones.
+ *
+ * An attempt that takes too long fails as Telegram's read timeout does. Telegram times out a
+ * connection that receives no data for a while; the emulator bounds each attempt as a whole,
+ * whatever the sender of its requests does, so a webhook that never answers cannot stall delivery.
  */
 export class BotWebhookService {
   readonly #webhooks: BotWebhookStore;
   readonly #pendingUpdates: PendingUpdateQueue;
   readonly #updateSubscriptions: BotUpdateSubscriptionStore;
   readonly #sendWebhookRequest: (request: Request) => Promise<Response>;
+  readonly #attemptTimeoutMilliseconds: number;
   readonly #currentUnixTimeSeconds: () => number;
   /** Aborting a bot's controller stops delivery to its webhook, including a request in flight. */
   readonly #deliveriesByBotId = new Map<number, AbortController>();
@@ -119,6 +138,7 @@ export class BotWebhookService {
       pendingUpdates,
       updateSubscriptions,
       sendWebhookRequest,
+      attemptTimeoutMilliseconds,
       currentUnixTimeSeconds,
     }: BotWebhookServiceDependencies,
   ) {
@@ -126,6 +146,7 @@ export class BotWebhookService {
     this.#pendingUpdates = pendingUpdates;
     this.#updateSubscriptions = updateSubscriptions;
     this.#sendWebhookRequest = sendWebhookRequest;
+    this.#attemptTimeoutMilliseconds = attemptTimeoutMilliseconds;
     this.#currentUnixTimeSeconds = currentUnixTimeSeconds;
   }
 
@@ -305,6 +326,7 @@ export class BotWebhookService {
   /**
    * Posts the update to the webhook as the official Bot API server's `WebhookActor` does, and
    * returns Telegram's description of the failure, or `undefined` when the webhook accepted it.
+   * The attempt ends when `deliverySignal` aborts, or fails once it outlasts its timeout.
    *
    * Telegram also runs a Bot API method that a webhook names in its response body; the emulator
    * does not, and ignores the body.
@@ -312,24 +334,31 @@ export class BotWebhookService {
   async #sendUpdate(
     webhook: BotWebhook,
     update: BotApiUpdate,
-    signal: AbortSignal,
+    deliverySignal: AbortSignal,
   ): Promise<string | undefined> {
-    const request = createWebhookRequest(webhook, update, signal);
-    let response: Response;
+    const timeout = new AbortController();
+    const timeoutId = setTimeout(() => timeout.abort(), this.#attemptTimeoutMilliseconds);
+    const attemptSignal = AbortSignal.any([deliverySignal, timeout.signal]);
     try {
-      response = await this.#sendWebhookRequest(request);
-    } catch {
-      // Telegram reports failures to connect without their cause.
-      return "Can't connect to the webhook";
+      const request = createWebhookRequest(webhook, update, attemptSignal);
+      let response: Response;
+      try {
+        response = await settleUnlessAborted(this.#sendWebhookRequest(request), attemptSignal);
+      } catch {
+        // Telegram reports other failures to connect without their cause.
+        return timeout.signal.aborted ? READ_TIMEOUT_ERROR_MESSAGE : "Can't connect to the webhook";
+      }
+      try {
+        await settleUnlessAborted(response.body?.cancel() ?? Promise.resolve(), attemptSignal);
+      } catch {
+        // The status alone decides the outcome, so a body that fails to close changes nothing.
+      }
+      return response.status >= 200 && response.status <= 299
+        ? undefined
+        : `Wrong response from the webhook: ${response.status} ${response.statusText}`;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    try {
-      await response.body?.cancel();
-    } catch {
-      // The status alone decides the outcome, so a body that fails to close changes nothing.
-    }
-    return response.status >= 200 && response.status <= 299
-      ? undefined
-      : `Wrong response from the webhook: ${response.status} ${response.statusText}`;
   }
 }
 
@@ -398,6 +427,23 @@ function createWebhookRequest(
     body: JSON.stringify(update),
     redirect: 'manual',
     signal,
+  });
+}
+
+/**
+ * Settles as `promise` does, unless `signal` aborts first, which rejects with its reason. The
+ * promise may keep running; its later outcome is ignored.
+ */
+function settleUnlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(signal.reason);
+  }
+  return new Promise((resolve, reject) => {
+    const rejectOnAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', rejectOnAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', rejectOnAbort);
+    });
   });
 }
 

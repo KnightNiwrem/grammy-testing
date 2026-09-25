@@ -57,41 +57,6 @@ The findings and recommendations are presented in one priority order, not groupe
 
 ---
 
-## 6. P2 — Webhook delivery has no emulator-controlled per-attempt deadline
-
-**Location:**
-[`src/services/bot_webhook.ts`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/src/services/bot_webhook.ts),
-`#deliverPendingUpdates`, `#sendUpdate`, and `createWebhookRequest`.
-
-### Finding and context
-
-The delivery loop awaits `#sendWebhookRequest`, using a signal associated with stopping or replacing
-delivery. There is no per-attempt deadline. The response-body cancellation is also awaited without a
-bound. A sender that never settles can therefore prevent the loop from recording an error, retrying
-the update, or processing subsequent updates.
-
-This is separate from the intentional one-at-a-time delivery model. Serial delivery can be a
-reasonable simplification; an unbounded attempt makes that simplification fragile. Telegram’s
-webhook actor constructs its outbound connection with finite timeout settings.
-
-**Reference:**
-[Telegram Bot API server `WebhookActor.cpp`](https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/WebhookActor.cpp).
-
-### Recommendation
-
-Add an injectable per-attempt deadline that aborts the attempt—not the webhook registration. On
-expiry, retain the pending update, record the delivery failure, and enter the existing retry path.
-Ensure that deleting the webhook or ending the session cancels the attempt and any scheduled retry.
-
-Bound completion of the delivery attempt as a whole, rather than relying on incidental timeout
-behavior of whichever fetch implementation is installed.
-
-### Regression coverage
-
-Inject a sender that remains pending until aborted. Advance a test scheduler and verify that the
-attempt is aborted, the update remains pending, the same update ID is retried, and registration
-teardown prevents further attempts.
-
 ## 7. P2 — Extract transport-independent method execution, then support webhook-response methods
 
 **Locations:**
@@ -301,8 +266,8 @@ Let the composition root accept a small runtime dependency containing the clock,
 outbound webhook transport, with normal production defaults.
 
 Build on the existing injection rather than replacing it. A deterministic session can then test the
-deadline in finding 6, retries, and future age/expiry behavior without sleeping or globally patching
-time for unrelated sessions.
+webhook attempt deadline, retries, and future age/expiry behavior without sleeping or globally
+patching time for unrelated sessions.
 
 Avoid introducing “advance the timestamp” without also advancing scheduled tasks. That produces a
 partially simulated clock and difficult-to-explain tests.
@@ -338,9 +303,6 @@ beneath an otherwise identical source revision.
 ---
 
 ## Bottom line
-
-**Retain the architecture and fix the behavioral invariants first.** The highest-value remaining
-correction is bounded webhook attempts.
 
 The most important SRP improvements are not “split every large service.” They are more specific:
 make method execution reusable across transports, and distinguish faithful emulation from strict

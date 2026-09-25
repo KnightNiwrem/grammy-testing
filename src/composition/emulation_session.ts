@@ -20,7 +20,10 @@ import { BotCommandService } from '../services/bot_command.ts';
 import { BotMessageViewService } from '../services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../services/bot_update_polling.ts';
-import { BotWebhookService } from '../services/bot_webhook.ts';
+import {
+  BotWebhookService,
+  WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
+} from '../services/bot_webhook.ts';
 import { CallbackQueryService } from '../services/callback_query.ts';
 import { InlineQueryService } from '../services/inline_query.ts';
 import { MediaFileService } from '../services/media_file.ts';
@@ -135,6 +138,7 @@ export function createEmulationSession(id: string): EmulationSession {
     pendingUpdates: botUpdates,
     updateSubscriptions,
     sendWebhookRequest: (request) => fetch(request),
+    attemptTimeoutMilliseconds: WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
     currentUnixTimeSeconds,
   });
   const botApi = new BotApiService({

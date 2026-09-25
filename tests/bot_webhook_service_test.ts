@@ -1,7 +1,11 @@
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { BotWebhookRepository } from '../src/repositories/bot_webhook.ts';
-import { BotWebhookService, type SetWebhookRequest } from '../src/services/bot_webhook.ts';
+import {
+  BotWebhookService,
+  type SetWebhookRequest,
+  WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
+} from '../src/services/bot_webhook.ts';
 import type { BotApiPrivateMessage } from '../src/types/bot_api.ts';
 
 const BOT_ID = 10;
@@ -209,6 +213,42 @@ Deno.test('BotWebhookService reports a webhook it cannot connect to', async () =
   }
 });
 
+Deno.test('BotWebhookService fails an attempt that outlasts its timeout and retries the update', async () => {
+  const { botUpdates, botWebhooks, receivedRequests, receivedSignals, waitForRequestCount } =
+    createWebhookFixture(
+      // The first request ignores its abort, as a sender might; the second hangs until aborted.
+      (request, requestIndex) =>
+        requestIndex === 0 ? new Promise<Response>(() => {}) : respondOnlyByAborting(request),
+      20,
+    );
+
+  try {
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(2));
+    botWebhooks.setWebhook(BOT_ID, webhookRequest());
+    // The first failure is retried at once; the second waits 2 seconds.
+    await waitForRequestCount(2);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    const webhookInfo = botWebhooks.getWebhookInfo(BOT_ID);
+    if (
+      JSON.stringify(receivedRequests.map(({ body }) => body.update_id)) !==
+        JSON.stringify([1, 1]) ||
+      !receivedSignals.every((signal) => signal.aborted) ||
+      webhookInfo.last_error_message !== 'Read timeout expired' ||
+      webhookInfo.pending_update_count !== 2
+    ) {
+      throw new Error(
+        `Expected timed-out attempts to be aborted and retried, received ${
+          JSON.stringify({ receivedRequests, webhookInfo })
+        }`,
+      );
+    }
+  } finally {
+    botWebhooks.endDelivery();
+  }
+});
+
 Deno.test('BotWebhookService ends delivery and keeps the update in flight pending', async () => {
   const { botUpdates, botWebhooks, receivedRequests, waitForRequestCount } = createWebhookFixture(
     respondOnlyByAborting,
@@ -296,15 +336,18 @@ interface ReceivedWebhookRequest {
  */
 function createWebhookFixture(
   respond: (request: Request, requestIndex: number) => Response | Promise<Response>,
+  attemptTimeoutMilliseconds = WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
 ) {
   const botUpdates = new BotUpdateRepository();
   const receivedRequests: ReceivedWebhookRequest[] = [];
+  const receivedSignals: AbortSignal[] = [];
   const requestListeners = new Set<() => void>();
   const botWebhooks = new BotWebhookService({
     webhooks: new BotWebhookRepository(),
     pendingUpdates: botUpdates,
     updateSubscriptions: new BotUpdateSubscriptionRepository(),
     sendWebhookRequest: async (request) => {
+      receivedSignals.push(request.signal);
       const { method, url, headers, redirect } = request;
       receivedRequests.push({ method, url, headers, redirect, body: await request.json() });
       for (const notify of requestListeners) {
@@ -312,6 +355,7 @@ function createWebhookFixture(
       }
       return await respond(request, receivedRequests.length - 1);
     },
+    attemptTimeoutMilliseconds,
     currentUnixTimeSeconds: () => NOW_UNIX_SECONDS,
   });
 
@@ -340,7 +384,7 @@ function createWebhookFixture(
     return Promise.race([received, timeout]).finally(() => clearTimeout(timeoutId));
   };
 
-  return { botUpdates, botWebhooks, receivedRequests, waitForRequestCount };
+  return { botUpdates, botWebhooks, receivedRequests, receivedSignals, waitForRequestCount };
 }
 
 /** Leaves the webhook request unanswered until it is aborted, as a hanging webhook would. */
