@@ -334,6 +334,50 @@ Deno.test('CallbackQueryService delivers a query created expired that cannot be 
   }
 });
 
+Deno.test('CallbackQueryService sends a press on an inline message to its inline bot', () => {
+  const { virtualUsers, privateMessaging, messageBoxes, callbackQueries, chat } =
+    createCallbackQueryFixture();
+  const inlineBot = createBot(virtualUsers, 'inline_bot');
+  const sending = privateMessaging.sendAccountInlineResult({
+    fromAccountId: chat.account.profile.id,
+    to: { type: 'private', botId: chat.bot.profile.id },
+    viaBotId: inlineBot.profile.id,
+    content: { kind: 'text', text: 'Cats', entities: [] },
+    inlineKeyboard: [[{ kind: 'callback', text: 'Like', callbackData: 'like' }]],
+  });
+  if (!sending.sent) {
+    throw new Error(`Expected the inline result to be sent, received ${sending.reason}`);
+  }
+  const messageId = messageBoxes.getMessageId(chat.bot.profile.id, sending.message.id);
+  if (messageId === undefined) {
+    throw new Error("Expected the inline message in the chat bot's message box");
+  }
+
+  const result = callbackQueries.pressCallbackButton({
+    fromAccountId: chat.account.profile.id,
+    chat: { type: 'private', botId: chat.bot.profile.id },
+    messageId,
+    callbackData: 'like',
+    expired: false,
+  });
+  if (
+    !result.pressed || result.callbackQuery.botId !== inlineBot.profile.id ||
+    result.callbackQuery.inlineMessageId !== sending.message.viaBot?.inlineMessageId
+  ) {
+    throw new Error('Expected the press to reach the inline bot by the inline message identifier');
+  }
+  const answer = (fromBotId: number) =>
+    callbackQueries.answerCallbackQuery({
+      fromBotId,
+      callbackQueryId: result.callbackQuery.id,
+      showAlert: false,
+      cacheTimeSeconds: 0,
+    }).answered;
+  if (answer(chat.bot.profile.id) || !answer(inlineBot.profile.id)) {
+    throw new Error("Expected only the inline bot to answer, not the chat's bot");
+  }
+});
+
 function createCallbackQueryFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();
@@ -408,7 +452,9 @@ function createCallbackQueryFixture() {
     virtualUsers,
     privateConversations,
     sharedChats,
+    privateMessaging,
     supergroupMessaging,
+    messageBoxes,
     publishedEvents,
     callbackQueries,
     chat: { account, bot, botMessage: botMessage.message, botMessageId, accountMessageId },

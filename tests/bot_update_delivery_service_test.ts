@@ -115,6 +115,7 @@ Deno.test('BotUpdateDeliveryService delivers a callback query to the bot whose b
     callbackQuery.from !== account.profile ||
     callbackQuery.chat_instance !== '-42' ||
     callbackQuery.data !== 'yes' ||
+    !('message' in callbackQuery) ||
     callbackQuery.message.message_id !== 1 ||
     callbackQuery.message.from.id !== bot.profile.id ||
     JSON.stringify(callbackQuery.message.reply_markup) !==
@@ -556,6 +557,117 @@ Deno.test('BotUpdateDeliveryService addresses supergroup media by caption and pe
   }
 });
 
+Deno.test('BotUpdateDeliveryService delivers inline queries, and chosen results only with feedback', () => {
+  const { virtualUsers, messages, messageBoxes, botUpdates, botUpdateDelivery } =
+    createDeliveryFixture();
+  const account = createAccount(virtualUsers);
+  const feedbackBot = createInlineBot(virtualUsers, 'feedback_bot', true);
+  const quietBot = createInlineBot(virtualUsers, 'quiet_bot', false);
+  const inlineQuery = {
+    id: '1',
+    accountId: account.profile.id,
+    botId: feedbackBot.profile.id,
+    chat: { type: 'private', botId: feedbackBot.profile.id },
+    query: 'cats',
+    offset: '',
+    state: { status: 'awaiting_answer' },
+  } as const;
+  botUpdateDelivery.publish({ type: 'inline_query_created', inlineQuery });
+  const message = messages.addPrivateMessage({
+    conversation: { accountId: account.profile.id, botId: feedbackBot.profile.id },
+    authorRole: 'account',
+    sentAtUnixSeconds: 1_700_000_000,
+    content: { kind: 'text', text: 'Cats', entities: [] },
+    inlineKeyboard: [[{ kind: 'callback', text: 'Like', callbackData: 'like' }]],
+    viaBotId: feedbackBot.profile.id,
+  });
+  messageBoxes.assignMessageId(feedbackBot.profile.id, message.id);
+  botUpdateDelivery.publish({ type: 'message_created', message });
+  botUpdateDelivery.publish({
+    type: 'inline_query_result_chosen',
+    inlineQuery,
+    resultId: 'cats-1',
+    message,
+  });
+  botUpdateDelivery.publish({
+    type: 'inline_query_result_chosen',
+    inlineQuery: { ...inlineQuery, botId: quietBot.profile.id },
+    resultId: 'cats-1',
+    message,
+  });
+
+  const [inlineQueryUpdate, messageUpdate, chosenResultUpdate, ...unexpectedUpdates] = botUpdates
+    .confirmAndReadPendingUpdates(feedbackBot.profile.id, { limit: 100 });
+  if (
+    inlineQueryUpdate === undefined || !('inline_query' in inlineQueryUpdate) ||
+    JSON.stringify(inlineQueryUpdate.inline_query) !== JSON.stringify({
+        id: '1',
+        from: account.profile,
+        chat_type: 'sender',
+        query: 'cats',
+        offset: '',
+      })
+  ) {
+    throw new Error(`Expected the inline query in Telegram's shape`);
+  }
+  const sentMessage = messageFromUpdate(messageUpdate);
+  if (
+    sentMessage === undefined ||
+    JSON.stringify(Object.keys(sentMessage).slice(-3)) !==
+      JSON.stringify(['text', 'reply_markup', 'via_bot']) ||
+    sentMessage.via_bot?.id !== feedbackBot.profile.id
+  ) {
+    throw new Error(`Expected the message with via_bot after its keyboard`);
+  }
+  if (
+    chosenResultUpdate === undefined || !('chosen_inline_result' in chosenResultUpdate) ||
+    JSON.stringify(chosenResultUpdate.chosen_inline_result) !== JSON.stringify({
+        from: account.profile,
+        inline_message_id: message.viaBot?.inlineMessageId,
+        query: 'cats',
+        result_id: 'cats-1',
+      }) ||
+    unexpectedUpdates.length !== 0
+  ) {
+    throw new Error("Expected the chosen result in Telegram's shape");
+  }
+  if (botUpdates.countPendingUpdates(quietBot.profile.id) !== 0) {
+    throw new Error('Expected a bot without inline feedback to learn of no chosen result');
+  }
+});
+
+Deno.test('BotUpdateDeliveryService delivers supergroup messages sent through a privacy-mode bot', () => {
+  const { virtualUsers, sharedChats, messages, messageBoxes, botUpdates, botUpdateDelivery } =
+    createDeliveryFixture();
+  const owner = createAccount(virtualUsers);
+  const inlineBot = createInlineBot(virtualUsers, 'inline_bot', false);
+  const otherBot = createInlineBot(virtualUsers, 'other_bot', false);
+  const supergroup = {
+    kind: 'supergroup',
+    id: -1_000_000_000_001,
+    title: 'Team',
+    chatInstance: '-42',
+  } as const;
+  sharedChats.registerSupergroup(supergroup, owner.profile.id);
+  sharedChats.addChatMember(supergroup.id, inlineBot.profile.id);
+  for (const viaBotId of [otherBot.profile.id, inlineBot.profile.id]) {
+    const message = messages.addSupergroupMessage({
+      chatId: supergroup.id,
+      author: { kind: 'account', accountId: owner.profile.id },
+      sentAtUnixSeconds: 1_700_000_000,
+      content: { kind: 'text', text: 'Cats', entities: [] },
+      viaBotId,
+    });
+    messageBoxes.assignMessageId(supergroup.id, message.id);
+    botUpdateDelivery.publish({ type: 'message_created', message });
+  }
+
+  const updates = botUpdates.confirmAndReadPendingUpdates(inlineBot.profile.id, { limit: 100 });
+  if (updates.length !== 1 || messageFromUpdate(updates[0])?.message_id !== 2) {
+    throw new Error('Expected the privacy-mode bot to receive only the message sent through it');
+  }
+});
+
 function createDeliveryFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();
@@ -604,6 +716,23 @@ function createAccount(virtualUsers: VirtualUserService) {
 
 function createBot(virtualUsers: VirtualUserService, username: string) {
   const result = virtualUsers.createBot({ first_name: 'Test Bot', username });
+  if (!result.created) {
+    throw new Error(`Expected bot creation to succeed, received ${result.reason}`);
+  }
+  return result.bot;
+}
+
+function createInlineBot(
+  virtualUsers: VirtualUserService,
+  username: string,
+  receivesChosenInlineResults: boolean,
+) {
+  const result = virtualUsers.createBot({
+    first_name: 'Inline Bot',
+    username,
+    supports_inline_queries: true,
+    receives_chosen_inline_results: receivesChosenInlineResults,
+  });
   if (!result.created) {
     throw new Error(`Expected bot creation to succeed, received ${result.reason}`);
   }

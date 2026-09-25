@@ -601,7 +601,9 @@ paths:
         Presses the button with the given callback data on a bot message in the account's private
         chat with the bot, or in a supergroup the account is a member of. Unless the bot that sent
         the message has an allowed_updates subscription that excludes callback_query
-        updates, the bot receives a callback_query update carrying the message as it is now. The
+        updates, the bot receives a callback_query update carrying the message as it is now. A
+        button on a message sent through a bot's inline mode reaches that inline bot instead, with
+        the message's `inline_message_id` in place of the message, as on Telegram. The
         bot answers asynchronously with answerCallbackQuery; read the answer from the created
         callback query. The press can create the query already expired, so that the bot receives
         it but cannot answer it, as when a bot that was offline catches up after the answer
@@ -655,6 +657,123 @@ paths:
           description: The account path identifier is invalid.
         '404':
           description: The session does not exist, or the account created no such callback query.
+  /sessions/{sessionId}/accounts/{accountId}/inline-queries:
+    description: Inline queries an account typed for inline bots.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      operationId: sendInlineQuery
+      summary: Type an inline query for a bot as a virtual account
+      description: >-
+        Sends an inline query, as typing the bot's username followed by the query does, from the
+        account's private chat with a bot, the inline bot or another, or from a supergroup the
+        account is a member of. The inline bot need not be a member of the chat, but must have been
+        created with `supports_inline_queries`. Unless the bot's allowed_updates subscription
+        excludes them, it receives an inline_query update whose `chat_type` is `sender` for the
+        account's private chat with the inline bot itself, `private` for its chat with another
+        bot, and `supergroup` for a supergroup. The bot answers asynchronously with
+        answerInlineQuery; read the answer from the created inline query, and send one of its
+        results to the chat with the query's chosen-results route. The emulator never expires
+        inline queries by time, and does not report user locations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendInlineQueryRequest'
+      responses:
+        '201':
+          description: The inline query was sent.
+          headers:
+            Location:
+              description: Relative URL of the created inline query.
+              required: true
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InlineQueryResponse'
+        '400':
+          description: The request is invalid, such as a query longer than 256 characters.
+        '403':
+          description: The account is not a member of the supergroup.
+        '404':
+          description: >-
+            The session, account, inline bot, supergroup, or bot of the private chat does not
+            exist.
+        '409':
+          description: The bot was not created with inline mode turned on.
+  /sessions/{sessionId}/accounts/{accountId}/inline-queries/{inlineQueryId}:
+    description: One inline query sent by an account.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/InlineQueryId'
+    get:
+      operationId: getInlineQuery
+      summary: Return an inline query with the bot's answer once given
+      responses:
+        '200':
+          description: The inline query, answered or not.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InlineQueryResponse'
+        '400':
+          description: The account path identifier is invalid.
+        '404':
+          description: The session does not exist, or the account sent no such inline query.
+  /sessions/{sessionId}/accounts/{accountId}/inline-queries/{inlineQueryId}/chosen-results:
+    description: Results of an inline query's answer that the account sent to the query's chat.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/InlineQueryId'
+    post:
+      operationId: chooseInlineQueryResult
+      summary: Send a result of the bot's answer as a virtual account
+      description: >-
+        Sends a result of the bot's answer to the chat where the account typed the query, as the
+        account's own message sent through the inline bot, which its `via_bot` shows. The message
+        holds the text of the result's `input_message_content`, or else its photo or document with
+        its caption, and the result's inline keyboard. The chat's bots receive it as they receive
+        the account's other messages; in a supergroup, the inline bot receives it in privacy mode
+        too when it is a member. Then, if the inline bot was created with
+        `receives_chosen_inline_results`, it receives a chosen_inline_result update, which carries
+        the message's `inline_message_id` when the message has an inline keyboard. The inline bot
+        edits the message by that identifier, and presses of its callback buttons reach the inline
+        bot as callback queries carrying it instead of the message. As on Telegram, the account
+        can send a result again, each time as a new message.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChooseInlineQueryResultRequest'
+      responses:
+        '201':
+          description: >-
+            The result was sent. A private message is shown as the conversation's bot sees it, and
+            a supergroup message as the account sees it.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SentMessage'
+                  - $ref: '#/components/schemas/SentSupergroupMessage'
+        '400':
+          description: The request is invalid, or the answer has no result with the given ID.
+        '403':
+          description: The account is no longer a member of the supergroup.
+        '404':
+          description: The session does not exist, or the account sent no such inline query.
+        '409':
+          description: >-
+            The bot has not answered the query yet, or the account blocks the bot of the private
+            chat and must unblock it before writing to it.
   /sessions/{sessionId}/bot-api/bot{token}/getMe:
     description: Telegram Bot API method for retrieving the authenticated virtual bot's profile.
     parameters:
@@ -1149,7 +1268,9 @@ paths:
       normalized as by `sendPhoto`, `show_caption_above_media` applies only to photos, and, as on
       Telegram, the edited message keeps only the inline keyboard given in `reply_markup` and the
       bot receives no update for its own edit. The edit date changes only when the caption, its
-      entities, or where it shows do. Messages sent through inline mode are not supported.
+      entities, or where it shows do. Without `chat_id` and `message_id`, the method edits a
+      message an account sent through the bot's inline mode, which `inline_message_id` identifies,
+      as `editMessageText` does.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -1180,11 +1301,13 @@ paths:
                 contentType: application/json
       responses:
         '200':
-          description: The message was edited.
+          description: >-
+            The message was edited: the edited message for a message of a chat, or `true` for an
+            inline message.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/EditMessageResponse'
         '400':
           description: >-
             The request cannot be decoded or has unsupported parameters, or Telegram would reject
@@ -1297,8 +1420,11 @@ paths:
       Telegram Bot API method for editing the text of a message the bot sent to a private chat or a
       supergroup. As on Telegram, the text is formatted and normalized as by `sendMessage`, the edited message
       keeps only the inline keyboard given in `reply_markup`, and the bot receives no update for
-      its own edit. The edit date changes only when the text or its entities do. Messages sent
-      through inline mode, which `inline_message_id` identifies, are not supported.
+      its own edit. The edit date changes only when the text or its entities do. Without `chat_id`
+      and `message_id`, the method edits a message an account sent through the bot's inline mode,
+      which `inline_message_id` identifies, whether or not the bot is a member of its chat, and
+      answers `true` rather than the message. As an account's message, the edited inline message
+      reaches the chat's bots that received it as an edited_message update.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -1333,18 +1459,23 @@ paths:
                 contentType: application/json
       responses:
         '200':
-          description: The message was edited.
+          description: >-
+            The message was edited: the edited message for a message of a chat, or `true` for an
+            inline message.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/EditMessageResponse'
         '400':
           description: >-
             The request cannot be decoded or has unsupported parameters, or Telegram would reject
             it, checking in this order: the text is empty (`Bad Request: message text is empty`);
             the text or its formatting cannot be read, as for `sendMessage`; neither `chat_id` nor
-            a positive `message_id` is given (`Bad Request: message identifier is not specified`);
-            `chat_id` is missing (`Bad Request: chat_id is empty`); the chat is not one the bot can
+            a positive `message_id` is given, and no `inline_message_id` either (`Bad Request:
+            message identifier is not specified`); `inline_message_id` identifies no message sent
+            through the bot's inline mode, including a deleted one or another bot's (`Bad Request:
+            MESSAGE_ID_INVALID`); `chat_id` is missing (`Bad Request: chat_id is empty`); the chat
+            is not one the bot can
             address, as for `sendMessage` (`Bad Request: chat not found`); the chat has no message
             with that ID (`Bad Request: message to edit not found`); another user wrote the message
             (`Bad Request: message can't be edited`); the message is a photo or document (`Bad
@@ -1380,8 +1511,9 @@ paths:
     description: >-
       Telegram Bot API method for replacing the inline keyboard of a message the bot sent to a
       private chat or a supergroup. Omitting `reply_markup` removes the keyboard. The content and edit
-      date are unchanged, and the bot receives no update for its own edit. Messages sent through inline
-      mode are not supported.
+      date are unchanged, and the bot receives no update for its own edit. Without `chat_id` and
+      `message_id`, the method edits a message an account sent through the bot's inline mode, which
+      `inline_message_id` identifies, as `editMessageText` does.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -1408,11 +1540,13 @@ paths:
                 contentType: application/json
       responses:
         '200':
-          description: The message's keyboard was replaced.
+          description: >-
+            The message's keyboard was replaced: the edited message for a message of a chat, or
+            `true` for an inline message.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/EditMessageResponse'
         '400':
           description: >-
             The request cannot be decoded or has unsupported parameters, or Telegram would reject
@@ -1604,6 +1738,93 @@ paths:
             The request cannot be decoded or has unsupported parameters, or the callback query
             does not exist, was sent to another bot, is already answered, or has expired (`Bad
             Request: query is too old and response timeout expired or query ID is invalid`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/answerInlineQuery:
+    description: >-
+      Telegram Bot API method for answering an inline query an account sent to the bot, once, with
+      up to 50 results that the account's client lists and sends. Article results, and photo and
+      document results with files the bot knows by `file_id`, are supported. Results of other
+      types (`Bad Request: inline query results of type "<type>" are not supported`), files given
+      by URL (`Bad Request: sending files by URL is not supported`), and `input_message_content`
+      of a location, venue, contact, invoice, or rich message (`Bad Request: inline query results
+      sending a location, venue, contact, invoice, or rich message are not supported`) are
+      rejected with these emulator errors. Thumbnails, and the dimensions of
+      a photo, are validated and ignored. Text and captions are read and normalized as by
+      `sendMessage` and `sendPhoto`. The older `switch_pm_text` and `switch_pm_parameter`
+      parameters form the `button` when it is omitted.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: answerInlineQuery
+      summary: Answer an inline query sent to the authenticated virtual bot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerInlineQueryRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AnswerInlineQueryRequest'
+            encoding:
+              results:
+                contentType: application/json
+              button:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AnswerInlineQueryRequest'
+            encoding:
+              results:
+                contentType: application/json
+              button:
+                contentType: application/json
+      responses:
+        '200':
+          description: The answer was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrueResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it. The Bot API server reads the results first: a result of an unknown type (`Bad
+            Request: can't parse InlineQueryResult: type "<type>" is unsupported for the inline
+            query result`), an article without message text (`Bad Request: can't parse
+            InlineQueryResult: Input message content is not specified`), or text or formatting it
+            cannot read, described as for `sendMessage` after `Bad Request: can't parse
+            InlineQueryResult: `. Every result's file is then resolved: a `file_id` the bot does
+            not know (`Bad Request: wrong remote file identifier specified: can't unserialize it`)
+            or of another file type (`Bad Request: can't use file of type Document as Photo`).
+            TDLib then checks the button's `start_parameter` for being empty (`Bad Request: can't
+            use empty start_parameter`), longer than 64 characters (`Bad Request: too long
+            start_parameter specified`), or holding characters other than letters, digits, `_`,
+            and `-` (`Bad Request: unallowed characters in start_parameter are used`); more than
+            50 results (`Bad Request: too many inline query results specified`); and each
+            result's message content as when sending it, where normalized text longer than 4096
+            characters fails with `Bad Request: MESSAGE_TOO_LONG` and a caption longer than 1024
+            characters with `Bad Request: MEDIA_CAPTION_TOO_LONG`. Telegram's servers finally
+            check the query, which must exist, have been sent to this bot, and be unanswered
+            (`Bad Request: query is too old and response timeout expired or query ID is
+            invalid`); a `next_offset` longer than 64 bytes (`Bad Request: NEXT_OFFSET_INVALID`);
+            and each result for an empty identifier (`Bad Request: RESULT_ID_EMPTY`), one longer
+            than 64 bytes (`Bad Request: RESULT_ID_INVALID`), a repeated one (`Bad Request:
+            RESULT_ID_DUPLICATE`), an empty article title (`Bad Request: ARTICLE_TITLE_EMPTY`), an
+            empty document title (`Bad Request: FILE_TITLE_EMPTY`), and callback data longer than
+            64 bytes (`Bad Request: BUTTON_DATA_INVALID`).
           content:
             application/json:
               schema:
@@ -2293,6 +2514,7 @@ components:
           type: boolean
         supports_inline_queries:
           type: boolean
+          description: Whether the bot was created with inline mode turned on.
         can_connect_to_business:
           type: boolean
         has_main_web_app:
@@ -2324,6 +2546,19 @@ components:
           description: >-
             Turns off the bot's privacy mode, as BotFather does, so that it receives every account
             message of its supergroups rather than only those addressed to it.
+        supports_inline_queries:
+          type: boolean
+          default: false
+          description: >-
+            Turns on the bot's inline mode, as BotFather does, so that accounts can send it inline
+            queries. `getMe` reports it.
+        receives_chosen_inline_results:
+          type: boolean
+          default: false
+          description: >-
+            Turns on the bot's inline feedback, as BotFather does, so that it receives a
+            `chosen_inline_result` update for each inline query result an account sends. It has
+            effect only with inline mode.
     CreatedBot:
       type: object
       additionalProperties: false
@@ -2688,6 +2923,8 @@ components:
           description: The account or bot that left or was removed.
         reply_markup:
           $ref: '#/components/schemas/InlineKeyboardMarkup'
+        via_bot:
+          $ref: '#/components/schemas/MessageSenderBot'
         has_protected_content:
           type: boolean
           const: true
@@ -2795,7 +3032,14 @@ components:
           description: Present when clients cover the photo until the user reveals it.
         reply_markup:
           $ref: '#/components/schemas/InlineKeyboardMarkup'
-          description: The inline keyboard the bot attached, omitted when there is none.
+          description: >-
+            The inline keyboard the bot attached, or the inline bot of a message sent through it;
+            omitted when there is none.
+        via_bot:
+          $ref: '#/components/schemas/MessageSenderBot'
+          description: >-
+            The bot through whose inline mode the account sent the message; omitted for other
+            messages.
         has_protected_content:
           type: boolean
           const: true
@@ -3315,6 +3559,85 @@ components:
             until_date:
               type: integer
               const: 0
+    InlineQueryUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - update_id
+        - inline_query
+      properties:
+        update_id:
+          type: integer
+          minimum: 1
+        inline_query:
+          $ref: '#/components/schemas/BotApiInlineQuery'
+    BotApiInlineQuery:
+      type: object
+      additionalProperties: false
+      description: An inline query, in the field order Telegram uses. User locations are not supported.
+      required:
+        - id
+        - from
+        - chat_type
+        - query
+        - offset
+      properties:
+        id:
+          type: string
+          description: Identifier to pass to answerInlineQuery.
+        from:
+          $ref: '#/components/schemas/Account'
+          description: The account that sent the query.
+        chat_type:
+          type: string
+          enum:
+            - sender
+            - private
+            - supergroup
+          description: >-
+            The chat where the account typed the query: `sender` for its private chat with the
+            inline bot itself, `private` for its private chat with another bot.
+        query:
+          type: string
+          maxLength: 256
+        offset:
+          type: string
+          description: >-
+            The `next_offset` of an earlier answer, requesting more results; empty for the first.
+    ChosenInlineResultUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - update_id
+        - chosen_inline_result
+      properties:
+        update_id:
+          type: integer
+          minimum: 1
+        chosen_inline_result:
+          $ref: '#/components/schemas/BotApiChosenInlineResult'
+    BotApiChosenInlineResult:
+      type: object
+      additionalProperties: false
+      description: >-
+        An inline query result the account sent, in the field order Telegram uses. Only a bot
+        created with `receives_chosen_inline_results` receives it.
+      required:
+        - from
+        - query
+        - result_id
+      properties:
+        from:
+          $ref: '#/components/schemas/Account'
+          description: The account that sent the result.
+        inline_message_id:
+          type: string
+          description: Identifier of the sent message, present only when it has an inline keyboard.
+        query:
+          type: string
+          description: The query of the answer that held the result.
+        result_id:
+          type: string
     CallbackQueryUpdate:
       type: object
       additionalProperties: false
@@ -3328,6 +3651,39 @@ components:
         callback_query:
           $ref: '#/components/schemas/BotApiCallbackQuery'
     BotApiCallbackQuery:
+      description: >-
+        A press of a callback button: on a message of the bot's chat, which it carries, or on a
+        message sent through the bot's inline mode, which the bot knows only by its
+        `inline_message_id`.
+      oneOf:
+        - $ref: '#/components/schemas/ChatMessageCallbackQuery'
+        - $ref: '#/components/schemas/InlineMessageCallbackQuery'
+    InlineMessageCallbackQuery:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - from
+        - inline_message_id
+        - chat_instance
+        - data
+      properties:
+        id:
+          type: string
+          description: Identifier to pass to answerCallbackQuery.
+        from:
+          $ref: '#/components/schemas/Account'
+          description: The account that pressed the button.
+        inline_message_id:
+          type: string
+          description: Identifier of the message carrying the button, by which the bot edits it.
+        chat_instance:
+          type: string
+          description: Opaque signed 64-bit decimal identifying the chat the message was sent to.
+        data:
+          type: string
+          description: The pressed button's callback data.
+    ChatMessageCallbackQuery:
       type: object
       additionalProperties: false
       required:
@@ -3799,9 +4155,10 @@ components:
     EditMessageTextRequest:
       type: object
       additionalProperties: false
+      description: >-
+        Addresses a message of a chat by `chat_id` and `message_id`, or a message sent through the
+        bot's inline mode by `inline_message_id`.
       required:
-        - chat_id
-        - message_id
         - text
       properties:
         chat_id:
@@ -3812,6 +4169,11 @@ components:
         message_id:
           type: integer
           description: Identifier of the message in the bot's chat.
+        inline_message_id:
+          type: string
+          description: >-
+            Identifier of a message sent through the bot's inline mode, used without `chat_id` and
+            `message_id`.
         text:
           type: string
           minLength: 1
@@ -3945,9 +4307,9 @@ components:
     EditMessageCaptionRequest:
       type: object
       additionalProperties: false
-      required:
-        - chat_id
-        - message_id
+      description: >-
+        Addresses a message of a chat by `chat_id` and `message_id`, or a message sent through the
+        bot's inline mode by `inline_message_id`.
       properties:
         chat_id:
           type: integer
@@ -3957,6 +4319,11 @@ components:
         message_id:
           type: integer
           description: Identifier of the message in the bot's chat.
+        inline_message_id:
+          type: string
+          description: >-
+            Identifier of a message sent through the bot's inline mode, used without `chat_id` and
+            `message_id`.
         caption:
           $ref: '#/components/schemas/Caption'
         parse_mode:
@@ -4014,9 +4381,9 @@ components:
     EditMessageReplyMarkupRequest:
       type: object
       additionalProperties: false
-      required:
-        - chat_id
-        - message_id
+      description: >-
+        Addresses a message of a chat by `chat_id` and `message_id`, or a message sent through the
+        bot's inline mode by `inline_message_id`.
       properties:
         chat_id:
           type: integer
@@ -4026,6 +4393,11 @@ components:
         message_id:
           type: integer
           description: Identifier of the message in the bot's chat.
+        inline_message_id:
+          type: string
+          description: >-
+            Identifier of a message sent through the bot's inline mode, used without `chat_id` and
+            `message_id`.
         reply_markup:
           $ref: '#/components/schemas/InlineKeyboardMarkup'
           description: Keyboard the message shows; omitting it removes the keyboard.
@@ -4041,6 +4413,22 @@ components:
           const: true
         result:
           $ref: '#/components/schemas/Message'
+    EditMessageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          description: The edited message of a chat, or `true` for an edited inline message.
+          oneOf:
+            - $ref: '#/components/schemas/Message'
+            - type: boolean
+              const: true
     DeleteMessageRequest:
       type: object
       additionalProperties: false
@@ -4526,6 +4914,342 @@ components:
       properties:
         callback_query:
           $ref: '#/components/schemas/CallbackQuery'
+    SendInlineQueryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - bot_id
+        - chat
+      properties:
+        bot_id:
+          $ref: '#/components/schemas/TelegramUserId'
+          description: The inline bot, whose username the account types before the query.
+        chat:
+          $ref: '#/components/schemas/MessageTarget'
+          description: The chat where the account types the query, to which a chosen result is sent.
+        query:
+          type: string
+          maxLength: 256
+          default: ''
+          description: >-
+            The query text, of at most 256 characters counted as Unicode code points; empty when
+            the account typed only the bot's username.
+        offset:
+          type: string
+          default: ''
+          description: >-
+            The `next_offset` of an earlier answer, requesting more results; empty for the first.
+    ChooseInlineQueryResultRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - result_id
+      properties:
+        result_id:
+          type: string
+          minLength: 1
+          description: Identifier of the result in the bot's answer.
+    InlineQuery:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - bot_id
+        - chat
+        - query
+        - offset
+        - status
+        - answer
+      properties:
+        id:
+          type: string
+          description: Identifier the bot receives in its inline_query update.
+        bot_id:
+          $ref: '#/components/schemas/TelegramUserId'
+        chat:
+          $ref: '#/components/schemas/MessageTarget'
+        query:
+          type: string
+        offset:
+          type: string
+        status:
+          type: string
+          enum:
+            - awaiting_answer
+            - answered
+          description: Whether the bot has answered the query; the bot answers a query once.
+        answer:
+          description: The bot's answer when the status is `answered`, and null otherwise.
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required:
+                - results
+                - cache_time
+                - is_personal
+                - next_offset
+              properties:
+                results:
+                  type: array
+                  maxItems: 50
+                  description: >-
+                    The results as the account's client lists them. What sending one writes shows
+                    in the sent message.
+                  items:
+                    $ref: '#/components/schemas/AccountInlineQueryResult'
+                cache_time:
+                  type: integer
+                  minimum: 0
+                  maximum: 86400
+                is_personal:
+                  type: boolean
+                next_offset:
+                  type: string
+                  description: The offset that requests more results; empty when there are no more.
+                button:
+                  $ref: '#/components/schemas/InlineQueryResultsButton'
+    AccountInlineQueryResult:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+          enum:
+            - article
+            - photo
+            - document
+        id:
+          type: string
+        title:
+          type: string
+          minLength: 1
+          description: Omitted for a photo without a title.
+        description:
+          type: string
+          minLength: 1
+          description: Omitted when the bot gave none.
+        url:
+          type: string
+          minLength: 1
+          description: The URL of an article, omitted when the bot gave none or hid it.
+    InlineQueryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - inline_query
+      properties:
+        inline_query:
+          $ref: '#/components/schemas/InlineQuery'
+    AnswerInlineQueryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - inline_query_id
+        - results
+      properties:
+        inline_query_id:
+          type: string
+        results:
+          type: array
+          description: >-
+            The results, whose `type` Telegram matches case-insensitively. Telegram reads a missing
+            list as empty.
+          items:
+            $ref: '#/components/schemas/InlineQueryResult'
+        cache_time:
+          type: integer
+          default: 300
+          description: >-
+            Seconds for which clients may reuse the answer for the same query; Telegram clamps it
+            to 0 through 86400.
+        is_personal:
+          type: boolean
+          default: false
+          description: Whether clients may reuse the answer only for the account that sent the query.
+        next_offset:
+          type: string
+          default: ''
+          maxLength: 64
+          description: The offset the client sends to request more results; empty for no more.
+        button:
+          $ref: '#/components/schemas/InlineQueryResultsButton'
+        switch_pm_text:
+          type: string
+          description: >-
+            The older form of a `button` that opens the bot's private chat, used when `button` is
+            omitted.
+        switch_pm_parameter:
+          type: string
+          description: The start parameter of the button that `switch_pm_text` forms.
+    InlineQueryResultsButton:
+      description: >-
+        The button the account's client shows above the results: it opens the bot's private chat
+        with a start parameter, or a Web App at an HTTPS URL.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - text
+            - start_parameter
+          properties:
+            text:
+              type: string
+            start_parameter:
+              type: string
+              minLength: 1
+              maxLength: 64
+              pattern: '^[A-Za-z0-9_-]+$'
+        - type: object
+          additionalProperties: false
+          required:
+            - text
+            - web_app
+          properties:
+            text:
+              type: string
+            web_app:
+              type: object
+              additionalProperties: false
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  pattern: '^https://'
+    InlineQueryResult:
+      description: An article, or a photo or document the bot knows by `file_id`.
+      oneOf:
+        - $ref: '#/components/schemas/InlineQueryResultArticle'
+        - $ref: '#/components/schemas/InlineQueryResultCachedPhoto'
+        - $ref: '#/components/schemas/InlineQueryResultCachedDocument'
+    InlineQueryResultArticle:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - id
+        - title
+        - input_message_content
+      properties:
+        type:
+          type: string
+          const: article
+        id:
+          $ref: '#/components/schemas/InlineQueryResultId'
+        title:
+          type: string
+          minLength: 1
+        input_message_content:
+          $ref: '#/components/schemas/InputTextMessageContent'
+          description: The text message that sending the article writes, which must have text.
+        reply_markup:
+          $ref: '#/components/schemas/InlineKeyboardMarkup'
+        url:
+          type: string
+        hide_url:
+          type: boolean
+          description: The older way to omit `url`, which Telegram honors by not sending the URL.
+        description:
+          type: string
+        thumbnail_url:
+          type: string
+        thumbnail_width:
+          type: integer
+        thumbnail_height:
+          type: integer
+    InlineQueryResultCachedPhoto:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - id
+        - photo_file_id
+      properties:
+        type:
+          type: string
+          const: photo
+        id:
+          $ref: '#/components/schemas/InlineQueryResultId'
+        photo_file_id:
+          $ref: '#/components/schemas/FileId'
+        title:
+          type: string
+        description:
+          type: string
+        caption:
+          $ref: '#/components/schemas/Caption'
+        parse_mode:
+          $ref: '#/components/schemas/ParseMode'
+        caption_entities:
+          $ref: '#/components/schemas/CaptionEntitiesParameter'
+        show_caption_above_media:
+          type: boolean
+          default: false
+        reply_markup:
+          $ref: '#/components/schemas/InlineKeyboardMarkup'
+        input_message_content:
+          $ref: '#/components/schemas/InputTextMessageContent'
+          description: Text that sending the result writes instead of the photo, if it has text.
+    InlineQueryResultCachedDocument:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - id
+        - title
+        - document_file_id
+      properties:
+        type:
+          type: string
+          const: document
+        id:
+          $ref: '#/components/schemas/InlineQueryResultId'
+        title:
+          type: string
+          minLength: 1
+        document_file_id:
+          $ref: '#/components/schemas/FileId'
+        description:
+          type: string
+        caption:
+          $ref: '#/components/schemas/Caption'
+        parse_mode:
+          $ref: '#/components/schemas/ParseMode'
+        caption_entities:
+          $ref: '#/components/schemas/CaptionEntitiesParameter'
+        reply_markup:
+          $ref: '#/components/schemas/InlineKeyboardMarkup'
+        input_message_content:
+          $ref: '#/components/schemas/InputTextMessageContent'
+          description: Text that sending the result writes instead of the document, if it has text.
+    InlineQueryResultId:
+      type: string
+      minLength: 1
+      description: The bot's identifier of the result, of 1 to 64 bytes and unique within its answer.
+    InputTextMessageContent:
+      type: object
+      additionalProperties: false
+      properties:
+        message_text:
+          type: string
+          description: The text to send, read and normalized as by `sendMessage`; an empty text is none.
+        parse_mode:
+          $ref: '#/components/schemas/ParseMode'
+        entities:
+          type: array
+          description: Entities marking the text; ignored when `parse_mode` formats it.
+          items:
+            $ref: '#/components/schemas/MessageEntityParameter'
+        link_preview_options:
+          $ref: '#/components/schemas/LinkPreviewOptions'
+        disable_web_page_preview:
+          type: boolean
+          description: The older form of `link_preview_options`, validated and without effect.
     GetUpdatesResponse:
       type: object
       additionalProperties: false
@@ -4542,6 +5266,8 @@ components:
             oneOf:
               - $ref: '#/components/schemas/MessageUpdate'
               - $ref: '#/components/schemas/EditedMessageUpdate'
+              - $ref: '#/components/schemas/InlineQueryUpdate'
+              - $ref: '#/components/schemas/ChosenInlineResultUpdate'
               - $ref: '#/components/schemas/CallbackQueryUpdate'
               - $ref: '#/components/schemas/MyChatMemberUpdate'
     GetMeResponse:
@@ -4652,6 +5378,13 @@ components:
       in: path
       required: true
       description: Identifier of a callback query created by the addressed account.
+      schema:
+        type: string
+    InlineQueryId:
+      name: inlineQueryId
+      in: path
+      required: true
+      description: Identifier of an inline query sent by the addressed account.
       schema:
         type: string
     FileUniqueId:

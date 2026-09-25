@@ -11,6 +11,8 @@ import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { ChatAction, Supergroup } from '../types/virtual_chat.ts';
 import {
   type CanonicalMessageId,
+  type ChatMessage,
+  type InlineMessageId,
   isSupergroupContentMessage,
   type MembershipServiceContent,
   type MessageContent,
@@ -64,6 +66,27 @@ export type SendSupergroupAccountMessageResult =
     & ({ readonly reason: SendSupergroupAccountMessageFailureReason } | ContentNormalizationFailure)
   );
 
+/**
+ * An inline query result that an account sends to a supergroup it is a member of, through the
+ * inline bot that offered it, which need not be a member.
+ */
+export interface SendSupergroupAccountInlineResultInput {
+  readonly fromAccountId: number;
+  readonly chatId: number;
+  readonly viaBotId: number;
+  /** Content the inline bot's answer holds, which Telegram checked when the bot answered. */
+  readonly content: MessageContent;
+  /** Omitted when the result sends no inline keyboard. */
+  readonly inlineKeyboard?: InlineKeyboard;
+}
+
+export type SendSupergroupAccountInlineResultResult =
+  | { readonly sent: true; readonly message: SupergroupMessage }
+  | {
+    readonly sent: false;
+    readonly reason: 'account_not_found' | 'chat_not_found' | 'not_a_member';
+  };
+
 /** The message of the supergroup that a bot's message replies to. */
 export interface SupergroupBotMessageReplyTarget {
   /** The supergroup's ID of the message. */
@@ -98,20 +121,29 @@ export type SendSupergroupBotMessageResult =
     & ({ readonly reason: SendSupergroupBotMessageFailureReason } | ContentNormalizationFailure)
   );
 
-interface EditSupergroupBotMessageTarget {
-  readonly fromBotId: number;
-  readonly chatId: number;
-  /** The supergroup's ID of the message. */
-  readonly messageId: number;
-}
+/**
+ * The message a bot edits: one it sent to a supergroup, or one an account sent to a supergroup
+ * through the bot's inline mode, which the bot addresses without being a member.
+ */
+type EditSupergroupBotMessageTarget =
+  | {
+    readonly fromBotId: number;
+    readonly chatId: number;
+    /** The supergroup's ID of the message. */
+    readonly messageId: number;
+  }
+  | {
+    readonly fromBotId: number;
+    readonly inlineMessageId: InlineMessageId;
+  };
 
-export interface EditSupergroupBotMessageTextInput extends EditSupergroupBotMessageTarget {
+export type EditSupergroupBotMessageTextInput = EditSupergroupBotMessageTarget & {
   readonly text: string;
   /** Formatting the bot specified, which Telegram validates and normalizes; omitted for none. */
   readonly entities?: readonly TextEntity[];
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
-}
+};
 
 export type EditSupergroupBotMessageCaptionInput =
   & EditSupergroupBotMessageTarget
@@ -123,11 +155,10 @@ export type EditSupergroupBotMessageCaptionInput =
     readonly inlineKeyboard?: InlineKeyboard;
   };
 
-export interface EditSupergroupBotMessageInlineKeyboardInput
-  extends EditSupergroupBotMessageTarget {
+export type EditSupergroupBotMessageInlineKeyboardInput = EditSupergroupBotMessageTarget & {
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
-}
+};
 
 export type EditSupergroupBotMessageInlineKeyboardFailureReason =
   | 'bot_not_found'
@@ -249,12 +280,14 @@ interface NewSupergroupMessage {
   readonly content: SupergroupMessageContent;
   readonly replyToMessageId?: CanonicalMessageId;
   readonly inlineKeyboard?: InlineKeyboard;
+  readonly viaBotId?: number;
   readonly isContentProtected?: boolean;
 }
 
 interface SupergroupMessageStore {
   addSupergroupMessage(input: NewSupergroupMessage): SupergroupMessage;
   getSupergroupMessage(messageId: CanonicalMessageId): SupergroupMessage | undefined;
+  getMessageByInlineMessageId(inlineMessageId: InlineMessageId): ChatMessage | undefined;
   editSupergroupMessage(messageId: CanonicalMessageId, edit: {
     readonly content: MessageContent;
     readonly inlineKeyboard: InlineKeyboard | undefined;
@@ -292,8 +325,9 @@ interface SupergroupMessagingServiceDependencies {
  *
  * Bots attach inline keyboards, edit their own messages, and delete them; as on Telegram, only an
  * administrator bot with the right to delete messages deletes other members'. Accounts edit the text or
- * caption of their own messages. Reply keyboards and forced replies, which Telegram shows to chosen members of a
- * group, are not supported.
+ * caption of their own messages, and send inline query results through inline bots, which edit the
+ * messages sent through them without being members. Reply keyboards and forced replies, which
+ * Telegram shows to chosen members of a group, are not supported.
  *
  * Results carry canonical messages; presenting them to an observer is left to the caller.
  */
@@ -359,6 +393,30 @@ export class SupergroupMessagingService {
   }
 
   /**
+   * Sends an inline query result from an account to a supergroup it is a member of, as the
+   * account's message sent through the inline bot.
+   */
+  sendAccountInlineResult(
+    input: SendSupergroupAccountInlineResultInput,
+  ): SendSupergroupAccountInlineResultResult {
+    const memberResolution = this.#resolveAccountMember(input.fromAccountId, input.chatId);
+    if (!memberResolution.resolved) {
+      return { sent: false, reason: memberResolution.reason };
+    }
+    return {
+      sent: true,
+      message: this.#commitMessage({
+        chatId: input.chatId,
+        author: { kind: 'account', accountId: input.fromAccountId },
+        sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
+        content: input.content,
+        inlineKeyboard: input.inlineKeyboard,
+        viaBotId: input.viaBotId,
+      }),
+    };
+  }
+
+  /**
    * Sends text, a photo, or a document from a bot to a supergroup it is a member of. A supergroup
    * the bot is not a member of is unknown to it, as on Telegram.
    *
@@ -408,8 +466,10 @@ export class SupergroupMessagingService {
   }
 
   /**
-   * Replaces the text, entities, and inline keyboard of a text message the bot sent. Only changed
-   * text or entities date the edit. As on Telegram, no bot receives an update for a bot's edit.
+   * Replaces the text, entities, and inline keyboard of a text message the bot sent, or that was
+   * sent through its inline mode. Only changed text or entities date the edit. As on Telegram, no
+   * bot receives an update for a bot's message's edit; an edit of an account's message sent
+   * through a bot reaches the supergroup's bots as the account's edited message.
    */
   editBotMessageText(input: EditSupergroupBotMessageTextInput): EditSupergroupBotMessageTextResult {
     if (this.#bots.getById(input.fromBotId) === undefined) {
@@ -432,8 +492,8 @@ export class SupergroupMessagingService {
 
   /**
    * Replaces the caption, its entities, and the inline keyboard of a photo or document the bot
-   * sent; an empty caption removes it. Only a changed caption dates the edit. As on Telegram, no
-   * bot receives an update for a bot's edit.
+   * sent, or that was sent through its inline mode; an empty caption removes it. Only a changed
+   * caption dates the edit. Updates follow `editBotMessageText`.
    */
   editBotMessageCaption(
     input: EditSupergroupBotMessageCaptionInput,
@@ -453,7 +513,10 @@ export class SupergroupMessagingService {
     );
   }
 
-  /** Replaces the inline keyboard of a message the bot sent, leaving its content as it is. */
+  /**
+   * Replaces the inline keyboard of a message the bot sent, or that was sent through its inline
+   * mode, leaving its content as it is.
+   */
   editBotMessageInlineKeyboard(
     input: EditSupergroupBotMessageInlineKeyboardInput,
   ): SupergroupMessageEditResult<EditSupergroupBotMessageInlineKeyboardFailureReason> {
@@ -487,9 +550,10 @@ export class SupergroupMessagingService {
     if (message === undefined) {
       return { edited: false, reason: 'message_not_found' };
     }
+    // As in TDLib, only the inline bot edits a message sent through it.
     if (
       !isSupergroupContentMessage(message) || message.author.kind !== 'account' ||
-      message.author.accountId !== input.fromAccountId
+      message.author.accountId !== input.fromAccountId || message.viaBot !== undefined
     ) {
       return { edited: false, reason: 'message_not_editable' };
     }
@@ -639,11 +703,12 @@ export class SupergroupMessagingService {
   }
 
   /**
-   * Resolves the bot message an edit targets, which only the bot that sent it can edit. A service
-   * message has no content to edit.
+   * Resolves the message an edit targets: a message of a supergroup the bot is a member of, which
+   * only the bot that sent it can edit, or a message sent through the bot's inline mode, which only
+   * that bot finds. A service message has no content to edit.
    */
   #resolveEditableBotMessage(
-    { fromBotId, chatId, messageId }: EditSupergroupBotMessageTarget,
+    target: EditSupergroupBotMessageTarget,
   ):
     | { readonly resolved: true; readonly message: SupergroupContentMessage }
     | {
@@ -653,6 +718,14 @@ export class SupergroupMessagingService {
         | 'message_not_found'
         | 'message_not_editable';
     } {
+    if ('inlineMessageId' in target) {
+      const message = this.#messages.getMessageByInlineMessageId(target.inlineMessageId);
+      return message?.kind === 'supergroup_message' && isSupergroupContentMessage(message) &&
+          message.viaBot?.botId === target.fromBotId
+        ? { resolved: true, message }
+        : { resolved: false, reason: 'message_not_found' };
+    }
+    const { fromBotId, chatId, messageId } = target;
     const accessFailure = this.#checkBotAccess(fromBotId, chatId);
     if (accessFailure !== undefined) {
       return { resolved: false, reason: accessFailure };

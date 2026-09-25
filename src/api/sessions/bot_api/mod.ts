@@ -22,6 +22,12 @@ import {
   messageEntitiesParameter,
   readMessageEntitiesParameter,
 } from './message_entities_parameter.ts';
+import {
+  type InlineQueryResultParameter,
+  inlineQueryResultsButtonParameter,
+  readInlineQueryResultsParameter,
+  type UnreadFormattedText,
+} from './inline_query_answer_parameters.ts';
 import { readInputFileParameter } from './input_file_parameter.ts';
 import { linkPreviewOptionsParameter } from './link_preview_options_parameter.ts';
 import {
@@ -169,6 +175,38 @@ const NO_MESSAGE_ID = 0;
 const QUERY_ID_INVALID_DESCRIPTION =
   'Bad Request: query is too old and response timeout expired or query ID is invalid';
 
+/** Telegram's descriptions for rejected answerInlineQuery requests, by the failure's reason. */
+const ANSWER_INLINE_QUERY_FAILURE_DESCRIPTIONS = {
+  start_parameter_empty: "Bad Request: can't use empty start_parameter",
+  start_parameter_too_long: 'Bad Request: too long start_parameter specified',
+  start_parameter_invalid: 'Bad Request: unallowed characters in start_parameter are used',
+  too_many_results: 'Bad Request: too many inline query results specified',
+  query_id_invalid: QUERY_ID_INVALID_DESCRIPTION,
+  next_offset_invalid: 'Bad Request: NEXT_OFFSET_INVALID',
+  result_id_empty: 'Bad Request: RESULT_ID_EMPTY',
+  result_id_invalid: 'Bad Request: RESULT_ID_INVALID',
+  result_id_duplicate: 'Bad Request: RESULT_ID_DUPLICATE',
+  article_title_empty: 'Bad Request: ARTICLE_TITLE_EMPTY',
+  document_title_empty: 'Bad Request: FILE_TITLE_EMPTY',
+  callback_data_invalid: BUTTON_DATA_INVALID_DESCRIPTION,
+  message_text_too_long: 'Bad Request: MESSAGE_TOO_LONG',
+  caption_too_long: 'Bad Request: MEDIA_CAPTION_TOO_LONG',
+  file_id_invalid: "Bad Request: wrong remote file identifier specified: can't unserialize it",
+} as const;
+
+/** How the Bot API server reports that it cannot read an inline query result. */
+const INLINE_QUERY_RESULT_ERROR_PREFIX = "can't parse InlineQueryResult: ";
+
+/** Telegram's default and range for how long clients may cache an inline query's answer. */
+const DEFAULT_INLINE_QUERY_CACHE_TIME_SECONDS = 300;
+const MAX_INLINE_QUERY_CACHE_TIME_SECONDS = 24 * 60 * 60;
+
+/** Telegram's description for an edit of an unknown, deleted, or other bot's inline message. */
+const INLINE_MESSAGE_ID_INVALID_DESCRIPTION = 'Bad Request: MESSAGE_ID_INVALID';
+
+/** The prefix of Telegram's descriptions of bad requests. */
+const BAD_REQUEST_PREFIX = 'Bad Request: ';
+
 /** Telegram's description for a missing or unknown chat action. */
 const CHAT_ACTION_INVALID_DESCRIPTION = 'Bad Request: wrong parameter action in request';
 
@@ -305,11 +343,15 @@ const sendDocumentParametersSchema = z.strictObject({
   disable_content_type_detection: booleanParameter().optional(),
 });
 
-// Editing messages sent through inline mode, which `inline_message_id` identifies, is not
-// supported.
-const editMessageTextParametersSchema = z.strictObject({
+/** Where an edit method finds the message: in a chat, or sent through the bot's inline mode. */
+const editedMessageParametersShape = {
   chat_id: integerParameter(z.int()).optional(),
   message_id: integerParameter(z.int()).optional(),
+  inline_message_id: z.string().default(''),
+};
+
+const editMessageTextParametersSchema = z.strictObject({
+  ...editedMessageParametersShape,
   text: z.string().default(''),
   parse_mode: z.string().optional(),
   entities: messageEntitiesParameter().optional(),
@@ -318,16 +360,14 @@ const editMessageTextParametersSchema = z.strictObject({
 });
 
 const editMessageCaptionParametersSchema = z.strictObject({
-  chat_id: integerParameter(z.int()).optional(),
-  message_id: integerParameter(z.int()).optional(),
+  ...editedMessageParametersShape,
   ...captionParametersShape,
   show_caption_above_media: booleanParameter().default(false),
   reply_markup: inlineKeyboardMarkupParameter().optional(),
 });
 
 const editMessageReplyMarkupParametersSchema = z.strictObject({
-  chat_id: integerParameter(z.int()).optional(),
-  message_id: integerParameter(z.int()).optional(),
+  ...editedMessageParametersShape,
   reply_markup: inlineKeyboardMarkupParameter().optional(),
 });
 
@@ -351,6 +391,23 @@ const answerCallbackQueryParametersSchema = z.strictObject({
   show_alert: booleanParameter().default(false),
   cache_time: integerParameter(z.int().min(0).max(MAX_CALLBACK_QUERY_ANSWER_CACHE_TIME_SECONDS))
     .default(0),
+});
+
+// `switch_pm_text` and `switch_pm_parameter` are the older form of a `button` that opens the bot's
+// private chat, which Telegram still accepts.
+const answerInlineQueryParametersSchema = z.strictObject({
+  inline_query_id: z.string().default(''),
+  results: jsonParameter(z.array(z.unknown())).optional(),
+  cache_time: integerParameter(
+    z.int().transform((cacheTimeSeconds) =>
+      Math.min(Math.max(cacheTimeSeconds, 0), MAX_INLINE_QUERY_CACHE_TIME_SECONDS)
+    ),
+  ).default(DEFAULT_INLINE_QUERY_CACHE_TIME_SECONDS),
+  is_personal: booleanParameter().default(false),
+  next_offset: z.string().default(''),
+  button: inlineQueryResultsButtonParameter().optional(),
+  switch_pm_text: z.string().default(''),
+  switch_pm_parameter: z.string().default(''),
 });
 
 const leaveChatParametersSchema = z.strictObject({
@@ -436,6 +493,21 @@ type MessageEditResult =
 
 type SendResult = ReturnType<EmulationSession['botApi']['sendMessage']>;
 
+/** The outcome of any edit method for an inline message; each fails for a subset of the reasons. */
+type InlineMessageEditResult =
+  | ReturnType<EmulationSession['botApi']['editInlineMessageText']>
+  | ReturnType<EmulationSession['botApi']['editInlineMessageCaption']>;
+
+type InlineQueryResultRequest = Parameters<
+  EmulationSession['botApi']['answerInlineQuery']
+>[1]['results'][number];
+
+/** Formatted text as a bot specified it, the result of reading its parse mode or entities. */
+type SpecifiedFormattedText = Extract<
+  FormattedTextReadingResult,
+  { readonly read: true }
+>['formattedText'];
+
 /** Removes properties from each member of a union, which keeps the union's alternatives apart. */
 type OmitFromEach<Type, Key extends PropertyKey> = Type extends unknown ? Omit<Type, Key> : never;
 
@@ -480,6 +552,21 @@ type SpecifiedFormattedTextReading =
   | Extract<FormattedTextReadingResult, { readonly read: true }>
   | { readonly read: false; readonly response: Response };
 
+/** Text with the entities its bot specified, or Telegram's description of why it is unreadable. */
+type FormattedTextParametersReading =
+  | Extract<FormattedTextReadingResult, { readonly read: true }>
+  | { readonly read: false; readonly description: string };
+
+/** Where an edit method finds the message it edits, or the error response for its parameters. */
+type EditedMessageTargetReading =
+  | {
+    readonly read: true;
+    readonly target:
+      | { readonly kind: 'chat_message'; readonly chatId: number; readonly messageId: number }
+      | { readonly kind: 'inline_message'; readonly inlineMessageId: string };
+  }
+  | { readonly read: false; readonly response: Response };
+
 type BotApiMethodHandler = (
   context: BotApiRouteContext,
   parameters: BotApiRequestParameters,
@@ -489,6 +576,7 @@ type BotApiMethodHandler = (
 /** Keyed by lowercase name, because Telegram matches method names case-insensitively. */
 const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHandler>([
   ['answercallbackquery', handleAnswerCallbackQuery],
+  ['answerinlinequery', handleAnswerInlineQuery],
   ['banchatmember', handleBanChatMember],
   ['deletemessage', handleDeleteMessage],
   ['deletemessages', handleDeleteMessages],
@@ -909,14 +997,8 @@ function handleEditMessageText(
   if (!parsedParameters.success) {
     return botApiError(context, 400, invalidParametersDescription);
   }
-  const {
-    chat_id: chatId,
-    message_id: messageId,
-    text,
-    parse_mode: parseMode,
-    entities,
-    reply_markup: inlineKeyboard,
-  } = parsedParameters.data;
+  const { text, parse_mode: parseMode, entities, reply_markup: inlineKeyboard } =
+    parsedParameters.data;
   // Telegram reads the text and its formatting before it looks for the message.
   const formattedTextReading = readSpecifiedFormattedText(
     context,
@@ -926,19 +1008,23 @@ function handleEditMessageText(
   if (!formattedTextReading.read) {
     return formattedTextReading.response;
   }
-  if (chatId === undefined) {
-    return botApiError(context, 400, missingChatIdDescription(messageId));
+  const targetReading = readEditedMessageTarget(context, parsedParameters.data);
+  if (!targetReading.read) {
+    return targetReading.response;
   }
 
-  return editMessageResponse(
-    context,
-    context.get('emulationSession').botApi.editMessageText(context.get('authenticatedBot'), {
-      chatId,
-      messageId: messageIdOrNone(messageId),
-      ...formattedTextReading.formattedText,
-      inlineKeyboard,
-    }),
-  );
+  const { target } = targetReading;
+  const { botApi } = context.get('emulationSession');
+  const edit = { ...formattedTextReading.formattedText, inlineKeyboard };
+  return target.kind === 'inline_message'
+    ? inlineMessageEditResponse(
+      context,
+      botApi.editInlineMessageText(context.get('authenticatedBot'), { ...target, ...edit }),
+    )
+    : editMessageResponse(
+      context,
+      botApi.editMessageText(context.get('authenticatedBot'), { ...target, ...edit }),
+    );
 }
 
 function handleEditMessageCaption(
@@ -956,20 +1042,27 @@ function handleEditMessageCaption(
   if (!captionReading.read) {
     return captionReading.response;
   }
-  if (data.chat_id === undefined) {
-    return botApiError(context, 400, missingChatIdDescription(data.message_id));
+  const targetReading = readEditedMessageTarget(context, data);
+  if (!targetReading.read) {
+    return targetReading.response;
   }
 
-  return editMessageResponse(
-    context,
-    context.get('emulationSession').botApi.editMessageCaption(context.get('authenticatedBot'), {
-      chatId: data.chat_id,
-      messageId: messageIdOrNone(data.message_id),
-      caption: captionReading.formattedText,
-      showsCaptionAboveMedia: data.show_caption_above_media,
-      inlineKeyboard: data.reply_markup,
-    }),
-  );
+  const { target } = targetReading;
+  const { botApi } = context.get('emulationSession');
+  const edit = {
+    caption: captionReading.formattedText,
+    showsCaptionAboveMedia: data.show_caption_above_media,
+    inlineKeyboard: data.reply_markup,
+  };
+  return target.kind === 'inline_message'
+    ? inlineMessageEditResponse(
+      context,
+      botApi.editInlineMessageCaption(context.get('authenticatedBot'), { ...target, ...edit }),
+    )
+    : editMessageResponse(
+      context,
+      botApi.editMessageCaption(context.get('authenticatedBot'), { ...target, ...edit }),
+    );
 }
 
 function handleEditMessageReplyMarkup(
@@ -980,19 +1073,26 @@ function handleEditMessageReplyMarkup(
   if (!parsedParameters.success) {
     return botApiError(context, 400, 'Bad Request: invalid editMessageReplyMarkup parameters');
   }
-  const { chat_id: chatId, message_id: messageId, reply_markup: inlineKeyboard } =
-    parsedParameters.data;
-  if (chatId === undefined) {
-    return botApiError(context, 400, missingChatIdDescription(messageId));
+  const targetReading = readEditedMessageTarget(context, parsedParameters.data);
+  if (!targetReading.read) {
+    return targetReading.response;
   }
 
-  return editMessageResponse(
-    context,
-    context.get('emulationSession').botApi.editMessageReplyMarkup(
-      context.get('authenticatedBot'),
-      { chatId, messageId: messageIdOrNone(messageId), inlineKeyboard },
-    ),
-  );
+  const { target } = targetReading;
+  const { botApi } = context.get('emulationSession');
+  const inlineKeyboard = parsedParameters.data.reply_markup;
+  return target.kind === 'inline_message'
+    ? inlineMessageEditResponse(
+      context,
+      botApi.editInlineMessageReplyMarkup(context.get('authenticatedBot'), {
+        ...target,
+        inlineKeyboard,
+      }),
+    )
+    : editMessageResponse(
+      context,
+      botApi.editMessageReplyMarkup(context.get('authenticatedBot'), { ...target, inlineKeyboard }),
+    );
 }
 
 /**
@@ -1011,7 +1111,10 @@ function readSpecifiedFormattedText(
   if (specifiedText.text.length === 0) {
     return { read: false, response: botApiError(context, 400, MESSAGE_TEXT_EMPTY_DESCRIPTION) };
   }
-  return readFormattedTextParameters(context, specifiedText, invalidParametersDescription);
+  return toResponseReading(
+    context,
+    readFormattedTextParameters(context, specifiedText, invalidParametersDescription),
+  );
 }
 
 /**
@@ -1027,11 +1130,23 @@ function readSpecifiedCaption(
   },
   invalidParametersDescription: string,
 ): SpecifiedFormattedTextReading {
-  return readFormattedTextParameters(
+  return toResponseReading(
     context,
-    { text: caption, parseMode, entities: captionEntities },
-    invalidParametersDescription,
+    readFormattedTextParameters(
+      context,
+      { text: caption, parseMode, entities: captionEntities },
+      invalidParametersDescription,
+    ),
   );
+}
+
+function toResponseReading(
+  context: BotApiRouteContext,
+  reading: FormattedTextParametersReading,
+): SpecifiedFormattedTextReading {
+  return reading.read
+    ? reading
+    : { read: false, response: botApiError(context, 400, reading.description) };
 }
 
 /**
@@ -1049,10 +1164,10 @@ function readFormattedTextParameters(
     readonly entities: readonly unknown[] | undefined;
   },
   invalidParametersDescription: string,
-): SpecifiedFormattedTextReading {
-  const failure = (description: string): SpecifiedFormattedTextReading => ({
+): FormattedTextParametersReading {
+  const failure = (description: string): FormattedTextParametersReading => ({
     read: false,
-    response: botApiError(context, 400, description),
+    description,
   });
   const entitiesReading = readMessageEntitiesParameter(
     entities ?? [],
@@ -1089,13 +1204,33 @@ function readFormattedTextParameters(
 }
 
 /**
- * Without `chat_id`, Telegram takes an edit without a positive `message_id` to address an inline
- * message, whose missing `inline_message_id` it reports as an unspecified message identifier.
+ * Reads where an edit method finds the message, as the official Bot API server does: an edit
+ * without `chat_id` and without a positive `message_id` addresses an inline message by its
+ * `inline_message_id`, which it reports missing as an unspecified message identifier.
  */
-function missingChatIdDescription(messageId: number | undefined): string {
-  return messageIdOrNone(messageId) === NO_MESSAGE_ID
-    ? MESSAGE_IDENTIFIER_NOT_SPECIFIED_DESCRIPTION
-    : CHAT_ID_EMPTY_DESCRIPTION;
+function readEditedMessageTarget(
+  context: BotApiRouteContext,
+  { chat_id: chatId, message_id: messageId, inline_message_id: inlineMessageId }: {
+    readonly chat_id?: number;
+    readonly message_id?: number;
+    readonly inline_message_id: string;
+  },
+): EditedMessageTargetReading {
+  if (chatId === undefined && messageIdOrNone(messageId) === NO_MESSAGE_ID) {
+    return inlineMessageId.length === 0
+      ? {
+        read: false,
+        response: botApiError(context, 400, MESSAGE_IDENTIFIER_NOT_SPECIFIED_DESCRIPTION),
+      }
+      : { read: true, target: { kind: 'inline_message', inlineMessageId } };
+  }
+  if (chatId === undefined) {
+    return { read: false, response: botApiError(context, 400, CHAT_ID_EMPTY_DESCRIPTION) };
+  }
+  return {
+    read: true,
+    target: { kind: 'chat_message', chatId, messageId: messageIdOrNone(messageId) },
+  };
 }
 
 function messageIdOrNone(messageId: number | undefined): number {
@@ -1136,6 +1271,40 @@ function editMessageResponse(context: BotApiRouteContext, result: MessageEditRes
     default: {
       const unhandledFailure: never = result;
       throw new Error(`Unhandled message edit failure: ${JSON.stringify(unhandledFailure)}`);
+    }
+  }
+}
+
+/** Answers a successful edit of an inline message with `true`, as Telegram does. */
+function inlineMessageEditResponse(
+  context: BotApiRouteContext,
+  result: InlineMessageEditResult,
+): Response {
+  if (result.edited) {
+    return context.json({ ok: true as const, result: true as const });
+  }
+  switch (result.reason) {
+    case 'inline_message_not_found':
+      return botApiError(context, 400, INLINE_MESSAGE_ID_INVALID_DESCRIPTION);
+    case 'message_text_empty':
+      return botApiError(context, 400, MESSAGE_TEXT_EMPTY_DESCRIPTION);
+    case 'text_invalid':
+      return botApiError(context, 400, badRequestDescription(result.textError));
+    case 'message_has_no_text':
+      return botApiError(context, 400, MESSAGE_HAS_NO_TEXT_DESCRIPTION);
+    case 'message_has_no_caption':
+      return botApiError(context, 400, MESSAGE_HAS_NO_CAPTION_DESCRIPTION);
+    case 'message_text_too_long':
+      return botApiError(context, 400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
+    case 'caption_too_long':
+      return botApiError(context, 400, CAPTION_TOO_LONG_DESCRIPTION);
+    case 'callback_data_invalid':
+      return botApiError(context, 400, BUTTON_DATA_INVALID_DESCRIPTION);
+    case 'message_not_modified':
+      return botApiError(context, 400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
+    default: {
+      const unhandledFailure: never = result;
+      throw new Error(`Unhandled inline message edit failure: ${JSON.stringify(unhandledFailure)}`);
     }
   }
 }
@@ -1644,6 +1813,163 @@ function myCommandsTargetError(
   }
 }
 
+function handleAnswerInlineQuery(
+  context: BotApiRouteContext,
+  parameters: BotApiRequestParameters,
+): Response {
+  const invalidParametersDescription = 'Bad Request: invalid answerInlineQuery parameters';
+  const parsedParameters = answerInlineQueryParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(context, 400, invalidParametersDescription);
+  }
+  const { data } = parsedParameters;
+  const resultsReading = readInlineQueryResultsParameter(
+    data.results ?? [],
+    invalidParametersDescription,
+  );
+  if (!resultsReading.read) {
+    return botApiError(context, 400, resultsReading.description);
+  }
+  const results: InlineQueryResultRequest[] = [];
+  for (const result of resultsReading.results) {
+    const resultReading = readInlineQueryResultText(context, result, invalidParametersDescription);
+    if (!resultReading.read) {
+      return botApiError(context, 400, resultReading.description);
+    }
+    results.push(resultReading.result);
+  }
+  const button = data.button ?? (data.switch_pm_text.length === 0 ? undefined : {
+    kind: 'start_bot' as const,
+    text: data.switch_pm_text,
+    startParameter: data.switch_pm_parameter,
+  });
+
+  const result = context.get('emulationSession').botApi.answerInlineQuery(
+    context.get('authenticatedBot'),
+    {
+      inlineQueryId: data.inline_query_id,
+      results,
+      cacheTimeSeconds: data.cache_time,
+      isPersonal: data.is_personal,
+      nextOffset: data.next_offset,
+      button,
+    },
+  );
+  if (result.answered) {
+    return context.json({ ok: true as const, result: true as const });
+  }
+  switch (result.reason) {
+    case 'text_invalid':
+      return botApiError(context, 400, badRequestDescription(result.textError));
+    case 'file_type_mismatch':
+      return botApiError(
+        context,
+        400,
+        `Bad Request: can't use file of type ${TDLIB_FILE_TYPE_NAMES[result.actualFileType]} as ${
+          TDLIB_FILE_TYPE_NAMES[result.expectedFileType]
+        }`,
+      );
+    default:
+      return botApiError(context, 400, ANSWER_INLINE_QUERY_FAILURE_DESCRIPTIONS[result.reason]);
+  }
+}
+
+/**
+ * Reads the text of an inline query result, the text of its `input_message_content` and its
+ * caption, with their parse mode or entities.
+ */
+function readInlineQueryResultText(
+  context: BotApiRouteContext,
+  result: InlineQueryResultParameter,
+  invalidParametersDescription: string,
+):
+  | { readonly read: true; readonly result: InlineQueryResultRequest }
+  | { readonly read: false; readonly description: string } {
+  const read = (text: UnreadFormattedText) =>
+    readInlineQueryResultFormattedText(context, text, invalidParametersDescription);
+  const shared = {
+    id: result.id,
+    description: result.description,
+    ...(result.inlineKeyboard === undefined ? {} : { inlineKeyboard: result.inlineKeyboard }),
+  };
+  if (result.kind === 'article') {
+    const messageTextReading = read(result.messageText);
+    return messageTextReading.read
+      ? {
+        read: true,
+        result: {
+          ...shared,
+          kind: 'article',
+          title: result.title,
+          url: result.url,
+          messageText: messageTextReading.formattedText,
+        },
+      }
+      : messageTextReading;
+  }
+
+  const messageTextReading = result.messageText === undefined
+    ? undefined
+    : read(result.messageText);
+  if (messageTextReading?.read === false) {
+    return messageTextReading;
+  }
+  const captionReading = read(result.caption);
+  if (!captionReading.read) {
+    return captionReading;
+  }
+  const media = {
+    ...shared,
+    title: result.title,
+    caption: captionReading.formattedText,
+    ...(messageTextReading === undefined ? {} : { messageText: messageTextReading.formattedText }),
+  };
+  return {
+    read: true,
+    result: result.kind === 'photo'
+      ? {
+        ...media,
+        kind: 'photo',
+        photoFileId: result.photoFileId,
+        showsCaptionAboveMedia: result.showsCaptionAboveMedia,
+      }
+      : { ...media, kind: 'document', documentFileId: result.documentFileId },
+  };
+}
+
+/**
+ * Reads text of an inline query result as `readFormattedTextParameters` does. The Bot API server
+ * reports text it cannot read as a result it cannot read, prefixing Telegram's own description.
+ */
+function readInlineQueryResultFormattedText(
+  context: BotApiRouteContext,
+  { text, parseMode, entities }: UnreadFormattedText,
+  invalidParametersDescription: string,
+): { readonly read: true; readonly formattedText: SpecifiedFormattedText } | {
+  readonly read: false;
+  readonly description: string;
+} {
+  const reading = readFormattedTextParameters(
+    context,
+    { text, parseMode, entities },
+    invalidParametersDescription,
+  );
+  if (
+    reading.read || reading.description === invalidParametersDescription ||
+    reading.description === DATE_TIME_UNSUPPORTED_DESCRIPTION
+  ) {
+    return reading;
+  }
+  // Telegram's descriptions begin with a capital letter, which `badRequestDescription` lowered.
+  const telegramError = reading.description.slice(BAD_REQUEST_PREFIX.length);
+  return {
+    read: false,
+    description: `${BAD_REQUEST_PREFIX}${INLINE_QUERY_RESULT_ERROR_PREFIX}${
+      telegramError.charAt(0).toUpperCase()
+    }${telegramError.slice(1)}`,
+  };
+}
+
 /**
  * Words a TDLib error message as the Bot API server's `fail_query_with_error` does for a bad
  * request: prefixed, with its first letter lowercased unless it begins an error code or acronym.
@@ -1654,7 +1980,7 @@ function badRequestDescription(tdlibErrorMessage: string): string {
   const message = keepsCase
     ? tdlibErrorMessage
     : tdlibErrorMessage.charAt(0).toLowerCase() + tdlibErrorMessage.slice(1);
-  return `Bad Request: ${message}`;
+  return `${BAD_REQUEST_PREFIX}${message}`;
 }
 
 /** Telegram's error body, whose `error_code` repeats the HTTP status. */

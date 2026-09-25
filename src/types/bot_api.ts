@@ -153,6 +153,8 @@ interface BotApiMessageHeader<Chat> {
 interface BotApiMessageTrailer {
   /** Omitted when the message has no inline keyboard. */
   readonly reply_markup?: BotApiInlineKeyboardMarkup;
+  /** The bot through whose inline mode the message was sent; omitted for other messages. */
+  readonly via_bot?: BotApiBotUser;
   /** Present only for a message its sender protected from forwarding and saving. */
   readonly has_protected_content?: true;
 }
@@ -203,12 +205,44 @@ export interface BotApiBotCommand {
   readonly is_ephemeral?: true;
 }
 
-export interface BotApiCallbackQuery {
+/**
+ * A press of a callback button, in the field order Telegram uses: on a message of the bot's chat,
+ * which it carries, or on a message sent through the bot's inline mode, which the bot knows only by
+ * its `inline_message_id`.
+ */
+export type BotApiCallbackQuery =
+  | {
+    readonly id: string;
+    readonly from: VirtualAccountProfile;
+    readonly message: BotApiMessage;
+    readonly chat_instance: string;
+    readonly data: string;
+  }
+  | {
+    readonly id: string;
+    readonly from: VirtualAccountProfile;
+    readonly inline_message_id: string;
+    readonly chat_instance: string;
+    readonly data: string;
+  };
+
+/** An inline query, in the field order Telegram uses. User locations are not supported. */
+export interface BotApiInlineQuery {
   readonly id: string;
   readonly from: VirtualAccountProfile;
-  readonly message: BotApiMessage;
-  readonly chat_instance: string;
-  readonly data: string;
+  /** `sender` for the private chat between the account and the inline bot itself. */
+  readonly chat_type: 'sender' | 'private' | 'supergroup';
+  readonly query: string;
+  readonly offset: string;
+}
+
+/** An inline query result an account sent, in the field order Telegram uses. */
+export interface BotApiChosenInlineResult {
+  readonly from: VirtualAccountProfile;
+  /** Present only when the sent message has an inline keyboard. */
+  readonly inline_message_id?: string;
+  readonly query: string;
+  readonly result_id: string;
 }
 
 /** The bot's membership in a private chat: `kicked` while the account blocks the bot. */
@@ -293,6 +327,16 @@ export interface BotApiCallbackQueryUpdate {
   readonly callback_query: BotApiCallbackQuery;
 }
 
+export interface BotApiInlineQueryUpdate {
+  readonly update_id: number;
+  readonly inline_query: BotApiInlineQuery;
+}
+
+export interface BotApiChosenInlineResultUpdate {
+  readonly update_id: number;
+  readonly chosen_inline_result: BotApiChosenInlineResult;
+}
+
 export interface BotApiMyChatMemberUpdate {
   readonly update_id: number;
   readonly my_chat_member: BotApiMyChatMemberUpdated;
@@ -301,6 +345,8 @@ export interface BotApiMyChatMemberUpdate {
 export type BotApiUpdate =
   | BotApiMessageUpdate
   | BotApiEditedMessageUpdate
+  | BotApiInlineQueryUpdate
+  | BotApiChosenInlineResultUpdate
   | BotApiCallbackQueryUpdate
   | BotApiMyChatMemberUpdate;
 

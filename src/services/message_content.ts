@@ -359,6 +359,43 @@ function storeOutgoingFile(
   return file.kind === 'stored' ? file.file.id : files.addFile(file.upload).id;
 }
 
+/**
+ * Returns normalized content as a message holds it, for content whose file, if any, is already
+ * stored, as when a bot reuses a file by its `file_id`. Content with an upload must be stored with
+ * `storeOutgoingContent` instead.
+ */
+export function toContentOfStoredFile(content: NormalizedOutgoingContent): MessageContent {
+  switch (content.kind) {
+    case 'text':
+      return content;
+    case 'photo':
+      return {
+        kind: 'photo',
+        fileId: getStoredFileId(content.photo),
+        caption: content.caption,
+        hasSpoiler: content.hasSpoiler,
+        showsCaptionAboveMedia: content.showsCaptionAboveMedia,
+      };
+    case 'document':
+      return {
+        kind: 'document',
+        fileId: getStoredFileId(content.document),
+        caption: content.caption,
+      };
+    default: {
+      const unhandledContent: never = content;
+      throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
+    }
+  }
+}
+
+function getStoredFileId(file: OutgoingPhoto | OutgoingDocument): StoredFileId {
+  if (file.kind !== 'stored') {
+    throw new Error('Expected a stored file rather than an upload');
+  }
+  return file.file.id;
+}
+
 /** The content of a message that a bot's edit replaces. */
 interface EditableMessage {
   readonly content: MessageContent;

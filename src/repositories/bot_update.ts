@@ -1,5 +1,7 @@
 import type {
   BotApiCallbackQuery,
+  BotApiChosenInlineResult,
+  BotApiInlineQuery,
   BotApiMessage,
   BotApiMyChatMemberUpdated,
   BotApiUpdate,
@@ -45,6 +47,20 @@ export class BotUpdateRepository {
     return this.#enqueueUpdate(
       botId,
       (update_id) => ({ update_id, edited_message: editedMessage }),
+    );
+  }
+
+  enqueueInlineQueryUpdate(botId: number, inlineQuery: BotApiInlineQuery): BotApiUpdate {
+    return this.#enqueueUpdate(botId, (update_id) => ({ update_id, inline_query: inlineQuery }));
+  }
+
+  enqueueChosenInlineResultUpdate(
+    botId: number,
+    chosenInlineResult: BotApiChosenInlineResult,
+  ): BotApiUpdate {
+    return this.#enqueueUpdate(
+      botId,
+      (update_id) => ({ update_id, chosen_inline_result: chosenInlineResult }),
     );
   }
 

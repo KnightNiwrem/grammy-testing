@@ -67,6 +67,26 @@ name's extension; unlike Telegram, the emulator never turns a video, audio file,
 document into other media. Files sent by URL, thumbnails, and other media types, such as videos,
 voice messages, and stickers, are not supported yet.
 
+Bots can run in inline mode, so tests can drive inline bots as users do. A bot created with
+`supports_inline_queries` receives an `inline_query` update when an account types a query for it in
+the account's private chat with a bot or in a supergroup, with Telegram's `chat_type`, and answers
+with `answerInlineQuery`. The emulator checks answers in Telegram's order and fails them with its
+errors, such as `RESULT_ID_DUPLICATE` and
+`query is too old and response timeout expired or query ID
+is invalid` for a query already answered.
+A test reads the answer's results, and the account sends one to the chat where it typed the query,
+as its own message with `via_bot`, even to a supergroup the bot is not a member of. The chat's bots
+receive that message like any other account message, and a bot in privacy mode receives the messages
+sent through it. With `receives_chosen_inline_results`, which turns on BotFather's inline feedback,
+the inline bot also receives a `chosen_inline_result` update. As on Telegram, the bot knows a
+message sent through it with an inline keyboard by its `inline_message_id`: presses of its callback
+buttons reach the inline bot as callback queries without the message, and the bot edits it with
+`editMessageText`, `editMessageCaption`, and `editMessageReplyMarkup`, which answer `true`. Results
+can be articles, which send text, and photos and documents the bot knows by `file_id`; other result
+types, results sending locations, contacts, or invoices, files given by URL, and user locations are
+not supported. The emulator does not expire inline queries or cache answers, and a test reads the
+button above the results but cannot press it.
+
 Bot API requests follow Telegram's conventions: GET or POST, case-insensitive method names, and
 parameters in the query string or a JSON, URL-encoded, or multipart body. Bot API failures,
 including calls to methods the emulator does not implement, return Telegram-shaped JSON errors that
@@ -128,6 +148,7 @@ try {
   const { token, bot } = await session.createBot({
     first_name: 'Test Bot',
     username: 'test_bot',
+    supports_inline_queries: true,
   });
   const { account } = await session.createAccount({ first_name: 'Ada' });
 
@@ -203,6 +224,22 @@ try {
   await account.sendMessage({ to: groupChat, text: '/start@test_bot' });
   const groupHistory = await account.getMessages({ chat: groupChat });
   console.log(groupHistory.map(({ from, text }) => `${from.first_name}: ${text ?? '(service)'}`));
+
+  // Type an inline query for the bot in the supergroup, read the bot's answer once it has
+  // answered, and send a result, which appears in the supergroup with via_bot.
+  const inlineQuery = await account.sendInlineQuery({
+    bot_id: bot.id,
+    chat: groupChat,
+    query: 'cats',
+  });
+  const answeredQuery = await account.getInlineQuery(inlineQuery.id);
+  const firstResult = answeredQuery.answer?.results[0];
+  if (firstResult !== undefined) {
+    await account.chooseInlineQueryResult({
+      inline_query_id: inlineQuery.id,
+      result_id: firstResult.id,
+    });
+  }
 
   // Promote the bot to administrator. It then receives every message of the supergroup, deletes
   // any, and bans spammers with banChatMember; demoting it takes its rights away again.

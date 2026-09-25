@@ -16,12 +16,19 @@ import {
   type FormerSupergroupMemberFailureReason,
   getSupergroupNonMemberFailureReason,
 } from '../types/chat_membership.ts';
+import type { InlineQueryId, InlineQueryResultsButton } from '../types/inline_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { ChatAction } from '../types/virtual_chat.ts';
-import type { PrivateMessage, SupergroupMessage, TextEntity } from '../types/virtual_message.ts';
+import type {
+  ChatMessage,
+  InlineMessageId,
+  PrivateMessage,
+  SupergroupMessage,
+  TextEntity,
+} from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
 import type {
   DeleteWebhookOutcome,
@@ -37,6 +44,12 @@ import type {
   LeaveChatResult,
   UnbanChatMemberResult,
 } from './shared_chat_administration.ts';
+import type {
+  AnswerInlineQueryFailureReason,
+  AnswerInlineQueryInput,
+  AnswerInlineQueryResult,
+  SpecifiedInlineQueryResult,
+} from './inline_query.ts';
 import type {
   ContentNormalizationFailure,
   OutgoingDocument,
@@ -230,6 +243,121 @@ export type EditMessageTextResult =
 export type EditMessageCaptionResult =
   | EditMessageResult<EditMessageCaptionFailureReason>
   | ({ readonly edited: false } & TextInvalidFailure);
+
+/** A message sent through the bot's inline mode, as the Bot API addresses it. */
+interface InlineMessageTarget {
+  /** The Bot API `inline_message_id`. */
+  readonly inlineMessageId: InlineMessageId;
+}
+
+export interface EditInlineMessageTextRequest extends InlineMessageTarget, SpecifiedFormattedText {
+  /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
+  readonly inlineKeyboard?: InlineKeyboard;
+}
+
+export interface EditInlineMessageCaptionRequest extends InlineMessageTarget {
+  /** Empty text removes the caption. */
+  readonly caption: SpecifiedFormattedText;
+  /** The Bot API `show_caption_above_media`, which only a photo honors. */
+  readonly showsCaptionAboveMedia: boolean;
+  /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
+  readonly inlineKeyboard?: InlineKeyboard;
+}
+
+export interface EditInlineMessageReplyMarkupRequest extends InlineMessageTarget {
+  /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
+  readonly inlineKeyboard?: InlineKeyboard;
+}
+
+/**
+ * Why an edit of an inline message can fail, apart from failures about the new content. An
+ * identifier of no message, of a deleted one, or of another bot's inline message finds none.
+ */
+export type EditInlineMessageReplyMarkupFailureReason =
+  | 'inline_message_not_found'
+  | 'callback_data_invalid'
+  | 'message_not_modified';
+
+export type EditInlineMessageTextFailureReason =
+  | EditInlineMessageReplyMarkupFailureReason
+  | 'message_text_empty'
+  | 'message_has_no_text'
+  | 'message_text_too_long';
+
+export type EditInlineMessageCaptionFailureReason =
+  | EditInlineMessageReplyMarkupFailureReason
+  | 'message_has_no_caption'
+  | 'caption_too_long';
+
+/** The Bot API answers an edit of an inline message with `true` rather than the message. */
+export type EditInlineMessageResult<FailureReason extends string> =
+  | { readonly edited: true }
+  | { readonly edited: false; readonly reason: FailureReason }
+  | ({ readonly edited: false } & TextInvalidFailure);
+
+interface InlineQueryResultRequestBase {
+  /** The bot's identifier of the result. */
+  readonly id: string;
+  /** Empty for none. */
+  readonly description: string;
+  /** The keyboard of the sent message; omitted for none. */
+  readonly inlineKeyboard?: InlineKeyboard;
+}
+
+/**
+ * A result of `answerInlineQuery`, as the Bot API specifies it. `messageText` is the text of its
+ * `input_message_content`, which a photo or document result sends instead of its own file.
+ */
+export type InlineQueryResultRequest =
+  | (InlineQueryResultRequestBase & {
+    readonly kind: 'article';
+    readonly title: string;
+    /** Empty for none. */
+    readonly url: string;
+    readonly messageText: SpecifiedFormattedText;
+  })
+  | (InlineQueryResultRequestBase & {
+    readonly kind: 'photo';
+    /** The `file_id` the bot knows the photo by. */
+    readonly photoFileId: string;
+    /** Empty for none. */
+    readonly title: string;
+    /** Empty text for no caption. */
+    readonly caption: SpecifiedFormattedText;
+    readonly showsCaptionAboveMedia: boolean;
+    readonly messageText?: SpecifiedFormattedText;
+  })
+  | (InlineQueryResultRequestBase & {
+    readonly kind: 'document';
+    /** The `file_id` the bot knows the document by. */
+    readonly documentFileId: string;
+    readonly title: string;
+    /** Empty text for no caption. */
+    readonly caption: SpecifiedFormattedText;
+    readonly messageText?: SpecifiedFormattedText;
+  });
+
+export interface AnswerInlineQueryRequest {
+  readonly inlineQueryId: InlineQueryId;
+  readonly results: readonly InlineQueryResultRequest[];
+  readonly cacheTimeSeconds: number;
+  readonly isPersonal: boolean;
+  /** Empty when there are no more results. */
+  readonly nextOffset: string;
+  /** Omitted when the client shows no button above the results. */
+  readonly button?: InlineQueryResultsButton;
+}
+
+export type BotApiAnswerInlineQueryResult =
+  | { readonly answered: true }
+  | (
+    & { readonly answered: false }
+    & (
+      | { readonly reason: AnswerInlineQueryFailureReason | 'file_id_invalid' }
+      | ContentNormalizationFailure
+      | FileTypeMismatchFailure
+    )
+  );
 
 export type GetFileResult =
   | { readonly found: true; readonly file: BotApiDownloadableFile }
@@ -438,6 +566,25 @@ type BotMessageEditingResult<FailureReason extends string> =
   | { readonly edited: true; readonly message: PrivateMessage }
   | { readonly edited: false; readonly reason: FailureReason };
 
+/**
+ * The message of a private chat that a bot edits: by its ID in the bot's chat, or by the inline
+ * message identifier of a message sent through the bot.
+ */
+type PrivateMessageEditTarget =
+  & { readonly fromBotId: number }
+  & (
+    | { readonly chat: BotPrivateChat; readonly botMessageId: number }
+    | { readonly inlineMessageId: InlineMessageId }
+  );
+
+/** The supergroup message that a bot edits, addressed as `PrivateMessageEditTarget` describes. */
+type SupergroupMessageEditTarget =
+  & { readonly fromBotId: number }
+  & (
+    | { readonly chatId: number; readonly messageId: number }
+    | { readonly inlineMessageId: InlineMessageId }
+  );
+
 /** A caption edit as the messaging services take it. */
 interface CaptionEdit {
   readonly caption: string;
@@ -462,14 +609,13 @@ interface BotMessaging {
       readonly isContentProtected?: boolean;
     },
   ): BotMessageSendingResult;
-  editBotMessageText(input: {
-    readonly fromBotId: number;
-    readonly chat: BotPrivateChat;
-    readonly botMessageId: number;
-    readonly text: string;
-    readonly entities?: readonly TextEntity[];
-    readonly inlineKeyboard?: InlineKeyboard;
-  }):
+  editBotMessageText(
+    input: PrivateMessageEditTarget & {
+      readonly text: string;
+      readonly entities?: readonly TextEntity[];
+      readonly inlineKeyboard?: InlineKeyboard;
+    },
+  ):
     | BotMessageEditingResult<
       | BotMessageEditFailureReason
       | 'message_text_empty'
@@ -477,23 +623,14 @@ interface BotMessaging {
       | 'message_text_too_long'
     >
     | ({ readonly edited: false } & TextInvalidFailure);
-  editBotMessageCaption(
-    input: CaptionEdit & {
-      readonly fromBotId: number;
-      readonly chat: BotPrivateChat;
-      readonly botMessageId: number;
-    },
-  ):
+  editBotMessageCaption(input: CaptionEdit & PrivateMessageEditTarget):
     | BotMessageEditingResult<
       BotMessageEditFailureReason | 'message_has_no_caption' | 'caption_too_long'
     >
     | ({ readonly edited: false } & TextInvalidFailure);
-  editBotMessageInlineKeyboard(input: {
-    readonly fromBotId: number;
-    readonly chat: BotPrivateChat;
-    readonly botMessageId: number;
-    readonly inlineKeyboard?: InlineKeyboard;
-  }): BotMessageEditingResult<BotMessageEditFailureReason>;
+  editBotMessageInlineKeyboard(
+    input: PrivateMessageEditTarget & { readonly inlineKeyboard?: InlineKeyboard },
+  ): BotMessageEditingResult<BotMessageEditFailureReason>;
   sendBotChatAction(input: {
     readonly fromBotId: number;
     readonly to: BotPrivateChat;
@@ -555,14 +692,13 @@ interface SupergroupBotMessaging {
         | 'callback_data_invalid';
     }
     | ({ readonly sent: false } & ContentNormalizationFailure);
-  editBotMessageText(input: {
-    readonly fromBotId: number;
-    readonly chatId: number;
-    readonly messageId: number;
-    readonly text: string;
-    readonly entities?: readonly TextEntity[];
-    readonly inlineKeyboard?: InlineKeyboard;
-  }):
+  editBotMessageText(
+    input: SupergroupMessageEditTarget & {
+      readonly text: string;
+      readonly entities?: readonly TextEntity[];
+      readonly inlineKeyboard?: InlineKeyboard;
+    },
+  ):
     | SupergroupBotMessageEditingResult<
       | SupergroupBotMessageEditFailureReason
       | 'message_text_empty'
@@ -570,23 +706,14 @@ interface SupergroupBotMessaging {
       | 'message_text_too_long'
     >
     | ({ readonly edited: false } & TextInvalidFailure);
-  editBotMessageCaption(
-    input: CaptionEdit & {
-      readonly fromBotId: number;
-      readonly chatId: number;
-      readonly messageId: number;
-    },
-  ):
+  editBotMessageCaption(input: CaptionEdit & SupergroupMessageEditTarget):
     | SupergroupBotMessageEditingResult<
       SupergroupBotMessageEditFailureReason | 'message_has_no_caption' | 'caption_too_long'
     >
     | ({ readonly edited: false } & TextInvalidFailure);
-  editBotMessageInlineKeyboard(input: {
-    readonly fromBotId: number;
-    readonly chatId: number;
-    readonly messageId: number;
-    readonly inlineKeyboard?: InlineKeyboard;
-  }): SupergroupBotMessageEditingResult<SupergroupBotMessageEditFailureReason>;
+  editBotMessageInlineKeyboard(
+    input: SupergroupMessageEditTarget & { readonly inlineKeyboard?: InlineKeyboard },
+  ): SupergroupBotMessageEditingResult<SupergroupBotMessageEditFailureReason>;
   sendBotChatAction(input: {
     readonly fromBotId: number;
     readonly chatId: number;
@@ -743,6 +870,14 @@ interface CallbackQueryAnswering {
   }): { readonly answered: boolean };
 }
 
+interface InlineQueryAnswering {
+  answerInlineQuery(input: AnswerInlineQueryInput): AnswerInlineQueryResult;
+}
+
+interface InlineMessageLookup {
+  getMessageByInlineMessageId(inlineMessageId: InlineMessageId): ChatMessage | undefined;
+}
+
 interface BotMessageViews {
   viewPrivateMessageForBot(message: PrivateMessage): BotApiPrivateMessage;
   viewSupergroupMessage(message: SupergroupMessage, observerId: number): BotApiSupergroupMessage;
@@ -759,6 +894,8 @@ interface BotApiServiceDependencies {
   readonly botMessageViews: BotMessageViews;
   readonly mediaFiles: MediaFiles;
   readonly callbackQueries: CallbackQueryAnswering;
+  readonly inlineQueries: InlineQueryAnswering;
+  readonly inlineMessages: InlineMessageLookup;
   readonly botCommands: BotCommandLists;
 }
 
@@ -780,6 +917,8 @@ export class BotApiService {
   readonly #botMessageViews: BotMessageViews;
   readonly #mediaFiles: MediaFiles;
   readonly #callbackQueries: CallbackQueryAnswering;
+  readonly #inlineQueries: InlineQueryAnswering;
+  readonly #inlineMessages: InlineMessageLookup;
   readonly #botCommands: BotCommandLists;
 
   constructor(
@@ -793,6 +932,8 @@ export class BotApiService {
       botMessageViews,
       mediaFiles,
       callbackQueries,
+      inlineQueries,
+      inlineMessages,
       botCommands,
     }: BotApiServiceDependencies,
   ) {
@@ -805,6 +946,8 @@ export class BotApiService {
     this.#botMessageViews = botMessageViews;
     this.#mediaFiles = mediaFiles;
     this.#callbackQueries = callbackQueries;
+    this.#inlineQueries = inlineQueries;
+    this.#inlineMessages = inlineMessages;
     this.#botCommands = botCommands;
   }
 
@@ -1485,6 +1628,135 @@ export class BotApiService {
     return result.answered ? { answered: true } : { answered: false, reason: 'query_id_invalid' };
   }
 
+  /**
+   * Answers an inline query that an account sent to the bot, with results whose files the bot
+   * knows by `file_id`.
+   *
+   * Every result's file is resolved before the other checks, while TDLib checks the button and
+   * the number of results first and resolves each result's file after its message content.
+   */
+  answerInlineQuery(
+    authenticatedBot: VirtualBotProfile,
+    { inlineQueryId, results, cacheTimeSeconds, isPersonal, nextOffset, button }:
+      AnswerInlineQueryRequest,
+  ): BotApiAnswerInlineQueryResult {
+    const specifiedResults: SpecifiedInlineQueryResult[] = [];
+    for (const result of results) {
+      const resolution = this.#resolveInlineQueryResult(authenticatedBot, result);
+      if (!resolution.resolved) {
+        return { answered: false, ...resolution.failure };
+      }
+      specifiedResults.push(resolution.result);
+    }
+    const answering = this.#inlineQueries.answerInlineQuery({
+      fromBotId: authenticatedBot.id,
+      inlineQueryId,
+      results: specifiedResults,
+      cacheTimeSeconds,
+      isPersonal,
+      nextOffset,
+      button,
+    });
+    return answering.answered ? { answered: true } : answering;
+  }
+
+  /** Replaces the text, entities, and inline keyboard of a text message sent through the bot. */
+  editInlineMessageText(
+    authenticatedBot: VirtualBotProfile,
+    { inlineMessageId, text, entities, inlineKeyboard }: EditInlineMessageTextRequest,
+  ): EditInlineMessageResult<EditInlineMessageTextFailureReason> {
+    const message = this.#findOwnInlineMessage(authenticatedBot, inlineMessageId);
+    if (message === undefined) {
+      return { edited: false, reason: 'inline_message_not_found' };
+    }
+    const edit = {
+      fromBotId: authenticatedBot.id,
+      inlineMessageId,
+      text,
+      entities,
+      inlineKeyboard,
+    };
+    const result = message.kind === 'private_message'
+      ? this.#botMessages.editBotMessageText(edit)
+      : this.#supergroupBotMessages.editBotMessageText(edit);
+    if (result.edited) {
+      return { edited: true };
+    }
+    switch (result.reason) {
+      case 'text_invalid':
+        return result;
+      case 'message_text_empty':
+      case 'message_has_no_text':
+      case 'message_text_too_long':
+        return { edited: false, reason: result.reason };
+      default:
+        return {
+          edited: false,
+          reason: toEditInlineMessageFailureReason(authenticatedBot, result.reason),
+        };
+    }
+  }
+
+  /**
+   * Replaces the caption, its entities, and the inline keyboard of a photo or document sent
+   * through the bot; empty caption text removes the caption.
+   */
+  editInlineMessageCaption(
+    authenticatedBot: VirtualBotProfile,
+    { inlineMessageId, caption, showsCaptionAboveMedia, inlineKeyboard }:
+      EditInlineMessageCaptionRequest,
+  ): EditInlineMessageResult<EditInlineMessageCaptionFailureReason> {
+    const message = this.#findOwnInlineMessage(authenticatedBot, inlineMessageId);
+    if (message === undefined) {
+      return { edited: false, reason: 'inline_message_not_found' };
+    }
+    const edit = {
+      fromBotId: authenticatedBot.id,
+      inlineMessageId,
+      caption: caption.text,
+      captionEntities: caption.entities,
+      showsCaptionAboveMedia,
+      inlineKeyboard,
+    };
+    const result = message.kind === 'private_message'
+      ? this.#botMessages.editBotMessageCaption(edit)
+      : this.#supergroupBotMessages.editBotMessageCaption(edit);
+    if (result.edited) {
+      return { edited: true };
+    }
+    switch (result.reason) {
+      case 'text_invalid':
+        return result;
+      case 'message_has_no_caption':
+      case 'caption_too_long':
+        return { edited: false, reason: result.reason };
+      default:
+        return {
+          edited: false,
+          reason: toEditInlineMessageFailureReason(authenticatedBot, result.reason),
+        };
+    }
+  }
+
+  /** Replaces the inline keyboard of a message sent through the bot. */
+  editInlineMessageReplyMarkup(
+    authenticatedBot: VirtualBotProfile,
+    { inlineMessageId, inlineKeyboard }: EditInlineMessageReplyMarkupRequest,
+  ): EditInlineMessageResult<EditInlineMessageReplyMarkupFailureReason> {
+    const message = this.#findOwnInlineMessage(authenticatedBot, inlineMessageId);
+    if (message === undefined) {
+      return { edited: false, reason: 'inline_message_not_found' };
+    }
+    const edit = { fromBotId: authenticatedBot.id, inlineMessageId, inlineKeyboard };
+    const result = message.kind === 'private_message'
+      ? this.#botMessages.editBotMessageInlineKeyboard(edit)
+      : this.#supergroupBotMessages.editBotMessageInlineKeyboard(edit);
+    return result.edited ? { edited: true } : {
+      edited: false,
+      reason: toEditInlineMessageFailureReason(authenticatedBot, result.reason),
+    };
+  }
+
   /** Replaces the bot's command list for a scope and language; an empty list deletes it. */
   setMyCommands(
     authenticatedBot: VirtualBotProfile,
@@ -1541,6 +1813,108 @@ export class BotApiService {
       throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
     }
     return { deleted: false, reason: result.reason };
+  }
+
+  /**
+   * Resolves the files of a result the bot specified and the message content it sends: the text
+   * of its `input_message_content`, or else its own photo or document with its caption.
+   */
+  #resolveInlineQueryResult(
+    authenticatedBot: VirtualBotProfile,
+    result: InlineQueryResultRequest,
+  ):
+    | { readonly resolved: true; readonly result: SpecifiedInlineQueryResult }
+    | {
+      readonly resolved: false;
+      readonly failure: { readonly reason: 'file_id_invalid' } | FileTypeMismatchFailure;
+    } {
+    const shared = {
+      id: result.id,
+      description: result.description,
+      ...(result.inlineKeyboard === undefined ? {} : { inlineKeyboard: result.inlineKeyboard }),
+    };
+    const textContent = (text: SpecifiedFormattedText): OutgoingMessageContent => ({
+      kind: 'text',
+      text: text.text,
+      entities: text.entities,
+    });
+    switch (result.kind) {
+      case 'article':
+        return {
+          resolved: true,
+          result: {
+            ...shared,
+            kind: 'article',
+            title: result.title,
+            url: result.url,
+            messageContent: textContent(result.messageText),
+          },
+        };
+      case 'photo': {
+        const file = this.#mediaFiles.findObserverFile(authenticatedBot.id, result.photoFileId);
+        if (file?.type !== 'photo') {
+          return { resolved: false, failure: fileIdFailure(file, 'photo') };
+        }
+        return {
+          resolved: true,
+          result: {
+            ...shared,
+            kind: 'photo',
+            photo: file,
+            title: result.title,
+            messageContent: result.messageText === undefined
+              ? {
+                kind: 'photo',
+                photo: { kind: 'stored', file },
+                caption: result.caption.text,
+                captionEntities: result.caption.entities,
+                hasSpoiler: false,
+                showsCaptionAboveMedia: result.showsCaptionAboveMedia,
+              }
+              : textContent(result.messageText),
+          },
+        };
+      }
+      case 'document': {
+        const file = this.#mediaFiles.findObserverFile(authenticatedBot.id, result.documentFileId);
+        if (file?.type !== 'document') {
+          return { resolved: false, failure: fileIdFailure(file, 'document') };
+        }
+        return {
+          resolved: true,
+          result: {
+            ...shared,
+            kind: 'document',
+            document: file,
+            title: result.title,
+            messageContent: result.messageText === undefined
+              ? {
+                kind: 'document',
+                document: { kind: 'stored', file },
+                caption: result.caption.text,
+                captionEntities: result.caption.entities,
+              }
+              : textContent(result.messageText),
+          },
+        };
+      }
+      default: {
+        const unhandledResult: never = result;
+        throw new Error(`Unhandled inline query result: ${JSON.stringify(unhandledResult)}`);
+      }
+    }
+  }
+
+  /**
+   * Finds a message sent through the bot's inline mode, whose chat decides which messaging service
+   * edits it. Another bot's inline message is not found.
+   */
+  #findOwnInlineMessage(
+    authenticatedBot: VirtualBotProfile,
+    inlineMessageId: InlineMessageId,
+  ): ChatMessage | undefined {
+    const message = this.#inlineMessages.getMessageByInlineMessageId(inlineMessageId);
+    return message?.viaBot?.botId === authenticatedBot.id ? message : undefined;
   }
 
   #deleteChatMessages(
@@ -1707,6 +2081,37 @@ function toEditMessageFailureReason(
     default: {
       const unhandledReason: never = reason;
       throw new Error(`Unhandled bot message edit failure: ${unhandledReason}`);
+    }
+  }
+}
+
+/**
+ * Translates the failures shared by the edit methods for an inline message into Bot API failures.
+ * The messaging services check an inline message only by its identifier, so failures about its
+ * chat cannot occur.
+ */
+function toEditInlineMessageFailureReason(
+  authenticatedBot: VirtualBotProfile,
+  reason: BotMessageEditFailureReason | SupergroupBotMessageEditFailureReason,
+): EditInlineMessageReplyMarkupFailureReason {
+  switch (reason) {
+    case 'callback_data_invalid':
+    case 'message_not_modified':
+      return reason;
+    case 'message_not_found':
+      return 'inline_message_not_found';
+    case 'bot_not_found':
+      throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+    case 'account_not_found':
+    case 'conversation_not_started':
+    case 'chat_not_found':
+    case 'bot_not_a_member':
+    case 'bot_kicked':
+    case 'message_not_editable':
+      throw new Error(`Inline message edit failed for its chat: ${reason}`);
+    default: {
+      const unhandledReason: never = reason;
+      throw new Error(`Unhandled inline message edit failure: ${unhandledReason}`);
     }
   }
 }

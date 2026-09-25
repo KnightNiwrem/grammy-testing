@@ -209,3 +209,59 @@ Deno.test('MessageRepository stores, edits, and deletes supergroup messages by c
     throw new Error('Expected the supergroup history to hold only its edited remaining message');
   }
 });
+
+Deno.test('MessageRepository finds messages sent through inline bots until they are deleted', () => {
+  const messages = new MessageRepository();
+  const privateMessage = messages.addPrivateMessage({
+    conversation: { accountId: 1, botId: 2 },
+    authorRole: 'account',
+    sentAtUnixSeconds: 1_700_000_000,
+    content: { kind: 'text', text: 'Cats', entities: [] },
+    viaBotId: 3,
+  });
+  const supergroupMessage = messages.addSupergroupMessage({
+    chatId: -1_000_000_000_001,
+    author: { kind: 'account', accountId: 1 },
+    sentAtUnixSeconds: 1_700_000_000,
+    content: { kind: 'text', text: 'Dogs', entities: [] },
+    viaBotId: 3,
+  });
+  const ownMessage = messages.addPrivateMessage({
+    conversation: { accountId: 1, botId: 2 },
+    authorRole: 'account',
+    sentAtUnixSeconds: 1_700_000_000,
+    content: { kind: 'text', text: 'Hello', entities: [] },
+  });
+  const privateViaBot = privateMessage.viaBot;
+  const supergroupViaBot = supergroupMessage.viaBot;
+  if (
+    privateViaBot?.botId !== 3 || supergroupViaBot === undefined ||
+    ownMessage.viaBot !== undefined ||
+    !/^[A-Za-z0-9_-]{32}$/.test(privateViaBot.inlineMessageId) ||
+    privateViaBot.inlineMessageId === supergroupViaBot.inlineMessageId
+  ) {
+    throw new Error('Expected distinct inline message identifiers only for messages through a bot');
+  }
+
+  const editedMessage = messages.editPrivateMessage(privateMessage.id, {
+    content: { kind: 'text', text: 'More cats', entities: [] },
+    inlineKeyboard: undefined,
+    contentEditedAtUnixSeconds: 1_700_000_001,
+  });
+  if (
+    editedMessage.viaBot?.inlineMessageId !== privateViaBot.inlineMessageId ||
+    messages.getMessageByInlineMessageId(privateViaBot.inlineMessageId) !== editedMessage ||
+    messages.getMessageByInlineMessageId(supergroupViaBot.inlineMessageId) !== supergroupMessage
+  ) {
+    throw new Error('Expected edits to keep the inline message identifier');
+  }
+
+  messages.deletePrivateMessage(privateMessage.id);
+  messages.deleteSupergroupMessage(supergroupMessage.id);
+  if (
+    messages.getMessageByInlineMessageId(privateViaBot.inlineMessageId) !== undefined ||
+    messages.getMessageByInlineMessageId(supergroupViaBot.inlineMessageId) !== undefined
+  ) {
+    throw new Error('Expected deleted messages to be found by no inline message identifier');
+  }
+});

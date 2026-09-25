@@ -1,4 +1,4 @@
-import type { CanonicalMessageId } from './virtual_message.ts';
+import type { CanonicalMessageId, InlineMessageId } from './virtual_message.ts';
 
 /** Telegram's decimal text form of a 64-bit callback query identifier. */
 export type CallbackQueryId = string;
@@ -28,15 +28,24 @@ export type CallbackQueryState =
 
 /**
  * An account's press of a callback button on a bot message, in their private conversation or in a
- * supergroup both are members of.
+ * supergroup both are members of, or on a message the account's chat received through the bot's
+ * inline mode.
  */
 export interface CallbackQuery {
   readonly id: CallbackQueryId;
   /** The account that pressed the button. */
   readonly accountId: number;
-  /** The bot that sent the message carrying the button, which receives and answers the query. */
+  /**
+   * The bot whose buttons the message carries, which receives and answers the query: the bot that
+   * sent the message, or the inline bot it was sent through.
+   */
   readonly botId: number;
   readonly messageId: CanonicalMessageId;
+  /**
+   * How the inline bot knows a message sent through it, which it receives instead of the message;
+   * omitted for a bot's own message.
+   */
+  readonly inlineMessageId?: InlineMessageId;
   /** Telegram's `chat_instance` of the message's chat, fixed when the chat began. */
   readonly chatInstance: string;
   readonly callbackData: string;

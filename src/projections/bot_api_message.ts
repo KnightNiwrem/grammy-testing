@@ -2,11 +2,13 @@ import type {
   BotApiBotUser,
   BotApiCallbackQuery,
   BotApiChatMember,
+  BotApiChosenInlineResult,
   BotApiDocument,
   BotApiGroupChat,
   BotApiGroupChatBotMember,
   BotApiInlineKeyboardButton,
   BotApiInlineKeyboardMarkup,
+  BotApiInlineQuery,
   BotApiMembershipServiceContent,
   BotApiMessage,
   BotApiMessageContent,
@@ -28,9 +30,11 @@ import type { CallbackQuery } from '../types/callback_query.ts';
 import type {
   BotBlockChangedEvent,
   ChatMemberStatusChangedEvent,
+  InlineQueryResultChosenEvent,
 } from '../types/chat_domain_event.ts';
 import type { ChatMemberStatus, SupergroupAdministratorRights } from '../types/chat_membership.ts';
 import type { InlineKeyboard, InlineKeyboardButton } from '../types/inline_keyboard.ts';
+import { getInlineQueryChatType, type InlineQuery } from '../types/inline_query.ts';
 import type { StoredFile } from '../types/stored_file.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
 import type { VirtualBotProfile } from '../types/virtual_bot.ts';
@@ -65,6 +69,8 @@ interface MessageProjectionContext {
    * other messages.
    */
   readonly changedMembers?: readonly BotApiUser[];
+  /** The bot through whose inline mode the message was sent; omitted for other messages. */
+  readonly viaBot?: BotApiBotUser;
 }
 
 export interface PrivateMessageForBotProjectionInput {
@@ -95,7 +101,12 @@ export function projectPrivateMessageForBot(
     from: message.authorRole === 'account' ? account : projectBotAsUser(bot),
     chat: projectPrivateChat(account),
     date: message.sentAtUnixSeconds,
-    ...projectMessageBody(message, projectMessageContent(message.content, context), repliedMessage),
+    ...projectMessageBody(
+      message,
+      projectMessageContent(message.content, context),
+      context,
+      repliedMessage,
+    ),
   };
 }
 
@@ -128,6 +139,7 @@ export function projectSupergroupMessage(
     ...projectMessageBody(
       message,
       projectSupergroupMessageContent(message.content, context),
+      context,
       repliedMessage,
     ),
   };
@@ -140,6 +152,7 @@ export function projectSupergroupMessage(
 function projectMessageBody<Content extends BotApiSupergroupMessageContent, RepliedMessage>(
   message: ChatMessage,
   content: Content,
+  { viaBot }: MessageProjectionContext,
   repliedMessage: RepliedMessage | undefined,
 ) {
   return {
@@ -151,6 +164,7 @@ function projectMessageBody<Content extends BotApiSupergroupMessageContent, Repl
     ...(message.inlineKeyboard === undefined
       ? {}
       : { reply_markup: projectInlineKeyboardMarkup(message.inlineKeyboard) }),
+    ...(viaBot === undefined ? {} : { via_bot: viaBot }),
     ...(message.isContentProtected ? { has_protected_content: true as const } : {}),
   };
 }
@@ -266,20 +280,63 @@ export interface CallbackQueryForBotProjectionInput {
   readonly callbackQuery: CallbackQuery;
   /** The account that pressed the button. */
   readonly account: VirtualAccountProfile;
-  /** The message carrying the pressed button, as the observing bot currently sees it. */
-  readonly message: BotApiMessage;
+  /**
+   * The message carrying the pressed button, as the observing bot currently sees it; omitted for
+   * an inline message, which the bot knows only by its identifier.
+   */
+  readonly message?: BotApiMessage;
 }
 
 /** Projects a callback query as the bot that owns the pressed button receives it. */
 export function projectCallbackQueryForBot(
   { callbackQuery, account, message }: CallbackQueryForBotProjectionInput,
 ): BotApiCallbackQuery {
+  const { id, inlineMessageId, chatInstance, callbackData } = callbackQuery;
+  if (inlineMessageId !== undefined) {
+    return {
+      id,
+      from: account,
+      inline_message_id: inlineMessageId,
+      chat_instance: chatInstance,
+      data: callbackData,
+    };
+  }
+  if (message === undefined) {
+    throw new Error(`Expected the message of callback query ${id} to be provided`);
+  }
+  return { id, from: account, message, chat_instance: chatInstance, data: callbackData };
+}
+
+/** Projects an inline query as the inline bot receives it. */
+export function projectInlineQueryForBot(
+  inlineQuery: InlineQuery,
+  account: VirtualAccountProfile,
+): BotApiInlineQuery {
   return {
-    id: callbackQuery.id,
+    id: inlineQuery.id,
     from: account,
-    message,
-    chat_instance: callbackQuery.chatInstance,
-    data: callbackQuery.callbackData,
+    chat_type: getInlineQueryChatType(inlineQuery),
+    query: inlineQuery.query,
+    offset: inlineQuery.offset,
+  };
+}
+
+/**
+ * Projects an account's choice of an inline query result as the inline bot receives it. As on
+ * Telegram, the bot learns the sent message's identifier only when the message has an inline
+ * keyboard.
+ */
+export function projectChosenInlineResultForBot(
+  { inlineQuery, resultId, message }: InlineQueryResultChosenEvent,
+  account: VirtualAccountProfile,
+): BotApiChosenInlineResult {
+  return {
+    from: account,
+    ...(message.inlineKeyboard === undefined || message.viaBot === undefined
+      ? {}
+      : { inline_message_id: message.viaBot.inlineMessageId }),
+    query: inlineQuery.query,
+    result_id: resultId,
   };
 }
 

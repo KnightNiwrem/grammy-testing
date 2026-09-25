@@ -13,6 +13,19 @@ export const MAX_TEXT_MESSAGE_LENGTH = 4_096;
  */
 export type CanonicalMessageId = string;
 
+/**
+ * Telegram's `inline_message_id`: an opaque identifier of a message an account sent through a
+ * bot's inline mode, by which that bot edits the message without being a member of its chat.
+ */
+export type InlineMessageId = string;
+
+/** The bot through whose inline mode an account sent a message, as Telegram's `via_bot` shows. */
+export interface ViaBot {
+  readonly botId: number;
+  /** How the inline bot addresses the message. */
+  readonly inlineMessageId: InlineMessageId;
+}
+
 /** A span of message text. Offsets and lengths count UTF-16 code units, as Telegram's do. */
 interface TextSpan {
   readonly offset: number;
@@ -155,8 +168,13 @@ export interface PrivateMessage {
   readonly content: MessageContent;
   /** The message of the same conversation this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
-  /** Omitted when the message has no inline keyboard. Only bots attach inline keyboards. */
+  /**
+   * Omitted when the message has no inline keyboard. Bots attach inline keyboards to their messages,
+   * and inline bots to messages sent through them.
+   */
   readonly inlineKeyboard?: InlineKeyboard;
+  /** Omitted for a message not sent through a bot's inline mode. Only accounts send them. */
+  readonly viaBot?: ViaBot;
   /**
    * The reply interface the message asks the account's client to show; omitted for none. Only
    * bots send one, and never with an inline keyboard. Edits leave it unchanged.
@@ -192,8 +210,13 @@ export interface SupergroupMessage {
   readonly content: SupergroupMessageContent;
   /** The message of the same supergroup this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
-  /** Omitted when the message has no inline keyboard. Only bots attach inline keyboards. */
+  /**
+   * Omitted when the message has no inline keyboard. Bots attach inline keyboards to their messages,
+   * and inline bots to messages sent through them.
+   */
   readonly inlineKeyboard?: InlineKeyboard;
+  /** Omitted for a message not sent through a bot's inline mode. Only accounts send them. */
+  readonly viaBot?: ViaBot;
   /**
    * When the text or caption was last edited; omitted for a message whose content was never
    * edited.
@@ -205,6 +228,27 @@ export interface SupergroupMessage {
 
 /** A canonical message of any chat the emulator supports. */
 export type ChatMessage = PrivateMessage | SupergroupMessage;
+
+/**
+ * The bot whose buttons a message carries, which receives the callback queries of their presses:
+ * the inline bot of a message sent through one, otherwise the bot that wrote the message. Returns
+ * `undefined` for an account's own message, which carries no buttons.
+ */
+export function getInlineKeyboardOwnerId(message: ChatMessage): number | undefined {
+  if (message.viaBot !== undefined) {
+    return message.viaBot.botId;
+  }
+  switch (message.kind) {
+    case 'private_message':
+      return message.authorRole === 'bot' ? message.conversation.botId : undefined;
+    case 'supergroup_message':
+      return message.author.kind === 'bot' ? message.author.botId : undefined;
+    default: {
+      const unhandledMessage: never = message;
+      throw new Error(`Unhandled message: ${JSON.stringify(unhandledMessage)}`);
+    }
+  }
+}
 
 /** A supergroup message that shows content its author wrote, rather than a membership change. */
 export type SupergroupContentMessage = SupergroupMessage & { readonly content: MessageContent };

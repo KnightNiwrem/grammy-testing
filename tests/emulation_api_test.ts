@@ -1225,7 +1225,7 @@ Deno.test('editMessageText and editMessageReplyMarkup follow Telegram checks', a
   await expectEditFailure(
     'editMessageText',
     { inline_message_id: 'inline', text: 'Done' },
-    'Bad Request: invalid editMessageText parameters',
+    'Bad Request: MESSAGE_ID_INVALID',
   );
   await expectEditFailure(
     'editMessageReplyMarkup',
@@ -4280,6 +4280,527 @@ Deno.test('a grammY bot downloads a document from an account and replies with a 
   }
 });
 
+Deno.test('an account sends an inline query, a bot answers, and the account sends a result', async () => {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const sessionPath = (await api.request('/sessions', { method: 'POST' })).headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const account = await createAccount(api, sessionPath, 'Ada');
+  const inlineBot = await createBot(api, sessionPath, 'cats_bot', {
+    supports_inline_queries: true,
+    receives_chosen_inline_results: true,
+  });
+  const otherBot = await createBot(api, sessionPath, 'other_bot');
+  const readUpdates = createUpdateReader(api);
+  const accountPath = `${sessionPath}/accounts/${account.id}`;
+  const getMeResponse = await callBotApi(api, `${inlineBot.botApiPath}/getMe`, {});
+  if (botApiResult(getMeResponse.body)?.supports_inline_queries !== true) {
+    throw new Error('Expected getMe to report inline mode');
+  }
+
+  const queryResponse = await api.request(
+    `${accountPath}/inline-queries`,
+    jsonRequest('POST', {
+      bot_id: inlineBot.bot.id,
+      chat: { type: 'private', botId: inlineBot.bot.id },
+      query: 'cats',
+    }),
+  );
+  const queryBody = await queryResponse.json() as { inline_query: { id: string } };
+  const inlineQueryPath = `${accountPath}/inline-queries/${queryBody.inline_query.id}`;
+  if (
+    queryResponse.status !== 201 || queryResponse.headers.get('Location') !== inlineQueryPath ||
+    JSON.stringify(queryBody) !== JSON.stringify({
+        inline_query: {
+          id: queryBody.inline_query.id,
+          bot_id: inlineBot.bot.id,
+          chat: { type: 'private', botId: inlineBot.bot.id },
+          query: 'cats',
+          offset: '',
+          status: 'awaiting_answer',
+          answer: null,
+        },
+      })
+  ) {
+    throw new Error(`Expected an unanswered inline query, received ${JSON.stringify(queryBody)}`);
+  }
+  const [queryUpdate] = await readUpdates(inlineBot.botApiPath);
+  if (
+    JSON.stringify(queryUpdate?.inline_query) !== JSON.stringify({
+      id: queryBody.inline_query.id,
+      from: account,
+      chat_type: 'sender',
+      query: 'cats',
+      offset: '',
+    })
+  ) {
+    throw new Error(`Expected an inline_query update, received ${JSON.stringify(queryUpdate)}`);
+  }
+
+  const answerResponse = await callBotApi(api, `${inlineBot.botApiPath}/answerInlineQuery`, {
+    inline_query_id: queryBody.inline_query.id,
+    results: [{
+      type: 'article',
+      id: 'fact-1',
+      title: 'Cat fact',
+      description: 'Cats sleep a lot',
+      input_message_content: { message_text: '*Cats* sleep a lot', parse_mode: 'MarkdownV2' },
+      reply_markup: { inline_keyboard: [[{ text: 'More', callback_data: 'more' }]] },
+    }],
+    button: { text: 'Sign in', start_parameter: 'sign-in' },
+  });
+  if (JSON.stringify(answerResponse.body) !== JSON.stringify({ ok: true, result: true })) {
+    throw new Error(`Expected the answer to be accepted, received ${answerResponse.status}`);
+  }
+  const answeredBody = await (await api.request(inlineQueryPath)).json() as {
+    inline_query: { status: string; answer: unknown };
+  };
+  if (
+    answeredBody.inline_query.status !== 'answered' ||
+    JSON.stringify(answeredBody.inline_query.answer) !== JSON.stringify({
+        results: [
+          { type: 'article', id: 'fact-1', title: 'Cat fact', description: 'Cats sleep a lot' },
+        ],
+        cache_time: 300,
+        is_personal: false,
+        next_offset: '',
+        button: { text: 'Sign in', start_parameter: 'sign-in' },
+      })
+  ) {
+    throw new Error(
+      `Expected the account to see the answer, received ${JSON.stringify(answeredBody)}`,
+    );
+  }
+
+  const chooseResponse = await api.request(
+    `${inlineQueryPath}/chosen-results`,
+    jsonRequest('POST', { result_id: 'fact-1' }),
+  );
+  const { message } = await chooseResponse.json() as { message: Record<string, unknown> };
+  if (
+    chooseResponse.status !== 201 || JSON.stringify(message.from) !== JSON.stringify(account) ||
+    message.text !== 'Cats sleep a lot' ||
+    JSON.stringify(message.entities) !== JSON.stringify([{ type: 'bold', offset: 0, length: 4 }]) ||
+    JSON.stringify(message.via_bot) !== JSON.stringify({
+        id: inlineBot.bot.id,
+        is_bot: true,
+        first_name: 'Test Bot',
+        username: 'cats_bot',
+      }) ||
+    JSON.stringify(Object.keys(message).slice(-2)) !== JSON.stringify(['reply_markup', 'via_bot'])
+  ) {
+    throw new Error(
+      `Expected the account's message through the bot, received ${JSON.stringify(message)}`,
+    );
+  }
+  const [messageUpdate, chosenResultUpdate] = await readUpdates(inlineBot.botApiPath);
+  const chosenResult = chosenResultUpdate?.chosen_inline_result as Record<string, unknown>;
+  const inlineMessageId = chosenResult?.inline_message_id;
+  if (
+    JSON.stringify(messageUpdate?.message) !== JSON.stringify(message) ||
+    typeof inlineMessageId !== 'string' ||
+    JSON.stringify(chosenResult) !== JSON.stringify({
+        from: account,
+        inline_message_id: inlineMessageId,
+        query: 'cats',
+        result_id: 'fact-1',
+      })
+  ) {
+    throw new Error('Expected the message and then the chosen result');
+  }
+
+  const accountEditResponse = await api.request(
+    `${accountPath}/conversations/private/${inlineBot.bot.id}/messages/${message.message_id}`,
+    jsonRequest('PATCH', { text: 'Dogs sleep a lot' }),
+  );
+  if (accountEditResponse.status !== 400) {
+    throw new Error('Expected only the inline bot to edit a message sent through it');
+  }
+
+  const pressResponse = await api.request(
+    `${accountPath}/callback-queries`,
+    jsonRequest('POST', {
+      chat: { type: 'private', botId: inlineBot.bot.id },
+      message_id: message.message_id,
+      callback_data: 'more',
+    }),
+  );
+  const [callbackQueryUpdate] = await readUpdates(inlineBot.botApiPath);
+  const callbackQuery = callbackQueryUpdate?.callback_query as Record<string, unknown>;
+  if (
+    pressResponse.status !== 201 ||
+    JSON.stringify(Object.keys(callbackQuery ?? {})) !==
+      JSON.stringify(['id', 'from', 'inline_message_id', 'chat_instance', 'data']) ||
+    callbackQuery.inline_message_id !== inlineMessageId
+  ) {
+    throw new Error(`Expected an inline callback query, received ${JSON.stringify(callbackQuery)}`);
+  }
+
+  const editResponse = await callBotApi(api, `${inlineBot.botApiPath}/editMessageText`, {
+    inline_message_id: inlineMessageId,
+    text: 'Cats also purr',
+  });
+  if (JSON.stringify(editResponse.body) !== JSON.stringify({ ok: true, result: true })) {
+    throw new Error(`Expected the inline edit to answer true, received ${editResponse.status}`);
+  }
+  const [editUpdate] = await readUpdates(inlineBot.botApiPath);
+  const editedMessage = editUpdate?.edited_message as Record<string, unknown> | undefined;
+  if (
+    editedMessage?.text !== 'Cats also purr' || editedMessage.reply_markup !== undefined ||
+    typeof editedMessage.edit_date !== 'number'
+  ) {
+    throw new Error(
+      `Expected the chat's bot to see the edit, received ${JSON.stringify(editUpdate)}`,
+    );
+  }
+
+  const failures = await Promise.all([
+    callBotApi(api, `${inlineBot.botApiPath}/editMessageText`, {
+      inline_message_id: inlineMessageId,
+      text: 'Cats also purr',
+    }),
+    callBotApi(api, `${otherBot.botApiPath}/editMessageText`, {
+      inline_message_id: inlineMessageId,
+      text: 'Dogs',
+    }),
+    callBotApi(api, `${inlineBot.botApiPath}/editMessageReplyMarkup`, {
+      inline_message_id: 'unknown',
+    }),
+    callBotApi(api, `${inlineBot.botApiPath}/editMessageCaption`, {
+      inline_message_id: inlineMessageId,
+      caption: 'A cat',
+    }),
+    callBotApi(api, `${inlineBot.botApiPath}/editMessageText`, { text: 'Cats' }),
+    callBotApi(api, `${inlineBot.botApiPath}/editMessageText`, {
+      chat_id: account.id,
+      message_id: message.message_id,
+      text: 'Cats',
+    }),
+  ]);
+  const failureDescriptions = failures.map(({ body }) =>
+    isBadRequestResponse(body) ? body.description : JSON.stringify(body)
+  );
+  if (
+    JSON.stringify(failureDescriptions) !== JSON.stringify([
+      'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message',
+      'Bad Request: MESSAGE_ID_INVALID',
+      'Bad Request: MESSAGE_ID_INVALID',
+      'Bad Request: there is no caption in the message to edit',
+      'Bad Request: message identifier is not specified',
+      "Bad Request: message can't be edited",
+    ])
+  ) {
+    throw new Error(`Expected Telegram's inline edit errors, received ${failureDescriptions}`);
+  }
+});
+
+Deno.test('answerInlineQuery and the inline query routes follow Telegram checks', async () => {
+  const { api, sessionPath, createdBot: plainBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountPath = `${sessionPath}/accounts/${createdAccount.account.id}`;
+  const inlineBot = await createBot(api, sessionPath, 'cats_bot', {
+    supports_inline_queries: true,
+  });
+  const sendQuery = async (body: Record<string, unknown>) =>
+    await api.request(`${accountPath}/inline-queries`, jsonRequest('POST', body));
+  const privateChat = { type: 'private', botId: inlineBot.bot.id };
+
+  const queryFailures = await Promise.all([
+    sendQuery({ bot_id: plainBot.bot.id, chat: privateChat, query: 'cats' }),
+    sendQuery({ bot_id: 999, chat: privateChat, query: 'cats' }),
+    sendQuery({
+      bot_id: inlineBot.bot.id,
+      chat: { type: 'supergroup', chatId: -1_000_000_000_999 },
+    }),
+    sendQuery({ bot_id: inlineBot.bot.id, chat: privateChat, query: 'a'.repeat(257) }),
+    api.request(
+      `${sessionPath}/accounts/999/inline-queries`,
+      jsonRequest('POST', {
+        bot_id: inlineBot.bot.id,
+        chat: privateChat,
+      }),
+    ),
+  ]);
+  if (
+    JSON.stringify(queryFailures.map((response) => response.status)) !==
+      JSON.stringify([409, 404, 404, 400, 404])
+  ) {
+    throw new Error(
+      `Expected inline queries to be refused, received ${
+        queryFailures.map((response) => response.status)
+      }`,
+    );
+  }
+
+  const queryResponse = await sendQuery({ bot_id: inlineBot.bot.id, chat: privateChat, query: '' });
+  const inlineQueryId = (await queryResponse.json() as { inline_query: { id: string } })
+    .inline_query.id;
+  const inlineQueryPath = `${accountPath}/inline-queries/${inlineQueryId}`;
+  const choose = async (resultId: string) =>
+    (await api.request(
+      `${inlineQueryPath}/chosen-results`,
+      jsonRequest('POST', { result_id: resultId }),
+    )).status;
+  if ((await choose('1')) !== 409) {
+    throw new Error('Expected an unanswered query to have no result to send');
+  }
+
+  const article = (id: string, extra: Record<string, unknown> = {}) => ({
+    type: 'article',
+    id,
+    title: `Result ${id}`,
+    input_message_content: { message_text: `Result ${id}` },
+    ...extra,
+  });
+  const answer = async (parameters: Record<string, unknown>) => {
+    const { body } = await callBotApi(api, `${inlineBot.botApiPath}/answerInlineQuery`, {
+      inline_query_id: inlineQueryId,
+      ...parameters,
+    });
+    return isBadRequestResponse(body) ? body.description : JSON.stringify(body);
+  };
+  const answerFailures = [
+    await answer({ results: [article('1'), article('1')] }),
+    await answer({ results: Array.from({ length: 51 }, (_, index) => article(String(index))) }),
+    await answer({ results: [{ ...article('1'), type: 'GIF' }] }),
+    await answer({ results: [{ ...article('1'), type: 'poll' }] }),
+    await answer({ results: [{ ...article('1'), input_message_content: { message_text: '' } }] }),
+    await answer({
+      results: [article('1', { input_message_content: { latitude: 1, longitude: 2 } })],
+    }),
+    await answer({
+      results: [
+        article('1', { input_message_content: { message_text: 'a.b', parse_mode: 'MarkdownV2' } }),
+      ],
+    }),
+    await answer({
+      results: [{ type: 'photo', id: '1', photo_url: 'https://example.com/cat.jpg' }],
+    }),
+    await answer({ results: [{ type: 'photo', id: '1', photo_file_id: 'unknown' }] }),
+    await answer({ results: [{ type: 'document', id: '1', title: '', document_file_id: 'x' }] }),
+    await answer({ results: [article('1')], button: { text: 'Sign in', start_parameter: 'a b' } }),
+    await answer({ results: [article('1')], next_offset: 'a'.repeat(65) }),
+    await answer({ results: [article('')] }),
+    await answer({ results: 'not JSON' }),
+    await answer({ inline_query_id: '999', results: [article('1')] }),
+  ];
+  if (
+    JSON.stringify(answerFailures) !== JSON.stringify([
+      'Bad Request: RESULT_ID_DUPLICATE',
+      'Bad Request: too many inline query results specified',
+      'Bad Request: inline query results of type "gif" are not supported',
+      `Bad Request: can't parse InlineQueryResult: type "poll" is unsupported for the inline query result`,
+      "Bad Request: can't parse InlineQueryResult: Input message content is not specified",
+      'Bad Request: inline query results sending a location, venue, contact, invoice, or rich message are not supported',
+      "Bad Request: can't parse InlineQueryResult: Can't parse entities: Character '.' is reserved and must be escaped with the preceding '\\'",
+      'Bad Request: sending files by URL is not supported',
+      "Bad Request: wrong remote file identifier specified: can't unserialize it",
+      "Bad Request: wrong remote file identifier specified: can't unserialize it",
+      'Bad Request: unallowed characters in start_parameter are used',
+      'Bad Request: NEXT_OFFSET_INVALID',
+      'Bad Request: RESULT_ID_EMPTY',
+      'Bad Request: invalid answerInlineQuery parameters',
+      'Bad Request: query is too old and response timeout expired or query ID is invalid',
+    ])
+  ) {
+    throw new Error(`Expected Telegram's answerInlineQuery errors, received ${answerFailures}`);
+  }
+
+  if (
+    (await answer({ results: [article('1')], cache_time: 100_000, is_personal: true })) !==
+      JSON.stringify({ ok: true, result: true }) ||
+    (await answer({ results: [article('2')] })) !==
+      'Bad Request: query is too old and response timeout expired or query ID is invalid'
+  ) {
+    throw new Error('Expected the query to be answered only once');
+  }
+  const answeredBody = await (await api.request(inlineQueryPath)).json() as {
+    inline_query: { answer: { cache_time: number; is_personal: boolean } };
+  };
+  if (
+    answeredBody.inline_query.answer.cache_time !== 86_400 ||
+    !answeredBody.inline_query.answer.is_personal
+  ) {
+    throw new Error('Expected cache_time to be clamped to a day');
+  }
+
+  await sendText('/start');
+  const blockResponse = await api.request(`${accountPath}/blocked-bots/${inlineBot.bot.id}`, {
+    method: 'PUT',
+  });
+  const chooseFailures = [
+    await choose('unknown'),
+    await choose('1'),
+    (await api.request(
+      `${accountPath}/inline-queries/999/chosen-results`,
+      jsonRequest('POST', { result_id: '1' }),
+    )).status,
+    (await api.request(
+      `${sessionPath}/accounts/${plainBot.bot.id}/inline-queries/${inlineQueryId}`,
+    ))
+      .status,
+  ];
+  if (
+    blockResponse.status !== 204 ||
+    JSON.stringify(chooseFailures) !== JSON.stringify([400, 409, 404, 404])
+  ) {
+    throw new Error(`Expected results to be refused, received ${chooseFailures}`);
+  }
+});
+
+Deno.test('a grammY bot answers inline queries and edits the message it sent to a group', async () => {
+  const { api, sessionPath, owner, supergroup, supergroupPath } = await createSupergroupFixture();
+  const inlineBot = await createBot(api, sessionPath, 'cats_bot', {
+    supports_inline_queries: true,
+    receives_chosen_inline_results: true,
+  });
+  const ownerPath = `${sessionPath}/accounts/${owner.id}`;
+  const grammyBot = new Bot(inlineBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  let catPhotoFileId: string | undefined;
+  const photoSent = Promise.withResolvers<void>();
+  const resultChosen = Promise.withResolvers<string>();
+  const moreHandled = Promise.withResolvers<void>();
+  grammyBot.command('start', async (context) => {
+    const reply = await context.replyWithPhoto(new InputFile(gifImage(2, 1), 'cat.gif'));
+    catPhotoFileId = reply.photo.at(-1)?.file_id;
+    photoSent.resolve();
+  });
+  grammyBot.inlineQuery(/cat/, async (context) => {
+    await context.answerInlineQuery([
+      {
+        type: 'article',
+        id: 'fact',
+        title: 'Cat fact',
+        input_message_content: { message_text: 'Cats sleep a lot' },
+        reply_markup: new InlineKeyboard().text('More', 'more'),
+      },
+      { type: 'photo', id: 'photo', photo_file_id: catPhotoFileId ?? '', caption: 'A cat' },
+    ], { cache_time: 0 });
+  });
+  grammyBot.on('chosen_inline_result', (context) => {
+    resultChosen.resolve(context.chosenInlineResult.result_id);
+  });
+  grammyBot.callbackQuery('more', async (context) => {
+    await context.answerCallbackQuery();
+    await context.editMessageText('Cats also purr');
+    moreHandled.resolve();
+  });
+  const polling = grammyBot.start();
+
+  try {
+    const startResponse = await api.request(
+      `${ownerPath}/messages`,
+      jsonRequest('POST', { to: { type: 'private', botId: inlineBot.bot.id }, text: '/start' }),
+    );
+    if (startResponse.status !== 201) {
+      throw new Error(`Expected /start to be sent, received ${startResponse.status}`);
+    }
+    await expectSettlementWithin(photoSent.promise, 5_000, 'Expected the bot to send a photo');
+
+    const queryResponse = await api.request(
+      `${ownerPath}/inline-queries`,
+      jsonRequest('POST', {
+        bot_id: inlineBot.bot.id,
+        chat: { type: 'supergroup', chatId: supergroup.id },
+        query: 'cat',
+      }),
+    );
+    const inlineQueryPath = queryResponse.headers.get('Location');
+    if (queryResponse.status !== 201 || inlineQueryPath === null) {
+      throw new Error(`Expected the inline query to be sent, received ${queryResponse.status}`);
+    }
+    const answer = await expectSettlementWithin(
+      (async () => {
+        for (;;) {
+          const body = await (await api.request(inlineQueryPath)).json() as {
+            inline_query: { status: string; answer: { results: { id: string }[] } | null };
+          };
+          if (body.inline_query.answer !== null) {
+            return body.inline_query.answer;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      })(),
+      5_000,
+      'Expected the bot to answer the inline query',
+    );
+    if (JSON.stringify(answer.results.map(({ id }) => id)) !== JSON.stringify(['fact', 'photo'])) {
+      throw new Error(`Expected both results, received ${JSON.stringify(answer)}`);
+    }
+
+    const chooseResult = async (resultId: string) => {
+      const response = await api.request(
+        `${inlineQueryPath}/chosen-results`,
+        jsonRequest('POST', { result_id: resultId }),
+      );
+      if (response.status !== 201) {
+        throw new Error(`Expected result ${resultId} to be sent, received ${response.status}`);
+      }
+      return (await response.json() as { message: Record<string, unknown> }).message;
+    };
+    const factMessage = await chooseResult('fact');
+    if (
+      (await expectSettlementWithin(resultChosen.promise, 5_000, 'Expected inline feedback')) !==
+        'fact'
+    ) {
+      throw new Error('Expected the bot to learn which result was chosen');
+    }
+    const photoMessage = await chooseResult('photo');
+    const photoSize = photoSizeOf(photoMessage);
+    if (
+      photoMessage.caption !== 'A cat' || photoSize === undefined ||
+      (photoMessage.via_bot as { id?: number } | undefined)?.id !== inlineBot.bot.id
+    ) {
+      throw new Error(
+        `Expected the cached photo in the group, received ${JSON.stringify(photoMessage)}`,
+      );
+    }
+
+    const pressResponse = await api.request(
+      `${ownerPath}/callback-queries`,
+      jsonRequest('POST', {
+        chat: { type: 'supergroup', chatId: supergroup.id },
+        message_id: factMessage.message_id,
+        callback_data: 'more',
+      }),
+    );
+    if (pressResponse.status !== 201) {
+      throw new Error(`Expected the button press to be accepted, received ${pressResponse.status}`);
+    }
+    await expectSettlementWithin(
+      moreHandled.promise,
+      5_000,
+      'Expected the bot to edit the message',
+    );
+
+    const historyResponse = await api.request(`${supergroupPath(owner.id)}/messages`);
+    const { messages } = await historyResponse.json() as {
+      messages: Record<string, unknown>[];
+    };
+    const editedFact = messages.find(({ message_id }) => message_id === factMessage.message_id);
+    if (
+      editedFact?.text !== 'Cats also purr' || editedFact.reply_markup !== undefined ||
+      (editedFact.via_bot as { id?: number } | undefined)?.id !== inlineBot.bot.id
+    ) {
+      throw new Error(
+        `Expected the edited message in the group, received ${JSON.stringify(editedFact)}`,
+      );
+    }
+  } finally {
+    await grammyBot.stop();
+    await polling;
+  }
+});
+
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,
@@ -4441,7 +4962,11 @@ async function createBot(
   api: ReturnType<typeof createEmulationApi>,
   sessionPath: string,
   username: string,
-  options: { can_read_all_group_messages?: boolean } = {},
+  options: {
+    can_read_all_group_messages?: boolean;
+    supports_inline_queries?: boolean;
+    receives_chosen_inline_results?: boolean;
+  } = {},
 ) {
   const response = await api.request(
     `${sessionPath}/bots`,

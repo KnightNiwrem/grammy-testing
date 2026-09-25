@@ -9,6 +9,12 @@ import {
   SUPERGROUP_ADMINISTRATOR_RIGHTS,
 } from '../../../types/chat_membership.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
+import {
+  type InlineQuery,
+  type InlineQueryResult,
+  type InlineQueryResultsButton,
+  MAX_INLINE_QUERY_LENGTH,
+} from '../../../types/inline_query.ts';
 import type { ReplyInterface } from '../../../types/reply_interface.ts';
 import {
   MAX_SUPERGROUP_OR_CHANNEL_ID,
@@ -17,7 +23,7 @@ import {
   MIN_TELEGRAM_USER_ID,
 } from '../../../types/telegram_identity.ts';
 import type { Supergroup } from '../../../types/virtual_chat.ts';
-import { MAX_TEXT_MESSAGE_LENGTH } from '../../../types/virtual_message.ts';
+import { type ChatMessage, MAX_TEXT_MESSAGE_LENGTH } from '../../../types/virtual_message.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 
 const ACCOUNT_ID_PARAMETER = 'accountId';
@@ -37,6 +43,10 @@ const CALLBACK_QUERY_ID_PARAMETER = 'callbackQueryId';
 const CALLBACK_QUERY_COLLECTION_PATH = `/:${ACCOUNT_ID_PARAMETER}/callback-queries` as const;
 const CALLBACK_QUERY_PATH =
   `${CALLBACK_QUERY_COLLECTION_PATH}/:${CALLBACK_QUERY_ID_PARAMETER}` as const;
+const INLINE_QUERY_ID_PARAMETER = 'inlineQueryId';
+const INLINE_QUERY_COLLECTION_PATH = `/:${ACCOUNT_ID_PARAMETER}/inline-queries` as const;
+const INLINE_QUERY_PATH = `${INLINE_QUERY_COLLECTION_PATH}/:${INLINE_QUERY_ID_PARAMETER}` as const;
+const CHOSEN_INLINE_RESULT_COLLECTION_PATH = `${INLINE_QUERY_PATH}/chosen-results` as const;
 const SUPERGROUP_COLLECTION_PATH = `/:${ACCOUNT_ID_PARAMETER}/supergroups` as const;
 const CHAT_ID_PARAMETER = 'chatId';
 const SUPERGROUP_CONVERSATION_PATH =
@@ -154,6 +164,22 @@ const pressCallbackButtonRequestSchema = z.strictObject({
   message_id: z.int().positive(),
   callback_data: z.string().min(1),
   expired: z.boolean().default(false),
+});
+
+/**
+ * An inline query typed in a chat, for the inline bot whose username precedes it. The query holds
+ * up to 256 characters, counted by code point.
+ */
+const sendInlineQueryRequestSchema = z.strictObject({
+  bot_id: telegramUserIdSchema,
+  chat: chatSchema,
+  query: z.string().default('').refine((query) => [...query].length <= MAX_INLINE_QUERY_LENGTH),
+  /** The `next_offset` of an earlier answer, requesting more results; empty for the first. */
+  offset: z.string().default(''),
+});
+
+const chooseInlineQueryResultRequestSchema = z.strictObject({
+  result_id: z.string().min(1),
 });
 
 /**
@@ -732,6 +758,105 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     return context.json({ callback_query: presentCallbackQueryForAccount(callbackQuery) });
   });
 
+  accountRoutes.post(INLINE_QUERY_COLLECTION_PATH, async (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    if (!accountId.success) {
+      return context.body(null, 400);
+    }
+
+    let requestBody: unknown;
+    try {
+      requestBody = await context.req.json();
+    } catch {
+      return context.body(null, 400);
+    }
+    const parsedRequest = sendInlineQueryRequestSchema.safeParse(requestBody);
+    if (!parsedRequest.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').inlineQueries.sendInlineQuery({
+      fromAccountId: accountId.data,
+      botId: parsedRequest.data.bot_id,
+      chat: parsedRequest.data.chat,
+      query: parsedRequest.data.query,
+      offset: parsedRequest.data.offset,
+    });
+    if (!result.sent) {
+      switch (result.reason) {
+        case 'not_a_member':
+          return context.body(null, 403);
+        case 'inline_mode_disabled':
+          return context.body(null, 409);
+        default:
+          return context.body(null, 404);
+      }
+    }
+
+    const inlineQueryPath = `${
+      basePath(context)
+    }/${accountId.data}/inline-queries/${result.inlineQuery.id}`;
+    return context.json(
+      { inline_query: presentInlineQueryForAccount(result.inlineQuery) },
+      201,
+      { Location: inlineQueryPath },
+    );
+  });
+
+  accountRoutes.get(INLINE_QUERY_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    if (!accountId.success) {
+      return context.body(null, 400);
+    }
+
+    const inlineQuery = context.get('emulationSession').inlineQueries.getAccountInlineQuery({
+      accountId: accountId.data,
+      inlineQueryId: context.req.param(INLINE_QUERY_ID_PARAMETER),
+    });
+    if (inlineQuery === undefined) {
+      return context.body(null, 404);
+    }
+    return context.json({ inline_query: presentInlineQueryForAccount(inlineQuery) });
+  });
+
+  accountRoutes.post(CHOSEN_INLINE_RESULT_COLLECTION_PATH, async (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    if (!accountId.success) {
+      return context.body(null, 400);
+    }
+
+    let requestBody: unknown;
+    try {
+      requestBody = await context.req.json();
+    } catch {
+      return context.body(null, 400);
+    }
+    const parsedRequest = chooseInlineQueryResultRequestSchema.safeParse(requestBody);
+    if (!parsedRequest.success) {
+      return context.body(null, 400);
+    }
+
+    const { inlineQueries, botMessageViews } = context.get('emulationSession');
+    const result = inlineQueries.chooseInlineQueryResult({
+      accountId: accountId.data,
+      inlineQueryId: context.req.param(INLINE_QUERY_ID_PARAMETER),
+      resultId: parsedRequest.data.result_id,
+    });
+    if (!result.chosen) {
+      return context.body(null, chosenInlineResultFailureStatus(result.reason));
+    }
+    return context.json(
+      { message: viewChatMessageForAccount(botMessageViews, result.message, accountId.data) },
+      201,
+    );
+  });
+
   return accountRoutes;
 }
 
@@ -899,4 +1024,87 @@ function presentCallbackQueryForAccount({ id, callbackData, state }: CallbackQue
       cache_time: state.answer.cacheTimeSeconds,
     },
   };
+}
+
+/**
+ * A missing query is not found; a result the answer does not hold rejects the request; a query
+ * without an answer, or a chat the account can no longer write to, conflicts with sending it.
+ */
+function chosenInlineResultFailureStatus(
+  reason: Extract<
+    ReturnType<EmulationSession['inlineQueries']['chooseInlineQueryResult']>,
+    { readonly chosen: false }
+  >['reason'],
+): 400 | 403 | 404 | 409 {
+  switch (reason) {
+    case 'inline_query_not_found':
+      return 404;
+    case 'result_not_found':
+      return 400;
+    case 'not_a_member':
+      return 403;
+    case 'inline_query_not_answered':
+    case 'bot_blocked':
+      return 409;
+    default: {
+      const unhandledReason: never = reason;
+      throw new Error(`Unhandled inline query result choice failure: ${unhandledReason}`);
+    }
+  }
+}
+
+/**
+ * Shows a message as these routes show messages: a private message as the conversation's bot sees
+ * it, and a supergroup message as the requesting account sees it.
+ */
+function viewChatMessageForAccount(
+  botMessageViews: EmulationSession['botMessageViews'],
+  message: ChatMessage,
+  accountId: number,
+) {
+  return message.kind === 'private_message'
+    ? botMessageViews.viewPrivateMessageForBot(message)
+    : botMessageViews.viewSupergroupMessage(message, accountId);
+}
+
+/** Shows an inline query to the account that sent it, with the bot's answer once given. */
+function presentInlineQueryForAccount({ id, botId, chat, query, offset, state }: InlineQuery) {
+  return {
+    id,
+    bot_id: botId,
+    chat,
+    query,
+    offset,
+    status: state.status,
+    answer: state.status !== 'answered' ? null : {
+      results: state.answer.results.map(presentInlineQueryResultForAccount),
+      cache_time: state.answer.cacheTimeSeconds,
+      is_personal: state.answer.isPersonal,
+      next_offset: state.answer.nextOffset,
+      ...(state.answer.button === undefined
+        ? {}
+        : { button: presentInlineQueryResultsButton(state.answer.button) }),
+    },
+  };
+}
+
+/**
+ * Shows a result as the account's client lists it, by its type, identifier, and texts. What
+ * sending it writes shows in the sent message.
+ */
+function presentInlineQueryResultForAccount(result: InlineQueryResult) {
+  return {
+    type: result.kind,
+    id: result.id,
+    ...(result.title === undefined ? {} : { title: result.title }),
+    ...(result.description === undefined ? {} : { description: result.description }),
+    ...(result.kind === 'article' && result.url !== undefined ? { url: result.url } : {}),
+  };
+}
+
+/** Shows the button above the results as the Bot API specifies it. */
+function presentInlineQueryResultsButton(button: InlineQueryResultsButton) {
+  return button.kind === 'start_bot'
+    ? { text: button.text, start_parameter: button.startParameter }
+    : { text: button.text, web_app: { url: button.url } };
 }

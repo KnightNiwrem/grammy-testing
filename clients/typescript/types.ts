@@ -12,6 +12,16 @@ export interface CreateVirtualBotInput {
    * `false`: the bot receives only commands, replies to its messages, and mentions of it.
    */
   readonly can_read_all_group_messages?: boolean;
+  /**
+   * Turns on inline mode, so that accounts send the bot inline queries. Defaults to `false`, as
+   * for a new Telegram bot.
+   */
+  readonly supports_inline_queries?: boolean;
+  /**
+   * Turns on inline feedback, so that the bot receives a `chosen_inline_result` update for each
+   * result of its inline queries that an account sends. Defaults to `false`.
+   */
+  readonly receives_chosen_inline_results?: boolean;
 }
 
 export interface VirtualBotProfile {
@@ -388,8 +398,10 @@ interface MessageHeader<Chat> {
 
 /** The fields that follow a message's content. */
 interface MessageTrailer {
-  /** The inline keyboard a bot attached to its message. */
+  /** The inline keyboard a bot attached to its message, or to a message sent through it. */
   readonly reply_markup?: InlineKeyboardMarkup;
+  /** The bot through whose inline mode an account sent the message. */
+  readonly via_bot?: MessageSenderBot;
   /** Present when the bot protected its message from forwarding and saving. */
   readonly has_protected_content?: true;
 }
@@ -500,6 +512,62 @@ export interface CallbackQuery {
   readonly answer: CallbackQueryAnswer | null;
 }
 
+export interface SendInlineQueryInput {
+  /** The inline bot, whose username the account types before the query. */
+  readonly bot_id: number;
+  /** The chat where the account types the query, to which a chosen result is sent. */
+  readonly chat: MessageTarget;
+  /** Up to 256 characters; omitted or empty when the account types only the bot's username. */
+  readonly query?: string;
+  /** The `next_offset` of an earlier answer, requesting more results; omitted for the first. */
+  readonly offset?: string;
+}
+
+/** A result of an answer as the account's client lists it. */
+export interface InlineQueryResultListing {
+  readonly type: 'article' | 'photo' | 'document';
+  readonly id: string;
+  readonly title?: string;
+  readonly description?: string;
+  /** The URL an article shows. */
+  readonly url?: string;
+}
+
+/** The button the account's client shows above the results. */
+export type InlineQueryResultsButton =
+  | { readonly text: string; readonly start_parameter: string }
+  | { readonly text: string; readonly web_app: { readonly url: string } };
+
+export interface InlineQueryAnswer {
+  readonly results: readonly InlineQueryResultListing[];
+  readonly cache_time: number;
+  readonly is_personal: boolean;
+  /** Empty when there are no more results. */
+  readonly next_offset: string;
+  readonly button?: InlineQueryResultsButton;
+}
+
+/** Whether the bot has answered an inline query. */
+export type InlineQueryStatus = 'awaiting_answer' | 'answered';
+
+/** An inline query an account sent, with the bot's answer once it has answered. */
+export interface InlineQuery {
+  readonly id: string;
+  readonly bot_id: number;
+  readonly chat: MessageTarget;
+  readonly query: string;
+  readonly offset: string;
+  readonly status: InlineQueryStatus;
+  /** The bot's answer when `status` is `answered`, and `null` otherwise. */
+  readonly answer: InlineQueryAnswer | null;
+}
+
+export interface ChooseInlineQueryResultInput {
+  readonly inline_query_id: string;
+  /** The identifier of a result of the bot's answer. */
+  readonly result_id: string;
+}
+
 export interface VirtualAccountClient extends VirtualAccountProfile {
   /**
    * Sends a message as this virtual Telegram account, to a bot or to a supergroup this account is
@@ -593,6 +661,23 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
   pressCallbackButton(input: PressCallbackButtonInput): Promise<CallbackQuery>;
   /** Returns a callback query this account created, with the bot's answer once given. */
   getCallbackQuery(callbackQueryId: string): Promise<CallbackQuery>;
+  /**
+   * Types an inline query for a bot with inline mode turned on, in a chat this account can write
+   * to, which sends the bot an `inline_query` update. The bot answers asynchronously; read the
+   * answer with `getInlineQuery`.
+   */
+  sendInlineQuery(input: SendInlineQueryInput): Promise<InlineQuery>;
+  /** Returns an inline query this account sent, with the bot's answer once given. */
+  getInlineQuery(inlineQueryId: string): Promise<InlineQuery>;
+  /**
+   * Sends a result of the bot's answer to the chat where the query was typed, as this account's
+   * message with `via_bot`. The chat's bots receive it as any message of this account, and a bot
+   * with inline feedback receives a `chosen_inline_result` update. Presses of the message's
+   * callback buttons reach the inline bot, which edits the message by its `inline_message_id`.
+   */
+  chooseInlineQueryResult(
+    input: ChooseInlineQueryResultInput,
+  ): Promise<PrivateMessage | SupergroupMessage>;
   /**
    * Returns the commands this account's client suggests in its private chat with a bot: the
    * bot's list for the chat, for all private chats, or by default, in the account's language if

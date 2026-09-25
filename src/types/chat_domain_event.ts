@@ -1,5 +1,6 @@
 import type { CallbackQuery } from './callback_query.ts';
 import type { ChatMemberStatus } from './chat_membership.ts';
+import type { InlineQuery } from './inline_query.ts';
 import type { SharedChat } from './virtual_chat.ts';
 import type { ChatMessage } from './virtual_message.ts';
 
@@ -21,6 +22,22 @@ export interface CallbackQueryCreatedEvent {
   readonly type: 'callback_query_created';
   readonly callbackQuery: CallbackQuery;
   /** The message carrying the pressed button, as it was when the button was pressed. */
+  readonly message: ChatMessage;
+}
+
+/** An account typed an inline query for a bot. */
+export interface InlineQueryCreatedEvent {
+  readonly type: 'inline_query_created';
+  readonly inlineQuery: InlineQuery;
+}
+
+/** An account sent a result of the bot's answer to an inline query, as a message of its chat. */
+export interface InlineQueryResultChosenEvent {
+  readonly type: 'inline_query_result_chosen';
+  /** The answered query that offered the result. */
+  readonly inlineQuery: InlineQuery;
+  readonly resultId: string;
+  /** The message that sending the result created. */
   readonly message: ChatMessage;
 }
 
@@ -58,5 +75,7 @@ export type ChatDomainEvent =
   | MessageCreatedEvent
   | MessageEditedEvent
   | CallbackQueryCreatedEvent
+  | InlineQueryCreatedEvent
+  | InlineQueryResultChosenEvent
   | BotBlockChangedEvent
   | ChatMemberStatusChangedEvent;

@@ -7,6 +7,7 @@ import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_
 import { BotWebhookRepository } from '../src/repositories/bot_webhook.ts';
 import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
 import { FileRepository } from '../src/repositories/file.ts';
+import { InlineQueryRepository } from '../src/repositories/inline_query.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
 import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
@@ -21,6 +22,7 @@ import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts
 import { BotUpdatePollingService } from '../src/services/bot_update_polling.ts';
 import { BotWebhookService } from '../src/services/bot_webhook.ts';
 import { CallbackQueryService } from '../src/services/callback_query.ts';
+import { InlineQueryService } from '../src/services/inline_query.ts';
 import { PrivateMessagingService } from '../src/services/private_messaging.ts';
 import { SupergroupMessagingService } from '../src/services/supergroup_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
@@ -220,6 +222,16 @@ function createBotApiFixture() {
     botMessageViews,
     mediaFiles: new MediaFileService({ files }),
     callbackQueries,
+    inlineQueries: new InlineQueryService({
+      accounts,
+      bots,
+      sharedChats,
+      privateMessages: privateMessaging,
+      supergroupMessages: supergroupMessaging,
+      inlineQueries: new InlineQueryRepository(),
+      events,
+    }),
+    inlineMessages: messages,
     botCommands: new BotCommandService({
       accounts,
       bots,

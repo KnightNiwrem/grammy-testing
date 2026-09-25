@@ -1,5 +1,7 @@
 import type {
   BotApiCallbackQuery,
+  BotApiChosenInlineResult,
+  BotApiInlineQuery,
   BotApiMessage,
   BotApiMyChatMemberUpdated,
   BotApiPrivateMessage,
@@ -12,8 +14,11 @@ import type {
   CallbackQueryCreatedEvent,
   ChatDomainEvent,
   ChatMemberStatusChangedEvent,
+  InlineQueryCreatedEvent,
+  InlineQueryResultChosenEvent,
 } from '../types/chat_domain_event.ts';
 import type { ChatMembership } from '../types/chat_membership.ts';
+import type { InlineQuery } from '../types/inline_query.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import {
   type CanonicalMessageId,
@@ -31,6 +36,8 @@ interface BotMessageViews {
     callbackQuery: CallbackQuery,
     message: ChatMessage,
   ): BotApiCallbackQuery;
+  viewInlineQueryForBot(inlineQuery: InlineQuery): BotApiInlineQuery;
+  viewChosenInlineResultForBot(event: InlineQueryResultChosenEvent): BotApiChosenInlineResult;
   viewBotBlockChangeForBot(event: BotBlockChangedEvent): BotApiMyChatMemberUpdated;
   viewBotMembershipChangeForBot(event: ChatMemberStatusChangedEvent): BotApiMyChatMemberUpdated;
 }
@@ -39,6 +46,11 @@ interface BotUpdateMailboxes {
   enqueueMessageUpdate(botId: number, message: BotApiMessage): void;
   enqueueEditedMessageUpdate(botId: number, editedMessage: BotApiMessage): void;
   enqueueCallbackQueryUpdate(botId: number, callbackQuery: BotApiCallbackQuery): void;
+  enqueueInlineQueryUpdate(botId: number, inlineQuery: BotApiInlineQuery): void;
+  enqueueChosenInlineResultUpdate(
+    botId: number,
+    chosenInlineResult: BotApiChosenInlineResult,
+  ): void;
   enqueueMyChatMemberUpdate(botId: number, myChatMember: BotApiMyChatMemberUpdated): void;
 }
 
@@ -109,6 +121,12 @@ export class BotUpdateDeliveryService {
         return;
       case 'callback_query_created':
         this.#deliverCallbackQuery(event);
+        return;
+      case 'inline_query_created':
+        this.#deliverInlineQuery(event);
+        return;
+      case 'inline_query_result_chosen':
+        this.#deliverChosenInlineResult(event);
         return;
       case 'bot_block_changed':
         this.#deliverBotBlockChange(event);
@@ -238,6 +256,35 @@ export class BotUpdateDeliveryService {
     );
   }
 
+  /** An inline query is observed only by the inline bot it was sent to. */
+  #deliverInlineQuery({ inlineQuery }: InlineQueryCreatedEvent): void {
+    if (!this.#isSubscribed(inlineQuery.botId, 'inline_query')) {
+      return;
+    }
+    this.#botUpdates.enqueueInlineQueryUpdate(
+      inlineQuery.botId,
+      this.#botMessageViews.viewInlineQueryForBot(inlineQuery),
+    );
+  }
+
+  /**
+   * An account's choice of an inline query result is observed only by the inline bot, and, as on
+   * Telegram, only when its inline feedback is turned on.
+   */
+  #deliverChosenInlineResult(event: InlineQueryResultChosenEvent): void {
+    const { botId } = event.inlineQuery;
+    if (
+      this.#bots.getById(botId)?.receivesChosenInlineResults !== true ||
+      !this.#isSubscribed(botId, 'chosen_inline_result')
+    ) {
+      return;
+    }
+    this.#botUpdates.enqueueChosenInlineResultUpdate(
+      botId,
+      this.#botMessageViews.viewChosenInlineResultForBot(event),
+    );
+  }
+
   /** A block or unblock is observed only by the bot whose membership in the chat changed. */
   #deliverBotBlockChange(event: BotBlockChangedEvent): void {
     if (!this.#isSubscribed(event.botId, 'my_chat_member')) {
@@ -285,7 +332,8 @@ export class BotUpdateDeliveryService {
 /**
  * Whether an account's supergroup message is addressed to a bot in privacy mode, which then
  * receives it: a command at the start of the text or caption that is not addressed to another bot,
- * a reply to one of the bot's messages, or a mention of the bot.
+ * a reply to one of the bot's messages, a mention of the bot, or a message sent through the bot's
+ * inline mode.
  *
  * Telegram documents that a command without a bot's username reaches only the bot that last wrote
  * to the group; the emulator delivers it to every bot in privacy mode.
@@ -297,7 +345,8 @@ function isAddressedToBot(
 ): boolean {
   const isReplyToBot = repliedMessage?.author.kind === 'bot' &&
     repliedMessage.author.botId === bot.id;
-  return isReplyToBot || startsWithCommandForBot(message, bot) || mentionsBot(message, bot);
+  return isReplyToBot || message.viaBot?.botId === bot.id ||
+    startsWithCommandForBot(message, bot) || mentionsBot(message, bot);
 }
 
 function startsWithCommandForBot(message: SupergroupMessage, bot: VirtualBotProfile): boolean {

@@ -12,11 +12,13 @@ import type {
   PrivateConversationKey,
   SharedChat,
 } from '../types/virtual_chat.ts';
-import type {
-  CanonicalMessageId,
-  ChatMessage,
-  PrivateMessage,
-  SupergroupMessage,
+import {
+  type CanonicalMessageId,
+  type ChatMessage,
+  getInlineKeyboardOwnerId,
+  type InlineMessageId,
+  type PrivateMessage,
+  type SupergroupMessage,
 } from '../types/virtual_message.ts';
 
 /**
@@ -104,6 +106,7 @@ interface CallbackQueryStore {
     readonly accountId: number;
     readonly botId: number;
     readonly messageId: CanonicalMessageId;
+    readonly inlineMessageId?: InlineMessageId;
     readonly chatInstance: string;
     readonly callbackData: string;
     readonly expired: boolean;
@@ -127,12 +130,11 @@ interface CallbackQueryServiceDependencies {
   readonly events: ChatDomainEventSink;
 }
 
-/** A bot's message found in the chat where an account presses one of its buttons. */
+/** A message found in the chat where an account presses one of its buttons. */
 type PressedMessageResolution =
   | {
     readonly resolved: true;
     readonly message: ChatMessage;
-    readonly botId: number;
     readonly chatInstance: string;
   }
   | {
@@ -141,9 +143,10 @@ type PressedMessageResolution =
   };
 
 /**
- * Carries out callback queries: an account presses a callback button on a bot's message, and the
- * bot answers once with an optional notification for the account. A press can create the query
- * already expired; the emulator does not otherwise expire queries by time.
+ * Carries out callback queries: an account presses a callback button on a bot's message, or on a
+ * message sent through a bot's inline mode, and the bot answers once with an optional notification
+ * for the account. A press can create the query already expired; the emulator does not otherwise
+ * expire queries by time.
  */
 export class CallbackQueryService {
   readonly #accounts: AccountLookup;
@@ -178,9 +181,10 @@ export class CallbackQueryService {
   }
 
   /**
-   * Presses the callback button with the given data on a bot's message, in the account's private
-   * chat with the bot or in a supergroup the account is a member of, and publishes the resulting
-   * callback query for the bot that sent the message.
+   * Presses the callback button with the given data on a message of the account's private chat
+   * with a bot or of a supergroup the account is a member of, and publishes the resulting callback
+   * query for the bot whose buttons the message carries. As on Telegram, the inline bot of a
+   * message sent through it knows the message only by its inline message identifier.
    */
   pressCallbackButton(input: PressCallbackButtonInput): PressCallbackButtonResult {
     if (this.#accounts.getById(input.fromAccountId) === undefined) {
@@ -193,20 +197,22 @@ export class CallbackQueryService {
       return { pressed: false, reason: resolution.reason };
     }
     const { message } = resolution;
+    const botId = getInlineKeyboardOwnerId(message);
     const hasPressedButton =
       message.inlineKeyboard?.some((row) =>
         row.some((button) =>
           button.kind === 'callback' && button.callbackData === input.callbackData
         )
       ) ?? false;
-    if (!hasPressedButton) {
+    if (botId === undefined || !hasPressedButton) {
       return { pressed: false, reason: 'callback_button_not_found' };
     }
 
     const callbackQuery = this.#callbackQueries.addCallbackQuery({
       accountId: input.fromAccountId,
-      botId: resolution.botId,
+      botId,
       messageId: message.id,
+      inlineMessageId: message.viaBot?.inlineMessageId,
       chatInstance: resolution.chatInstance,
       callbackData: input.callbackData,
       expired: input.expired,
@@ -263,7 +269,7 @@ export class CallbackQueryService {
     if (conversation === undefined || message === undefined) {
       return { resolved: false, reason: 'message_not_found' };
     }
-    return { resolved: true, message, botId, chatInstance: conversation.chatInstance };
+    return { resolved: true, message, chatInstance: conversation.chatInstance };
   }
 
   #resolveSupergroupMessage(
@@ -282,15 +288,6 @@ export class CallbackQueryService {
     if (message === undefined) {
       return { resolved: false, reason: 'message_not_found' };
     }
-    // Only bots attach inline keyboards, so an account's message has no button to press.
-    if (message.author.kind !== 'bot') {
-      return { resolved: false, reason: 'callback_button_not_found' };
-    }
-    return {
-      resolved: true,
-      message,
-      botId: message.author.botId,
-      chatInstance: supergroup.chatInstance,
-    };
+    return { resolved: true, message, chatInstance: supergroup.chatInstance };
   }
 }

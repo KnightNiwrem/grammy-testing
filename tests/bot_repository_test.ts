@@ -34,5 +34,6 @@ function createBot(): VirtualBot {
       can_manage_bots: false,
       supports_join_request_queries: false,
     },
+    receivesChosenInlineResults: false,
   };
 }

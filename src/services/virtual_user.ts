@@ -26,12 +26,15 @@ export type AccountCreationResult =
   };
 
 /**
- * A bot's profile as its owner sets it up with BotFather. `can_read_all_group_messages` turns off
- * the bot's privacy mode in groups; it defaults to `false`, as for a new Telegram bot.
+ * A bot's profile and settings as its owner sets them up with BotFather, each off by default, as
+ * for a new Telegram bot: `can_read_all_group_messages` turns off the bot's privacy mode in groups,
+ * `supports_inline_queries` turns on inline mode, and `receives_chosen_inline_results` turns on
+ * inline feedback.
  */
 export type CreateVirtualBotInput =
   & Pick<VirtualBotProfile, 'first_name' | 'username'>
-  & Partial<Pick<VirtualBotProfile, 'can_read_all_group_messages'>>;
+  & Partial<Pick<VirtualBotProfile, 'can_read_all_group_messages' | 'supports_inline_queries'>>
+  & { readonly receives_chosen_inline_results?: boolean };
 
 export type BotCreationResult =
   | {
@@ -117,7 +120,7 @@ export class VirtualUserService {
       username: input.username,
       can_join_groups: true,
       can_read_all_group_messages: input.can_read_all_group_messages ?? false,
-      supports_inline_queries: false,
+      supports_inline_queries: input.supports_inline_queries ?? false,
       can_connect_to_business: false,
       has_main_web_app: false,
       has_topics_enabled: false,
@@ -128,6 +131,7 @@ export class VirtualUserService {
     const bot: VirtualBot = {
       token: `${profile.id}:${tokenSecret}`,
       profile,
+      receivesChosenInlineResults: input.receives_chosen_inline_results ?? false,
     };
     if (!this.#bots.add(bot)) {
       throw new Error(`Bot ID ${profile.id} or token is already registered`);

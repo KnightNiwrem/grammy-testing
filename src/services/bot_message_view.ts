@@ -5,12 +5,17 @@ import {
   projectBotMembershipChangeForBot,
   projectCallbackQueryForBot,
   projectChatMember,
+  projectChosenInlineResultForBot,
+  projectInlineQueryForBot,
   projectPrivateMessageForBot,
   projectSupergroupMessage,
 } from '../projections/bot_api_message.ts';
 import type {
+  BotApiBotUser,
   BotApiCallbackQuery,
   BotApiChatMember,
+  BotApiChosenInlineResult,
+  BotApiInlineQuery,
   BotApiMessage,
   BotApiMyChatMemberUpdated,
   BotApiPrivateMessage,
@@ -24,8 +29,10 @@ import type { StoredFile, StoredFileId } from '../types/stored_file.ts';
 import type {
   BotBlockChangedEvent,
   ChatMemberStatusChangedEvent,
+  InlineQueryResultChosenEvent,
 } from '../types/chat_domain_event.ts';
 import type { ChatMemberStatus } from '../types/chat_membership.ts';
+import type { InlineQuery } from '../types/inline_query.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { SharedChat } from '../types/virtual_chat.ts';
@@ -74,9 +81,9 @@ interface BotMessageViewServiceDependencies {
 }
 
 /**
- * Presents committed canonical messages, callback queries on them, the standing of users in
- * groups, and changes of a bot's membership in its chats, as the Bot API shows them to an
- * observing bot.
+ * Presents committed canonical messages, callback queries on them, inline queries and the results
+ * sent from their answers, the standing of users in groups, and changes of a bot's membership in
+ * its chats, as the Bot API shows them to an observing bot.
  *
  * It reads the participants' profiles, the chats, and the observer's message numbering; it never
  * creates messages or decides whether sending one is permitted. As on Telegram, each observer
@@ -155,23 +162,39 @@ export class BotMessageViewService {
 
   /**
    * Returns a callback query as the bot that owns the pressed button receives it, carrying the
-   * given state of the button's message.
+   * given state of the button's message, unless the bot knows it only as an inline message.
    */
   viewCallbackQueryForBot(
     callbackQuery: CallbackQuery,
     message: ChatMessage,
   ): BotApiCallbackQuery {
-    const { accountId } = callbackQuery;
-    const account = this.#accounts.getById(accountId);
-    if (account === undefined) {
-      throw new Error(`Account ${accountId} of callback query ${callbackQuery.id} does not exist`);
-    }
-
     return projectCallbackQueryForBot({
       callbackQuery,
-      account: account.profile,
-      message: this.viewMessageForBot(message, callbackQuery.botId),
+      account: this.#findAccountProfile(
+        callbackQuery.accountId,
+        `callback query ${callbackQuery.id}`,
+      ),
+      ...(callbackQuery.inlineMessageId === undefined
+        ? { message: this.viewMessageForBot(message, callbackQuery.botId) }
+        : {}),
     });
+  }
+
+  /** Returns an inline query as the inline bot receives it. */
+  viewInlineQueryForBot(inlineQuery: InlineQuery): BotApiInlineQuery {
+    return projectInlineQueryForBot(
+      inlineQuery,
+      this.#findAccountProfile(inlineQuery.accountId, `inline query ${inlineQuery.id}`),
+    );
+  }
+
+  /** Returns an account's choice of an inline query result as the inline bot receives it. */
+  viewChosenInlineResultForBot(event: InlineQueryResultChosenEvent): BotApiChosenInlineResult {
+    const { inlineQuery } = event;
+    return projectChosenInlineResultForBot(
+      event,
+      this.#findAccountProfile(inlineQuery.accountId, `inline query ${inlineQuery.id}`),
+    );
   }
 
   /** Returns an account's block or unblock of a bot as the blocked bot receives it. */
@@ -252,6 +275,15 @@ export class BotMessageViewService {
     return user;
   }
 
+  /** Looks up the account a query names, which exists as long as the session does. */
+  #findAccountProfile(accountId: number, queryDescription: string) {
+    const account = this.#accounts.getById(accountId);
+    if (account === undefined) {
+      throw new Error(`Account ${accountId} of ${queryDescription} does not exist`);
+    }
+    return account.profile;
+  }
+
   /** Shows an account or a bot as messages show users. */
   #findUser(userId: number): BotApiUser | undefined {
     const account = this.#accounts.getById(userId);
@@ -292,11 +324,15 @@ export class BotMessageViewService {
   }
 
   /**
-   * Resolves the users a message mentions, its file, and the members a service message names, as
-   * the observer sees them.
+   * Resolves the users a message mentions, the bot it was sent through, its file, and the members a
+   * service message names, as the observer sees them.
    */
   #resolveProjectionContext(message: ChatMessage, observerId: number) {
-    const context = { observerId, mentionedUsers: this.#findMentionedUsers(message) };
+    const context = {
+      observerId,
+      mentionedUsers: this.#findMentionedUsers(message),
+      ...(message.viaBot === undefined ? {} : { viaBot: this.#findViaBot(message) }),
+    };
     const { content } = message;
     switch (content.kind) {
       case 'text':
@@ -319,6 +355,16 @@ export class BotMessageViewService {
         throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
       }
     }
+  }
+
+  /** Looks up the inline bot a message was sent through, which exists as long as the session does. */
+  #findViaBot(message: ChatMessage): BotApiBotUser {
+    const botId = message.viaBot?.botId;
+    const bot = botId === undefined ? undefined : this.#bots.getById(botId);
+    if (bot === undefined) {
+      throw new Error(`Inline bot ${botId} of message ${message.id} does not exist`);
+    }
+    return projectBotAsUser(bot.profile);
   }
 
   /** Looks up the members a service message names, which exist as long as the session does. */

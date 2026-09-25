@@ -4,10 +4,12 @@ import { HTTP_STATUS_CREATED, HTTP_STATUS_NO_CONTENT, HTTP_STATUS_OK } from './c
 import {
   botCommandsResponseSchema,
   callbackQueryResponseSchema,
+  chosenInlineResultResponseSchema,
   createdSupergroupResponseSchema,
   createdVirtualAccountSchema,
   createdVirtualBotSchema,
   getMeResponseSchema,
+  inlineQueryResponseSchema,
   messageHistoryResponseSchema,
   replyInterfaceResponseSchema,
   sentMessageResponseSchema,
@@ -27,6 +29,7 @@ import type {
   BotBlockInput,
   BotCommand,
   CallbackQuery,
+  ChooseInlineQueryResultInput,
   CreatedVirtualAccount,
   CreatedVirtualBot,
   CreateSupergroupInput,
@@ -34,6 +37,7 @@ import type {
   CreateVirtualBotInput,
   DemoteChatMemberInput,
   EmulationSession,
+  InlineQuery,
   LeaveChatInput,
   MessageIn,
   MessageTarget,
@@ -43,7 +47,9 @@ import type {
   PromoteChatMemberInput,
   RemoveChatMemberInput,
   ReplyInterface,
+  SendInlineQueryInput,
   Supergroup,
+  SupergroupMessage,
   VirtualAccountClient,
   VirtualAccountProfile,
   VirtualBotProfile,
@@ -318,6 +324,38 @@ function createVirtualAccountClient(
         responseSchema: callbackQueryResponseSchema,
       });
       return response.callback_query;
+    },
+    async sendInlineQuery(input: SendInlineQueryInput): Promise<InlineQuery> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'POST',
+        url: `${accountUrl}/inline-queries`,
+        expectedStatus: HTTP_STATUS_CREATED,
+        responseSchema: inlineQueryResponseSchema,
+        body: input,
+      });
+      return response.inline_query;
+    },
+    async getInlineQuery(inlineQueryId: string): Promise<InlineQuery> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'GET',
+        url: `${accountUrl}/inline-queries/${encodeURIComponent(inlineQueryId)}`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: inlineQueryResponseSchema,
+      });
+      return response.inline_query;
+    },
+    async chooseInlineQueryResult(
+      input: ChooseInlineQueryResultInput,
+    ): Promise<PrivateMessage | SupergroupMessage> {
+      const inlineQueryId = encodeURIComponent(input.inline_query_id);
+      const response = await requestJson(fetchImplementation, {
+        method: 'POST',
+        url: `${accountUrl}/inline-queries/${inlineQueryId}/chosen-results`,
+        expectedStatus: HTTP_STATUS_CREATED,
+        responseSchema: chosenInlineResultResponseSchema,
+        body: { result_id: input.result_id },
+      });
+      return response.message;
     },
     async getBotCommands(input: AccountBotCommandsInput): Promise<readonly BotCommand[]> {
       const botId = encodeURIComponent(input.chat.botId);

@@ -3,12 +3,18 @@ import type { ReplyInterface } from '../types/reply_interface.ts';
 import type { PrivateConversationKey, PrivateConversationRole } from '../types/virtual_chat.ts';
 import type {
   CanonicalMessageId,
+  ChatMessage,
+  InlineMessageId,
   MessageContent,
   PrivateMessage,
   SupergroupMessage,
   SupergroupMessageAuthor,
   SupergroupMessageContent,
+  ViaBot,
 } from '../types/virtual_message.ts';
+
+/** Telegram's inline message identifiers encode 24 bytes of TL data as base64url. */
+const INLINE_MESSAGE_ID_BYTE_COUNT = 24;
 
 export interface AddPrivateMessageInput {
   readonly conversation: PrivateConversationKey;
@@ -19,6 +25,11 @@ export interface AddPrivateMessageInput {
   readonly replyToMessageId?: CanonicalMessageId;
   readonly inlineKeyboard?: InlineKeyboard;
   readonly replyInterface?: ReplyInterface;
+  /**
+   * The bot through whose inline mode the account sent the message, which gives the message an
+   * inline message identifier; omitted for other messages.
+   */
+  readonly viaBotId?: number;
   /** Omitted for a message its sender did not protect. */
   readonly isContentProtected?: boolean;
 }
@@ -31,6 +42,8 @@ export interface AddSupergroupMessageInput {
   /** The message of the same supergroup this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
   readonly inlineKeyboard?: InlineKeyboard;
+  /** As `AddPrivateMessageInput` describes it. */
+  readonly viaBotId?: number;
   /** Omitted for a message its sender did not protect. */
   readonly isContentProtected?: boolean;
 }
@@ -42,12 +55,16 @@ export interface MessageEdit {
   readonly contentEditedAtUnixSeconds: number | undefined;
 }
 
-/** Stores canonical messages under opaque identities, independent of Telegram message IDs. */
+/**
+ * Stores canonical messages under opaque identities, independent of Telegram message IDs, and finds
+ * messages sent through a bot's inline mode by their inline message identifiers.
+ */
 export class MessageRepository {
   readonly #privateMessagesById = new Map<CanonicalMessageId, PrivateMessage>();
   readonly #privateMessageIdsByAccountId = new Map<number, Map<number, CanonicalMessageId[]>>();
   readonly #supergroupMessagesById = new Map<CanonicalMessageId, SupergroupMessage>();
   readonly #supergroupMessageIdsByChatId = new Map<number, CanonicalMessageId[]>();
+  readonly #messageIdsByInlineMessageId = new Map<InlineMessageId, CanonicalMessageId>();
 
   addPrivateMessage(input: AddPrivateMessageInput): PrivateMessage {
     const message: PrivateMessage = {
@@ -61,12 +78,14 @@ export class MessageRepository {
       ...(input.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(input.inlineKeyboard) }),
+      ...this.#createViaBot(input.viaBotId),
       ...(input.replyInterface === undefined
         ? {}
         : { replyInterface: copyReplyInterface(input.replyInterface) }),
       isContentProtected: input.isContentProtected ?? false,
     };
     this.#privateMessagesById.set(message.id, message);
+    this.#indexInlineMessage(message);
 
     const messageIdsByBotId = this.#privateMessageIdsByAccountId.get(
       input.conversation.accountId,
@@ -100,6 +119,7 @@ export class MessageRepository {
       authorRole,
       sentAtUnixSeconds,
       replyToMessageId,
+      viaBot,
       replyInterface,
       isContentProtected,
     } = storedMessage;
@@ -114,6 +134,7 @@ export class MessageRepository {
       ...(edit.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
+      ...(viaBot === undefined ? {} : { viaBot }),
       ...(replyInterface === undefined ? {} : { replyInterface }),
       ...(edit.contentEditedAtUnixSeconds === undefined
         ? {}
@@ -139,6 +160,7 @@ export class MessageRepository {
     }
     conversationMessageIds.splice(historyIndex, 1);
     this.#privateMessagesById.delete(messageId);
+    this.#unindexInlineMessage(storedMessage);
   }
 
   getPrivateConversationMessages(
@@ -168,9 +190,11 @@ export class MessageRepository {
       ...(input.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(input.inlineKeyboard) }),
+      ...this.#createViaBot(input.viaBotId),
       isContentProtected: input.isContentProtected ?? false,
     };
     this.#supergroupMessagesById.set(message.id, message);
+    this.#indexInlineMessage(message);
 
     const messageIds = this.#supergroupMessageIdsByChatId.get(input.chatId) ?? [];
     messageIds.push(message.id);
@@ -193,8 +217,16 @@ export class MessageRepository {
       throw new Error(`Supergroup message ${messageId} does not exist`);
     }
 
-    const { id, kind, chatId, author, sentAtUnixSeconds, replyToMessageId, isContentProtected } =
-      storedMessage;
+    const {
+      id,
+      kind,
+      chatId,
+      author,
+      sentAtUnixSeconds,
+      replyToMessageId,
+      viaBot,
+      isContentProtected,
+    } = storedMessage;
     const editedMessage: SupergroupMessage = {
       kind,
       id,
@@ -206,6 +238,7 @@ export class MessageRepository {
       ...(edit.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
+      ...(viaBot === undefined ? {} : { viaBot }),
       ...(edit.contentEditedAtUnixSeconds === undefined
         ? {}
         : { contentEditedAtUnixSeconds: edit.contentEditedAtUnixSeconds }),
@@ -229,6 +262,21 @@ export class MessageRepository {
     }
     chatMessageIds.splice(historyIndex, 1);
     this.#supergroupMessagesById.delete(messageId);
+    this.#unindexInlineMessage(storedMessage);
+  }
+
+  /** Finds a message of any chat that was sent through a bot's inline mode, until it is deleted. */
+  getMessageByInlineMessageId(inlineMessageId: InlineMessageId): ChatMessage | undefined {
+    const messageId = this.#messageIdsByInlineMessageId.get(inlineMessageId);
+    if (messageId === undefined) {
+      return undefined;
+    }
+    const message = this.#privateMessagesById.get(messageId) ??
+      this.#supergroupMessagesById.get(messageId);
+    if (message === undefined) {
+      throw new Error(`Inline message ${inlineMessageId} is indexed but not stored`);
+    }
+    return message;
   }
 
   getSupergroupMessages(chatId: number): readonly SupergroupMessage[] {
@@ -240,6 +288,27 @@ export class MessageRepository {
       }
       return message;
     });
+  }
+
+  #createViaBot(viaBotId: number | undefined): { readonly viaBot?: ViaBot } {
+    if (viaBotId === undefined) {
+      return {};
+    }
+    const inlineMessageId = crypto.getRandomValues(new Uint8Array(INLINE_MESSAGE_ID_BYTE_COUNT))
+      .toBase64({ alphabet: 'base64url', omitPadding: true });
+    return { viaBot: { botId: viaBotId, inlineMessageId } };
+  }
+
+  #indexInlineMessage(message: ChatMessage): void {
+    if (message.viaBot !== undefined) {
+      this.#messageIdsByInlineMessageId.set(message.viaBot.inlineMessageId, message.id);
+    }
+  }
+
+  #unindexInlineMessage(message: ChatMessage): void {
+    if (message.viaBot !== undefined) {
+      this.#messageIdsByInlineMessageId.delete(message.viaBot.inlineMessageId);
+    }
   }
 }
 

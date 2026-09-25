@@ -8,6 +8,7 @@ import { BotUpdateSubscriptionRepository } from '../repositories/bot_update_subs
 import { BotWebhookRepository } from '../repositories/bot_webhook.ts';
 import { CallbackQueryRepository } from '../repositories/callback_query.ts';
 import { FileRepository } from '../repositories/file.ts';
+import { InlineQueryRepository } from '../repositories/inline_query.ts';
 import { MessageRepository } from '../repositories/message.ts';
 import { PrivateConversationRepository } from '../repositories/private_conversation.ts';
 import { SharedChatRepository } from '../repositories/shared_chat.ts';
@@ -21,6 +22,7 @@ import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
 import { BotUpdatePollingService } from '../services/bot_update_polling.ts';
 import { BotWebhookService } from '../services/bot_webhook.ts';
 import { CallbackQueryService } from '../services/callback_query.ts';
+import { InlineQueryService } from '../services/inline_query.ts';
 import { MediaFileService } from '../services/media_file.ts';
 import { PrivateMessagingService } from '../services/private_messaging.ts';
 import { SharedChatAdministrationService } from '../services/shared_chat_administration.ts';
@@ -105,6 +107,15 @@ export function createEmulationSession(id: string): EmulationSession {
     callbackQueries: new CallbackQueryRepository(),
     events: botUpdateDelivery,
   });
+  const inlineQueries = new InlineQueryService({
+    accounts,
+    bots,
+    sharedChats,
+    privateMessages: privateMessaging,
+    supergroupMessages: supergroupMessaging,
+    inlineQueries: new InlineQueryRepository(),
+    events: botUpdateDelivery,
+  });
 
   const botCommands = new BotCommandService({
     accounts,
@@ -131,6 +142,8 @@ export function createEmulationSession(id: string): EmulationSession {
     botMessageViews,
     mediaFiles,
     callbackQueries,
+    inlineQueries,
+    inlineMessages: messages,
     botCommands,
   });
 
@@ -142,6 +155,7 @@ export function createEmulationSession(id: string): EmulationSession {
     supergroupMessaging,
     botBlocking,
     callbackQueries,
+    inlineQueries,
     botCommands,
     botMessageViews,
     mediaFiles,

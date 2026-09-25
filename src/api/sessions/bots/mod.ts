@@ -9,6 +9,10 @@ const createBotRequestSchema = z.strictObject({
   username: z.string().min(1),
   /** Turns off privacy mode, so that the bot receives every message of its groups. */
   can_read_all_group_messages: z.boolean().optional(),
+  /** Turns on inline mode, so that accounts send the bot inline queries. */
+  supports_inline_queries: z.boolean().optional(),
+  /** Turns on inline feedback, so that the bot learns which inline query results are sent. */
+  receives_chosen_inline_results: z.boolean().optional(),
 });
 
 export function createBotRoutes(): Hono<SessionRouteContextTypes> {

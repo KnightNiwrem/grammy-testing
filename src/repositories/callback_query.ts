@@ -3,12 +3,14 @@ import type {
   CallbackQueryAnswer,
   CallbackQueryId,
 } from '../types/callback_query.ts';
-import type { CanonicalMessageId } from '../types/virtual_message.ts';
+import type { CanonicalMessageId, InlineMessageId } from '../types/virtual_message.ts';
 
 export interface AddCallbackQueryInput {
   readonly accountId: number;
   readonly botId: number;
   readonly messageId: CanonicalMessageId;
+  /** Omitted for a press on a bot's own message rather than an inline message. */
+  readonly inlineMessageId?: InlineMessageId;
   readonly chatInstance: string;
   readonly callbackData: string;
   /** Stores the query already expired instead of awaiting an answer. */
@@ -26,6 +28,7 @@ export class CallbackQueryRepository {
       accountId: input.accountId,
       botId: input.botId,
       messageId: input.messageId,
+      ...(input.inlineMessageId === undefined ? {} : { inlineMessageId: input.inlineMessageId }),
       chatInstance: input.chatInstance,
       callbackData: input.callbackData,
       state: input.expired ? { status: 'expired' } : { status: 'awaiting_answer' },

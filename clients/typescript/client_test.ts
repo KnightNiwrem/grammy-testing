@@ -481,6 +481,64 @@ Deno.test('TypeScript client sends, edits, and downloads photos and documents', 
   throw new Error('Expected content that is not an image to be refused as a photo');
 });
 
+Deno.test('TypeScript client sends inline queries and results through an inline bot', async () => {
+  const publicOrigin = 'http://emulator.example:9000';
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin,
+  });
+  const client = new TelegramEmulationClient(publicOrigin, {
+    fetch: createInProcessFetch(api.fetch),
+  });
+  const session = await client.createSession();
+  const { token, bot } = await session.createBot({
+    first_name: 'Cats Bot',
+    username: 'cats_bot',
+    supports_inline_queries: true,
+    receives_chosen_inline_results: true,
+  });
+  const { account } = await session.createAccount({ first_name: 'Ada' });
+  const supergroup = await account.createSupergroup({ title: 'Team' });
+
+  const inlineQuery = await account.sendInlineQuery({
+    bot_id: bot.id,
+    chat: { type: 'supergroup', chatId: supergroup.id },
+    query: 'cats',
+  });
+  const answerResponse = await api.request(
+    `/sessions/${session.id}/bot-api/bot${token}/answerInlineQuery`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        inline_query_id: inlineQuery.id,
+        results: [{
+          type: 'article',
+          id: 'fact',
+          title: 'Cat fact',
+          input_message_content: { message_text: 'Cats sleep a lot' },
+        }],
+        button: { text: 'Open', web_app: { url: 'https://grammy.dev' } },
+      }),
+    },
+  );
+  const answeredQuery = await account.getInlineQuery(inlineQuery.id);
+  const message = await account.chooseInlineQueryResult({
+    inline_query_id: inlineQuery.id,
+    result_id: 'fact',
+  });
+  if (
+    bot.supports_inline_queries !== true || inlineQuery.status !== 'awaiting_answer' ||
+    answerResponse.status !== 200 || answeredQuery.answer?.results[0]?.title !== 'Cat fact' ||
+    answeredQuery.answer.button === undefined || !('web_app' in answeredQuery.answer.button) ||
+    message.text !== 'Cats sleep a lot' || message.via_bot?.username !== 'cats_bot' ||
+    message.chat.type !== 'supergroup'
+  ) {
+    throw new Error('Expected the client to send an inline query and its chosen result');
+  }
+  await session.end();
+});
+
 Deno.test('TypeScript client reports HTTP failures with request details', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({

@@ -16,6 +16,8 @@ import type {
 } from '../types/virtual_chat.ts';
 import type {
   CanonicalMessageId,
+  ChatMessage,
+  InlineMessageId,
   MessageContent,
   PrivateMessage,
   TextEntity,
@@ -29,7 +31,6 @@ import {
   type FileUploadStore,
   hasOnlyValidCallbackData,
   isSameMessageContent,
-  type NormalizedOutgoingContent,
   normalizeOutgoingContent,
   type OutgoingContentNormalization,
   type OutgoingMessageContent,
@@ -87,6 +88,30 @@ export type SendAccountMessageResult =
     )
   );
 
+/**
+ * An inline query result that an account sends to its private chat with a bot, through the inline
+ * bot that offered it.
+ */
+export interface SendAccountInlineResultInput {
+  readonly fromAccountId: number;
+  readonly to: {
+    readonly type: 'private';
+    readonly botId: number;
+  };
+  readonly viaBotId: number;
+  /** Content the inline bot's answer holds, which Telegram checked when the bot answered. */
+  readonly content: MessageContent;
+  /** Omitted when the result sends no inline keyboard. */
+  readonly inlineKeyboard?: InlineKeyboard;
+}
+
+export type SendAccountInlineResultResult =
+  | { readonly sent: true; readonly message: PrivateMessage }
+  | {
+    readonly sent: false;
+    readonly reason: 'account_not_found' | 'bot_not_found' | 'bot_blocked';
+  };
+
 /** A bot's private chat, identified by the account at its other end. */
 export interface BotPrivateChat {
   readonly type: 'private';
@@ -133,20 +158,29 @@ export type SendBotMessageResult =
     )
   );
 
-interface EditBotMessageTarget {
-  readonly fromBotId: number;
-  readonly chat: BotPrivateChat;
-  /** The message's ID in the bot's message box. */
-  readonly botMessageId: number;
-}
+/**
+ * The message a bot edits: one it sent to one of its private chats, or one an account sent to a
+ * private chat through the bot's inline mode, which the bot addresses without being in the chat.
+ */
+type EditBotMessageTarget =
+  | {
+    readonly fromBotId: number;
+    readonly chat: BotPrivateChat;
+    /** The message's ID in the bot's message box. */
+    readonly botMessageId: number;
+  }
+  | {
+    readonly fromBotId: number;
+    readonly inlineMessageId: InlineMessageId;
+  };
 
-export interface EditBotMessageTextInput extends EditBotMessageTarget {
+export type EditBotMessageTextInput = EditBotMessageTarget & {
   readonly text: string;
   /** Formatting the bot specified, which Telegram validates and normalizes; omitted for none. */
   readonly entities?: readonly TextEntity[];
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
-}
+};
 
 export type EditBotMessageCaptionInput = EditBotMessageTarget & SpecifiedCaption & {
   /** Whether a photo shows its caption above itself; a document ignores it. */
@@ -155,10 +189,10 @@ export type EditBotMessageCaptionInput = EditBotMessageTarget & SpecifiedCaption
   readonly inlineKeyboard?: InlineKeyboard;
 };
 
-export interface EditBotMessageInlineKeyboardInput extends EditBotMessageTarget {
+export type EditBotMessageInlineKeyboardInput = EditBotMessageTarget & {
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
-}
+};
 
 export type EditBotMessageInlineKeyboardFailureReason =
   | 'bot_not_found'
@@ -335,9 +369,11 @@ interface PrivateMessageStore {
     readonly replyToMessageId?: CanonicalMessageId;
     readonly inlineKeyboard?: InlineKeyboard;
     readonly replyInterface?: ReplyInterface;
+    readonly viaBotId?: number;
     readonly isContentProtected?: boolean;
   }): PrivateMessage;
   getPrivateMessage(messageId: CanonicalMessageId): PrivateMessage | undefined;
+  getMessageByInlineMessageId(inlineMessageId: InlineMessageId): ChatMessage | undefined;
   editPrivateMessage(messageId: CanonicalMessageId, edit: {
     readonly content: MessageContent;
     readonly inlineKeyboard: InlineKeyboard | undefined;
@@ -380,7 +416,8 @@ interface PrivateMessagingServiceDependencies {
  * numbered for both participants, then published. Bots can attach inline keyboards to their
  * messages, edit them afterward, and delete messages of their chats. A bot's message can also
  * change the reply interface the account's client shows, such as a reply keyboard whose buttons
- * the account presses. An account edits the text or caption of its messages.
+ * the account presses. An account edits the text or caption of its messages, and sends inline
+ * query results through inline bots, which edit the messages sent through them.
  *
  * While an account blocks a bot, neither can write to the other, as on Telegram, where the bot's
  * sends fail and a client asks the user to unblock the bot before writing to it.
@@ -487,8 +524,43 @@ export class PrivateMessagingService {
         account,
         bot,
         authorRole: 'account',
-        content: contentNormalization.content,
+        content: storeOutgoingContent(contentNormalization.content, this.#files),
         replyToMessageId: repliedMessage?.id,
+      }),
+    };
+  }
+
+  /**
+   * Sends an inline query result from an account to its private chat with a bot, which receives
+   * it as the account's message sent through the inline bot. As for any message, the account must
+   * not block the chat's bot.
+   */
+  sendAccountInlineResult(input: SendAccountInlineResultInput): SendAccountInlineResultResult {
+    const account = this.#accounts.getById(input.fromAccountId);
+    if (account === undefined) {
+      return { sent: false, reason: 'account_not_found' };
+    }
+    const bot = this.#bots.getById(input.to.botId);
+    if (bot === undefined) {
+      return { sent: false, reason: 'bot_not_found' };
+    }
+    if (this.#blockedUsers.isBlocked(account.profile.id, bot.profile.id)) {
+      return { sent: false, reason: 'bot_blocked' };
+    }
+
+    this.#privateConversations.getOrCreatePrivateConversation({
+      accountId: account.profile.id,
+      botId: bot.profile.id,
+    });
+    return {
+      sent: true,
+      message: this.#storePrivateMessage({
+        account,
+        bot,
+        authorRole: 'account',
+        content: input.content,
+        inlineKeyboard: input.inlineKeyboard,
+        viaBotId: input.viaBotId,
       }),
     };
   }
@@ -543,7 +615,7 @@ export class PrivateMessagingService {
         account,
         bot,
         authorRole: 'bot',
-        content: contentNormalization.content,
+        content: storeOutgoingContent(contentNormalization.content, this.#files),
         replyToMessageId: replyResolution.repliedMessage?.id,
         inlineKeyboard: input.inlineKeyboard,
         replyInterfaceMarkup: input.replyInterfaceMarkup,
@@ -553,8 +625,10 @@ export class PrivateMessagingService {
   }
 
   /**
-   * Replaces the text, entities, and inline keyboard of a text message the bot sent. Only changed
-   * text or entities date the edit. As on Telegram, the bot receives no update for its own edit.
+   * Replaces the text, entities, and inline keyboard of a text message the bot sent, or that was
+   * sent through its inline mode. Only changed text or entities date the edit. As on Telegram, the
+   * bot receives no update for its own message's edit; an edit of an account's message sent
+   * through the bot reaches the chat's bot as the account's edited message.
    *
    * Checks follow Telegram's order: the text is checked for emptiness before the message is
    * resolved; it is then normalized with its entities, and the result is checked for length.
@@ -580,8 +654,8 @@ export class PrivateMessagingService {
 
   /**
    * Replaces the caption, its entities, and the inline keyboard of a photo or document the bot
-   * sent; an empty caption removes it. Only a changed caption dates the edit. As on Telegram, the
-   * bot receives no update for its own edit.
+   * sent, or that was sent through its inline mode; an empty caption removes it. Only a changed
+   * caption dates the edit. Updates follow `editBotMessageText`.
    */
   editBotMessageCaption(input: EditBotMessageCaptionInput): EditBotMessageCaptionResult {
     if (this.#bots.getById(input.fromBotId) === undefined) {
@@ -600,8 +674,8 @@ export class PrivateMessagingService {
   }
 
   /**
-   * Replaces the inline keyboard of a message the bot sent, leaving its content and edit date as
-   * they are. As on Telegram, the bot receives no update for its own edit.
+   * Replaces the inline keyboard of a message the bot sent, or that was sent through its inline
+   * mode, leaving its content and edit date as they are. Updates follow `editBotMessageText`.
    */
   editBotMessageInlineKeyboard(
     input: EditBotMessageInlineKeyboardInput,
@@ -623,8 +697,8 @@ export class PrivateMessagingService {
   }
 
   /**
-   * Replaces the text or caption of a message the account wrote to the bot, which, unlike a bot's
-   * own edit, sends the bot an `edited_message` update. As when sending, the text is normalized as
+   * Replaces the text or caption of a message the account wrote to the bot, other than one sent
+   * through an inline bot, which, unlike a bot's own edit, sends the bot an `edited_message` update. As when sending, the text is normalized as
    * a Telegram client does, which marks bot commands again.
    */
   editAccountMessage(input: EditAccountMessageInput): EditAccountMessageResult {
@@ -641,7 +715,8 @@ export class PrivateMessagingService {
     if (message === undefined) {
       return { edited: false, reason: 'message_not_found' };
     }
-    if (message.authorRole !== 'account') {
+    // As in TDLib, only the inline bot edits a message sent through it.
+    if (message.authorRole !== 'account' || message.viaBot !== undefined) {
       return { edited: false, reason: 'message_not_editable' };
     }
     const replacement = replaceAccountMessageContent(
@@ -850,9 +925,12 @@ export class PrivateMessagingService {
     return { message, replyInterface: message.replyInterface };
   }
 
-  /** Resolves the bot message an edit targets, which only the bot that sent it can edit. */
+  /**
+   * Resolves the message an edit targets: a message of the bot's chat, which only the bot that sent
+   * it can edit, or a message sent through the bot's inline mode, which only that bot finds.
+   */
   #resolveEditableBotMessage(
-    { fromBotId, chat, botMessageId }: EditBotMessageTarget,
+    target: EditBotMessageTarget,
   ):
     | { readonly resolved: true; readonly message: PrivateMessage }
     | {
@@ -863,6 +941,13 @@ export class PrivateMessagingService {
         | 'message_not_found'
         | 'message_not_editable';
     } {
+    if ('inlineMessageId' in target) {
+      const message = this.#findInlineMessage(target.inlineMessageId);
+      return message?.viaBot?.botId === target.fromBotId
+        ? { resolved: true, message }
+        : { resolved: false, reason: 'message_not_found' };
+    }
+    const { fromBotId, chat, botMessageId } = target;
     if (this.#accounts.getById(chat.accountId) === undefined) {
       return { resolved: false, reason: 'account_not_found' };
     }
@@ -924,6 +1009,12 @@ export class PrivateMessagingService {
     return { edited: true, message: editedMessage };
   }
 
+  /** Finds a private message sent through a bot's inline mode by its inline message identifier. */
+  #findInlineMessage(inlineMessageId: InlineMessageId): PrivateMessage | undefined {
+    const message = this.#messages.getMessageByInlineMessageId(inlineMessageId);
+    return message?.kind === 'private_message' ? message : undefined;
+  }
+
   /** A text mention may name any user of the session. */
   get #textFixingContext() {
     return {
@@ -944,8 +1035,8 @@ export class PrivateMessagingService {
   }
 
   /**
-   * Stores normalized content written by one participant of an existing private conversation with
-   * its upload, numbers it in both participants' message boxes, applies its change of the
+   * Stores content written by one participant of an existing private conversation, whose file the
+   * caller stored, numbers it in both participants' message boxes, applies its change of the
    * account's reply interface, and publishes its creation.
    */
   #storePrivateMessage(
@@ -957,15 +1048,17 @@ export class PrivateMessagingService {
       replyToMessageId,
       inlineKeyboard,
       replyInterfaceMarkup,
+      viaBotId,
       isContentProtected,
     }: {
       readonly account: VirtualAccount;
       readonly bot: VirtualBot;
       readonly authorRole: PrivateConversationRole;
-      readonly content: NormalizedOutgoingContent;
+      readonly content: MessageContent;
       readonly replyToMessageId?: CanonicalMessageId;
       readonly inlineKeyboard?: InlineKeyboard;
       readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
+      readonly viaBotId?: number;
       readonly isContentProtected?: boolean;
     },
   ): PrivateMessage {
@@ -977,12 +1070,13 @@ export class PrivateMessagingService {
       conversation,
       authorRole,
       sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
-      content: storeOutgoingContent(content, this.#files),
+      content,
       replyToMessageId,
       inlineKeyboard,
       replyInterface: replyInterfaceMarkup?.kind === 'reply_keyboard_removal'
         ? undefined
         : replyInterfaceMarkup,
+      viaBotId,
       isContentProtected,
     });
     // Telegram numbers a private message in each participant's message box. Only the bot's

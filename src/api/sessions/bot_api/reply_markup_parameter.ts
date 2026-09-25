@@ -25,7 +25,11 @@ const urlButtonSchema = z.strictObject({
   url: z.string().refine((url) => URL.canParse(url)),
 }).transform(({ text, url }): InlineKeyboardButton => ({ kind: 'url', text, url }));
 
-const inlineKeyboardMarkupSchema = z.strictObject({
+/**
+ * An `InlineKeyboardMarkup` object, as `inlineKeyboardMarkupParameter` describes it, for objects
+ * that hold one, such as inline query results.
+ */
+export const inlineKeyboardMarkupSchema = z.strictObject({
   inline_keyboard: z.array(z.array(z.union([callbackButtonSchema, urlButtonSchema])).min(1)),
 }).transform(({ inline_keyboard }): InlineKeyboard | undefined =>
   inline_keyboard.length === 0 ? undefined : inline_keyboard
