@@ -1,5 +1,6 @@
 import { cleanUploadedFileName } from '../media/document_file.ts';
 import { isParseMode, parseMarkup } from '../text_entities/parse_mode.ts';
+import { checkLink, getLinkUserId } from '../text_entities/telegram_link.ts';
 import type {
   BotApiBotCommand,
   BotApiChatMember,
@@ -17,7 +18,7 @@ import {
   getSupergroupNonMemberFailureReason,
 } from '../types/chat_membership.ts';
 import type { InlineQueryId, InlineQueryResultsButton } from '../types/inline_query.ts';
-import type { InlineKeyboard } from '../types/inline_keyboard.ts';
+import type { InlineKeyboard, InlineKeyboardButton } from '../types/inline_keyboard.ts';
 import {
   createMessageForward,
   isForwardable,
@@ -108,6 +109,14 @@ export type ReadFormattedTextResult =
     readonly reason: 'markup_invalid';
     /** TDLib's description of the markup error. */
     readonly markupError: string;
+  };
+
+export type ReadInlineKeyboardResult =
+  | { readonly read: true; readonly inlineKeyboard: InlineKeyboard }
+  | {
+    readonly read: false;
+    /** TDLib's description of the button it cannot read. */
+    readonly keyboardError: string;
   };
 
 /** The message that a sent message replies to, as `reply_parameters` specify it. */
@@ -1236,6 +1245,39 @@ export class BotApiService {
       return { read: true, formattedText: { text: parsing.text, entities: parsing.entities } };
     }
     return { read: false, reason: 'markup_invalid', markupError: parsing.error };
+  }
+
+  /**
+   * Reads the links of an inline keyboard's URL buttons as TDLib's `get_inline_keyboard_button`
+   * does for a keyboard being sent: a `tg://user?id=` link opens the user's profile and is kept in
+   * that canonical form, and any other link must pass `check_link`, which normalizes it, so that
+   * `grammy.dev` opens `http://grammy.dev/`. Telegram's servers decide whether the user of a
+   * profile link may be shown, which the emulator does not check. The keyboard still has to pass
+   * the checks that sending or editing applies.
+   */
+  readInlineKeyboard(inlineKeyboard: InlineKeyboard): ReadInlineKeyboardResult {
+    const readRows: InlineKeyboardButton[][] = [];
+    for (const row of inlineKeyboard) {
+      const readRow: InlineKeyboardButton[] = [];
+      for (const button of row) {
+        if (button.kind !== 'url') {
+          readRow.push(button);
+          continue;
+        }
+        const userId = getLinkUserId(button.url);
+        if (userId !== undefined) {
+          readRow.push({ ...button, url: `tg://user?id=${userId}` });
+          continue;
+        }
+        const linkCheck = checkLink(button.url);
+        if (!linkCheck.valid) {
+          return { read: false, keyboardError: `Inline keyboard button ${linkCheck.error}` };
+        }
+        readRow.push({ ...button, url: linkCheck.url });
+      }
+      readRows.push(readRow);
+    }
+    return { read: true, inlineKeyboard: readRows };
   }
 
   /**

@@ -5,9 +5,15 @@
 ## Inline keyboards
 
 Messages can carry inline keyboards with callback and URL buttons in private chats and supergroups.
-Callback data must contain 1–64 UTF-8 bytes. Bots replace or remove a keyboard with
-`editMessageReplyMarkup`, or supply it when editing text/captions. An empty `inline_keyboard`
-removes the keyboard.
+Callback data must contain 1–64 UTF-8 bytes. URL buttons accept the links TDLib's
+[`get_inline_keyboard_button`][td-inline-button] accepts: a `tg://user?id=` link opens the user's
+profile, and any other link must pass [`LinkManager::check_link`][check-link], the same rule the
+emulator applies to text links. The keyboard keeps and returns the normalized link, so `grammy.dev`
+becomes `http://grammy.dev/`, and a refused link fails with TDLib's error, such as
+`Bad Request: inline keyboard button URL 'grammy' is invalid: Wrong HTTP URL`. Telegram's servers
+decide whether a profile link's user may be shown, which the emulator does not check. Bots replace
+or remove a keyboard with `editMessageReplyMarkup`, or supply it when editing text/captions. An
+empty `inline_keyboard` removes the keyboard.
 
 An account presses a callback button using its message ID and `callback_data`. The emulator creates
 a `callback_query` update for the bot responsible for that keyboard. The query includes the account,
@@ -113,9 +119,6 @@ no buttons, and it checks only the icon identifier's syntax, as it does for
 - **Reply keyboard request buttons.** Requests for contacts, locations, polls, users, chats and web
   apps are absent. Compare these missing types and fields with upstream's
   [keyboard button parsing][button-parsing].
-- **URL acceptance rules.** Validation uses JavaScript's `URL` parser rather than Telegram's full
-  link rules, so acceptance is not identical. Matching those rules is needed for button validation
-  tests.
 
 ## Comparison limits
 
@@ -140,6 +143,8 @@ server behavior.
 [dismiss-reply]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L16043-L16082
 [reply-markup]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10504-L10630
 [button-parsing]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10200-L10503
+[td-inline-button]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L226-L262
+[check-link]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/LinkManager.cpp#L1926-L1994
 [button-style]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10226-L10246
 [button-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L4247-L4263
 [td-button-equality]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L84-L87

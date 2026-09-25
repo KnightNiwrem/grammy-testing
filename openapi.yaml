@@ -3919,8 +3919,13 @@ components:
               $ref: '#/components/schemas/ButtonStyle'
             url:
               type: string
-              format: uri
-              description: An absolute URL.
+              minLength: 1
+              description: >-
+                A link as Telegram reads it: an HTTP or HTTPS URL, whose scheme defaults to
+                `http`, or a `tg:`, `ton:` or `tonsite:` link. Responses show it normalized, as
+                `http://grammy.dev/` for `grammy.dev`; a `tg://user?id=` link opens the user's
+                profile. A link Telegram refuses fails with `Bad Request: inline keyboard button
+                URL '…' is invalid: …`.
     MessageSenderBot:
       type: object
       additionalProperties: false

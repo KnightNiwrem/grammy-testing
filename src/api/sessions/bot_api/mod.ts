@@ -7,6 +7,7 @@ import {
 } from '../../../types/bot_command.ts';
 import { MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH } from '../../../types/callback_query.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
+import type { InlineKeyboard } from '../../../types/inline_keyboard.ts';
 import type { VirtualBotProfile } from '../../../types/virtual_bot.ts';
 import type { ChatAction } from '../../../types/virtual_chat.ts';
 import { fileDownloadResponse } from '../file_download.ts';
@@ -1188,10 +1189,16 @@ function readSendOptions(
   if (chatId === undefined) {
     return { read: false, errorAnswer: botApiError(400, CHAT_ID_EMPTY_DESCRIPTION) };
   }
+  const keyboardReading = readInlineKeyboardParameter(context, replyMarkup.inlineKeyboard);
+  if (!keyboardReading.read) {
+    return keyboardReading;
+  }
   return {
     read: true,
     options: {
-      ...replyMarkup,
+      ...(keyboardReading.inlineKeyboard === undefined
+        ? replyMarkup
+        : { inlineKeyboard: keyboardReading.inlineKeyboard }),
       chatId,
       replyTo: replyTarget === undefined ? undefined : {
         messageId: replyTarget.messageId,
@@ -1207,6 +1214,26 @@ function readSendOptions(
       isSilent,
       messageEffectId,
     },
+  };
+}
+
+/**
+ * Reads the inline keyboard a request attaches, as `BotApiService.readInlineKeyboard` does,
+ * answering Telegram's error for a button it cannot read; a request without one reads none.
+ */
+function readInlineKeyboardParameter(
+  context: BotApiMethodContext,
+  inlineKeyboard: InlineKeyboard | undefined,
+):
+  | { readonly read: true; readonly inlineKeyboard: InlineKeyboard | undefined }
+  | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
+  if (inlineKeyboard === undefined) {
+    return { read: true, inlineKeyboard };
+  }
+  const reading = context.session.botApi.readInlineKeyboard(inlineKeyboard);
+  return reading.read ? reading : {
+    read: false,
+    errorAnswer: botApiError(400, badRequestDescription(reading.keyboardError)),
   };
 }
 
@@ -1296,9 +1323,17 @@ function handleEditMessageText(
     return targetReading.errorAnswer;
   }
 
+  const keyboardReading = readInlineKeyboardParameter(context, inlineKeyboard);
+  if (!keyboardReading.read) {
+    return keyboardReading.errorAnswer;
+  }
+
   const { target } = targetReading;
   const { botApi } = context.session;
-  const edit = { ...formattedTextReading.formattedText, inlineKeyboard };
+  const edit = {
+    ...formattedTextReading.formattedText,
+    inlineKeyboard: keyboardReading.inlineKeyboard,
+  };
   return target.kind === 'inline_message'
     ? inlineMessageEditAnswer(botApi.editInlineMessageText(context.bot, { ...target, ...edit }))
     : editMessageAnswer(botApi.editMessageText(context.bot, { ...target, ...edit }));
@@ -1323,13 +1358,17 @@ function handleEditMessageCaption(
   if (!targetReading.read) {
     return targetReading.errorAnswer;
   }
+  const keyboardReading = readInlineKeyboardParameter(context, data.reply_markup);
+  if (!keyboardReading.read) {
+    return keyboardReading.errorAnswer;
+  }
 
   const { target } = targetReading;
   const { botApi } = context.session;
   const edit = {
     caption: captionReading.formattedText,
     showsCaptionAboveMedia: data.show_caption_above_media,
-    inlineKeyboard: data.reply_markup,
+    inlineKeyboard: keyboardReading.inlineKeyboard,
   };
   return target.kind === 'inline_message'
     ? inlineMessageEditAnswer(
@@ -1351,9 +1390,14 @@ function handleEditMessageReplyMarkup(
     return targetReading.errorAnswer;
   }
 
+  const keyboardReading = readInlineKeyboardParameter(context, parsedParameters.data.reply_markup);
+  if (!keyboardReading.read) {
+    return keyboardReading.errorAnswer;
+  }
+
   const { target } = targetReading;
   const { botApi } = context.session;
-  const inlineKeyboard = parsedParameters.data.reply_markup;
+  const { inlineKeyboard } = keyboardReading;
   return target.kind === 'inline_message'
     ? inlineMessageEditAnswer(botApi.editInlineMessageReplyMarkup(context.bot, {
       ...target,
@@ -2078,7 +2122,15 @@ function handleAnswerInlineQuery(
   }
   const results: InlineQueryResultRequest[] = [];
   for (const result of resultsReading.results) {
-    const resultReading = readInlineQueryResultText(context, result, invalidParametersDescription);
+    const keyboardReading = readInlineKeyboardParameter(context, result.inlineKeyboard);
+    if (!keyboardReading.read) {
+      return keyboardReading.errorAnswer;
+    }
+    const resultReading = readInlineQueryResultText(
+      context,
+      { ...result, inlineKeyboard: keyboardReading.inlineKeyboard },
+      invalidParametersDescription,
+    );
     if (!resultReading.read) {
       return botApiError(400, resultReading.description);
     }

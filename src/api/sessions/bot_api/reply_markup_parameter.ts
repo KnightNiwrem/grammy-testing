@@ -53,7 +53,9 @@ const callbackButtonSchema = z.strictObject({
 const urlButtonSchema = z.strictObject({
   text: z.string().min(1),
   ...buttonAppearanceShape,
-  url: z.string().refine((url) => URL.canParse(url)),
+  // Sending reads the link as Telegram does; an empty link would leave a text button, which
+  // Telegram refuses in an inline keyboard.
+  url: z.string().min(1),
 }).transform((button): InlineKeyboardButton => ({
   kind: 'url',
   text: button.text,

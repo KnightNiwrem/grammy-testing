@@ -1017,7 +1017,7 @@ Deno.test('sendMessage attaches an inline keyboard from every request encoding',
   const accountId = createdAccount.account.id;
   const inlineKeyboard = [
     [{ text: 'Yes', callback_data: 'yes' }, { text: 'No', callback_data: 'no' }],
-    [{ text: 'Docs', url: 'https://grammy.dev' }],
+    [{ text: 'Docs', url: 'https://grammy.dev/' }],
   ];
 
   const jsonReply = await callBotApi(api, `${botApiPath}/sendMessage`, {
@@ -1065,7 +1065,6 @@ Deno.test('sendMessage attaches an inline keyboard from every request encoding',
     { inline_keyboard: [[{ text: 'Plain' }]] },
     { inline_keyboard: [[{ text: 'Empty', callback_data: '' }]] },
     { inline_keyboard: [[{ text: 'Both', callback_data: 'yes', url: 'https://grammy.dev' }]] },
-    { inline_keyboard: [[{ text: 'Relative', url: 'grammy.dev' }]] },
     { inline_keyboard: [[{ text: 'App', web_app: { url: 'https://grammy.dev' } }]] },
     { inline_keyboard: [[]] },
     'not JSON',
@@ -1093,6 +1092,70 @@ Deno.test('sendMessage attaches an inline keyboard from every request encoding',
     oversizedCallbackData.body.description !== 'Bad Request: BUTTON_DATA_INVALID'
   ) {
     throw new Error('Expected callback data over 64 bytes to be rejected as Telegram does');
+  }
+});
+
+Deno.test('URL buttons follow Telegram link rules', async () => {
+  const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
+  await sendText('/start');
+  const accountId = createdAccount.account.id;
+  const sendUrlButtons = (urls: readonly string[]) =>
+    callBotApi(api, `${botApiPath}/sendMessage`, {
+      chat_id: accountId,
+      text: 'Links',
+      reply_markup: { inline_keyboard: [urls.map((url) => ({ text: 'Open', url }))] },
+    });
+
+  const reply = await sendUrlButtons([
+    'grammy.dev',
+    'HTTPS://Grammy.dev/Docs?page=1',
+    'tg://resolve?domain=grammy_bot',
+    'TG://user?id=' + accountId,
+  ]);
+  const sentMessage = botApiResult(reply.body);
+  const expectedUrls = [
+    'http://grammy.dev/',
+    'https://grammy.dev/Docs?page=1',
+    'tg://resolve?domain=grammy_bot',
+    `tg://user?id=${accountId}`,
+  ];
+  const sentUrls =
+    (sentMessage?.reply_markup as { inline_keyboard: { url: string }[][] } | undefined)
+      ?.inline_keyboard[0].map(({ url }) => url);
+  if (reply.status !== 200 || JSON.stringify(sentUrls) !== JSON.stringify(expectedUrls)) {
+    throw new Error(`Expected Telegram's normalized links, received ${JSON.stringify(sentUrls)}`);
+  }
+
+  const invalidLinks = [
+    ['grammy', "Bad Request: inline keyboard button URL 'grammy' is invalid: Wrong HTTP URL"],
+    [
+      'ftp://grammy.dev',
+      "Bad Request: inline keyboard button URL 'ftp://grammy.dev' is invalid: Unsupported URL protocol",
+    ],
+    [
+      'tg://resolve:80?domain=grammy_bot',
+      "Bad Request: inline keyboard button URL 'tg://resolve:80?domain=grammy_bot' is invalid: Wrong tg URL",
+    ],
+  ] as const;
+  for (const [url, expectedDescription] of invalidLinks) {
+    const { status, body } = await sendUrlButtons([url]);
+    if (
+      status !== 400 || !isBadRequestResponse(body) || body.description !== expectedDescription
+    ) {
+      throw new Error(`Expected ${url} to be refused, received ${JSON.stringify(body)}`);
+    }
+  }
+
+  const invalidEdit = await callBotApi(api, `${botApiPath}/editMessageReplyMarkup`, {
+    chat_id: accountId,
+    message_id: sentMessage?.message_id,
+    reply_markup: { inline_keyboard: [[{ text: 'Open', url: 'grammy' }]] },
+  });
+  if (
+    !isBadRequestResponse(invalidEdit.body) ||
+    invalidEdit.body.description !== invalidLinks[0][1]
+  ) {
+    throw new Error('Expected an edit to read the keyboard links as sending does');
   }
 });
 
@@ -5504,6 +5567,9 @@ Deno.test('answerInlineQuery and the inline query routes follow Telegram checks'
     await answer({ results: [article('1')], button: { text: 'Sign in', start_parameter: 'a b' } }),
     await answer({ results: [article('1')], next_offset: 'a'.repeat(65) }),
     await answer({ results: [article('')] }),
+    await answer({
+      results: [article('1', { reply_markup: { inline_keyboard: [[{ text: 'Go', url: 'go' }]] } })],
+    }),
     await answer({ results: 'not JSON' }),
     await answer({ inline_query_id: '999', results: [article('1')] }),
   ];
@@ -5522,6 +5588,7 @@ Deno.test('answerInlineQuery and the inline query routes follow Telegram checks'
       'Bad Request: unallowed characters in start_parameter are used',
       'Bad Request: NEXT_OFFSET_INVALID',
       'Bad Request: RESULT_ID_EMPTY',
+      "Bad Request: inline keyboard button URL 'go' is invalid: Wrong HTTP URL",
       'Bad Request: invalid answerInlineQuery parameters',
       'Bad Request: query is too old and response timeout expired or query ID is invalid',
     ])
