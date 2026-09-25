@@ -3,12 +3,8 @@ export {
   EmulationClientError,
   type EmulationClientErrorDetails,
 } from './emulation_client_error.ts';
-export {
-  ButtonSelectionError,
-  findButton,
-  listButtons,
-  richTextToPlainText,
-} from './message_buttons.ts';
+export { ButtonSelectionError, findButton, listButtons } from './message_buttons.ts';
+export { richMessageToPlainText, richTextToPlainText } from './rich_message_text.ts';
 export type { EmulationSessionClient } from './emulation_session_client.ts';
 export {
   TelegramEmulationClient,

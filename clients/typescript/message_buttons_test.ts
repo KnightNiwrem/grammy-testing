@@ -1,4 +1,4 @@
-import { ButtonSelectionError, findButton, listButtons, richTextToPlainText } from './mod.ts';
+import { ButtonSelectionError, findButton, listButtons } from './mod.ts';
 import type { ButtonSelector, MessageWithButtons, RichBlockTableCell, RichText } from './mod.ts';
 
 const shop: MessageWithButtons = {
@@ -43,20 +43,6 @@ const shop: MessageWithButtons = {
     ]],
   },
 };
-
-Deno.test('richTextToPlainText shows nested text, custom emoji, and button labels', () => {
-  const text: RichText = [
-    { type: 'bold', text: ['Sale ', { type: 'italic', text: 'now' }] },
-    { type: 'anchor', name: 'top' },
-    ' ',
-    { type: 'custom_emoji', custom_emoji_id: '5', alternative_text: '✈' },
-    { type: 'button', button: { text: ' Book', callback_data: 'book' } },
-  ];
-  const plainText = richTextToPlainText(text);
-  if (plainText !== 'Sale now ✈ Book') {
-    throw new Error(`Expected the text a client shows, got ${JSON.stringify(plainText)}`);
-  }
-});
 
 Deno.test('listButtons lists rich message buttons, then the inline keyboard, with their paths', () => {
   const buttons = listButtons(shop).map(({ label, path }) => `${label} ${path}`);
@@ -217,5 +203,23 @@ Deno.test('listButtons finds buttons in quotes, credits, and captions', () => {
   ];
   if (JSON.stringify(buttons) !== JSON.stringify(expected)) {
     throw new Error(`Unexpected buttons: ${JSON.stringify(buttons)}`);
+  }
+});
+
+Deno.test('listButtons keeps disabled buttons, which tests can tell apart', () => {
+  const buttons = listButtons({
+    rich_message: {
+      blocks: [{
+        type: 'buttons',
+        buttons: [
+          { text: 'Buy', callback_data: 'buy' },
+          { text: 'Sold out', disabled: {} },
+        ],
+      }],
+    },
+  });
+  const disabled = buttons.filter(({ button }) => 'disabled' in button).map(({ label }) => label);
+  if (JSON.stringify(disabled) !== JSON.stringify(['Sold out'])) {
+    throw new Error(`Expected the disabled button to be listed, got ${JSON.stringify(disabled)}`);
   }
 });

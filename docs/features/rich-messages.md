@@ -48,6 +48,11 @@ TDLib keeps and shows them:
 - A map's zero dimension clears both, as TDLib's [`get_dimensions`][dimensions] does. Its location's
   accuracy is at most 1500 meters, rounded up to whole meters as for shared locations.
 
+For assertions about content, the TypeScript client's `richMessageToPlainText` gives the text a rich
+message shows, one block per line, including the content of closed `details` and expandable
+blockquotes, and `listButtons` gives each of its buttons, disabled ones too, with its label and
+where it is.
+
 Buttons, in rows and in text, act as inline keyboard buttons of the same kind. TDLib's
 [`get_inline_keyboard_button`][inline-button] reads them, so their links are checked and normalized
 as keyboard links are. Their style is read as the server's [`get_button_style`][button-style] reads

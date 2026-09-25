@@ -13,7 +13,7 @@ local `receipt.png` file. The import below assumes the example is saved directly
 Tests can use the TypeScript client instead of constructing emulation server URLs directly:
 
 ```ts
-import { TelegramEmulationClient } from '../clients/typescript/mod.ts';
+import { richMessageToPlainText, TelegramEmulationClient } from '../clients/typescript/mod.ts';
 
 const emulator = new TelegramEmulationClient('http://localhost:8081');
 const session = await emulator.createSession();
@@ -52,6 +52,8 @@ try {
   // callback data instead.
   const menu = history.at(-1);
   if (menu !== undefined) {
+    // Read what a rich message shows as plain text, including collapsed content.
+    if (menu.rich_message !== undefined) console.log(richMessageToPlainText(menu.rich_message));
     const callbackQuery = await account.pressButton({
       chat: { type: 'private', botId: bot.id },
       message_id: menu.message_id,

@@ -1,3 +1,13 @@
+import {
+  isRichTextSequence,
+  listItemText,
+  richBlockParts,
+  richBlockText,
+  richTextToPlainText,
+  ROW_ITEM_SEPARATOR,
+  tableRowText,
+} from './rich_message_text.ts';
+import type { RichBlockPart } from './rich_message_text.ts';
 import type {
   ButtonContainer,
   ButtonSelector,
@@ -5,15 +15,12 @@ import type {
   MessageButton,
   MessageWithButtons,
   RichBlock,
-  RichBlockCaption,
   RichBlockListItem,
   RichBlockTableCell,
   RichMessageButton,
   RichText,
 } from './types.ts';
 
-/** Separates the texts of the cells or buttons of one row in a container's plain text. */
-const ROW_ITEM_SEPARATOR = ' | ';
 /** How many characters of a container's text an error message shows. */
 const DESCRIBED_TEXT_MAX_LENGTH = 40;
 
@@ -29,24 +36,6 @@ export class ButtonSelectionError extends Error {
   constructor(message: string, matches: readonly MessageButton[]) {
     super(message);
     this.matches = matches;
-  }
-}
-
-/** Returns rich text as the plain text a client shows, with buttons shown by their labels. */
-export function richTextToPlainText(text: RichText): string {
-  if (typeof text === 'string') return text;
-  if (isRichTextSequence(text)) return text.map(richTextToPlainText).join('');
-  switch (text.type) {
-    case 'custom_emoji':
-      return text.alternative_text;
-    case 'mathematical_expression':
-      return text.expression;
-    case 'anchor':
-      return '';
-    case 'button':
-      return richTextToPlainText(text.button.text);
-    default:
-      return richTextToPlainText(text.text);
   }
 }
 
@@ -138,122 +127,6 @@ function* inlineKeyboardButtons(markup: InlineKeyboardMarkup): Generator<Message
   }
 }
 
-/**
- * A part of a rich block that holds text, blocks, list items, table rows, or buttons, with its
- * path relative to the block.
- */
-type RichBlockPart =
-  | { readonly type: 'text'; readonly path: string; readonly text: RichText }
-  | { readonly type: 'blocks'; readonly path: string; readonly blocks: readonly RichBlock[] }
-  | {
-    readonly type: 'list_items';
-    readonly path: string;
-    readonly items: readonly RichBlockListItem[];
-  }
-  | {
-    readonly type: 'table_rows';
-    readonly path: string;
-    readonly rows: readonly (readonly RichBlockTableCell[])[];
-  }
-  | {
-    readonly type: 'buttons';
-    readonly path: string;
-    readonly buttons: readonly RichMessageButton[];
-  };
-
-/** The parts of a block that show something, in the order a client shows them. */
-function richBlockParts(block: RichBlock): readonly RichBlockPart[] {
-  switch (block.type) {
-    case 'paragraph':
-    case 'footer':
-    case 'heading':
-    case 'pre':
-      return [{ type: 'text', path: '.text', text: block.text }];
-    case 'mathematical_expression':
-      return [{ type: 'text', path: '.expression', text: block.expression }];
-    case 'divider':
-    case 'anchor':
-      return [];
-    case 'list':
-      return [{ type: 'list_items', path: '.items', items: block.items }];
-    case 'blockquote':
-      return [
-        { type: 'blocks', path: '.blocks', blocks: block.blocks },
-        ...optionalTextPart('.credit', block.credit),
-      ];
-    case 'expandable_blockquote':
-    case 'pullquote':
-      return [
-        { type: 'text', path: '.text', text: block.text },
-        ...optionalTextPart('.credit', block.credit),
-      ];
-    case 'collage':
-    case 'slideshow':
-      return [
-        { type: 'blocks', path: '.blocks', blocks: block.blocks },
-        ...captionParts(block.caption),
-      ];
-    case 'table':
-      return [
-        { type: 'table_rows', path: '.cells', rows: block.cells },
-        ...optionalTextPart('.caption', block.caption),
-      ];
-    case 'details':
-      return [
-        { type: 'text', path: '.summary', text: block.summary },
-        { type: 'blocks', path: '.blocks', blocks: block.blocks },
-      ];
-    case 'buttons':
-      return [{ type: 'buttons', path: '.buttons', buttons: block.buttons }];
-    case 'map':
-    case 'photo':
-    case 'document':
-      return captionParts(block.caption);
-  }
-}
-
-function optionalTextPart(path: string, text: RichText | undefined): readonly RichBlockPart[] {
-  return text === undefined ? [] : [{ type: 'text', path, text }];
-}
-
-function captionParts(caption: RichBlockCaption | undefined): readonly RichBlockPart[] {
-  return caption === undefined ? [] : [
-    { type: 'text', path: '.caption.text', text: caption.text },
-    ...optionalTextPart('.caption.credit', caption.credit),
-  ];
-}
-
-function blockListText(blocks: readonly RichBlock[]): string {
-  return blocks.map(richBlockText).join('\n');
-}
-
-function richBlockText(block: RichBlock): string {
-  return richBlockParts(block).map(richBlockPartText).join('\n');
-}
-
-function richBlockPartText(part: RichBlockPart): string {
-  switch (part.type) {
-    case 'text':
-      return richTextToPlainText(part.text);
-    case 'blocks':
-      return blockListText(part.blocks);
-    case 'list_items':
-      return part.items.map((item) => blockListText(item.blocks)).join('\n');
-    case 'table_rows':
-      return part.rows.map(tableRowText).join('\n');
-    case 'buttons':
-      return part.buttons.map((button) => richTextToPlainText(button.text)).join(
-        ROW_ITEM_SEPARATOR,
-      );
-  }
-}
-
-function tableRowText(row: readonly RichBlockTableCell[]): string {
-  return row.map((cell) => cell.text === undefined ? '' : richTextToPlainText(cell.text)).join(
-    ROW_ITEM_SEPARATOR,
-  );
-}
-
 function* blockListButtons(
   blocks: readonly RichBlock[],
   path: string,
@@ -312,7 +185,7 @@ function* listItemButtons(
 ): Generator<MessageButton> {
   yield* blockListButtons(item.blocks, `${path}.blocks`, [...containers, {
     kind: 'list_item',
-    text: blockListText(item.blocks),
+    text: listItemText(item),
     path,
   }]);
 }
@@ -359,10 +232,6 @@ function richMessageButton(
   containers: readonly ButtonContainer[],
 ): MessageButton {
   return { label: richTextToPlainText(button.text), button, path, containers };
-}
-
-function isRichTextSequence(text: RichText): text is readonly RichText[] {
-  return Array.isArray(text);
 }
 
 function describeSelector(selector: ButtonSelector): string {
