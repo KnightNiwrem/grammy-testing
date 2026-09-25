@@ -410,6 +410,42 @@ export interface MessageOriginUser {
   readonly date: number;
 }
 
+/**
+ * A message of another chat that a message replies to: who first wrote it and when, the
+ * supergroup message it is, and its media, whose caption the reply's quote shows instead.
+ */
+export type ExternalReplyInfo =
+  & {
+    readonly origin: MessageOriginUser;
+    /** The replied message's supergroup; absent for a message of a private chat. */
+    readonly chat?: SupergroupChat;
+    /** The replied message's ID in its supergroup; absent for a message of a private chat. */
+    readonly message_id?: number;
+  }
+  & (
+    | { readonly photo?: never; readonly has_media_spoiler?: never; readonly document?: never }
+    | { readonly photo: readonly PhotoSize[]; readonly has_media_spoiler?: true }
+    | { readonly document: Document }
+  );
+
+/** The quoted part of the text or caption of a replied message. */
+export interface TextQuote {
+  readonly text: string;
+  readonly entities?: readonly MessageEntity[];
+  /** Where the quote starts in the replied text, in UTF-16 code units. */
+  readonly position: number;
+  /** Present when the sender chose the quote, rather than Telegram quoting the message. */
+  readonly is_manual?: true;
+}
+
+/** How a message replies to a message of another chat, and what it quotes of a replied message. */
+interface MessageReplyInfo {
+  /** Present for a reply to a message of another chat. */
+  readonly external_reply?: ExternalReplyInfo;
+  /** Present for a reply that quotes the replied message. */
+  readonly quote?: TextQuote;
+}
+
 /** The fields that precede a message's reply and content. */
 interface MessageHeader<Chat> {
   readonly message_id: number;
@@ -439,7 +475,11 @@ interface MessageTrailer {
 }
 
 /** A message as a reply shows it, without its own reply. */
-export type RepliedPrivateMessage = MessageHeader<PrivateChat> & MessageContent & MessageTrailer;
+export type RepliedPrivateMessage =
+  & MessageHeader<PrivateChat>
+  & MessageReplyInfo
+  & MessageContent
+  & MessageTrailer;
 
 /**
  * A private-chat message as the conversation's bot sees it: numbered in the bot's message box,
@@ -451,12 +491,14 @@ export type PrivateMessage =
     /** The message this one replies to, unless it was deleted; it never shows its own reply. */
     readonly reply_to_message?: RepliedPrivateMessage;
   }
+  & MessageReplyInfo
   & MessageContent
   & MessageTrailer;
 
 /** A message as a reply shows it, without its own reply. */
 export type RepliedSupergroupMessage =
   & MessageHeader<SupergroupChat>
+  & MessageReplyInfo
   & SupergroupMessageContent
   & MessageTrailer;
 
@@ -472,6 +514,7 @@ export type SupergroupMessage =
     /** The message this one replies to, unless it was deleted; it never shows its own reply. */
     readonly reply_to_message?: RepliedSupergroupMessage;
   }
+  & MessageReplyInfo
   & SupergroupMessageContent
   & MessageTrailer;
 

@@ -4,6 +4,7 @@ import type { PrivateConversationKey, PrivateConversationRole } from '../types/v
 import type {
   CanonicalMessageId,
   ChatMessage,
+  ExternalReply,
   InlineMessageId,
   MessageContent,
   MessageForwardInfo,
@@ -11,6 +12,7 @@ import type {
   SupergroupMessage,
   SupergroupMessageAuthor,
   SupergroupMessageContent,
+  TextQuote,
   ViaBot,
 } from '../types/virtual_message.ts';
 
@@ -24,6 +26,10 @@ export interface AddPrivateMessageInput {
   readonly content: MessageContent;
   /** The message of the same conversation this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
+  /** The message of another chat this one replies to; omitted when it replies to none. */
+  readonly externalReply?: ExternalReply;
+  /** Omitted for a reply without a quote, or no reply. */
+  readonly quote?: TextQuote;
   readonly inlineKeyboard?: InlineKeyboard;
   readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
   /**
@@ -46,6 +52,10 @@ export interface AddSupergroupMessageInput {
   readonly content: SupergroupMessageContent;
   /** The message of the same supergroup this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
+  /** As `AddPrivateMessageInput` describes it. */
+  readonly externalReply?: ExternalReply;
+  /** As `AddPrivateMessageInput` describes it. */
+  readonly quote?: TextQuote;
   readonly inlineKeyboard?: InlineKeyboard;
   /** As `AddPrivateMessageInput` describes it. */
   readonly viaBotId?: number;
@@ -82,6 +92,7 @@ export class MessageRepository {
       sentAtUnixSeconds: input.sentAtUnixSeconds,
       content: copyContent(input.content),
       ...(input.replyToMessageId === undefined ? {} : { replyToMessageId: input.replyToMessageId }),
+      ...copyReply(input),
       ...(input.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(input.inlineKeyboard) }),
@@ -142,6 +153,7 @@ export class MessageRepository {
       sentAtUnixSeconds,
       content: copyContent(edit.content),
       ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
+      ...copyReply(storedMessage),
       ...(edit.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
@@ -200,6 +212,7 @@ export class MessageRepository {
       sentAtUnixSeconds: input.sentAtUnixSeconds,
       content: copyContent(input.content),
       ...(input.replyToMessageId === undefined ? {} : { replyToMessageId: input.replyToMessageId }),
+      ...copyReply(input),
       ...(input.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(input.inlineKeyboard) }),
@@ -250,6 +263,7 @@ export class MessageRepository {
       sentAtUnixSeconds,
       content: copyContent(edit.content),
       ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
+      ...copyReply(storedMessage),
       ...(edit.inlineKeyboard === undefined
         ? {}
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
@@ -326,6 +340,35 @@ export class MessageRepository {
       this.#messageIdsByInlineMessageId.delete(message.viaBot.inlineMessageId);
     }
   }
+}
+
+/** Copies a message's reply to another chat and its quote, leaving out those it lacks. */
+function copyReply(
+  { externalReply, quote }: {
+    readonly externalReply?: ExternalReply;
+    readonly quote?: TextQuote;
+  },
+): { readonly externalReply?: ExternalReply; readonly quote?: TextQuote } {
+  return {
+    ...(externalReply === undefined ? {} : {
+      externalReply: {
+        origin: { ...externalReply.origin },
+        ...(externalReply.supergroupMessage === undefined
+          ? {}
+          : { supergroupMessage: { ...externalReply.supergroupMessage } }),
+        ...(externalReply.media === undefined ? {} : { media: copyContent(externalReply.media) }),
+      },
+    }),
+    ...(quote === undefined ? {} : {
+      quote: {
+        ...quote,
+        text: {
+          text: quote.text.text,
+          entities: quote.text.entities.map((entity) => ({ ...entity })),
+        },
+      },
+    }),
+  };
 }
 
 function copyContent<Content extends SupergroupMessageContent>(content: Content): Content;

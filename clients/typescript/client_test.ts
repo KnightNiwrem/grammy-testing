@@ -403,6 +403,28 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     );
   }
 
+  const externalReplyResponse = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: owner.id,
+      text: 'Seen in the team',
+      reply_parameters: { chat_id: supergroup.id, message_id: greeting.message_id },
+    }),
+  });
+  const [externalReply] = (await owner.getMessages({ chat: { type: 'private', botId: bot.id } }))
+    .slice(-1);
+  if (
+    externalReplyResponse.status !== 200 ||
+    externalReply.external_reply?.chat?.id !== supergroup.id ||
+    externalReply.external_reply.message_id !== greeting.message_id ||
+    externalReply.quote?.text !== 'Hello everyone'
+  ) {
+    throw new Error(
+      `Expected the client to read an external reply, received ${JSON.stringify(externalReply)}`,
+    );
+  }
+
   // Only an administrator with the right deletes another member's message.
   const deleteGreeting = () =>
     api.request(`${botApiPath}/deleteMessage`, {

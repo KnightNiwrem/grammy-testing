@@ -121,10 +121,6 @@ const BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION =
   'Forbidden: bot is not a member of the supergroup chat';
 const BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION = 'Forbidden: bot was kicked from the supergroup chat';
 
-/** The emulator's description for a reply to a message of another chat, which it does not support. */
-const CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION =
-  'Bad Request: replies to messages of other chats are not supported';
-
 /**
  * The emulator's description for a reply keyboard, keyboard removal, or forced reply sent to a
  * group, where Telegram shows them to chosen members; the emulator does not support that.
@@ -1172,8 +1168,9 @@ function repeatMessagesAnswer(result: RepeatMessagesResult): BotApiMethodAnswer 
 }
 
 /**
- * Reads where and how a send method sends its message. A reply to a message of another chat,
- * which Telegram supports, is rejected as unsupported.
+ * Reads where and how a send method sends its message. As the official Bot API server's
+ * `check_reply_parameters` does, a reply naming the chat the message is sent to replies in that
+ * chat.
  */
 function readSendOptions(parameters: SendOptionsParameters):
   | { readonly read: true; readonly options: SendRequestOptions }
@@ -1188,12 +1185,6 @@ function readSendOptions(parameters: SendOptionsParameters):
     return { read: false, errorAnswer: botApiError(400, CHAT_ID_EMPTY_DESCRIPTION) };
   }
   const replyTarget = selectSpecifiedReplyTarget(parameters);
-  if (replyTarget?.chatId !== undefined && replyTarget.chatId !== chatId) {
-    return {
-      read: false,
-      errorAnswer: botApiError(400, CROSS_CHAT_REPLY_UNSUPPORTED_DESCRIPTION),
-    };
-  }
   return {
     read: true,
     options: {
@@ -1201,6 +1192,9 @@ function readSendOptions(parameters: SendOptionsParameters):
       chatId,
       replyTo: replyTarget === undefined ? undefined : {
         messageId: replyTarget.messageId,
+        ...(replyTarget.chatId === undefined || replyTarget.chatId === chatId
+          ? {}
+          : { chatId: replyTarget.chatId }),
         allowSendingWithoutReply: replyTarget.allowSendingWithoutReply,
       },
       isContentProtected,

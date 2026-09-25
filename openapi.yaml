@@ -1115,9 +1115,12 @@ paths:
             non-empty`, `Bad Request: entity URL '…' is invalid: …`, or `Bad Request: user not
             found`); the normalized text is longer than 4096 characters (`Bad Request: message is
             too long`); or a button's callback data exceeds 64 bytes (`Bad Request:
-            BUTTON_DATA_INVALID`). Replies to messages of other chats (`Bad Request: replies to
-            messages of other chats are not supported`) and reply keyboards, keyboard removals, and
-            forced replies in supergroups (`Bad Request: reply keyboards, keyboard removals, and
+            BUTTON_DATA_INVALID`). A reply to a message of another chat is checked before all of
+            these, while Telegram checks the text and the chat first: the replied message's chat is
+            not one the bot can read (`Bad Request: chat not found`, or the membership errors of
+            a supergroup the bot left or was removed from), or the replied message is not found
+            and sending without a reply is not allowed (`Bad Request: message to be replied not
+            found`). Reply keyboards, keyboard removals, and forced replies in supergroups (`Bad Request: reply keyboards, keyboard removals, and
             forced replies are not supported in groups`) are not supported.
           content:
             application/json:
@@ -3264,6 +3267,10 @@ components:
           description: Legacy form of `forward_origin.date`, present only for a forward.
         reply_to_message:
           $ref: '#/components/schemas/SupergroupMessage'
+        external_reply:
+          $ref: '#/components/schemas/ExternalReplyInfo'
+        quote:
+          $ref: '#/components/schemas/TextQuote'
         text:
           type: string
         entities:
@@ -3327,12 +3334,67 @@ components:
         has_protected_content:
           type: boolean
           const: true
+    ExternalReplyInfo:
+      type: object
+      additionalProperties: false
+      description: >-
+        The message of another chat that a message replies to, present only for such a reply. As
+        TDLib's `RepliedMessageInfo` keeps it, it shows where the replied message first appeared,
+        its supergroup and ID when it is a supergroup message, and a photo or document without
+        its caption. The replied text or caption appears as the reply's `quote` instead.
+      required:
+        - origin
+      properties:
+        origin:
+          $ref: '#/components/schemas/MessageOriginUser'
+        chat:
+          $ref: '#/components/schemas/SupergroupChat'
+        message_id:
+          type: integer
+          minimum: 1
+        photo:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PhotoSize'
+        has_media_spoiler:
+          type: boolean
+          const: true
+        document:
+          $ref: '#/components/schemas/Document'
+    TextQuote:
+      type: object
+      additionalProperties: false
+      description: >-
+        The quoted part of the replied message's text or caption. A reply to another chat's
+        message quotes up to 1,024 characters of it automatically, keeping only bold, italic,
+        underline, strikethrough, spoiler, custom emoji, and date and time entities.
+      required:
+        - text
+        - position
+      properties:
+        text:
+          type: string
+          minLength: 1
+        entities:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/MessageEntity'
+        position:
+          type: integer
+          minimum: 0
+          description: Where the quote starts in the replied text, in UTF-16 code units.
+        is_manual:
+          type: boolean
+          const: true
+          description: Present when the sender chose the quote.
     MessageOriginUser:
       type: object
       additionalProperties: false
       description: >-
-        Where a forward first appeared, present only for a forward: the account or bot that sent
-        the original message, and when.
+        Where a forward, or a message of another chat that a message replies to, first appeared:
+        the account or bot that sent the original message, and when.
       required:
         - type
         - sender_user
@@ -3415,6 +3477,10 @@ components:
             The current state of the message this one replies to, which never has a
             `reply_to_message` of its own. Omitted when the message is no reply or the replied
             message was deleted.
+        external_reply:
+          $ref: '#/components/schemas/ExternalReplyInfo'
+        quote:
+          $ref: '#/components/schemas/TextQuote'
         text:
           type: string
           description: The text of a text message.
@@ -4621,8 +4687,8 @@ components:
       type: object
       additionalProperties: false
       description: >-
-        The message of the chat to reply to. An empty object, or a `message_id` that is not
-        positive, specifies no reply. Quotes, checklist tasks, and poll options are not supported.
+        The message to reply to. An empty object, or a `message_id` that is not positive,
+        specifies no reply. Quotes, checklist tasks, and poll options are not supported.
       properties:
         message_id:
           type: integer
@@ -4630,8 +4696,11 @@ components:
         chat_id:
           type: integer
           description: >-
-            Identifier of the replied message's chat, which must be the chat the message is sent
-            to; replies to messages of other chats are not supported.
+            Identifier of the replied message's chat, a private chat with an account that has
+            written to the bot or a supergroup the bot is a member of; omitted for the chat the
+            message is sent to. A reply to another chat's message shows it in `external_reply`
+            and quotes its text or caption. As TDLib does, a message that cannot be forwarded,
+            such as protected content or a service message, is silently not replied to.
         allow_sending_without_reply:
           type: boolean
           default: false

@@ -19,6 +19,7 @@ import {
 import type { InlineQueryId, InlineQueryResultsButton } from '../types/inline_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import { createMessageForward, isForwardable } from '../types/message_forward.ts';
+import { createExternalReply, type ExternalReplyWithQuote } from '../types/message_reply.ts';
 import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
 import { isUserId } from '../types/telegram_identity.ts';
@@ -27,6 +28,7 @@ import type { ChatAction } from '../types/virtual_chat.ts';
 import {
   type CanonicalMessageId,
   type ChatMessage,
+  type ExternalReply,
   type InlineMessageId,
   isContentMessage,
   type MessageContent,
@@ -34,6 +36,7 @@ import {
   type PrivateMessage,
   type SupergroupMessage,
   type TextEntity,
+  type TextQuote,
 } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
 import type {
@@ -104,26 +107,29 @@ export type ReadFormattedTextResult =
     readonly markupError: string;
   };
 
-/** The message of the chat that a sent message replies to, as `reply_parameters` specify it. */
+/** The message that a sent message replies to, as `reply_parameters` specify it. */
 export interface ReplyTarget {
-  /** The message's ID in the bot's chat. */
+  /** The message's ID in its chat, as the bot knows it. */
   readonly messageId: number;
+  /**
+   * The Bot API `chat_id` of the replied message's chat when it is another chat than the one the
+   * message is sent to; omitted for that chat.
+   */
+  readonly chatId?: number;
   /** Sends the message as no reply, rather than failing, when the target is not found. */
   readonly allowSendingWithoutReply: boolean;
 }
 
 /**
- * Where and how every send method sends its message. The reply markup is an inline keyboard or a
- * change of the reply interface.
+ * Where and how a send method sends its message, apart from what it replies to. The reply markup
+ * is an inline keyboard or a change of the reply interface.
  */
-export type SendRequestOptions = BotMessageReplyMarkup & {
+type SendDestinationOptions = BotMessageReplyMarkup & {
   /**
    * The Bot API `chat_id`: for a private chat, the other user's ID, which is positive; for a
    * supergroup, its negative chat ID.
    */
   readonly chatId: number;
-  /** Omitted for a message that replies to none. */
-  readonly replyTo?: ReplyTarget;
   /** The Bot API `protect_content`; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
   /**
@@ -132,6 +138,21 @@ export type SendRequestOptions = BotMessageReplyMarkup & {
    */
   readonly messageEffectId?: string;
 };
+
+/** Where and how every send method sends its message. */
+export type SendRequestOptions = SendDestinationOptions & {
+  /** Omitted for a message that replies to none. */
+  readonly replyTo?: ReplyTarget;
+};
+
+/**
+ * What a message being sent replies to: a message of its own chat, which the chat's messaging
+ * service looks up, or a resolved message of another chat; neither for a message that replies to
+ * none.
+ */
+type OutgoingReply =
+  | { readonly replyTo?: ReplyTarget; readonly externalReply?: never; readonly quote?: never }
+  | (ExternalReplyWithQuote & { readonly replyTo?: never });
 
 export type SendMessageRequest = SpecifiedFormattedText & SendRequestOptions;
 
@@ -722,6 +743,8 @@ interface BotMessaging {
         readonly botMessageId: number;
         readonly allowSendingWithoutReply: boolean;
       };
+      readonly externalReply?: ExternalReply;
+      readonly quote?: TextQuote;
       readonly isContentProtected?: boolean;
       readonly forwardInfo?: MessageForwardInfo;
       readonly messageEffectId?: string;
@@ -810,6 +833,8 @@ interface SupergroupBotMessaging {
     readonly content: OutgoingMessageContent;
     readonly inlineKeyboard?: InlineKeyboard;
     readonly replyTo?: { readonly messageId: number; readonly allowSendingWithoutReply: boolean };
+    readonly externalReply?: ExternalReply;
+    readonly quote?: TextQuote;
     readonly isContentProtected?: boolean;
     readonly forwardInfo?: MessageForwardInfo;
     readonly messageEffectId?: string;
@@ -1471,22 +1496,70 @@ export class BotApiService {
     }
   }
 
-  /** Sends content to a private chat or a supergroup; a forward also shows where it came from. */
+  /**
+   * Sends content to a private chat or a supergroup; a forward also shows where it came from.
+   *
+   * A reply to a message of another chat is resolved before the chat the message goes to, while
+   * Telegram checks that chat and the text first; a request that fails both ways fails for its
+   * reply.
+   */
   #send(
     authenticatedBot: VirtualBotProfile,
     content: OutgoingMessageContent,
-    options: SendRequestOptions,
+    { replyTo, ...options }: SendRequestOptions,
     forwardInfo?: MessageForwardInfo,
   ): SendResult {
+    const replyResolution = this.#resolveOutgoingReply(authenticatedBot, replyTo);
+    if (!replyResolution.resolved) {
+      return { sent: false, reason: replyResolution.reason };
+    }
+    const { reply } = replyResolution;
     return isUserId(options.chatId)
-      ? this.#sendPrivateMessage(authenticatedBot, content, options, forwardInfo)
-      : this.#sendSupergroupMessage(authenticatedBot, content, options, forwardInfo);
+      ? this.#sendPrivateMessage(authenticatedBot, content, options, reply, forwardInfo)
+      : this.#sendSupergroupMessage(authenticatedBot, content, options, reply, forwardInfo);
+  }
+
+  /**
+   * Resolves what a message being sent replies to. The chat's messaging service looks up a message
+   * of the chat itself. A message of another chat is resolved here, as the official Bot API
+   * server's `check_reply_parameters` does: the bot must be able to read that chat, and a message it
+   * does not find fails the send unless the bot allowed sending without a reply. As TDLib's
+   * `create_message_input_reply_to` does, a message that cannot be forwarded, such as protected
+   * content or a service message, is silently not replied to.
+   */
+  #resolveOutgoingReply(authenticatedBot: VirtualBotProfile, replyTo: ReplyTarget | undefined):
+    | { readonly resolved: true; readonly reply: OutgoingReply }
+    | {
+      readonly resolved: false;
+      readonly reason:
+        | 'chat_not_found'
+        | FormerSupergroupMemberFailureReason
+        | 'reply_message_not_found';
+    } {
+    if (replyTo?.chatId === undefined) {
+      return { resolved: true, reply: replyTo === undefined ? {} : { replyTo } };
+    }
+    const { chatId, messageId, allowSendingWithoutReply } = replyTo;
+    const lookup = this.#findRepeatedMessage(authenticatedBot, { chatId, messageId });
+    if (!lookup.found) {
+      if (lookup.reason !== 'repeated_message_not_found') {
+        return { resolved: false, reason: lookup.reason };
+      }
+      return allowSendingWithoutReply
+        ? { resolved: true, reply: {} }
+        : { resolved: false, reason: 'reply_message_not_found' };
+    }
+    return {
+      resolved: true,
+      reply: isForwardable(lookup.message) ? createExternalReply(lookup.message, messageId) : {},
+    };
   }
 
   #sendPrivateMessage(
     authenticatedBot: VirtualBotProfile,
     content: OutgoingMessageContent,
-    { chatId, replyTo, isContentProtected, messageEffectId, ...replyMarkup }: SendRequestOptions,
+    { chatId, isContentProtected, messageEffectId, ...replyMarkup }: SendDestinationOptions,
+    { replyTo, externalReply, quote }: OutgoingReply,
     forwardInfo: MessageForwardInfo | undefined,
   ): SendResult {
     const result = this.#botMessages.sendBotMessage({
@@ -1498,6 +1571,8 @@ export class BotApiService {
         botMessageId: replyTo.messageId,
         allowSendingWithoutReply: replyTo.allowSendingWithoutReply,
       },
+      externalReply,
+      quote,
       isContentProtected,
       forwardInfo,
       messageEffectId,
@@ -1538,12 +1613,12 @@ export class BotApiService {
     content: OutgoingMessageContent,
     {
       chatId,
-      replyTo,
       isContentProtected,
       messageEffectId,
       inlineKeyboard,
       replyInterfaceMarkup,
-    }: SendRequestOptions,
+    }: SendDestinationOptions,
+    { replyTo, externalReply, quote }: OutgoingReply,
     forwardInfo: MessageForwardInfo | undefined,
   ): SendResult {
     if (replyInterfaceMarkup !== undefined) {
@@ -1555,6 +1630,8 @@ export class BotApiService {
       content,
       inlineKeyboard,
       replyTo,
+      externalReply,
+      quote,
       isContentProtected,
       forwardInfo,
       messageEffectId,

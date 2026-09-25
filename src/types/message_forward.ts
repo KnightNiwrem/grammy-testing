@@ -32,11 +32,7 @@ export function isForwardable(message: ChatMessage): message is ContentMessage {
  * original message.
  */
 export function createMessageForward(message: ContentMessage): MessageForward {
-  const forwardInfo: MessageForwardInfo = message.forwardInfo ?? {
-    originalSenderId: getMessageAuthorId(message),
-    originalSentAtUnixSeconds: message.sentAtUnixSeconds,
-    ...(message.viaBot === undefined ? {} : { viaBotId: message.viaBot.botId }),
-  };
+  const forwardInfo = getMessageOrigin(message);
   const keepsInlineKeyboard = message.inlineKeyboard?.every((row) =>
     row.every((button) => button.kind === 'url')
   );
@@ -44,5 +40,17 @@ export function createMessageForward(message: ContentMessage): MessageForward {
     content: message.content,
     forwardInfo,
     ...(keepsInlineKeyboard ? { inlineKeyboard: message.inlineKeyboard } : {}),
+  };
+}
+
+/**
+ * Where a message first appeared, as its forwards and replies from other chats show it: its own
+ * author, date, and inline bot, or, for a forward, the original's.
+ */
+export function getMessageOrigin(message: ContentMessage): MessageForwardInfo {
+  return message.forwardInfo ?? {
+    originalSenderId: getMessageAuthorId(message),
+    originalSentAtUnixSeconds: message.sentAtUnixSeconds,
+    ...(message.viaBot === undefined ? {} : { viaBotId: message.viaBot.botId }),
   };
 }

@@ -18,6 +18,7 @@
           "src/types/chat_membership.ts",
           "src/types/virtual_message.ts",
           "src/types/message_forward.ts",
+          "src/types/message_reply.ts",
           "src/types/stored_file.ts",
           "src/types/chat_domain_event.ts",
           "src/types/callback_query.ts",

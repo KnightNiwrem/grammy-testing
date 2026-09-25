@@ -5,6 +5,8 @@ import type {
   BotApiChatMemberUpdated,
   BotApiChosenInlineResult,
   BotApiDocument,
+  BotApiExternalReplyInfo,
+  BotApiExternalReplyMedia,
   BotApiGroupChat,
   BotApiGroupChatBotMember,
   BotApiInlineKeyboardButton,
@@ -26,6 +28,7 @@ import type {
   BotApiSupergroupChat,
   BotApiSupergroupMessage,
   BotApiSupergroupMessageContent,
+  BotApiTextQuote,
   BotApiUser,
 } from '../types/bot_api.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
@@ -45,6 +48,7 @@ import type {
   ChatMessage,
   DateTimeFormat,
   DateTimePartPrecision,
+  ExternalReply,
   FormattedText,
   MembershipServiceContent,
   MessageContent,
@@ -52,6 +56,7 @@ import type {
   SupergroupMessage,
   SupergroupMessageContent,
   TextEntity,
+  TextQuote,
 } from '../types/virtual_message.ts';
 
 /** A stored file with the `file_id` by which the observer of a projection knows it. */
@@ -80,6 +85,21 @@ interface MessageProjectionContext {
   readonly viaBot?: BotApiBotUser;
   /** The sender of a forward's original message; omitted for a message that is no forward. */
   readonly forwardSender?: BotApiUser;
+  /**
+   * What the message of another chat that the message replies to shows, resolved for the
+   * observer; omitted for a message that replies to none.
+   */
+  readonly externalReply?: ExternalReplyProjectionContext;
+}
+
+/** What a reply to a message of another chat shows of it, resolved for the observer. */
+export interface ExternalReplyProjectionContext {
+  /** Who first wrote the replied message. */
+  readonly originSender: BotApiUser;
+  /** The replied message's supergroup; omitted for a message of a private chat. */
+  readonly supergroup?: Supergroup;
+  /** The replied photo or document; omitted for a replied text message. */
+  readonly mediaFile?: ObservedFile;
 }
 
 export interface PrivateMessageForBotProjectionInput {
@@ -161,15 +181,20 @@ export function projectSupergroupMessage(
 function projectMessageBody<Content extends BotApiSupergroupMessageContent, RepliedMessage>(
   message: ChatMessage,
   content: Content,
-  { viaBot, forwardSender }: MessageProjectionContext,
+  context: MessageProjectionContext,
   repliedMessage: RepliedMessage | undefined,
 ) {
+  const { viaBot, forwardSender, externalReply } = context;
   return {
     ...(message.contentEditedAtUnixSeconds === undefined
       ? {}
       : { edit_date: message.contentEditedAtUnixSeconds }),
     ...projectForward(message, forwardSender),
     ...(repliedMessage === undefined ? {} : { reply_to_message: repliedMessage }),
+    ...(message.externalReply === undefined
+      ? {}
+      : { external_reply: projectExternalReply(message.externalReply, externalReply) }),
+    ...(message.quote === undefined ? {} : { quote: projectTextQuote(message.quote, context) }),
     ...content,
     ...(message.inlineKeyboard === undefined
       ? {}
@@ -197,6 +222,71 @@ function projectForward(message: ChatMessage, forwardSender: BotApiUser | undefi
     date,
   };
   return { forward_origin: forwardOrigin, forward_from: forwardSender, forward_date: date };
+}
+
+/**
+ * Shows a message of another chat that a message replies to, as the official Bot API server's
+ * `JsonExternalReplyInfo` does: its origin, its supergroup message, and its media.
+ */
+function projectExternalReply(
+  { origin, supergroupMessage, media }: ExternalReply,
+  context: ExternalReplyProjectionContext | undefined,
+): BotApiExternalReplyInfo {
+  if (context === undefined) {
+    throw new Error('Expected the external reply of the message to be resolved');
+  }
+  const supergroup = context.supergroup;
+  if (supergroupMessage !== undefined && supergroup?.id !== supergroupMessage.chatId) {
+    throw new Error(`Expected supergroup ${supergroupMessage.chatId} of the reply to be provided`);
+  }
+  return {
+    origin: {
+      type: 'user',
+      sender_user: context.originSender,
+      date: origin.originalSentAtUnixSeconds,
+    },
+    ...(supergroupMessage === undefined || supergroup === undefined ? {} : {
+      chat: projectSupergroupChat(supergroup),
+      message_id: supergroupMessage.messageId,
+    }),
+    ...projectExternalReplyMedia(media, context.mediaFile),
+  };
+}
+
+function projectExternalReplyMedia(
+  media: ExternalReply['media'],
+  mediaFile: ObservedFile | undefined,
+): BotApiExternalReplyMedia {
+  switch (media?.kind) {
+    case undefined:
+      return {};
+    case 'photo':
+      return {
+        photo: [projectPhotoSize(mediaFile)],
+        ...(media.hasSpoiler ? { has_media_spoiler: true as const } : {}),
+      };
+    case 'document':
+      return { document: projectDocument(mediaFile) };
+    default: {
+      const unhandledMedia: never = media;
+      throw new Error(`Unhandled external reply media: ${JSON.stringify(unhandledMedia)}`);
+    }
+  }
+}
+
+/** Shows the quoted part of a replied message as the official Bot API server's `JsonTextQuote`. */
+function projectTextQuote(
+  { text, position, isManual }: TextQuote,
+  { mentionedUsers }: MessageProjectionContext,
+): BotApiTextQuote {
+  return {
+    text: text.text,
+    ...(text.entities.length === 0 ? {} : {
+      entities: text.entities.map((entity) => projectTextEntity(entity, mentionedUsers)),
+    }),
+    position,
+    ...(isManual ? { is_manual: true as const } : {}),
+  };
 }
 
 function projectSupergroupMessageContent(

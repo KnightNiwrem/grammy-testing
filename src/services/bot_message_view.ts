@@ -1,4 +1,5 @@
 import {
+  type ExternalReplyProjectionContext,
   type ObservedFile,
   projectBotAsUser,
   projectBotBlockChangeForBot,
@@ -37,10 +38,11 @@ import type { ChatMemberStatus } from '../types/chat_membership.ts';
 import type { InlineQuery } from '../types/inline_query.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
-import type { SharedChat } from '../types/virtual_chat.ts';
+import type { SharedChat, Supergroup } from '../types/virtual_chat.ts';
 import {
   type CanonicalMessageId,
   type ChatMessage,
+  type ExternalReply,
   getContentText,
   type MessageForwardInfo,
   type PrivateMessage,
@@ -355,6 +357,9 @@ export class BotMessageViewService {
       observerId,
       mentionedUsers: this.#findMentionedUsers(message),
       ...this.#resolveProvenance(message),
+      ...(message.externalReply === undefined ? {} : {
+        externalReply: this.#resolveExternalReply(message.externalReply, observerId, message),
+      }),
     };
     const { content } = message;
     switch (content.kind) {
@@ -393,6 +398,40 @@ export class BotMessageViewService {
       ...(message.forwardInfo === undefined
         ? {}
         : { forwardSender: this.#findForwardSender(message.forwardInfo, message) }),
+    };
+  }
+
+  /**
+   * Looks up what a reply to a message of another chat shows of it: its original sender and
+   * supergroup, which exist as long as the session does, and its media as the observer knows it.
+   */
+  #resolveExternalReply(
+    { origin, supergroupMessage, media }: ExternalReply,
+    observerId: number,
+    message: ChatMessage,
+  ): ExternalReplyProjectionContext {
+    const originSender = this.#findUser(origin.originalSenderId);
+    if (originSender === undefined) {
+      throw new Error(
+        `Original sender ${origin.originalSenderId} of the reply of ${message.id} does not exist`,
+      );
+    }
+    let supergroup: Supergroup | undefined;
+    if (supergroupMessage !== undefined) {
+      const chat = this.#sharedChats.getSharedChat(supergroupMessage.chatId);
+      if (chat?.kind !== 'supergroup') {
+        throw new Error(
+          `Supergroup ${supergroupMessage.chatId} of the reply of ${message.id} does not exist`,
+        );
+      }
+      supergroup = chat;
+    }
+    return {
+      originSender,
+      ...(supergroup === undefined ? {} : { supergroup }),
+      ...(media === undefined
+        ? {}
+        : { mediaFile: this.#observeFile(media.fileId, observerId, message.id) }),
     };
   }
 

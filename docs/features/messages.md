@@ -26,10 +26,22 @@ servers decide which effect identifiers exist; that check is not in the open-sou
 emulator accepts any 64-bit identifier. The [official send path][message-effects] shows how the
 option is read.
 
-Cross-chat replies, quotes and replies to checklist tasks or poll options are
-[real gaps](#real-gaps). Text and captions follow the [formatting limits](text-formatting.md).
-Observable notification behavior and simulated link-preview metadata are also
-[missing](sessions-and-requests.md#real-gaps).
+Bots can also reply to a message of another of their chats by naming its `chat_id` in
+`reply_parameters`. As the official server's [`check_reply_parameters`][check-reply] does, the bot
+must be able to read that chat, and a missing message fails the send unless
+`allow_sending_without_reply` is set. The reply shows the message in `external_reply` as TDLib's
+[`RepliedMessageInfo`][replied-message-info] keeps it. It includes the original sender and date, and
+the chat and message ID when the message is in a supergroup. It also carries a photo or document
+without its caption. The text or caption becomes an automatic `quote` of up to 1,024 characters.
+That quote keeps only the entity types TDLib's [`is_allowed_quote_entity_type`][quote-entities]
+allows. As TDLib's [`create_message_input_reply_to`][external-reply-input] does, the emulator sends
+a reply to protected content or a service message of another chat without a reply. The emulator
+resolves the replied message before the destination chat and text. When a request fails both ways,
+it fails for the reply.
+
+Chosen quotes and replies to checklist tasks or poll options are [real gaps](#real-gaps). Text and
+captions follow the [formatting limits](text-formatting.md). Observable notification behavior and
+simulated link-preview metadata are also [missing](sessions-and-requests.md#real-gaps).
 
 Private message IDs come from each observer's message box; a supergroup has one sequence shared by
 all members. Private conversation history in the emulation API uses the **bot's** message IDs, so a
@@ -119,11 +131,9 @@ albums are [real gaps](#real-gaps).
 
 ## Real gaps
 
-- **Cross-chat replies.** Replies can only reference messages in the same chat. Tests cannot
-  exercise replies to messages in another chat, although upstream
-  [`Client::get_reply_parameters`][reply-parameters] accepts a separate chat target.
-- **Reply quotes.** Replies cannot carry quoted text, quote entities or a quote position. These
-  fields are needed to test quote handling and are read by the same upstream reply parser.
+- **Reply quotes.** Replies cannot carry chosen quoted text, quote entities or a quote position.
+  These fields are needed to test quote handling and are read by the upstream reply parser,
+  [`Client::get_reply_parameters`][reply-parameters].
 - **Checklist and poll reply targets.** Replies cannot target an individual checklist task or poll
   option. These targets are also supported by the upstream reply parser and are missing from the
   emulator.
@@ -145,9 +155,15 @@ albums are [real gaps](#real-gaps).
 [private messaging](../../src/services/private_messaging.ts),
 [message projection](../../src/projections/bot_api_message.ts),
 [forward rules](../../src/types/message_forward.ts),
-[private messaging tests](../../tests/private_messaging_service_test.ts) and
-[forward tests](../../tests/message_forward_test.ts).
+[reply rules](../../src/types/message_reply.ts),
+[private messaging tests](../../tests/private_messaging_service_test.ts),
+[forward tests](../../tests/message_forward_test.ts) and
+[reply tests](../../tests/message_reply_test.ts).
 
+[check-reply]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L9144-L9207
+[external-reply-input]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L21264-L21291
+[quote-entities]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L4840-L4853
+[replied-message-info]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/RepliedMessageInfo.cpp#L142-L200
 [reply-parameters]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10130-L10180
 [edit-permissions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L23183-L23292
 [delete-permissions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8405-L8520

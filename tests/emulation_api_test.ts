@@ -2307,9 +2307,10 @@ Deno.test('sendMessage replies to messages of the chat and accepts Telegram mess
       { chat_id: 999, reply_parameters: { message_id: 99 } },
       'Bad Request: chat not found',
     ],
+    // The replied message's chat must be one the bot can read.
     [
       { reply_parameters: { message_id: 1, chat_id: createdBot.bot.id } },
-      'Bad Request: replies to messages of other chats are not supported',
+      'Bad Request: chat not found',
     ],
     [
       { reply_parameters: { message_id: 1, quote: 'Question' } },
@@ -3122,6 +3123,131 @@ Deno.test('bots set supergroup command scopes that members see in their menus', 
   const stranger = await createAccount(api, sessionPath, 'Linus');
   if ((await menuOf(stranger.id)).status !== 403) {
     throw new Error('Expected a non-member to be forbidden from the supergroup menu');
+  }
+});
+
+Deno.test('bots reply to messages of their other chats with an external reply', async () => {
+  const { api, sessionPath, member, bot, supergroup } = await createSupergroupFixture();
+  const sendMessage = async (parameters: Record<string, unknown>) => {
+    const { status, body } = await callBotApi(api, `${bot.botApiPath}/sendMessage`, parameters);
+    return { status, body, message: botApiResult(body) };
+  };
+  const accountResponse = await api.request(
+    `${sessionPath}/accounts/${member.id}/messages`,
+    jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: 'Hello' }),
+  );
+  const accountBody: unknown = await accountResponse.json();
+  if (accountResponse.status !== 201 || !isSentMessageResponse(accountBody)) {
+    throw new Error(`Expected the account to write to the bot, received ${accountResponse.status}`);
+  }
+  const accountMessage = accountBody.message;
+  const announcement = await sendMessage({
+    chat_id: supergroup.id,
+    text: '<b>Ship</b> it <code>now</code>',
+    parse_mode: 'HTML',
+  });
+  const botUser = announcement.message?.from;
+  const announcementId = announcement.message?.message_id;
+
+  const privateReply = await sendMessage({
+    chat_id: member.id,
+    text: 'Noted',
+    reply_parameters: { chat_id: supergroup.id, message_id: announcementId },
+  });
+  const expectedPrivateReply = {
+    origin: { type: 'user', sender_user: botUser, date: announcement.message?.date },
+    chat: { id: supergroup.id, title: 'Team', type: 'supergroup' },
+    message_id: announcementId,
+  };
+  if (
+    privateReply.status !== 200 || privateReply.message?.reply_to_message !== undefined ||
+    JSON.stringify(privateReply.message?.external_reply) !== JSON.stringify(expectedPrivateReply) ||
+    JSON.stringify(privateReply.message?.quote) !== JSON.stringify({
+        text: 'Ship it now',
+        entities: [{ type: 'bold', offset: 0, length: 4 }],
+        position: 0,
+      })
+  ) {
+    throw new Error(
+      `Expected an external reply to the supergroup message, received ${
+        JSON.stringify(privateReply.body)
+      }`,
+    );
+  }
+
+  const supergroupReply = await sendMessage({
+    chat_id: supergroup.id,
+    text: 'A customer says hello',
+    reply_parameters: { chat_id: member.id, message_id: accountMessage.message_id },
+  });
+  const supergroupHistory = await (await api.request(
+    `${sessionPath}/accounts/${member.id}/conversations/supergroup/${supergroup.id}/messages`,
+  )).json() as { messages: Array<Record<string, unknown>> };
+  const expectedSupergroupReply = {
+    external_reply: {
+      origin: { type: 'user', sender_user: accountMessage.from, date: accountMessage.date },
+    },
+    quote: { text: 'Hello', position: 0 },
+  };
+  const shownReply = supergroupHistory.messages.at(-1);
+  if (
+    supergroupReply.status !== 200 ||
+    JSON.stringify({
+        external_reply: supergroupReply.message?.external_reply,
+        quote: supergroupReply.message?.quote,
+      }) !== JSON.stringify(expectedSupergroupReply) ||
+    JSON.stringify({ external_reply: shownReply?.external_reply, quote: shownReply?.quote }) !==
+      JSON.stringify(expectedSupergroupReply)
+  ) {
+    throw new Error(
+      `Expected an external reply to the private message without its chat, received ${
+        JSON.stringify(supergroupReply.body)
+      }`,
+    );
+  }
+
+  // As TDLib does, a message that cannot be forwarded is silently not replied to.
+  const protectedMessage = await sendMessage({
+    chat_id: supergroup.id,
+    text: 'Secret',
+    protect_content: true,
+  });
+  const replyToProtected = await sendMessage({
+    chat_id: member.id,
+    text: 'Keep it secret',
+    reply_parameters: { chat_id: supergroup.id, message_id: protectedMessage.message?.message_id },
+  });
+  const replyToMissingAllowed = await sendMessage({
+    chat_id: member.id,
+    text: 'Anyway',
+    reply_parameters: {
+      chat_id: supergroup.id,
+      message_id: 999,
+      allow_sending_without_reply: true,
+    },
+  });
+  for (const reply of [replyToProtected, replyToMissingAllowed]) {
+    if (
+      reply.status !== 200 || reply.message?.external_reply !== undefined ||
+      reply.message?.quote !== undefined
+    ) {
+      throw new Error(`Expected a message without a reply, received ${JSON.stringify(reply.body)}`);
+    }
+  }
+
+  const rejections: [Record<string, unknown>, string][] = [
+    [{ chat_id: supergroup.id, message_id: 999 }, 'Bad Request: message to be replied not found'],
+    [{ chat_id: -1_000_000_000_999, message_id: 1 }, 'Bad Request: chat not found'],
+  ];
+  for (const [replyParameters, expectedDescription] of rejections) {
+    const { status, body } = await sendMessage({
+      chat_id: member.id,
+      text: 'Reply',
+      reply_parameters: replyParameters,
+    });
+    if (status !== 400 || !isBadRequestResponse(body) || body.description !== expectedDescription) {
+      throw new Error(`Expected "${expectedDescription}", received ${JSON.stringify(body)}`);
+    }
   }
 });
 

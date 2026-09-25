@@ -155,6 +155,49 @@ export interface BotApiMessageOriginUser {
   readonly date: number;
 }
 
+/**
+ * The media of a message of another chat that a message replies to, whose caption shows as the
+ * reply's quote instead: nothing for text.
+ */
+export type BotApiExternalReplyMedia =
+  | Record<never, never>
+  | {
+    readonly photo: readonly BotApiPhotoSize[];
+    /** Present only for a photo that clients cover until the user reveals it. */
+    readonly has_media_spoiler?: true;
+  }
+  | { readonly document: BotApiDocument };
+
+/** A message of another chat that a message replies to, as Telegram's `ExternalReplyInfo`. */
+export type BotApiExternalReplyInfo =
+  & {
+    readonly origin: BotApiMessageOriginUser;
+    /** The replied message's supergroup; omitted for a message of a private chat. */
+    readonly chat?: BotApiSupergroupChat;
+    /** The replied message's ID in its supergroup; omitted for a message of a private chat. */
+    readonly message_id?: number;
+  }
+  & BotApiExternalReplyMedia;
+
+/** The quoted part of a replied message, as Telegram's `TextQuote`. */
+export interface BotApiTextQuote {
+  readonly text: string;
+  /** Omitted when the quote has no entities. */
+  readonly entities?: readonly BotApiMessageEntity[];
+  /** Where the quote starts in the replied text, in UTF-16 code units. */
+  readonly position: number;
+  /** Present only for a quote the sender chose. */
+  readonly is_manual?: true;
+}
+
+/** How a message replies to a message outside its chat, or with a quote; before its content. */
+interface BotApiMessageReplyInfo {
+  /** Present only for a reply to a message of another chat. */
+  readonly external_reply?: BotApiExternalReplyInfo;
+  /** Present only for a reply that quotes the replied message. */
+  readonly quote?: BotApiTextQuote;
+}
+
 interface BotApiMessageHeader<Chat> {
   readonly message_id: number;
   readonly from: BotApiUser;
@@ -181,9 +224,13 @@ interface BotApiMessageTrailer {
   readonly effect_id?: string;
 }
 
-/** A message as a reply shows it: Telegram never nests the replied message's own reply. */
+/**
+ * A message as a reply shows it: Telegram never nests the replied message's own reply, though it
+ * shows the message's reply to another chat and its quote.
+ */
 type BotApiRepliedMessageInChat<Chat, Content> =
   & BotApiMessageHeader<Chat>
+  & BotApiMessageReplyInfo
   & Content
   & BotApiMessageTrailer;
 
@@ -197,6 +244,7 @@ type BotApiMessageInChat<Chat, Content> =
      */
     readonly reply_to_message?: BotApiRepliedMessageInChat<Chat, Content>;
   }
+  & BotApiMessageReplyInfo
   & Content
   & BotApiMessageTrailer;
 

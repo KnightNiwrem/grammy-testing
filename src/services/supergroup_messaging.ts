@@ -14,6 +14,7 @@ import {
   canBotEditMessage,
   type CanonicalMessageId,
   type ChatMessage,
+  type ExternalReply,
   type InlineMessageId,
   isSupergroupContentMessage,
   type MembershipServiceContent,
@@ -24,6 +25,7 @@ import {
   type SupergroupMessageAuthor,
   type SupergroupMessageContent,
   type TextEntity,
+  type TextQuote,
 } from '../types/virtual_message.ts';
 import {
   type AccountMessageContent,
@@ -113,8 +115,15 @@ export interface SendSupergroupBotMessageInput {
   readonly content: OutgoingMessageContent;
   /** Omitted when the message has no inline keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
-  /** Omitted for a message that replies to none. */
+  /** The message of the supergroup it replies to; omitted for a message that replies to none. */
   readonly replyTo?: SupergroupBotMessageReplyTarget;
+  /**
+   * The message of another chat it replies to, which the caller resolved; omitted for a message
+   * that replies to none there.
+   */
+  readonly externalReply?: ExternalReply;
+  /** The quote of the message it replies to; omitted for none. */
+  readonly quote?: TextQuote;
   /** Protects the message from forwarding and saving; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
   /** Where the content first appeared, for a forward; omitted for other messages. */
@@ -327,6 +336,8 @@ interface NewSupergroupMessage {
   readonly sentAtUnixSeconds: number;
   readonly content: SupergroupMessageContent;
   readonly replyToMessageId?: CanonicalMessageId;
+  readonly externalReply?: ExternalReply;
+  readonly quote?: TextQuote;
   readonly inlineKeyboard?: InlineKeyboard;
   readonly viaBotId?: number;
   readonly forwardInfo?: MessageForwardInfo;
@@ -535,6 +546,8 @@ export class SupergroupMessagingService {
         author: { kind: 'bot', botId: input.fromBotId },
         content: contentNormalization.content,
         replyToMessageId: repliedMessage?.id,
+        externalReply: input.externalReply,
+        quote: input.quote,
         inlineKeyboard: input.inlineKeyboard,
         forwardInfo: input.forwardInfo,
         isContentProtected: input.isContentProtected,

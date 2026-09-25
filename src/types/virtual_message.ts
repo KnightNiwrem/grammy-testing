@@ -213,6 +213,43 @@ export function getContentText(content: SupergroupMessageContent): FormattedText
   }
 }
 
+/**
+ * A quoted part of the text or caption of the message a message replies to, as Telegram shows it
+ * with the reply.
+ */
+export interface TextQuote {
+  /** The quoted text, which keeps only the entities Telegram allows in quotes. */
+  readonly text: FormattedText;
+  /** Where the quote starts in the replied text, in UTF-16 code units. */
+  readonly position: number;
+  /** Whether the sender chose the quote, rather than Telegram quoting the replied message. */
+  readonly isManual: boolean;
+}
+
+/** A supergroup message, as other chats refer to it: by its chat and its ID there. */
+export interface SupergroupMessageReference {
+  readonly chatId: number;
+  /** The supergroup's ID of the message, which every member sees. */
+  readonly messageId: number;
+}
+
+/**
+ * The message of another chat that a message replies to, as the reply keeps it when it is sent:
+ * who first wrote it and when, the supergroup message it is, and its media. The replied text or
+ * caption is instead shown as the reply's quote.
+ */
+export interface ExternalReply {
+  /** Where the replied message first appeared, as a forward of it would show. */
+  readonly origin: MessageForwardInfo;
+  /**
+   * The replied message when it is a supergroup message; omitted for a private message, whose
+   * chat and ID Telegram does not show in other chats.
+   */
+  readonly supergroupMessage?: SupergroupMessageReference;
+  /** The replied photo or document without its caption; omitted for a text message. */
+  readonly media?: PhotoMessageContent | DocumentMessageContent;
+}
+
 /** A canonical message of a private conversation, written by either participant. */
 export interface PrivateMessage {
   readonly kind: 'private_message';
@@ -223,6 +260,10 @@ export interface PrivateMessage {
   readonly content: MessageContent;
   /** The message of the same conversation this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
+  /** The message of another chat this one replies to; omitted when it replies to none. */
+  readonly externalReply?: ExternalReply;
+  /** The quoted part of the replied message; omitted for a reply without one, or no reply. */
+  readonly quote?: TextQuote;
   /**
    * Omitted when the message has no inline keyboard. Bots attach inline keyboards to their messages,
    * and inline bots to messages sent through them.
@@ -274,6 +315,10 @@ export interface SupergroupMessage {
   readonly content: SupergroupMessageContent;
   /** The message of the same supergroup this one replies to; omitted when it is no reply. */
   readonly replyToMessageId?: CanonicalMessageId;
+  /** The message of another chat this one replies to; omitted when it replies to none. */
+  readonly externalReply?: ExternalReply;
+  /** The quoted part of the replied message; omitted for a reply without one, or no reply. */
+  readonly quote?: TextQuote;
   /**
    * Omitted when the message has no inline keyboard. Bots attach inline keyboards to their messages,
    * and inline bots to messages sent through them.

@@ -216,6 +216,36 @@ const photoContentShape = {
 
 const documentContentShape = { document: documentSchema, ...captionShape };
 
+const externalReplyShape = {
+  origin: z.strictObject({
+    type: z.literal('user'),
+    sender_user: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
+    date: z.number().int().nonnegative(),
+  }),
+  chat: supergroupChatSchema.optional(),
+  message_id: z.number().int().positive().optional(),
+};
+
+/** How a message replies to a message of another chat, and what it quotes of a replied message. */
+const messageReplyInfoShape = {
+  // The replied message's media, which only a photo or document message has.
+  external_reply: z.union([
+    z.strictObject(externalReplyShape),
+    z.strictObject({
+      ...externalReplyShape,
+      photo: z.array(photoSizeSchema).min(1),
+      has_media_spoiler: z.literal(true).optional(),
+    }),
+    z.strictObject({ ...externalReplyShape, document: documentSchema }),
+  ]).optional(),
+  quote: z.strictObject({
+    text: z.string().min(1),
+    entities: z.array(messageEntitySchema).min(1).optional(),
+    position: z.number().int().nonnegative(),
+    is_manual: z.literal(true).optional(),
+  }).optional(),
+};
+
 const messageTrailerShape = {
   reply_markup: inlineKeyboardMarkupSchema.optional(),
   via_bot: messageSenderBotSchema.optional(),
@@ -256,15 +286,19 @@ function membershipChangeMessageSchemas<Header extends z.ZodRawShape>(header: He
   ] as const;
 }
 
-// A reply, which shows no reply of its own, comes between a message's header and content.
-const privateMessageHeader = messageHeaderShape(privateChatSchema);
+// A reply, which shows no reply of its own, comes between a message's header and content, as does
+// a reply to another chat or a quote, which a replied message still shows.
+const privateMessageHeader = { ...messageHeaderShape(privateChatSchema), ...messageReplyInfoShape };
 
 export const privateMessageSchema: z.ZodType<PrivateMessage> = z.union(contentMessageSchemas({
   ...privateMessageHeader,
   reply_to_message: z.union(contentMessageSchemas(privateMessageHeader)).optional(),
 }));
 
-const supergroupMessageHeader = messageHeaderShape(supergroupChatSchema);
+const supergroupMessageHeader = {
+  ...messageHeaderShape(supergroupChatSchema),
+  ...messageReplyInfoShape,
+};
 
 /** Supergroup messages, which service messages about members joining or leaving are among. */
 function supergroupMessageSchemas<Header extends z.ZodRawShape>(header: Header) {

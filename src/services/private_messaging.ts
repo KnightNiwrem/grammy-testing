@@ -19,11 +19,13 @@ import {
   canBotEditMessage,
   type CanonicalMessageId,
   type ChatMessage,
+  type ExternalReply,
   type InlineMessageId,
   type MessageContent,
   type MessageForwardInfo,
   type PrivateMessage,
   type TextEntity,
+  type TextQuote,
 } from '../types/virtual_message.ts';
 import {
   type AccountMessageContent,
@@ -145,8 +147,15 @@ export type SendBotMessageInput = BotMessageReplyMarkup & {
   readonly fromBotId: number;
   readonly to: BotPrivateChat;
   readonly content: OutgoingMessageContent;
-  /** Omitted for a message that replies to none. */
+  /** The message of the chat it replies to; omitted for a message that replies to none. */
   readonly replyTo?: BotMessageReplyTarget;
+  /**
+   * The message of another chat it replies to, which the caller resolved; omitted for a message
+   * that replies to none there.
+   */
+  readonly externalReply?: ExternalReply;
+  /** The quote of the message it replies to; omitted for none. */
+  readonly quote?: TextQuote;
   /** Protects the message from forwarding and saving; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
   /** Where the content first appeared, for a forward; omitted for other messages. */
@@ -420,6 +429,8 @@ interface PrivateMessageStore {
     readonly sentAtUnixSeconds: number;
     readonly content: MessageContent;
     readonly replyToMessageId?: CanonicalMessageId;
+    readonly externalReply?: ExternalReply;
+    readonly quote?: TextQuote;
     readonly inlineKeyboard?: InlineKeyboard;
     readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
     readonly viaBotId?: number;
@@ -661,6 +672,8 @@ export class PrivateMessagingService {
         authorRole: 'bot',
         content: storeOutgoingContent(contentNormalization.content, this.#files),
         replyToMessageId: replyResolution.repliedMessage?.id,
+        externalReply: input.externalReply,
+        quote: input.quote,
         inlineKeyboard: input.inlineKeyboard,
         replyInterfaceMarkup: input.replyInterfaceMarkup,
         forwardInfo: input.forwardInfo,
@@ -1200,6 +1213,8 @@ export class PrivateMessagingService {
       authorRole,
       content,
       replyToMessageId,
+      externalReply,
+      quote,
       inlineKeyboard,
       replyInterfaceMarkup,
       viaBotId,
@@ -1212,6 +1227,8 @@ export class PrivateMessagingService {
       readonly authorRole: PrivateConversationRole;
       readonly content: MessageContent;
       readonly replyToMessageId?: CanonicalMessageId;
+      readonly externalReply?: ExternalReply;
+      readonly quote?: TextQuote;
       readonly inlineKeyboard?: InlineKeyboard;
       readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
       readonly viaBotId?: number;
@@ -1230,6 +1247,8 @@ export class PrivateMessagingService {
       sentAtUnixSeconds: this.#currentUnixTimeSeconds(),
       content,
       replyToMessageId,
+      externalReply,
+      quote,
       inlineKeyboard,
       replyInterfaceMarkup,
       viaBotId,
