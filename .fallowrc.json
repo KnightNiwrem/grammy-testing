@@ -33,6 +33,7 @@
           "src/types/bot_language_code.ts",
           "src/types/bot_description.ts",
           "src/types/bot_default_administrator_rights.ts",
+          "src/types/bot_menu_button.ts",
           "src/types/bot_webhook.ts",
           "src/types/bot_rate_limit.ts"
         ]
@@ -128,6 +129,12 @@
         ]
       },
       {
+        "name": "bot-menu-button-repository",
+        "patterns": [
+          "src/repositories/bot_menu_button.ts"
+        ]
+      },
+      {
         "name": "bot-rate-limit-repository",
         "patterns": [
           "src/repositories/bot_rate_limit.ts"
@@ -196,6 +203,7 @@
           "src/services/bot_command.ts",
           "src/services/bot_description.ts",
           "src/services/bot_default_administrator_rights.ts",
+          "src/services/bot_menu_button.ts",
           "src/services/bot_blocking.ts",
           "src/services/chat_action.ts",
           "src/services/bot_rate_limit.ts"
@@ -349,6 +357,12 @@
         ]
       },
       {
+        "from": "bot-menu-button-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "bot-rate-limit-repository",
         "allow": [
           "domain"
@@ -484,6 +498,7 @@
           "bot-command-repository",
           "bot-description-repository",
           "bot-default-administrator-rights-repository",
+          "bot-menu-button-repository",
           "bot-rate-limit-repository",
           "blocked-user-repository",
           "chat-action-repository",

@@ -6,6 +6,7 @@ import type {
   BotApiChatMember,
   BotApiDefaultAdministratorRights,
   BotApiDownloadableFile,
+  BotApiMenuButton,
   BotApiMessage,
   BotApiPrivateMessage,
   BotApiSupergroupMessage,
@@ -19,6 +20,7 @@ import {
   type DefaultAdministratorRightsChatKind,
 } from '../types/bot_default_administrator_rights.ts';
 import type { BotDescriptionKind } from '../types/bot_description.ts';
+import { type BotMenuButton, toBotApiMenuButton } from '../types/bot_menu_button.ts';
 import type { BotLanguageCode } from '../types/bot_language_code.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
 import {
@@ -1137,6 +1139,44 @@ interface BotDefaultAdministratorRightsSettings {
     | { readonly found: false; readonly reason: 'bot_not_found' };
 }
 
+/** Why a user cannot be addressed or a menu button is rejected, in the order Telegram checks. */
+export type SetChatMenuButtonFailureReason =
+  | 'user_not_found'
+  | 'menu_button_text_empty'
+  | 'menu_button_text_not_utf8'
+  | 'menu_button_url_not_utf8';
+
+export type SetChatMenuButtonResult =
+  | { readonly set: true }
+  | { readonly set: false; readonly reason: SetChatMenuButtonFailureReason }
+  | {
+    readonly set: false;
+    readonly reason: 'web_app_url_invalid';
+    /** TDLib's description of the invalid URL. */
+    readonly urlError: string;
+  };
+
+export type GetChatMenuButtonResult =
+  | { readonly found: true; readonly menuButton: BotApiMenuButton }
+  | { readonly found: false; readonly reason: 'user_not_found' };
+
+interface BotMenuButtons {
+  setBotMenuButton(input: {
+    readonly botId: number;
+    readonly userId?: number;
+    readonly menuButton: BotMenuButton;
+  }):
+    | { readonly set: true }
+    | {
+      readonly set: false;
+      readonly reason: SetChatMenuButtonFailureReason | 'bot_not_found';
+    }
+    | { readonly set: false; readonly reason: 'web_app_url_invalid'; readonly urlError: string };
+  getBotMenuButton(target: { readonly botId: number; readonly userId?: number }):
+    | { readonly found: true; readonly menuButton: BotMenuButton }
+    | { readonly found: false; readonly reason: 'bot_not_found' | 'user_not_found' };
+}
+
 interface CallbackQueryAnswering {
   answerCallbackQuery(input: {
     readonly fromBotId: number;
@@ -1191,6 +1231,7 @@ interface BotApiServiceDependencies {
   readonly botCommands: BotCommandLists;
   readonly botDescriptions: BotDescriptions;
   readonly defaultAdministratorRights: BotDefaultAdministratorRightsSettings;
+  readonly menuButtons: BotMenuButtons;
   readonly chatActions: ChatActions;
   readonly publicChats: PublicChatDirectory;
   /** Hides the accounts whose privacy settings keep forwards from linking to them. */
@@ -1224,6 +1265,7 @@ export class BotApiService {
   readonly #botCommands: BotCommandLists;
   readonly #botDescriptions: BotDescriptions;
   readonly #defaultAdministratorRights: BotDefaultAdministratorRightsSettings;
+  readonly #menuButtons: BotMenuButtons;
   readonly #chatActions: ChatActions;
   readonly #publicChats: PublicChatDirectory;
   readonly #getPrivateForwardName: PrivateForwardNameLookup;
@@ -1244,6 +1286,7 @@ export class BotApiService {
       botCommands,
       botDescriptions,
       defaultAdministratorRights,
+      menuButtons,
       chatActions,
       publicChats,
       getPrivateForwardName,
@@ -1263,6 +1306,7 @@ export class BotApiService {
     this.#botCommands = botCommands;
     this.#botDescriptions = botDescriptions;
     this.#defaultAdministratorRights = defaultAdministratorRights;
+    this.#menuButtons = menuButtons;
     this.#chatActions = chatActions;
     this.#publicChats = publicChats;
     this.#getPrivateForwardName = getPrivateForwardName;
@@ -2644,6 +2688,42 @@ export class BotApiService {
     return Object.fromEntries(
       APPLICABLE_ADMINISTRATOR_RIGHT_NAMES[kind].map((right) => [right, result.rights.has(right)]),
     );
+  }
+
+  /**
+   * Replaces the bot's menu button for all its private chats, or for its chat with a user when
+   * `userId` is given; the default button removes the choice.
+   */
+  setChatMenuButton(
+    authenticatedBot: VirtualBotProfile,
+    request: { readonly userId?: number; readonly menuButton: BotMenuButton },
+  ): SetChatMenuButtonResult {
+    const result = this.#menuButtons.setBotMenuButton({ botId: authenticatedBot.id, ...request });
+    if (result.set || result.reason === 'web_app_url_invalid') {
+      return result;
+    }
+    if (result.reason === 'bot_not_found') {
+      throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+    }
+    return { set: false, reason: result.reason };
+  }
+
+  /**
+   * Returns the bot's menu button for all its private chats, or the one its chat with a user
+   * shows when `userId` is given.
+   */
+  getChatMenuButton(
+    authenticatedBot: VirtualBotProfile,
+    userId: number | undefined,
+  ): GetChatMenuButtonResult {
+    const result = this.#menuButtons.getBotMenuButton({ botId: authenticatedBot.id, userId });
+    if (result.found) {
+      return { found: true, menuButton: toBotApiMenuButton(result.menuButton) };
+    }
+    if (result.reason === 'bot_not_found') {
+      throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+    }
+    return { found: false, reason: result.reason };
   }
 
   /**

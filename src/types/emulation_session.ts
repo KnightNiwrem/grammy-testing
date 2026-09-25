@@ -1,6 +1,7 @@
 import type { BotApiService } from '../services/bot_api.ts';
 import type { BotBlockingService } from '../services/bot_blocking.ts';
 import type { BotCommandService } from '../services/bot_command.ts';
+import type { BotMenuButtonService } from '../services/bot_menu_button.ts';
 import type { BotMessageViewService } from '../services/bot_message_view.ts';
 import type { BotRateLimitService } from '../services/bot_rate_limit.ts';
 import type { CallbackQueryService } from '../services/callback_query.ts';
@@ -29,6 +30,7 @@ export interface EmulationSession {
   readonly callbackQueries: CallbackQueryService;
   readonly inlineQueries: InlineQueryService;
   readonly botCommands: BotCommandService;
+  readonly botMenuButtons: BotMenuButtonService;
   readonly chatActions: ChatActionService;
   readonly botMessageViews: BotMessageViewService;
   readonly mediaFiles: MediaFileService;

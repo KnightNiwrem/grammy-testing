@@ -696,6 +696,15 @@ export interface BotCommand {
   readonly is_ephemeral: boolean;
 }
 
+/**
+ * The button an account's client shows next to the message field of a private chat with a bot:
+ * the bot's commands, a Web App, or `default` when the bot chose no specific button.
+ */
+export type MenuButton =
+  | { readonly type: 'commands' }
+  | { readonly type: 'web_app'; readonly text: string; readonly web_app: { readonly url: string } }
+  | { readonly type: 'default' };
+
 /** The notification an account's client shows for another participant's message. */
 export interface Notification {
   /** The notifying message's ID, as the chat's bots see it. */
@@ -986,6 +995,11 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    */
   getBotCommands(input: AccountBotCommandsInput): Promise<readonly BotCommand[]>;
   /**
+   * Returns the menu button this account's client shows in its private chat with a bot: the
+   * bot's button for this account, or else for all its private chats.
+   */
+  getMenuButton(input: AccountMenuButtonInput): Promise<MenuButton>;
+  /**
    * Returns the commands this account's client suggests in a supergroup it is a member of, for
    * each bot of the supergroup that has any: the bot's list for the account as a member, for the
    * supergroup's administrators, for the supergroup, for all groups' administrators, for all
@@ -1021,6 +1035,10 @@ export interface AccountNotificationsInput {
 }
 
 export interface AccountBotCommandsInput {
+  readonly chat: PrivateMessageTarget;
+}
+
+export interface AccountMenuButtonInput {
   readonly chat: PrivateMessageTarget;
 }
 

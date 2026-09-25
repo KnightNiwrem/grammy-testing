@@ -822,6 +822,30 @@ paths:
           description: A path identifier is invalid.
         '404':
           description: The session, account, or bot does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/menu-button:
+    description: The menu button an account's client shows in its private chat with a bot.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      operationId: getPrivateChatMenuButton
+      summary: Return the menu button the account sees in its private chat with the bot
+      description: >-
+        Returns the button the bot chose for its chat with this account, or else the one it chose
+        for all its private chats, or `default` if it chose neither. The account need not have
+        written to the bot.
+      responses:
+        '200':
+          description: The menu button.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountMenuButton'
+        '400':
+          description: A path identifier is invalid.
+        '404':
+          description: The session, account, or bot does not exist.
   /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/chat-actions:
     description: The chat action, such as typing, an account's client shows in its private chat with a bot.
     parameters:
@@ -3574,6 +3598,119 @@ paths:
         '400':
           description: >-
             The request cannot be decoded or has unsupported parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
+  /sessions/{sessionId}/bot-api/bot{token}/setChatMenuButton:
+    description: >-
+      Telegram Bot API method for choosing the menu button of all the bot's private chats, or with
+      `chat_id` of its chat with one account. A missing or empty `menu_button` is the default
+      button, which removes the choice. As in TDLib, a Web App button's text and URL are cleaned
+      of control characters and its URL, which must be a valid HTTPS link, is stored normalized.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: setChatMenuButton
+      summary: Choose the authenticated virtual bot's menu button
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetChatMenuButtonRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SetChatMenuButtonRequest'
+            encoding:
+              menu_button:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SetChatMenuButtonRequest'
+            encoding:
+              menu_button:
+                contentType: application/json
+      responses:
+        '200':
+          description: The menu button was chosen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrueResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, including unknown button
+            fields, or Telegram would reject it, checking in this order: `menu_button` is not
+            JSON (`Bad Request: can't parse menu button JSON object`), not a JSON object (`Bad
+            Request: can't parse menu button: MenuButton must be an Object`), lacks a field (`Bad
+            Request: can't parse menu button: Can't find field "<field>"`), has a `web_app` that
+            is not an object (`Bad Request: can't parse menu button: Field "web_app" must be of
+            type Object`), or has another type (`Bad Request: can't parse menu button: MenuButton
+            has unsupported type`); `chat_id` is not positive (`Bad Request: invalid chat_id
+            specified`) or names no account (`Bad Request: user not found`); a Web App button's
+            text is empty (`Bad Request: menu button text must be non-empty`), its text or URL is
+            not well-formed Unicode (`Bad Request: menu button text must be encoded in UTF-8`,
+            `Bad Request: menu button URL must be encoded in UTF-8`), or its URL is not a valid
+            HTTPS link (`Bad Request: menu button Web App URL '<url>' is invalid: <reason>`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
+  /sessions/{sessionId}/bot-api/bot{token}/getChatMenuButton:
+    description: >-
+      Telegram Bot API method for reading the menu button of all the bot's private chats, or with
+      `chat_id` the one its chat with an account shows: the button chosen for that chat, or else
+      the one for all chats.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getChatMenuButton
+      summary: Return the authenticated virtual bot's menu button
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetChatMenuButtonRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GetChatMenuButtonRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GetChatMenuButtonRequest'
+      responses:
+        '200':
+          description: The menu button, `default` if none is chosen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuButtonResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or `chat_id` is not positive
+            (`Bad Request: invalid chat_id specified`) or names no account (`Bad Request: user not
+            found`).
           content:
             application/json:
               schema:
@@ -6899,6 +7036,73 @@ components:
               type: boolean
             is_anonymous:
               type: boolean
+    MenuButton:
+      description: A Bot API `MenuButton`.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - type
+          properties:
+            type:
+              type: string
+              enum:
+                - commands
+                - default
+        - type: object
+          additionalProperties: false
+          required:
+            - type
+            - text
+            - web_app
+          properties:
+            type:
+              type: string
+              const: web_app
+            text:
+              type: string
+            web_app:
+              type: object
+              additionalProperties: false
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+    AccountMenuButton:
+      type: object
+      additionalProperties: false
+      required:
+        - menu_button
+      properties:
+        menu_button:
+          $ref: '#/components/schemas/MenuButton'
+    SetChatMenuButtonRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        chat_id:
+          $ref: '#/components/schemas/TelegramUserId'
+        menu_button:
+          $ref: '#/components/schemas/MenuButton'
+    GetChatMenuButtonRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        chat_id:
+          $ref: '#/components/schemas/TelegramUserId'
+    MenuButtonResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          $ref: '#/components/schemas/MenuButton'
     TrueResultResponse:
       type: object
       additionalProperties: false

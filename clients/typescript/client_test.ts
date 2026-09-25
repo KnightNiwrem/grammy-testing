@@ -256,6 +256,23 @@ Deno.test('TypeScript client manages all currently implemented session resources
     );
   }
 
+  const setMenuButtonResponse = await api.request(`${botApiPath}/setChatMenuButton`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ menu_button: { type: 'commands' } }),
+  });
+  if (setMenuButtonResponse.status !== 200) {
+    throw new Error(`Expected the menu button to be set, received ${setMenuButtonResponse.status}`);
+  }
+  const menuButton = await createdAccount.account.getMenuButton({
+    chat: { type: 'private', botId: createdBot.bot.id },
+  });
+  if (JSON.stringify(menuButton) !== JSON.stringify({ type: 'commands' })) {
+    throw new Error(
+      `Expected the client to return the bot's menu button, received ${JSON.stringify(menuButton)}`,
+    );
+  }
+
   const chat = { type: 'private', botId: createdBot.bot.id } as const;
   if (await createdAccount.account.getReplyInterface({ chat }) !== null) {
     throw new Error('Expected no reply interface before the bot sends one');

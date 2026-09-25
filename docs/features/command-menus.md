@@ -74,12 +74,30 @@ The getter shows every right that applies to the kind of chat, all false when no
 The emulator has no workflow that adds a bot with these rights; supergroup owners still
 [promote bots](supergroups.md#administrator-operations) through the emulation API.
 
+## Menu buttons
+
+Bots choose the button shown next to the message field of their private chats with
+`setChatMenuButton`, for all chats or, with `chat_id`, for the chat with one account, and read it
+with `getChatMenuButton`. The button is the bot's commands, a Web App, or the default button, which
+removes the choice; a missing `menu_button` is the default button. The official server's
+[`get_bot_menu_button`][menu-button-parameter] errors answer malformed buttons, and the button is
+read before `chat_id`, which must be a positive user ID (`Bad Request: invalid chat_id specified`)
+of an account (`Bad Request: user not found`). As TDLib's [`set_menu_button`][set-menu-button] does,
+a Web App button needs nonempty text, both text and URL are cleaned of control characters, and the
+URL must be a valid HTTPS link, which is stored normalized; for example, an HTTP URL fails with
+`Bad Request: menu button Web App URL 'http://…' is invalid: Only HTTPS links are allowed`.
+
+A chat's button is the one chosen for it, or else the one for all chats, or `{"type":"default"}`,
+shown as the official server's [`JsonBotMenuButton`][menu-button-json] shows it. Tests read the
+button an account sees through `account.getMenuButton`. Telegram's server decides what it returns
+for chats without a choice, which the source does not show; the emulator's fallback follows the Bot
+API's description of the default button as no specific choice. Pressing a Web App button needs the
+missing [Mini App support](README.md#unimplemented-areas).
+
 ## Real gaps
 
 Changing supported BotFather-style settings after bot creation is also a
 [real gap](sessions-and-requests.md#real-gaps).
-
-Menu buttons are also a real gap; their methods are not implemented.
 
 ## Local evidence
 
@@ -89,8 +107,10 @@ Menu buttons are also a real gap; their methods are not implemented.
 [command tests](../../tests/bot_command_service_test.ts),
 [description service](../../src/services/bot_description.ts),
 [description tests](../../tests/bot_description_service_test.ts),
-[default administrator rights service](../../src/services/bot_default_administrator_rights.ts) and
-[their tests](../../tests/bot_default_administrator_rights_service_test.ts).
+[default administrator rights service](../../src/services/bot_default_administrator_rights.ts),
+[their tests](../../tests/bot_default_administrator_rights_service_test.ts),
+[menu button service](../../src/services/bot_menu_button.ts) and
+[menu button tests](../../tests/bot_menu_button_service_test.ts).
 
 [bot-command]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/BotCommand.cpp
 [scope-order]: https://core.telegram.org/bots/api#determining-list-of-commands
@@ -101,3 +121,6 @@ Menu buttons are also a real gap; their methods are not implemented.
 [rights-parameter]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L11438-L11489
 [administrator-rights]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogParticipant.cpp#L44-L115
 [rights-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L18010-L18042
+[menu-button-parameter]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L11393-L11436
+[set-menu-button]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/BotMenuButton.cpp#L126-L155
+[menu-button-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L5711-L5728

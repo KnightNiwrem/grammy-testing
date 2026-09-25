@@ -11,6 +11,7 @@ import {
   createdVirtualBotSchema,
   getMeResponseSchema,
   inlineQueryResponseSchema,
+  menuButtonResponseSchema,
   messageHistoryResponseSchema,
   notificationsResponseSchema,
   rateLimitResponsesListSchema,
@@ -28,6 +29,7 @@ import type {
   AccountEditMessageCaptionInput,
   AccountEditMessageInput,
   AccountForwardMessageInput,
+  AccountMenuButtonInput,
   AccountMessageHistoryInput,
   AccountNotificationsInput,
   AccountReplyInterfaceInput,
@@ -50,6 +52,7 @@ import type {
   EmulationSession,
   InlineQuery,
   LeaveChatInput,
+  MenuButton,
   MessageIn,
   MessageTarget,
   Notification,
@@ -467,6 +470,16 @@ function createVirtualAccountClient(
         responseSchema: botCommandsResponseSchema,
       });
       return response.commands;
+    },
+    async getMenuButton(input: AccountMenuButtonInput): Promise<MenuButton> {
+      const botId = encodeURIComponent(input.chat.botId);
+      const response = await requestJson(fetchImplementation, {
+        method: 'GET',
+        url: `${accountUrl}/conversations/private/${botId}/menu-button`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: menuButtonResponseSchema,
+      });
+      return response.menu_button;
     },
     async getSupergroupBotCommands(
       input: AccountSupergroupBotCommandsInput,

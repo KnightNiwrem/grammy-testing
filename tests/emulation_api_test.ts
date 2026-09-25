@@ -2793,6 +2793,123 @@ Deno.test('bots set and read the administrator rights they ask for by default', 
   }
 });
 
+Deno.test('bots choose the menu button accounts see in their private chats', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  const callBot = async (methodName: string, parameters: Record<string, unknown>) =>
+    await callBotApi(api, `${botApiPath}/${methodName}`, parameters);
+  const expectResult = async (
+    methodName: string,
+    parameters: Record<string, unknown>,
+    expectedResult: unknown,
+  ) => {
+    const { status, body } = await callBot(methodName, parameters);
+    if (
+      status !== 200 ||
+      JSON.stringify(body) !== JSON.stringify({ ok: true, result: expectedResult })
+    ) {
+      throw new Error(
+        `Expected ${methodName} ${JSON.stringify(parameters)} to return ${
+          JSON.stringify(expectedResult)
+        }, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  };
+  const accountMenuButton = async () => {
+    const response = await api.request(
+      `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/menu-button`,
+    );
+    return await response.json();
+  };
+  const shopButton = { type: 'web_app', text: 'Shop', web_app: { url: 'https://shop.example/' } };
+
+  await expectResult('getChatMenuButton', {}, { type: 'default' });
+  await expectResult('setChatMenuButton', { menu_button: { type: 'commands' } }, true);
+  await expectResult('setChatMenuButton', {
+    chat_id: accountId,
+    menu_button: { type: 'web_app', text: 'Shop', web_app: { url: 'https://Shop.example' } },
+  }, true);
+  await expectResult('getChatMenuButton', {}, { type: 'commands' });
+  await expectResult('getChatMenuButton', { chat_id: accountId }, shopButton);
+  if (JSON.stringify(await accountMenuButton()) !== JSON.stringify({ menu_button: shopButton })) {
+    throw new Error('Expected the account to see the menu button chosen for its chat');
+  }
+
+  // A missing button is the default one, which removes the chat's own choice.
+  await expectResult('setChatMenuButton', { chat_id: accountId }, true);
+  await expectResult('getChatMenuButton', { chat_id: accountId }, { type: 'commands' });
+  if (
+    JSON.stringify(await accountMenuButton()) !==
+      JSON.stringify({ menu_button: { type: 'commands' } })
+  ) {
+    throw new Error('Expected the account to see the menu button for all chats');
+  }
+
+  const failures = [
+    [
+      'setChatMenuButton',
+      { menu_button: 'not json' },
+      "Bad Request: can't parse menu button JSON object",
+    ],
+    [
+      'setChatMenuButton',
+      { menu_button: [] },
+      "Bad Request: can't parse menu button: MenuButton must be an Object",
+    ],
+    [
+      'setChatMenuButton',
+      { menu_button: {} },
+      'Bad Request: can\'t parse menu button: Can\'t find field "type"',
+    ],
+    [
+      'setChatMenuButton',
+      { menu_button: { type: 'mini_app' } },
+      "Bad Request: can't parse menu button: MenuButton has unsupported type",
+    ],
+    [
+      'setChatMenuButton',
+      { menu_button: { type: 'web_app', text: 'Shop' } },
+      'Bad Request: can\'t parse menu button: Can\'t find field "web_app"',
+    ],
+    ['setChatMenuButton', {
+      menu_button: { type: 'web_app', text: 'Shop', web_app: 'https://shop.example' },
+    }, 'Bad Request: can\'t parse menu button: Field "web_app" must be of type Object'],
+    ['setChatMenuButton', {
+      menu_button: { type: 'web_app', text: '', web_app: { url: 'https://shop.example' } },
+    }, 'Bad Request: menu button text must be non-empty'],
+    [
+      'setChatMenuButton',
+      { menu_button: { type: 'web_app', text: 'Shop', web_app: { url: 'http://shop.example' } } },
+      "Bad Request: menu button Web App URL 'http://shop.example' is invalid: Only HTTPS links are allowed",
+    ],
+    [
+      'setChatMenuButton',
+      { menu_button: { type: 'commands', text: 'Menu' } },
+      'Bad Request: invalid setChatMenuButton parameters',
+    ],
+    // The button is read before the chat.
+    [
+      'setChatMenuButton',
+      { chat_id: -1, menu_button: { type: 'mini_app' } },
+      "Bad Request: can't parse menu button: MenuButton has unsupported type",
+    ],
+    ['setChatMenuButton', { chat_id: -1 }, 'Bad Request: invalid chat_id specified'],
+    ['getChatMenuButton', { chat_id: createdBot.bot.id }, 'Bad Request: user not found'],
+    ['getChatMenuButton', { chat_id: 'Ada' }, 'Bad Request: invalid getChatMenuButton parameters'],
+  ] as const;
+  for (const [methodName, parameters, expectedDescription] of failures) {
+    const { status, body } = await callBot(methodName, parameters);
+    if (status !== 400 || !isBadRequestResponse(body) || body.description !== expectedDescription) {
+      throw new Error(
+        `Expected ${methodName} ${
+          JSON.stringify(parameters)
+        } to fail with ${expectedDescription}, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  }
+});
+
 Deno.test('accounts see the chat action a bot shows until its next message', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
     await createPrivateConversationFixture();

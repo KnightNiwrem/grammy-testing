@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { toBotApiLocation } from '../../../types/bot_api.ts';
 import type { BotCommand } from '../../../types/bot_command.ts';
+import { toBotApiMenuButton } from '../../../types/bot_menu_button.ts';
 import type { CallbackQuery } from '../../../types/callback_query.ts';
 import {
   grantSupergroupAdministratorRights,
@@ -44,6 +45,7 @@ const MESSAGE_ID_PARAMETER = 'messageId';
 const PRIVATE_MESSAGE_PATH = `${PRIVATE_MESSAGE_HISTORY_PATH}/:${MESSAGE_ID_PARAMETER}` as const;
 const BLOCKED_BOT_PATH = `/:${ACCOUNT_ID_PARAMETER}/blocked-bots/:${BOT_ID_PARAMETER}` as const;
 const PRIVATE_CHAT_COMMANDS_PATH = `${PRIVATE_CONVERSATION_PATH}/commands` as const;
+const PRIVATE_CHAT_MENU_BUTTON_PATH = `${PRIVATE_CONVERSATION_PATH}/menu-button` as const;
 const PRIVATE_CHAT_REPLY_INTERFACE_PATH = `${PRIVATE_CONVERSATION_PATH}/reply-interface` as const;
 const PRIVATE_CHAT_ACTIONS_PATH = `${PRIVATE_CONVERSATION_PATH}/chat-actions` as const;
 const PRIVATE_CHAT_NOTIFICATIONS_PATH = `${PRIVATE_CONVERSATION_PATH}/notifications` as const;
@@ -927,6 +929,25 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 404);
     }
     return context.json({ commands: result.commands.map(presentBotCommandForAccount) });
+  });
+
+  accountRoutes.get(PRIVATE_CHAT_MENU_BUTTON_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
+    if (!accountId.success || !botId.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').botMenuButtons.getPrivateChatMenuButton({
+      accountId: accountId.data,
+      botId: botId.data,
+    });
+    if (!result.found) {
+      return context.body(null, 404);
+    }
+    return context.json({ menu_button: toBotApiMenuButton(result.menuButton) });
   });
 
   accountRoutes.get(PRIVATE_CHAT_ACTIONS_PATH, (context) => {

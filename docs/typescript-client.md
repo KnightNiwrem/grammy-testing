@@ -85,9 +85,11 @@ try {
   await account.blockBot({ botId: bot.id });
   await account.unblockBot({ botId: bot.id });
 
-  // Read the command menu the account sees in its chat with the bot.
+  // Read the command menu and the menu button the account sees in its chat with the bot.
   const commands = await account.getBotCommands({ chat: { type: 'private', botId: bot.id } });
   console.log(commands.map(({ command }) => `/${command}`));
+  const menuButton = await account.getMenuButton({ chat: { type: 'private', botId: bot.id } });
+  console.log(menuButton.type);
 
   // Create a supergroup, add the bot, and send it a command there. The bot receives a
   // my_chat_member update and a new_chat_members service message when it is added, and, in privacy

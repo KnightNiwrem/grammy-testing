@@ -4,6 +4,7 @@ import { BotRepository } from '../src/repositories/bot.ts';
 import { BotCommandRepository } from '../src/repositories/bot_command.ts';
 import { BotDefaultAdministratorRightsRepository } from '../src/repositories/bot_default_administrator_rights.ts';
 import { BotDescriptionRepository } from '../src/repositories/bot_description.ts';
+import { BotMenuButtonRepository } from '../src/repositories/bot_menu_button.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { BotWebhookRepository } from '../src/repositories/bot_webhook.ts';
@@ -20,6 +21,7 @@ import { BotApiService } from '../src/services/bot_api.ts';
 import { BotCommandService } from '../src/services/bot_command.ts';
 import { BotDefaultAdministratorRightsService } from '../src/services/bot_default_administrator_rights.ts';
 import { BotDescriptionService } from '../src/services/bot_description.ts';
+import { BotMenuButtonService } from '../src/services/bot_menu_button.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { MediaFileService } from '../src/services/media_file.ts';
 import { SharedChatAdministrationService } from '../src/services/shared_chat_administration.ts';
@@ -259,6 +261,11 @@ function createBotApiFixture() {
     defaultAdministratorRights: new BotDefaultAdministratorRightsService({
       bots,
       defaultAdministratorRights: new BotDefaultAdministratorRightsRepository(),
+    }),
+    menuButtons: new BotMenuButtonService({
+      accounts,
+      bots,
+      menuButtons: new BotMenuButtonRepository(),
     }),
     chatActions: new ChatActionService({
       accounts,

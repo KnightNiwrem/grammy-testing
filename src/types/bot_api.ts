@@ -333,6 +333,12 @@ export type BotApiDefaultAdministratorRights = {
   readonly [Right in ChatAdministratorRightName]?: boolean;
 };
 
+/** The menu button of a bot's private chats, as the official server's `JsonBotMenuButton` shows it. */
+export type BotApiMenuButton =
+  | { readonly type: 'commands' }
+  | { readonly type: 'web_app'; readonly text: string; readonly web_app: { readonly url: string } }
+  | { readonly type: 'default' };
+
 export interface BotApiBotCommand {
   readonly command: string;
   readonly description: string;

@@ -34,11 +34,15 @@ const INT64_MAX = 2n ** 63n - 1n;
 const INT32_MAX = 2n ** 31n - 1n;
 
 /**
- * Checks and normalizes a link as TDLib does for a text link given as an entity. An error names
- * the link, as in `URL 'example' is invalid: Wrong HTTP URL`.
+ * Checks and normalizes a link as TDLib's `LinkManager::check_link` does: by default as for a text
+ * link given as an entity, or, with `httpsOnly`, allowing only HTTPS links, as for a Web App. An
+ * error names the link, as in `URL 'example' is invalid: Wrong HTTP URL`.
  */
-export function checkLink(link: string): LinkCheck {
-  const check = checkLinkWithoutContext(link);
+export function checkLink(
+  link: string,
+  { httpsOnly = false }: { readonly httpsOnly?: boolean } = {},
+): LinkCheck {
+  const check = checkLinkWithoutContext(link, httpsOnly);
   return check.valid ? check : { valid: false, error: `URL '${link}' is invalid: ${check.error}` };
 }
 
@@ -47,7 +51,7 @@ export function checkLink(link: string): LinkCheck {
  * invalid link, which markup drops silently.
  */
 export function getCheckedLink(link: string): string | undefined {
-  const check = checkLinkWithoutContext(link);
+  const check = checkLinkWithoutContext(link, false);
   return check.valid ? check.url : undefined;
 }
 
@@ -268,7 +272,7 @@ function findQueryParameter(query: string, name: string): string | undefined {
 }
 
 /** Mirrors TDLib's `check_link_impl` for links that may use any scheme Telegram accepts. */
-function checkLinkWithoutContext(link: string): LinkCheck {
+function checkLinkWithoutContext(link: string, httpsOnly: boolean): LinkCheck {
   let rest = link;
   const scheme = LINK_SCHEMES.find((candidate) =>
     toAsciiLowerCase(rest).startsWith(`${candidate}:`)
@@ -282,6 +286,9 @@ function checkLinkWithoutContext(link: string): LinkCheck {
     return { valid: false, error: parsing.error };
   }
   const url = parsing.url;
+  if (httpsOnly && (url.protocol !== 'https' || scheme !== undefined)) {
+    return { valid: false, error: 'Only HTTPS links are allowed' };
+  }
 
   if (scheme !== undefined) {
     if (

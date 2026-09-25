@@ -7,6 +7,7 @@ import { BotRepository } from '../repositories/bot.ts';
 import { BotCommandRepository } from '../repositories/bot_command.ts';
 import { BotDefaultAdministratorRightsRepository } from '../repositories/bot_default_administrator_rights.ts';
 import { BotDescriptionRepository } from '../repositories/bot_description.ts';
+import { BotMenuButtonRepository } from '../repositories/bot_menu_button.ts';
 import { BotRateLimitRepository } from '../repositories/bot_rate_limit.ts';
 import { BotUpdateRepository } from '../repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../repositories/bot_update_subscription.ts';
@@ -25,6 +26,7 @@ import { BotBlockingService } from '../services/bot_blocking.ts';
 import { BotCommandService } from '../services/bot_command.ts';
 import { BotDefaultAdministratorRightsService } from '../services/bot_default_administrator_rights.ts';
 import { BotDescriptionService } from '../services/bot_description.ts';
+import { BotMenuButtonService } from '../services/bot_menu_button.ts';
 import { BotMessageViewService } from '../services/bot_message_view.ts';
 import { BotRateLimitService } from '../services/bot_rate_limit.ts';
 import { BotUpdateDeliveryService } from '../services/bot_update_delivery.ts';
@@ -168,6 +170,12 @@ export function createEmulationSession(id: string): EmulationSession {
     defaultAdministratorRights: new BotDefaultAdministratorRightsRepository(),
   });
 
+  const botMenuButtons = new BotMenuButtonService({
+    accounts,
+    bots,
+    menuButtons: new BotMenuButtonRepository(),
+  });
+
   const botRateLimits = new BotRateLimitService({
     bots,
     rateLimitResponses: new BotRateLimitRepository(),
@@ -204,6 +212,7 @@ export function createEmulationSession(id: string): EmulationSession {
     botCommands,
     botDescriptions,
     defaultAdministratorRights,
+    menuButtons: botMenuButtons,
     chatActions,
     publicChats: sharedChatAdministration,
     getPrivateForwardName: getAccountPrivateForwardName,
@@ -220,6 +229,7 @@ export function createEmulationSession(id: string): EmulationSession {
     callbackQueries,
     inlineQueries,
     botCommands,
+    botMenuButtons,
     chatActions,
     botMessageViews,
     mediaFiles,

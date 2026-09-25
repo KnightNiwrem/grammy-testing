@@ -411,6 +411,18 @@ export const botCommandsResponseSchema = z.strictObject({
   commands: z.array(botCommandSchema),
 });
 
+export const menuButtonResponseSchema = z.strictObject({
+  menu_button: z.discriminatedUnion('type', [
+    z.strictObject({ type: z.literal('commands') }),
+    z.strictObject({
+      type: z.literal('web_app'),
+      text: z.string().min(1),
+      web_app: z.strictObject({ url: z.string() }),
+    }),
+    z.strictObject({ type: z.literal('default') }),
+  ]),
+});
+
 export const notificationsResponseSchema = z.strictObject({
   notifications: z.array(z.strictObject({
     message_id: z.number().int().positive(),

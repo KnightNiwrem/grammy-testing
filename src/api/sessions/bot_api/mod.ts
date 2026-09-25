@@ -18,6 +18,7 @@ import {
   readBotCommandScopeParameter,
 } from './bot_command_parameters.ts';
 import { readChatAdministratorRightsParameter } from './chat_administrator_rights_parameter.ts';
+import { readMenuButtonParameter } from './menu_button_parameter.ts';
 import {
   messageEntitiesParameter,
   readMessageEntitiesParameter,
@@ -269,6 +270,16 @@ const BOT_COMMAND_FAILURE_DESCRIPTIONS = {
 
 /** TDLib's description of text that is not well-formed Unicode, which it rejects first. */
 const STRINGS_NOT_UTF8_DESCRIPTION = 'Bad Request: strings must be encoded in UTF-8';
+
+/** Telegram's descriptions for rejected menu buttons and the users they are for. */
+const CHAT_ID_INVALID_DESCRIPTION = 'Bad Request: invalid chat_id specified';
+const USER_NOT_FOUND_DESCRIPTION = 'Bad Request: user not found';
+const MENU_BUTTON_FAILURE_DESCRIPTIONS = {
+  user_not_found: USER_NOT_FOUND_DESCRIPTION,
+  menu_button_text_empty: 'Bad Request: menu button text must be non-empty',
+  menu_button_text_not_utf8: 'Bad Request: menu button text must be encoded in UTF-8',
+  menu_button_url_not_utf8: 'Bad Request: menu button URL must be encoded in UTF-8',
+} as const;
 
 /** Telegram's descriptions for rejected requests about chat members. */
 const USER_ID_INVALID_DESCRIPTION = 'Bad Request: invalid user_id specified';
@@ -529,6 +540,18 @@ const getMyDefaultAdministratorRightsParametersSchema = z.strictObject({
   for_channels: booleanParameter().default(false),
 });
 
+// `chat_id` names a private chat by its user's ID. Telegram answers `@username` there as an invalid
+// chat_id; the emulator resolves every method's usernames first, so such a request fails as for the
+// chat the username names instead.
+const setChatMenuButtonParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+  menu_button: z.string().optional(),
+});
+
+const getChatMenuButtonParametersSchema = z.strictObject({
+  chat_id: integerParameter(z.int()).optional(),
+});
+
 const getChatMemberParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   user_id: integerParameter(z.int()).optional(),
@@ -712,6 +735,7 @@ const BOT_API_METHODS: readonly BotApiMethod[] = [
     handler: handleGetChatMemberCount,
     legacyNames: ['getChatMembersCount'],
   },
+  { name: 'getChatMenuButton', handler: handleGetChatMenuButton },
   { name: 'getFile', handler: handleGetFile },
   { name: 'getMe', handler: handleGetMe },
   { name: 'getMyCommands', handler: handleGetMyCommands },
@@ -729,6 +753,7 @@ const BOT_API_METHODS: readonly BotApiMethod[] = [
     name: 'setChatAdministratorCustomTitle',
     handler: handleSetChatAdministratorCustomTitle,
   },
+  { name: 'setChatMenuButton', handler: handleSetChatMenuButton },
   { name: 'setMyCommands', handler: handleSetMyCommands },
   { name: 'setMyDefaultAdministratorRights', handler: handleSetMyDefaultAdministratorRights },
   { name: 'setMyDescription', handler: handleSetMyDescription },
@@ -2328,6 +2353,62 @@ function handleGetMyDefaultAdministratorRights(
       parsedParameters.data.for_channels ? 'channel' : 'group',
     ),
   );
+}
+
+/**
+ * Sets the bot's menu button for all its private chats, or with `chat_id` for its chat with that
+ * user. The button is read before the chat, as the official server's
+ * `process_set_chat_menu_button_query` does.
+ */
+function handleSetChatMenuButton(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const invalidParametersDescription = 'Bad Request: invalid setChatMenuButton parameters';
+  const parsedParameters = setChatMenuButtonParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, invalidParametersDescription);
+  }
+  const menuButtonReading = readMenuButtonParameter(
+    parsedParameters.data.menu_button,
+    invalidParametersDescription,
+  );
+  if (!menuButtonReading.read) {
+    return botApiError(400, menuButtonReading.description);
+  }
+  const { chat_id: userId } = parsedParameters.data;
+  if (userId !== undefined && userId <= 0) {
+    return botApiError(400, CHAT_ID_INVALID_DESCRIPTION);
+  }
+
+  const result = context.session.botApi.setChatMenuButton(context.bot, {
+    userId,
+    menuButton: menuButtonReading.menuButton,
+  });
+  if (result.set) {
+    return botApiResult(true);
+  }
+  return result.reason === 'web_app_url_invalid'
+    ? botApiError(400, `${BAD_REQUEST_PREFIX}menu button Web App ${result.urlError}`)
+    : botApiError(400, MENU_BUTTON_FAILURE_DESCRIPTIONS[result.reason]);
+}
+
+function handleGetChatMenuButton(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const parsedParameters = getChatMenuButtonParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, 'Bad Request: invalid getChatMenuButton parameters');
+  }
+  const { chat_id: userId } = parsedParameters.data;
+  if (userId !== undefined && userId <= 0) {
+    return botApiError(400, CHAT_ID_INVALID_DESCRIPTION);
+  }
+  const result = context.session.botApi.getChatMenuButton(context.bot, userId);
+  return result.found
+    ? botApiResult(result.menuButton)
+    : botApiError(400, USER_NOT_FOUND_DESCRIPTION);
 }
 
 function handleSetMyDescription(
