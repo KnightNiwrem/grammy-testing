@@ -42,6 +42,7 @@ import {
   type BotApiMethodAnswer,
   type BotApiMethodContext,
   botApiResult,
+  botApiRetryAfterError,
 } from './method_call.ts';
 import {
   booleanParameter,
@@ -640,47 +641,85 @@ export type BotApiMethodHandler = (
   uploadedFiles: BotApiUploadedFiles,
 ) => BotApiMethodAnswer | Promise<BotApiMethodAnswer>;
 
-/** Keyed by lowercase name, because Telegram matches method names case-insensitively. */
-const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHandler>([
-  ['answercallbackquery', handleAnswerCallbackQuery],
-  ['answerinlinequery', handleAnswerInlineQuery],
-  ['banchatmember', handleBanChatMember],
-  ['copymessage', handleCopyMessage],
-  ['copymessages', handleCopyMessages],
-  ['deletemessage', handleDeleteMessage],
-  ['deletemessages', handleDeleteMessages],
-  ['deletemycommands', handleDeleteMyCommands],
-  ['deletewebhook', handleDeleteWebhook],
-  ['editmessagecaption', handleEditMessageCaption],
-  ['editmessagereplymarkup', handleEditMessageReplyMarkup],
-  ['editmessagetext', handleEditMessageText],
-  ['forwardmessage', handleForwardMessage],
-  ['forwardmessages', handleForwardMessages],
-  ['getchatadministrators', handleGetChatAdministrators],
-  ['getchatmember', handleGetChatMember],
-  ['getchatmembercount', handleGetChatMemberCount],
-  // Telegram's older name for getChatMemberCount.
-  ['getchatmemberscount', handleGetChatMemberCount],
-  ['getfile', handleGetFile],
-  ['getme', handleGetMe],
-  ['getmycommands', handleGetMyCommands],
-  ['getupdates', handleGetUpdates],
-  ['getwebhookinfo', handleGetWebhookInfo],
-  // Telegram's older name for banChatMember.
-  ['kickchatmember', handleBanChatMember],
-  ['leavechat', handleLeaveChat],
-  ['sendchataction', handleSendChatAction],
-  ['senddocument', handleSendDocument],
-  ['sendmessage', handleSendMessage],
-  ['sendphoto', handleSendPhoto],
-  ['setmycommands', handleSetMyCommands],
-  ['setwebhook', handleSetWebhook],
-  ['unbanchatmember', handleUnbanChatMember],
-]);
+/** A Bot API method the emulator implements, under its current name. */
+export interface BotApiMethod {
+  readonly name: string;
+  readonly handler: BotApiMethodHandler;
+  /** Telegram's older names of the method, which still call it. */
+  readonly legacyNames?: readonly string[];
+}
 
-/** Finds a Bot API method by name, which Telegram matches case-insensitively. */
-export function findBotApiMethodHandler(methodName: string): BotApiMethodHandler | undefined {
-  return BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME.get(methodName.toLowerCase());
+const BOT_API_METHODS: readonly BotApiMethod[] = [
+  { name: 'answerCallbackQuery', handler: handleAnswerCallbackQuery },
+  { name: 'answerInlineQuery', handler: handleAnswerInlineQuery },
+  { name: 'banChatMember', handler: handleBanChatMember, legacyNames: ['kickChatMember'] },
+  { name: 'copyMessage', handler: handleCopyMessage },
+  { name: 'copyMessages', handler: handleCopyMessages },
+  { name: 'deleteMessage', handler: handleDeleteMessage },
+  { name: 'deleteMessages', handler: handleDeleteMessages },
+  { name: 'deleteMyCommands', handler: handleDeleteMyCommands },
+  { name: 'deleteWebhook', handler: handleDeleteWebhook },
+  { name: 'editMessageCaption', handler: handleEditMessageCaption },
+  { name: 'editMessageReplyMarkup', handler: handleEditMessageReplyMarkup },
+  { name: 'editMessageText', handler: handleEditMessageText },
+  { name: 'forwardMessage', handler: handleForwardMessage },
+  { name: 'forwardMessages', handler: handleForwardMessages },
+  { name: 'getChatAdministrators', handler: handleGetChatAdministrators },
+  { name: 'getChatMember', handler: handleGetChatMember },
+  {
+    name: 'getChatMemberCount',
+    handler: handleGetChatMemberCount,
+    legacyNames: ['getChatMembersCount'],
+  },
+  { name: 'getFile', handler: handleGetFile },
+  { name: 'getMe', handler: handleGetMe },
+  { name: 'getMyCommands', handler: handleGetMyCommands },
+  { name: 'getUpdates', handler: handleGetUpdates },
+  { name: 'getWebhookInfo', handler: handleGetWebhookInfo },
+  { name: 'leaveChat', handler: handleLeaveChat },
+  { name: 'sendChatAction', handler: handleSendChatAction },
+  { name: 'sendDocument', handler: handleSendDocument },
+  { name: 'sendMessage', handler: handleSendMessage },
+  { name: 'sendPhoto', handler: handleSendPhoto },
+  { name: 'setMyCommands', handler: handleSetMyCommands },
+  { name: 'setWebhook', handler: handleSetWebhook },
+  { name: 'unbanChatMember', handler: handleUnbanChatMember },
+];
+
+/** Keyed by lowercase name, because Telegram matches method names case-insensitively. */
+const BOT_API_METHODS_BY_LOWERCASE_NAME: ReadonlyMap<string, BotApiMethod> = new Map(
+  BOT_API_METHODS.flatMap((method) =>
+    [method.name, ...(method.legacyNames ?? [])].map((name) =>
+      [name.toLowerCase(), method] as const
+    )
+  ),
+);
+
+/**
+ * Finds a Bot API method by its current or older name, which Telegram matches
+ * case-insensitively.
+ */
+export function findBotApiMethod(methodName: string): BotApiMethod | undefined {
+  return BOT_API_METHODS_BY_LOWERCASE_NAME.get(methodName.toLowerCase());
+}
+
+/**
+ * Runs a bot's call of a method, however the call arrived, unless a test queued a rate limit
+ * answer for it, which the call receives instead.
+ */
+export async function callBotApiMethod(
+  context: BotApiMethodContext,
+  { name, handler }: BotApiMethod,
+  parameters: BotApiRequestParameters,
+  uploadedFiles: BotApiUploadedFiles,
+): Promise<BotApiMethodAnswer> {
+  const retryAfterSeconds = context.session.botRateLimits.takeRateLimitResponse(
+    context.bot.id,
+    name,
+  );
+  return retryAfterSeconds === undefined
+    ? await handler(context, parameters, uploadedFiles)
+    : botApiRetryAfterError(retryAfterSeconds);
 }
 
 export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
@@ -722,10 +761,8 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
 
   // Telegram accepts both HTTP methods for every Bot API method.
   botApiRoutes.on(['GET', 'POST'], BOT_API_METHOD_PATH, async (context) => {
-    const methodHandler = findBotApiMethodHandler(
-      context.req.param(BOT_API_METHOD_NAME_PARAMETER),
-    );
-    if (methodHandler === undefined) {
+    const method = findBotApiMethod(context.req.param(BOT_API_METHOD_NAME_PARAMETER));
+    if (method === undefined) {
       return botApiResponse(context, botApiError(404, 'Not Found: method not found'));
     }
 
@@ -740,8 +777,9 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
     };
     return botApiResponse(
       context,
-      await methodHandler(
+      await callBotApiMethod(
         methodContext,
+        method,
         parametersDecoding.parameters,
         parametersDecoding.uploadedFiles,
       ),
@@ -2281,5 +2319,8 @@ function badRequestDescription(tdlibErrorMessage: string): string {
 
 /** Sends a Bot API method's answer as the JSON body of an HTTP response. */
 function botApiResponse(context: Context, { status, body }: BotApiMethodAnswer): Response {
-  return context.json(body, status);
+  const retryAfterSeconds = body.ok ? undefined : body.parameters?.retry_after;
+  return retryAfterSeconds === undefined
+    ? context.json(body, status)
+    : context.json(body, status, { 'Retry-After': String(retryAfterSeconds) });
 }

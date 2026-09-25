@@ -662,6 +662,37 @@ Deno.test('TypeScript client sends inline queries and results through an inline 
   await session.end();
 });
 
+Deno.test('TypeScript client queues rate limit answers for a bot', async () => {
+  const publicOrigin = 'http://emulator.example:9000';
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin,
+  });
+  const client = new TelegramEmulationClient(publicOrigin, {
+    fetch: createInProcessFetch(api.fetch),
+  });
+  const session = await client.createSession();
+  const createdBot = await session.createBot({ first_name: 'Test Bot', username: 'test_bot' });
+
+  const queued = await session.queueRateLimitResponses({
+    bot_id: createdBot.bot.id,
+    method: 'getme',
+    retry_after: 2,
+  });
+  const limitedResponse = await api.request(
+    `/sessions/${session.id}/bot-api/bot${createdBot.token}/getMe`,
+  );
+  const remaining = await session.getRateLimitResponses(createdBot.bot.id);
+  if (
+    JSON.stringify(queued) !==
+      JSON.stringify({ method: 'getMe', retry_after: 2, remaining_count: 1 }) ||
+    limitedResponse.status !== 429 || remaining.length !== 0
+  ) {
+    throw new Error('Expected the queued answer to limit the next getMe call');
+  }
+  await session.end();
+});
+
 Deno.test('TypeScript client reports HTTP failures with request details', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({

@@ -67,6 +67,8 @@ export type {
   PrivateMessage,
   PrivateMessageTarget,
   PromoteChatMemberInput,
+  QueueRateLimitResponsesInput,
+  RateLimitResponses,
   RemoveChatMemberInput,
   RepliedPrivateMessage,
   RepliedSupergroupMessage,

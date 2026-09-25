@@ -46,6 +46,29 @@ export interface CreatedVirtualBot {
   readonly bot: VirtualBotProfile;
 }
 
+/**
+ * `429 Too Many Requests` answers queued for a bot's next Bot API calls, which receive them
+ * instead of running.
+ */
+export interface RateLimitResponses {
+  /** The method whose calls receive the answers, by its current name; omitted for every method. */
+  readonly method?: string;
+  /** The `retry_after`, in seconds, of every answer. */
+  readonly retry_after: number;
+  /** How many of the bot's next matching calls still receive an answer. */
+  readonly remaining_count: number;
+}
+
+export interface QueueRateLimitResponsesInput {
+  readonly bot_id: number;
+  /** An implemented Bot API method, by any name Telegram accepts; omit it for every method. */
+  readonly method?: string;
+  /** The `retry_after`, in seconds, of every answer; at least 1. */
+  readonly retry_after: number;
+  /** How many of the bot's next matching calls receive an answer. Defaults to 1. */
+  readonly count?: number;
+}
+
 export interface CreateVirtualAccountInput {
   readonly first_name: string;
   readonly last_name?: string;

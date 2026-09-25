@@ -2,6 +2,7 @@ import type { BotApiService } from '../services/bot_api.ts';
 import type { BotBlockingService } from '../services/bot_blocking.ts';
 import type { BotCommandService } from '../services/bot_command.ts';
 import type { BotMessageViewService } from '../services/bot_message_view.ts';
+import type { BotRateLimitService } from '../services/bot_rate_limit.ts';
 import type { CallbackQueryService } from '../services/callback_query.ts';
 import type { ChatActionService } from '../services/chat_action.ts';
 import type { InlineQueryService } from '../services/inline_query.ts';
@@ -31,6 +32,7 @@ export interface EmulationSession {
   readonly chatActions: ChatActionService;
   readonly botMessageViews: BotMessageViewService;
   readonly mediaFiles: MediaFileService;
+  readonly botRateLimits: BotRateLimitService;
   readonly botApi: BotApiService;
   /**
    * Stops the session from keeping requests waiting and from delivering updates: held long polls

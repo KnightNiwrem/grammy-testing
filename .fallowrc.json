@@ -29,7 +29,8 @@
           "src/types/bot_api.ts",
           "src/types/telegram_identity.ts",
           "src/types/bot_command.ts",
-          "src/types/bot_webhook.ts"
+          "src/types/bot_webhook.ts",
+          "src/types/bot_rate_limit.ts"
         ]
       },
       {
@@ -111,6 +112,12 @@
         ]
       },
       {
+        "name": "bot-rate-limit-repository",
+        "patterns": [
+          "src/repositories/bot_rate_limit.ts"
+        ]
+      },
+      {
         "name": "blocked-user-repository",
         "patterns": [
           "src/repositories/blocked_user.ts"
@@ -172,7 +179,8 @@
           "src/services/virtual_user.ts",
           "src/services/bot_command.ts",
           "src/services/bot_blocking.ts",
-          "src/services/chat_action.ts"
+          "src/services/chat_action.ts",
+          "src/services/bot_rate_limit.ts"
         ]
       },
       {
@@ -311,6 +319,12 @@
         ]
       },
       {
+        "from": "bot-rate-limit-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "blocked-user-repository",
         "allow": [
           "domain"
@@ -438,6 +452,7 @@
           "callback-query-repository",
           "inline-query-repository",
           "bot-command-repository",
+          "bot-rate-limit-repository",
           "blocked-user-repository",
           "chat-action-repository",
           "identity-repository",

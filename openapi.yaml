@@ -120,6 +120,58 @@ paths:
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotId'
+  /sessions/{sessionId}/bots/{botId}/rate-limit-responses:
+    description: >-
+      `429 Too Many Requests` answers queued for a bot's next Bot API calls, for testing how the
+      bot handles Telegram's rate limits. The emulator reproduces none of Telegram's traffic
+      thresholds. Each call takes one answer from the earliest queued answers that apply to its
+      method, whatever its parameters, instead of running; webhook replies that call methods take
+      them too. Answers that no call takes end with the session.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      operationId: queueRateLimitResponses
+      summary: Queue rate limit answers for a bot's next calls
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueueRateLimitResponsesRequest'
+      responses:
+        '201':
+          description: The answers were queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitResponses'
+        '400':
+          description: >-
+            The request body is malformed, or `method` names no Bot API method the emulator
+            implements.
+        '404':
+          description: No active test session or virtual bot has the supplied identifier.
+    get:
+      operationId: listRateLimitResponses
+      summary: List the rate limit answers still queued for a bot
+      responses:
+        '200':
+          description: The queued answers, earliest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - rate_limit_responses
+                properties:
+                  rate_limit_responses:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RateLimitResponses'
+        '404':
+          description: No active test session or virtual bot has the supplied identifier.
   /sessions/{sessionId}/accounts:
     description: Virtual Telegram accounts owned by a test session.
     parameters:
@@ -1019,6 +1071,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/getUpdates:
     description: Telegram Bot API long-polling method for receiving pending bot updates.
     parameters:
@@ -1076,6 +1130,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/setWebhook:
     description: >-
       Telegram Bot API method for delivering the bot's updates to a webhook, or, with an empty URL,
@@ -1147,6 +1203,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/deleteWebhook:
     description: >-
       Telegram Bot API method for removing the bot's webhook, as setWebhook does with an empty
@@ -1191,6 +1249,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/getWebhookInfo:
     description: >-
       Telegram Bot API method for reading the bot's webhook, its pending updates, and the latest
@@ -1222,6 +1282,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/sendMessage:
     description: >-
       Telegram Bot API method for sending a text message. The emulator supports text sent to a
@@ -1327,6 +1389,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/files/{fileUniqueId}:
     description: >-
       The content of a photo or document of the session's messages, addressed by its
@@ -1425,6 +1489,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/sendDocument:
     description: >-
       Telegram Bot API method for sending a file as a document with an optional caption, as
@@ -1491,6 +1557,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/forwardMessage:
     description: >-
       Telegram Bot API method for forwarding a message of one of the bot's chats, a private chat
@@ -1562,6 +1630,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/copyMessage:
     description: >-
       Telegram Bot API method for copying a message of one of the bot's chats to a private chat
@@ -1644,6 +1714,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/forwardMessages:
     description: >-
       Telegram Bot API method for forwarding up to 100 messages of one of the bot's chats at once,
@@ -1720,6 +1792,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/copyMessages:
     description: >-
       Telegram Bot API method for copying up to 100 messages of one of the bot's chats at once, as
@@ -1783,6 +1857,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/editMessageCaption:
     description: >-
       Telegram Bot API method for editing the caption of a photo or document the bot sent to a
@@ -1858,6 +1934,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/getFile:
     description: >-
       Telegram Bot API method for preparing a file the bot knows by its `file_id` for download.
@@ -1907,6 +1985,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/file/bot{token}/{fileDirectory}/{fileName}:
     description: >-
       Where a bot downloads a file whose `file_path`, `<fileDirectory>/<fileName>`, getFile
@@ -2032,6 +2112,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/editMessageReplyMarkup:
     description: >-
       Telegram Bot API method for replacing the inline keyboard of a message the bot sent to a
@@ -2097,6 +2179,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/deleteMessage:
     description: >-
       Telegram Bot API method for deleting a message of a private chat or a supergroup for every
@@ -2161,6 +2245,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/deleteMessages:
     description: >-
       Telegram Bot API method for deleting several messages of a chat at once, as deleteMessage
@@ -2228,6 +2314,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/answerCallbackQuery:
     description: >-
       Telegram Bot API method for answering a callback query the bot received. The account that
@@ -2276,6 +2364,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/answerInlineQuery:
     description: >-
       Telegram Bot API method for answering an inline query an account sent to the bot, once, with
@@ -2363,6 +2453,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/sendChatAction:
     description: >-
       Telegram Bot API method for showing a chat action, such as typing, in a private chat with an
@@ -2423,6 +2515,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/leaveChat:
     description: >-
       Telegram Bot API method for leaving a supergroup the bot is a member of. The bot receives a
@@ -2482,6 +2576,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/getChatMember:
     description: >-
       Telegram Bot API method for reading a user's standing in a chat. In a private chat, the
@@ -2545,6 +2641,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/getChatAdministrators:
     description: >-
       Telegram Bot API method for listing a supergroup's owner, then its administrators in the
@@ -2604,6 +2702,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/getChatMemberCount:
     description: >-
       Telegram Bot API method for counting a chat's members: the two participants of a private
@@ -2662,6 +2762,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/banChatMember:
     description: >-
       Telegram Bot API method for banning a user from a supergroup, which needs the
@@ -2734,6 +2836,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/unbanChatMember:
     description: >-
       Telegram Bot API method for lifting a user's ban from a supergroup, so that it may be
@@ -2803,6 +2907,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/setMyCommands:
     description: >-
       Telegram Bot API method for replacing the bot's command list for a scope and language. As on
@@ -2881,6 +2987,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/getMyCommands:
     description: >-
       Telegram Bot API method for reading the bot's command list for exactly one scope and
@@ -2947,6 +3055,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/deleteMyCommands:
     description: >-
       Telegram Bot API method for deleting the bot's command list for a scope and language, so
@@ -3013,6 +3123,8 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/{method}:
     description: Telegram Bot API methods invoked for a virtual bot within a test session.
     x-implementation-status: unimplemented
@@ -6493,6 +6605,57 @@ components:
           type: integer
         description:
           type: string
+        parameters:
+          type: object
+          additionalProperties: false
+          description: Present on a `429` rate limit answer.
+          required:
+            - retry_after
+          properties:
+            retry_after:
+              type: integer
+              minimum: 1
+              description: How many seconds the bot should wait before retrying.
+    RateLimitResponses:
+      type: object
+      additionalProperties: false
+      required:
+        - retry_after
+        - remaining_count
+      properties:
+        method:
+          type: string
+          description: >-
+            The Bot API method whose calls receive the answers, by its current name, such as
+            `banChatMember` for `kickChatMember`; omitted for calls of every method.
+        retry_after:
+          type: integer
+          minimum: 1
+          description: The `retry_after`, in seconds, of every answer.
+        remaining_count:
+          type: integer
+          minimum: 1
+          description: How many of the bot's next matching calls still receive an answer.
+    QueueRateLimitResponsesRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - retry_after
+      properties:
+        method:
+          type: string
+          description: >-
+            An implemented Bot API method, by any name Telegram accepts for it, matched
+            case-insensitively; omit it to limit calls of every method.
+        retry_after:
+          type: integer
+          minimum: 1
+          description: The `retry_after`, in seconds, of every answer.
+        count:
+          type: integer
+          minimum: 1
+          default: 1
+          description: How many of the bot's next matching calls receive an answer.
     Session:
       type: object
       additionalProperties: false
@@ -6614,3 +6777,19 @@ components:
       description: Telegram Bot API method name.
       schema:
         type: string
+  responses:
+    BotApiRateLimited:
+      description: >-
+        A test queued a rate limit answer for this call with `queueRateLimitResponses`. As on
+        Telegram, the `Retry-After` header and `parameters.retry_after` say how many seconds to
+        wait before retrying.
+      headers:
+        Retry-After:
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/BotApiErrorResponse'

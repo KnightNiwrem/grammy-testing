@@ -32,6 +32,23 @@ virtual token gives `401 Unauthorized`; an unimplemented method gives
 `404 Not Found: method not found`. Requests under an absent session use the emulation API's plain
 `404`, not a Bot API envelope.
 
+### Rate limit answers
+
+Tests make a bot's next calls fail with `429 Too Many Requests` by queuing answers with
+`POST /sessions/{sessionId}/bots/{botId}/rate-limit-responses` or the TypeScript client's
+`queueRateLimitResponses`. A request names the `retry_after` in seconds, optionally a `method` and a
+`count` of calls, which defaults to 1; `GET` on the same path lists the answers still queued. Each
+call of the bot takes one answer from the earliest queued answers for its method, or for every
+method, instead of running, whatever its parameters. A method is matched by any name Telegram
+accepts for it, so answers queued for `kickChatMember` also limit `banChatMember`. Webhook replies
+that call methods take answers too.
+
+The answer is written as the official server's [`Query::set_retry_after_error`][retry-after-error]
+writes it: HTTP status 429, a `Retry-After` header, and
+`{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 3","parameters":{"retry_after":3}}`.
+The emulator does not reject calls that arrive before the wait ends; a test that needs a longer
+limit queues more answers.
+
 ## Intentional deviations
 
 - **Virtual identities and no Telegram connection.** Accounts and bot tokens belong to the test
@@ -48,8 +65,9 @@ virtual token gives `401 Unauthorized`; an unimplemented method gives
   These checks expose accidental or unsupported input and malformed values in tests, even when
   Telegram would ignore or coerce them. The comparison below describes the parsing differences.
 - **No production rate thresholds.** Telegram's traffic limits are not reproduced automatically.
-  Rate-limit scenarios should be controlled by the test, so bot developers can exercise error
-  handling without generating production-scale traffic or depending on Telegram's limit figures.
+  Tests [queue rate limit answers](#rate-limit-answers) instead, so bot developers can exercise
+  error handling without generating production-scale traffic or depending on Telegram's limit
+  figures.
 - **No link previews or preview metadata.** Tests should not depend on fetching third-party websites
   to generate previews. Returned messages also omit `link_preview_options`, whose value Telegram
   derives from the generated preview; see
@@ -108,19 +126,12 @@ chosen at creation. Tests need to change these settings during a session.
 update or deletion operations. Tests currently rely on creation responses and session teardown;
 managing individual profiles is missing.
 
-**Configurable rate-limit responses.** There is no test configuration that makes selected Bot API
-calls return `429` with `parameters.retry_after`. Bot developers need this control to test
-rate-limit handling. The intended mechanism is explicit test configuration; reproducing Telegram's
-production rate thresholds is intentionally out of scope.
-
-The official server's error handling is in [`Client::fail_query_with_error`][api-errors] and
-[`Client::fail_query_flood_limit_exceeded`][flood-control].
-
 ## Local evidence
 
 [Session lifecycle](../../src/services/session_lifecycle.ts),
 [request decoding](../../src/api/sessions/bot_api/request_parameters.ts),
 [method schemas](../../src/api/sessions/bot_api/mod.ts),
+[rate limit answers](../../src/services/bot_rate_limit.ts),
 [request decoding tests](../../tests/bot_api_request_parameters_test.ts) and
 [HTTP tests](../../tests/emulation_api_test.ts).
 
@@ -132,5 +143,4 @@ The official server's error handling is in [`Client::fail_query_with_error`][api
 [subscriptions]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L18310-L18364
 [polling]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L16926-L16949
 [check-chat]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L8869-L8895
-[api-errors]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L71-L110
-[flood-control]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17529-L17535
+[retry-after-error]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Query.cpp#L120-L127

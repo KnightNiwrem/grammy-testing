@@ -16,6 +16,7 @@ import type {
   MessageSenderBot,
   PlainMessageEntityType,
   PrivateMessage,
+  RateLimitResponses,
   ReplyInterface,
   Supergroup,
   SupergroupMessage,
@@ -69,6 +70,16 @@ export const emulationSessionSchema: z.ZodType<EmulationSession> = z.strictObjec
 export const createdVirtualBotSchema: z.ZodType<CreatedVirtualBot> = z.strictObject({
   token: z.string().min(1),
   bot: virtualBotProfileSchema,
+});
+
+export const rateLimitResponsesSchema: z.ZodType<RateLimitResponses> = z.strictObject({
+  method: z.string().min(1).optional(),
+  retry_after: z.int().positive(),
+  remaining_count: z.int().positive(),
+});
+
+export const rateLimitResponsesListSchema = z.strictObject({
+  rate_limit_responses: z.array(rateLimitResponsesSchema),
 });
 
 export const createdVirtualAccountSchema: z.ZodType<CreatedVirtualAccountResponse> = z.strictObject(

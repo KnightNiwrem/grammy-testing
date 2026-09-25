@@ -1,5 +1,5 @@
 import type { BotApiMethodContext } from './method_call.ts';
-import { findBotApiMethodHandler } from './mod.ts';
+import { callBotApiMethod, findBotApiMethod } from './mod.ts';
 import { decodeBotApiBodyParameters } from './request_parameters.ts';
 
 /** The parameter naming the method that a webhook's response asks Telegram to run. */
@@ -40,9 +40,8 @@ export async function runWebhookReply(
   ) {
     return;
   }
-  await findBotApiMethodHandler(lowercaseMethodName)?.(
-    context,
-    parameters,
-    decoding.uploadedFiles,
-  );
+  const method = findBotApiMethod(lowercaseMethodName);
+  if (method !== undefined) {
+    await callBotApiMethod(context, method, parameters, decoding.uploadedFiles);
+  }
 }

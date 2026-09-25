@@ -14,9 +14,10 @@ documented reasons explain which behavior tests should expect instead of Telegra
 **Real gaps** are missing or incorrect behavior the emulator should support. Listing a gap does not
 make the behavior available or establish an implementation schedule.
 
-An area can contain both. For example, tests should configure rate-limit errors instead of
-reproducing Telegram's production traffic thresholds, but that configuration is
-[not yet implemented](sessions-and-requests.md#real-gaps).
+An area can contain both. For example, sessions intentionally omit Telegram's production traffic
+thresholds, which tests replace with
+[queued rate limit answers](sessions-and-requests.md#rate-limit-answers), while
+[public chat usernames](sessions-and-requests.md#real-gaps) are a real gap.
 
 ## Feature guide
 
@@ -86,8 +87,9 @@ lifecycle control.
 Other intentional choices include
 [in-memory sessions and strict request validation](sessions-and-requests.md#intentional-deviations),
 [retaining unconfirmed updates](updates.md#intentional-deviations), and omitting production rate
-thresholds. The feature pages explain their testing rationale and distinguish them from missing
-functionality such as [configurable rate-limit responses](sessions-and-requests.md#real-gaps).
+thresholds in favor of [queued rate limit answers](sessions-and-requests.md#rate-limit-answers). The
+feature pages explain their testing rationale and distinguish them from
+[missing functionality](sessions-and-requests.md#real-gaps).
 
 ## Comparison baseline and evidence
 

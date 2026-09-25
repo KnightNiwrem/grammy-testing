@@ -54,9 +54,9 @@ grammY and Telegraf.
   [sessions](sessions-and-requests.md#intentional-deviations) and
   [update queues](updates.md#intentional-deviations).
 - **No production rate thresholds.** Repeated `setWebhook` calls are not automatically throttled.
-  Tests should control rate-limit scenarios explicitly; configurable 429 responses remain a
-  [real gap](sessions-and-requests.md#real-gaps). Upstream throttles registration in
-  [`Client::process_set_webhook_query`][webhook-throttle].
+  Tests control rate-limit scenarios by
+  [queuing rate limit answers](sessions-and-requests.md#rate-limit-answers). Upstream throttles
+  registration in [`Client::process_set_webhook_query`][webhook-throttle].
 - **Registration before server startup.** `setWebhook` validates URL/token syntax and returns
   without verifying DNS or connectivity, allowing tests to register before starting their webhook
   server. Upstream [resolves and verifies the connection during setup][webhook-network]. A

@@ -6657,6 +6657,87 @@ Deno.test('a grammY support bot forwards questions to its team and copies answer
   }
 });
 
+Deno.test('tests queue rate limit answers for the next Bot API calls of a bot', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  await sendText('/start');
+  const rateLimitsPath = `${sessionPath}/bots/${createdBot.bot.id}/rate-limit-responses`;
+  const queueResponses = (body: unknown) => api.request(rateLimitsPath, jsonRequest('POST', body));
+
+  const queuing = await queueResponses({ method: 'SENDMESSAGE', retry_after: 3, count: 2 });
+  const legacyQueuing = await queueResponses({ method: 'kickChatMember', retry_after: 5 });
+  if (
+    queuing.status !== 201 ||
+    JSON.stringify(await queuing.json()) !==
+      JSON.stringify({ method: 'sendMessage', retry_after: 3, remaining_count: 2 }) ||
+    JSON.stringify(await legacyQueuing.json()) !==
+      JSON.stringify({ method: 'banChatMember', retry_after: 5, remaining_count: 1 })
+  ) {
+    throw new Error("Expected the queued answers under the methods' current names");
+  }
+  const refusals = await Promise.all([
+    queueResponses({ method: 'sendPoll', retry_after: 3 }),
+    queueResponses({ retry_after: 0 }),
+    api.request(
+      `${sessionPath}/bots/${createdAccount.account.id}/rate-limit-responses`,
+      jsonRequest('POST', { retry_after: 3 }),
+    ),
+  ]);
+  if (JSON.stringify(refusals.map(({ status }) => status)) !== JSON.stringify([400, 400, 404])) {
+    throw new Error('Expected unknown methods, invalid waits and unknown bots to be refused');
+  }
+
+  const limitedResponse = await api.request(
+    `${botApiPath}/sendMessage`,
+    jsonRequest('POST', { chat_id: createdAccount.account.id, text: 'Hello' }),
+  );
+  const limitedBody = await limitedResponse.json();
+  const expectedLimitedBody = {
+    ok: false,
+    error_code: 429,
+    description: 'Too Many Requests: retry after 3',
+    parameters: { retry_after: 3 },
+  };
+  if (
+    limitedResponse.status !== 429 || limitedResponse.headers.get('Retry-After') !== '3' ||
+    JSON.stringify(limitedBody) !== JSON.stringify(expectedLimitedBody)
+  ) {
+    throw new Error(
+      `Expected Telegram's rate limit answer, received ${JSON.stringify(limitedBody)}`,
+    );
+  }
+
+  const getMe = await callBotApi(api, `${botApiPath}/getMe`, {});
+  const grammyBot = new Bot(createdBot.token, {
+    client: {
+      apiRoot: `http://emulator.example:9000${sessionPath}/bot-api`,
+      fetch: createInProcessFetch(api.fetch),
+    },
+  });
+  const grammyFailure = await grammyBot.api.sendMessage(createdAccount.account.id, 'Hello')
+    .catch((error: unknown) => error);
+  const delivered = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: createdAccount.account.id,
+    text: 'Hello',
+  });
+  if (
+    getMe.status !== 200 ||
+    !(grammyFailure instanceof GrammyError) || grammyFailure.error_code !== 429 ||
+    grammyFailure.parameters.retry_after !== 3 || delivered.status !== 200
+  ) {
+    throw new Error('Expected only the queued sendMessage calls to be limited');
+  }
+
+  const remaining = await (await api.request(rateLimitsPath)).json();
+  if (
+    JSON.stringify(remaining) !== JSON.stringify({
+      rate_limit_responses: [{ method: 'banChatMember', retry_after: 5, remaining_count: 1 }],
+    })
+  ) {
+    throw new Error(`Expected the unused answer to remain, received ${JSON.stringify(remaining)}`);
+  }
+});
+
 async function expectSettlementWithin<T>(
   pending: Promise<T>,
   milliseconds: number,

@@ -32,6 +32,8 @@ export type BotApiMethodAnswer =
       readonly ok: false;
       readonly error_code: ContentfulStatusCode;
       readonly description: string;
+      /** Telegram tells a rate-limited bot how many seconds to wait before retrying. */
+      readonly parameters?: { readonly retry_after: number };
     };
   };
 
@@ -47,4 +49,21 @@ export function botApiError(
   description: string,
 ): BotApiMethodAnswer {
   return { status: errorCode, body: { ok: false, error_code: errorCode, description } };
+}
+
+/**
+ * Telegram's answer to a rate-limited call, as the official Bot API server's
+ * `Query::set_retry_after_error` writes it; the HTTP response also carries the wait in its
+ * `Retry-After` header.
+ */
+export function botApiRetryAfterError(retryAfterSeconds: number): BotApiMethodAnswer {
+  return {
+    status: 429,
+    body: {
+      ok: false,
+      error_code: 429,
+      description: `Too Many Requests: retry after ${retryAfterSeconds}`,
+      parameters: { retry_after: retryAfterSeconds },
+    },
+  };
 }

@@ -2,7 +2,17 @@ import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 import { z } from 'zod';
 
+import type { QueuedRateLimitResponses } from '../../../types/bot_rate_limit.ts';
+import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from '../../../types/telegram_identity.ts';
+import { findBotApiMethod } from '../bot_api/mod.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
+
+const BOT_ID_PARAMETER = 'botId';
+const RATE_LIMIT_RESPONSES_PATH = `/:${BOT_ID_PARAMETER}/rate-limit-responses` as const;
+
+const botIdPathParameterSchema = z.coerce.number().pipe(
+  z.int().min(MIN_TELEGRAM_USER_ID).max(MAX_TELEGRAM_USER_ID),
+);
 
 const createBotRequestSchema = z.strictObject({
   first_name: z.string().min(1),
@@ -13,6 +23,13 @@ const createBotRequestSchema = z.strictObject({
   supports_inline_queries: z.boolean().optional(),
   /** Turns on inline feedback, so that the bot learns which inline query results are sent. */
   receives_chosen_inline_results: z.boolean().optional(),
+});
+
+const queueRateLimitResponsesRequestSchema = z.strictObject({
+  /** The method whose calls are limited, by any name Telegram accepts; omitted for every method. */
+  method: z.string().optional(),
+  retry_after: z.int().min(1),
+  count: z.int().min(1).default(1),
 });
 
 export function createBotRoutes(): Hono<SessionRouteContextTypes> {
@@ -47,5 +64,62 @@ export function createBotRoutes(): Hono<SessionRouteContextTypes> {
     );
   });
 
+  botRoutes.post(RATE_LIMIT_RESPONSES_PATH, async (context) => {
+    const botId = botIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
+    if (!botId.success) {
+      return context.body(null, 404);
+    }
+    let requestBody: unknown;
+    try {
+      requestBody = await context.req.json();
+    } catch {
+      return context.body(null, 400);
+    }
+    const parsedRequest = queueRateLimitResponsesRequestSchema.safeParse(requestBody);
+    if (!parsedRequest.success) {
+      return context.body(null, 400);
+    }
+    const { method: methodName, retry_after: retryAfterSeconds, count } = parsedRequest.data;
+    const method = methodName === undefined ? undefined : findBotApiMethod(methodName);
+    if (methodName !== undefined && method === undefined) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').botRateLimits.queueRateLimitResponses(
+      botId.data,
+      {
+        ...(method === undefined ? {} : { methodName: method.name }),
+        retryAfterSeconds,
+        remainingCount: count,
+      },
+    );
+    return result.queued
+      ? context.json(presentRateLimitResponses(result.responses), 201)
+      : context.body(null, 404);
+  });
+
+  botRoutes.get(RATE_LIMIT_RESPONSES_PATH, (context) => {
+    const botId = botIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
+    if (!botId.success) {
+      return context.body(null, 404);
+    }
+    const result = context.get('emulationSession').botRateLimits.listRateLimitResponses(
+      botId.data,
+    );
+    return result.found
+      ? context.json({ rate_limit_responses: result.responses.map(presentRateLimitResponses) })
+      : context.body(null, 404);
+  });
+
   return botRoutes;
+}
+
+function presentRateLimitResponses(
+  { methodName, retryAfterSeconds, remainingCount }: QueuedRateLimitResponses,
+) {
+  return {
+    ...(methodName === undefined ? {} : { method: methodName }),
+    retry_after: retryAfterSeconds,
+    remaining_count: remainingCount,
+  };
 }

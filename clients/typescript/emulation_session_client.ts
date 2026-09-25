@@ -13,6 +13,8 @@ import {
   inlineQueryResponseSchema,
   messageHistoryResponseSchema,
   notificationsResponseSchema,
+  rateLimitResponsesListSchema,
+  rateLimitResponsesSchema,
   replyInterfaceResponseSchema,
   sentMessageResponseSchema,
   sentSupergroupMessageResponseSchema,
@@ -55,6 +57,8 @@ import type {
   PressReplyKeyboardButtonInput,
   PrivateMessage,
   PromoteChatMemberInput,
+  QueueRateLimitResponsesInput,
+  RateLimitResponses,
   RemoveChatMemberInput,
   ReplyInterface,
   SendInlineQueryInput,
@@ -74,6 +78,13 @@ export interface EmulationSessionClient extends EmulationSession {
   createAccount(input: CreateVirtualAccountInput): Promise<CreatedVirtualAccount>;
   /** Calls the emulated Bot API getMe method with a virtual bot token. */
   getMe(botToken: string): Promise<VirtualBotProfile>;
+  /**
+   * Makes a bot's next calls of a method, or of every method, fail with `429 Too Many Requests`,
+   * for testing how the bot handles Telegram's rate limits.
+   */
+  queueRateLimitResponses(input: QueueRateLimitResponsesInput): Promise<RateLimitResponses>;
+  /** Lists the rate limit answers still queued for a bot, earliest first. */
+  getRateLimitResponses(botId: number): Promise<readonly RateLimitResponses[]>;
   /**
    * Returns the content of a photo or document of the session's messages by its
    * `file_unique_id`, which, unlike `file_id`, is the same for every user.
@@ -153,6 +164,28 @@ class HttpEmulationSessionClient implements EmulationSessionClient {
       responseSchema: getMeResponseSchema,
     });
     return response.result;
+  }
+
+  queueRateLimitResponses(
+    { bot_id: botId, ...request }: QueueRateLimitResponsesInput,
+  ): Promise<RateLimitResponses> {
+    return requestJson(this.#fetch, {
+      method: 'POST',
+      url: `${this.#sessionUrl}/bots/${botId}/rate-limit-responses`,
+      expectedStatus: HTTP_STATUS_CREATED,
+      responseSchema: rateLimitResponsesSchema,
+      body: request,
+    });
+  }
+
+  async getRateLimitResponses(botId: number): Promise<readonly RateLimitResponses[]> {
+    const response = await requestJson(this.#fetch, {
+      method: 'GET',
+      url: `${this.#sessionUrl}/bots/${botId}/rate-limit-responses`,
+      expectedStatus: HTTP_STATUS_OK,
+      responseSchema: rateLimitResponsesListSchema,
+    });
+    return response.rate_limit_responses;
   }
 
   downloadFile(fileUniqueId: string): Promise<Uint8Array> {
