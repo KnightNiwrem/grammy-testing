@@ -50,6 +50,8 @@ export type {
   MessageContent,
   MessageEntity,
   MessageIn,
+  MessageOrigin,
+  MessageOriginHiddenUser,
   MessageOriginUser,
   MessageSenderBot,
   MessageTarget,

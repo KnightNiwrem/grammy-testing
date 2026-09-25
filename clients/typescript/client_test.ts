@@ -310,7 +310,10 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     can_read_all_group_messages: true,
   });
   const { account: owner } = await session.createAccount({ first_name: 'Ada' });
-  const { account: member } = await session.createAccount({ first_name: 'Grace' });
+  const { account: member } = await session.createAccount({
+    first_name: 'Grace',
+    has_private_forwards: true,
+  });
 
   const supergroup = await owner.createSupergroup({ title: 'Team', description: 'Our team' });
   const chat = { type: 'supergroup', chatId: supergroup.id } as const;
@@ -408,8 +411,9 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
   });
   if (
     forward.chat.id !== owner.id || forward.text !== 'Hello everyone' ||
-    forward.forward_origin?.sender_user.id !== member.id ||
-    forward.forward_origin.date !== greeting.date
+    JSON.stringify(forward.forward_origin) !==
+      JSON.stringify({ type: 'hidden_user', sender_user_name: 'Grace', date: greeting.date }) ||
+    forward.forward_sender_name !== 'Grace'
   ) {
     throw new Error(
       `Expected the client to forward a message, received ${JSON.stringify(forward)}`,

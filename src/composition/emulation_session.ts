@@ -1,5 +1,6 @@
 import { runWebhookReply } from '../api/sessions/bot_api/webhook_reply.ts';
 import type { EmulationSession } from '../types/emulation_session.ts';
+import { getPrivateForwardName } from '../types/virtual_account.ts';
 import { AccountRepository } from '../repositories/account.ts';
 import { BlockedUserRepository } from '../repositories/blocked_user.ts';
 import { BotRepository } from '../repositories/bot.ts';
@@ -42,6 +43,10 @@ export function createEmulationSession(id: string): EmulationSession {
   const accounts = new AccountRepository();
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
+  const getAccountPrivateForwardName = (userId: number) => {
+    const account = accounts.getById(userId);
+    return account === undefined ? undefined : getPrivateForwardName(account);
+  };
   const sharedChats = new SharedChatRepository();
   const messages = new MessageRepository();
   const files = new FileRepository();
@@ -100,6 +105,7 @@ export function createEmulationSession(id: string): EmulationSession {
   const messageForwarding = new MessageForwardingService({
     privateMessages: privateMessaging,
     supergroupMessages: supergroupMessaging,
+    getPrivateForwardName: getAccountPrivateForwardName,
   });
   const mediaFiles = new MediaFileService({ files });
   const botBlocking = new BotBlockingService({
@@ -175,6 +181,7 @@ export function createEmulationSession(id: string): EmulationSession {
     inlineMessages: messages,
     botCommands,
     chatActions,
+    getPrivateForwardName: getAccountPrivateForwardName,
   });
 
   const session: EmulationSession = {

@@ -98,6 +98,8 @@ const createAccountRequestSchema = z.strictObject({
   last_name: z.string().min(1).optional(),
   username: z.string().min(1).optional(),
   language_code: z.string().min(1).optional(),
+  /** Keeps forwards of the account's messages from linking to it; they show only its name. */
+  has_private_forwards: z.boolean().optional(),
 });
 
 /** A file's content, which JSON carries as base64 text. */

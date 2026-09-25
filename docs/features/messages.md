@@ -127,8 +127,18 @@ or copied are skipped, and the request fails only when none is left. A message t
 earlier message of the same request replies to that message's new counterpart. Batch copies keep no
 reply markup, and `remove_caption` drops media captions.
 
-Origins are always users. Other origin types, sender privacy, video start timestamps and media
-albums are [real gaps](#real-gaps).
+An account created with `has_private_forwards` keeps forwards from linking to it, as Telegram's
+"Forwarded messages" privacy setting does. As TDLib's
+[`MessageOrigin::hide_sender_if_needed`][hide-sender] does, forwards of its messages show a
+`hidden_user` origin with only its name, and the legacy `forward_sender_name` replaces
+`forward_from`. This applies to forwards by bots and accounts, to forwards of those forwards, as
+TDLib's [`copy_message_forward_info`][copy-forward-info] hides them again, and to replies from other
+chats. Telegram's servers supply the shown name; the emulator uses the account's first and last
+name, joined as TDLib's `get_user_title` joins them. The official server serializes the origin in
+[`JsonMessageOrigin`][json-origin].
+
+Other origins are users. Channel and chat origins, video start timestamps and media albums are
+[real gaps](#real-gaps).
 
 ## Intentional deviations
 
@@ -157,9 +167,9 @@ albums are [real gaps](#real-gaps).
   that replace message media.
 - **Account-side deletion.** The account emulation API has no message deletion operation. Tests
   cannot simulate an account deleting its messages; only Bot API deletion is available.
-- **Forward origins and sender privacy.** Forward origins are always visible users. Tests cannot
-  exercise hidden-sender, channel or chat origins, which TDLib's
-  [forward origin model][forward-origin] supports.
+- **Channel and chat origins.** Forward origins are users or hidden users. Tests cannot exercise
+  channel or chat origins, which TDLib's [forward origin model][forward-origin] supports; they need
+  the missing channels and anonymous administrators.
 - **Video start timestamps.** Forwarding and copying cannot specify a video start timestamp. This
   option is missing along with video message support.
 - **Additional content and albums.** Media albums and the other message kinds listed in the
@@ -189,6 +199,9 @@ albums are [real gaps](#real-gaps).
 [forward-permissions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8270-L8330
 [forward-markup]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/ReplyMarkup.cpp
 [forward-origin]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageForwardInfo.cpp
+[hide-sender]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageOrigin.cpp#L123-L131
+[copy-forward-info]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageForwardInfo.cpp#L182-L192
+[json-origin]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L2140-L2185
 [forward-messages]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L24816-L24965
 [forward-buttons]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L42-L81
 [effect-rules]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageSendOptions.cpp#L161-L170

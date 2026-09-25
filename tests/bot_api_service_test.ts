@@ -253,6 +253,7 @@ function createBotApiFixture() {
       chatActions: new ChatActionRepository(),
       currentTimeMilliseconds: () => 1_700_000_000_000,
     }),
+    getPrivateForwardName: () => undefined,
   });
   return { virtualUsers, privateMessaging, botApi };
 }

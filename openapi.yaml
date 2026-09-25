@@ -1368,10 +1368,11 @@ paths:
       chat. As TDLib does, the forward repeats the message's content and the bot through whose
       inline mode it was sent, and shows who first sent it and when in `forward_origin` and the
       legacy `forward_from` and `forward_date`; a forward of a forward shows the original's origin.
-      It keeps the inline keyboard only when every button opens a URL. As on Telegram, a forward
-      cannot be edited and the bot receives no update for it. Accounts never hide their name from
-      forwards here, so the origin is always a user. Topics, paid broadcasts, suggested posts, and
-      video start timestamps are not supported.
+      As TDLib's `hide_sender_if_needed` does, the origin of an account created with
+      `has_private_forwards` is a hidden user that shows only the account's name, also in the legacy
+      `forward_sender_name`. It keeps the inline keyboard only when every button opens a URL. As on
+      Telegram, a forward cannot be edited and the bot receives no update for it. Topics, paid
+      broadcasts, suggested posts, and video start timestamps are not supported.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -3033,6 +3034,13 @@ components:
         language_code:
           type: string
           minLength: 1
+        has_private_forwards:
+          type: boolean
+          default: false
+          description: >-
+            Sets the account's "Forwarded messages" privacy setting so that forwards of its
+            messages, and replies to them from other chats, do not link to it. Their origin is a
+            hidden user that shows only the account's first and last name.
     CreatedAccount:
       type: object
       additionalProperties: false
@@ -3311,10 +3319,18 @@ components:
           type: integer
           minimum: 0
         forward_origin:
-          $ref: '#/components/schemas/MessageOriginUser'
+          $ref: '#/components/schemas/MessageOrigin'
         forward_from:
           $ref: '#/components/schemas/MessageUser'
-          description: Legacy form of `forward_origin.sender_user`, present only for a forward.
+          description: >-
+            Legacy form of `forward_origin.sender_user`, present only for a forward whose origin is
+            a user.
+        forward_sender_name:
+          type: string
+          minLength: 1
+          description: >-
+            Legacy form of `forward_origin.sender_user_name`, present only for a forward whose
+            origin is a hidden user.
         forward_date:
           type: integer
           minimum: 0
@@ -3400,7 +3416,7 @@ components:
         - origin
       properties:
         origin:
-          $ref: '#/components/schemas/MessageOriginUser'
+          $ref: '#/components/schemas/MessageOrigin'
         chat:
           $ref: '#/components/schemas/SupergroupChat'
         message_id:
@@ -3444,6 +3460,37 @@ components:
           type: boolean
           const: true
           description: Present when the sender chose the quote.
+    MessageOrigin:
+      description: >-
+        Where a forward, or a message of another chat that a message replies to, first appeared.
+      oneOf:
+        - $ref: '#/components/schemas/MessageOriginUser'
+        - $ref: '#/components/schemas/MessageOriginHiddenUser'
+      discriminator:
+        propertyName: type
+        mapping:
+          user: '#/components/schemas/MessageOriginUser'
+          hidden_user: '#/components/schemas/MessageOriginHiddenUser'
+    MessageOriginHiddenUser:
+      type: object
+      additionalProperties: false
+      description: >-
+        The origin of a message of an account created with `has_private_forwards`: only the
+        account's name, and when it sent the original message.
+      required:
+        - type
+        - sender_user_name
+        - date
+      properties:
+        type:
+          type: string
+          const: hidden_user
+        sender_user_name:
+          type: string
+          minLength: 1
+        date:
+          type: integer
+          minimum: 0
     MessageOriginUser:
       type: object
       additionalProperties: false
@@ -3518,10 +3565,18 @@ components:
             message's content was never edited. Replacing only the inline keyboard does not change
             it.
         forward_origin:
-          $ref: '#/components/schemas/MessageOriginUser'
+          $ref: '#/components/schemas/MessageOrigin'
         forward_from:
           $ref: '#/components/schemas/MessageUser'
-          description: Legacy form of `forward_origin.sender_user`, present only for a forward.
+          description: >-
+            Legacy form of `forward_origin.sender_user`, present only for a forward whose origin is
+            a user.
+        forward_sender_name:
+          type: string
+          minLength: 1
+          description: >-
+            Legacy form of `forward_origin.sender_user_name`, present only for a forward whose
+            origin is a hidden user.
         forward_date:
           type: integer
           minimum: 0

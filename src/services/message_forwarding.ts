@@ -2,6 +2,7 @@ import {
   createMessageForward,
   isForwardable,
   type MessageForward,
+  type PrivateForwardNameLookup,
 } from '../types/message_forward.ts';
 import type { ChatMessage, PrivateMessage, SupergroupMessage } from '../types/virtual_message.ts';
 
@@ -81,24 +82,29 @@ interface SupergroupForwardMessaging {
 interface MessageForwardingServiceDependencies {
   readonly privateMessages: PrivateForwardMessaging;
   readonly supergroupMessages: SupergroupForwardMessaging;
+  /** Hides the accounts whose privacy settings keep forwards from linking to them. */
+  readonly getPrivateForwardName: PrivateForwardNameLookup;
 }
 
 /**
  * Forwards messages between the chats of an account, as a Telegram client does: the account
  * forwards a message of its private chat with a bot, or of a supergroup it is a member of, to any
  * such chat, where it becomes the account's own message that shows where it first appeared. The
- * chat's bots receive it like any message of the account.
- *
- * Telegram also lets users hide their name from forwards of their messages, which the emulator's
- * accounts never do.
+ * chat's bots receive it like any message of the account. The forward shows only the name of an
+ * original sender whose privacy settings keep forwards from linking to it.
  */
 export class MessageForwardingService {
   readonly #privateMessages: PrivateForwardMessaging;
   readonly #supergroupMessages: SupergroupForwardMessaging;
+  readonly #getPrivateForwardName: PrivateForwardNameLookup;
 
-  constructor({ privateMessages, supergroupMessages }: MessageForwardingServiceDependencies) {
+  constructor(
+    { privateMessages, supergroupMessages, getPrivateForwardName }:
+      MessageForwardingServiceDependencies,
+  ) {
     this.#privateMessages = privateMessages;
     this.#supergroupMessages = supergroupMessages;
+    this.#getPrivateForwardName = getPrivateForwardName;
   }
 
   /**
@@ -114,7 +120,7 @@ export class MessageForwardingService {
       return { forwarded: false, reason: 'message_not_forwardable' };
     }
 
-    const forward = createMessageForward(lookup.message);
+    const forward = createMessageForward(lookup.message, this.#getPrivateForwardName);
     const { fromAccountId, toChat } = input;
     const sending = toChat.type === 'private'
       ? this.#privateMessages.sendAccountForward({ fromAccountId, to: toChat, forward })

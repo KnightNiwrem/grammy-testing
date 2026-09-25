@@ -9,6 +9,7 @@ Deno.test('AccountRepository adds and retrieves an account without overwriting i
       is_bot: false,
       first_name: 'Ada',
     },
+    hasPrivateForwards: false,
   };
 
   if (!accounts.add(account)) {

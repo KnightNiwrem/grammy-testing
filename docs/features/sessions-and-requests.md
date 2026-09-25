@@ -11,7 +11,9 @@ token authenticates calls under `<botApiRoot>/bot<token>/<method>`. `getMe` retu
 Sessions isolate users, chats, messages, files, update queues and bot settings. Bot creation accepts
 `can_read_all_group_messages`, `supports_inline_queries` and `receives_chosen_inline_results`, all
 false by default. These stand in for selected BotFather settings. Account profiles can include a
-username and language code. Usernames are unique within a session, compared without case.
+username and language code. Usernames are unique within a session, compared without case. Account
+creation also accepts `has_private_forwards`, false by default, which stands in for the
+["Forwarded messages" privacy setting](messages.md#forwarding-and-copying).
 
 `DELETE /sessions/{sessionId}` or `session.end()` discards the session and stops webhook delivery
 and waiting long polls. State lives in memory and is lost on process restart. There is no account
@@ -100,8 +102,8 @@ usernames and username targets are missing. The official server resolves usernam
 `allow_paid_broadcast`, are rejected. These belong to the
 [broader feature gaps](README.md#unimplemented-areas).
 
-**Mutable bot settings.** Supported BotFather-style settings can only be chosen at bot creation.
-Tests need to change these settings during a session.
+**Mutable settings.** Supported BotFather-style settings and account privacy settings can only be
+chosen at creation. Tests need to change these settings during a session.
 
 **Individual profile management.** The emulation API has no individual bot/account profile read,
 update or deletion operations. Tests currently rely on creation responses and session teardown;

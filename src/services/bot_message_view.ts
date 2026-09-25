@@ -393,11 +393,12 @@ export class BotMessageViewService {
     message: ChatMessage,
   ): { readonly viaBot?: BotApiBotUser; readonly forwardSender?: BotApiUser } {
     const viaBotId = message.viaBot?.botId ?? message.forwardInfo?.viaBotId;
+    const forwardSender = message.forwardInfo === undefined
+      ? undefined
+      : this.#findOriginSender(message.forwardInfo, message);
     return {
       ...(viaBotId === undefined ? {} : { viaBot: this.#findViaBot(viaBotId, message) }),
-      ...(message.forwardInfo === undefined
-        ? {}
-        : { forwardSender: this.#findForwardSender(message.forwardInfo, message) }),
+      ...(forwardSender === undefined ? {} : { forwardSender }),
     };
   }
 
@@ -410,12 +411,7 @@ export class BotMessageViewService {
     observerId: number,
     message: ChatMessage,
   ): ExternalReplyProjectionContext {
-    const originSender = this.#findUser(origin.originalSenderId);
-    if (originSender === undefined) {
-      throw new Error(
-        `Original sender ${origin.originalSenderId} of the reply of ${message.id} does not exist`,
-      );
-    }
+    const originSender = this.#findOriginSender(origin, message);
     let supergroup: Supergroup | undefined;
     if (supergroupMessage !== undefined) {
       const chat = this.#sharedChats.getSharedChat(supergroupMessage.chatId);
@@ -427,7 +423,7 @@ export class BotMessageViewService {
       supergroup = chat;
     }
     return {
-      originSender,
+      ...(originSender === undefined ? {} : { originSender }),
       ...(supergroup === undefined ? {} : { supergroup }),
       ...(media === undefined
         ? {}
@@ -444,15 +440,22 @@ export class BotMessageViewService {
     return projectBotAsUser(bot.profile);
   }
 
-  /** Looks up the sender of a forward's original, which exists as long as the session does. */
-  #findForwardSender(
-    { originalSenderId }: MessageForwardInfo,
+  /**
+   * Looks up who wrote the original of a forward or of a message of another chat that a message
+   * replies to, which exists as long as the session does. Returns `undefined` for a hidden user,
+   * whose origin shows only a name.
+   */
+  #findOriginSender(
+    { originalSender }: MessageForwardInfo,
     message: ChatMessage,
-  ): BotApiUser {
-    const sender = this.#findUser(originalSenderId);
+  ): BotApiUser | undefined {
+    if (originalSender.kind === 'hidden_user') {
+      return undefined;
+    }
+    const sender = this.#findUser(originalSender.userId);
     if (sender === undefined) {
       throw new Error(
-        `Original sender ${originalSenderId} of forward ${message.id} does not exist`,
+        `Original sender ${originalSender.userId} of message ${message.id} does not exist`,
       );
     }
     return sender;

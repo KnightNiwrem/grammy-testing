@@ -161,6 +161,20 @@ const inlineKeyboardMarkupSchema: z.ZodType<InlineKeyboardMarkup> = z.strictObje
   ).min(1),
 });
 
+/** Where a forward, or the message of another chat a reply shows, first appeared. */
+const messageOriginSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('user'),
+    sender_user: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
+    date: z.number().int().nonnegative(),
+  }),
+  z.strictObject({
+    type: z.literal('hidden_user'),
+    sender_user_name: z.string().min(1),
+    date: z.number().int().nonnegative(),
+  }),
+]);
+
 /** The fields that precede a message's reply, for a chat of the given schema. */
 function messageHeaderShape<Chat extends z.ZodType>(chat: Chat) {
   return {
@@ -169,12 +183,9 @@ function messageHeaderShape<Chat extends z.ZodType>(chat: Chat) {
     chat,
     date: z.number().int().nonnegative(),
     edit_date: z.number().int().nonnegative().optional(),
-    forward_origin: z.strictObject({
-      type: z.literal('user'),
-      sender_user: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
-      date: z.number().int().nonnegative(),
-    }).optional(),
+    forward_origin: messageOriginSchema.optional(),
     forward_from: z.union([virtualAccountProfileSchema, messageSenderBotSchema]).optional(),
+    forward_sender_name: z.string().min(1).optional(),
     forward_date: z.number().int().nonnegative().optional(),
   };
 }
@@ -217,11 +228,7 @@ const photoContentShape = {
 const documentContentShape = { document: documentSchema, ...captionShape };
 
 const externalReplyShape = {
-  origin: z.strictObject({
-    type: z.literal('user'),
-    sender_user: z.union([virtualAccountProfileSchema, messageSenderBotSchema]),
-    date: z.number().int().nonnegative(),
-  }),
+  origin: messageOriginSchema,
   chat: supergroupChatSchema.optional(),
   message_id: z.number().int().positive().optional(),
 };

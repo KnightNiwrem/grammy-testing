@@ -28,12 +28,21 @@ export interface ViaBot {
 }
 
 /**
- * Where a forwarded message first appeared, which the forward shows as Telegram's origin of a user.
- * Forwarding a forward keeps its origin.
+ * Who wrote the original of a forward, as the forward shows it: the account or bot itself, or, as
+ * Telegram's origin of a hidden user does, only the name of an account whose privacy settings keep
+ * forwards from linking to it.
+ */
+export type MessageOriginSender =
+  | { readonly kind: 'user'; readonly userId: number }
+  | { readonly kind: 'hidden_user'; readonly name: string };
+
+/**
+ * Where a forwarded message first appeared, which the forward shows as Telegram's origin of a user
+ * or of a hidden user. Forwarding a forward keeps its origin.
  */
 export interface MessageForwardInfo {
-  /** The account or bot that wrote the original message. */
-  readonly originalSenderId: number;
+  /** Who wrote the original message, as the forward shows it. */
+  readonly originalSender: MessageOriginSender;
   readonly originalSentAtUnixSeconds: number;
   /**
    * The inline bot the original message was sent through, which the forward still shows; omitted

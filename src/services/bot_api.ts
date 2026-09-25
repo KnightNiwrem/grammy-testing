@@ -18,7 +18,11 @@ import {
 } from '../types/chat_membership.ts';
 import type { InlineQueryId, InlineQueryResultsButton } from '../types/inline_query.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
-import { createMessageForward, isForwardable } from '../types/message_forward.ts';
+import {
+  createMessageForward,
+  isForwardable,
+  type PrivateForwardNameLookup,
+} from '../types/message_forward.ts';
 import { createExternalReply, type ExternalReplyTarget } from '../types/message_reply.ts';
 import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
@@ -1086,6 +1090,8 @@ interface BotApiServiceDependencies {
   readonly inlineMessages: InlineMessageLookup;
   readonly botCommands: BotCommandLists;
   readonly chatActions: ChatActions;
+  /** Hides the accounts whose privacy settings keep forwards from linking to them. */
+  readonly getPrivateForwardName: PrivateForwardNameLookup;
 }
 
 /**
@@ -1110,6 +1116,7 @@ export class BotApiService {
   readonly #inlineMessages: InlineMessageLookup;
   readonly #botCommands: BotCommandLists;
   readonly #chatActions: ChatActions;
+  readonly #getPrivateForwardName: PrivateForwardNameLookup;
 
   constructor(
     {
@@ -1126,6 +1133,7 @@ export class BotApiService {
       inlineMessages,
       botCommands,
       chatActions,
+      getPrivateForwardName,
     }: BotApiServiceDependencies,
   ) {
     this.#bots = bots;
@@ -1141,6 +1149,7 @@ export class BotApiService {
     this.#inlineMessages = inlineMessages;
     this.#botCommands = botCommands;
     this.#chatActions = chatActions;
+    this.#getPrivateForwardName = getPrivateForwardName;
   }
 
   /** Returns the profile of the bot that owns `token`, or `undefined` if no bot does. */
@@ -1296,7 +1305,10 @@ export class BotApiService {
     if (!isForwardable(lookup.message)) {
       return { sent: false, reason: 'message_not_forwardable' };
     }
-    const { content, forwardInfo, inlineKeyboard } = createMessageForward(lookup.message);
+    const { content, forwardInfo, inlineKeyboard } = createMessageForward(
+      lookup.message,
+      this.#getPrivateForwardName,
+    );
     return this.#send(
       authenticatedBot,
       { kind: 'existing', content },
@@ -1357,7 +1369,10 @@ export class BotApiService {
       if (!isForwardable(message)) {
         return undefined;
       }
-      const { content, forwardInfo, inlineKeyboard } = createMessageForward(message);
+      const { content, forwardInfo, inlineKeyboard } = createMessageForward(
+        message,
+        this.#getPrivateForwardName,
+      );
       return { content, forwardInfo, ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }) };
     });
   }
@@ -1594,7 +1609,14 @@ export class BotApiService {
     return {
       resolved: true,
       reply: isForwardable(lookup.message)
-        ? { externalReply: createExternalReply(lookup.message, messageId), quote }
+        ? {
+          externalReply: createExternalReply(
+            lookup.message,
+            messageId,
+            this.#getPrivateForwardName,
+          ),
+          quote,
+        }
         : {},
     };
   }

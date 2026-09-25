@@ -51,6 +51,11 @@ export interface CreateVirtualAccountInput {
   readonly last_name?: string;
   readonly username?: string;
   readonly language_code?: string;
+  /**
+   * Keeps forwards of the account's messages, and replies to them from other chats, from linking
+   * to the account: their origin is a hidden user that shows only its name. Defaults to `false`.
+   */
+  readonly has_private_forwards?: boolean;
 }
 
 export interface VirtualAccountProfile {
@@ -410,13 +415,23 @@ export interface MessageOriginUser {
   readonly date: number;
 }
 
+/** The name of an account with private forwards that first sent a forwarded message, and when. */
+export interface MessageOriginHiddenUser {
+  readonly type: 'hidden_user';
+  readonly sender_user_name: string;
+  readonly date: number;
+}
+
+/** Where a forwarded message, or the message of another chat a reply shows, first appeared. */
+export type MessageOrigin = MessageOriginUser | MessageOriginHiddenUser;
+
 /**
  * A message of another chat that a message replies to: who first wrote it and when, the
  * supergroup message it is, and its media, whose caption the reply's quote shows instead.
  */
 export type ExternalReplyInfo =
   & {
-    readonly origin: MessageOriginUser;
+    readonly origin: MessageOrigin;
     /** The replied message's supergroup; absent for a message of a private chat. */
     readonly chat?: SupergroupChat;
     /** The replied message's ID in its supergroup; absent for a message of a private chat. */
@@ -455,9 +470,11 @@ interface MessageHeader<Chat> {
   /** Present once the message's author has edited its text or caption. */
   readonly edit_date?: number;
   /** Present for a forward. */
-  readonly forward_origin?: MessageOriginUser;
-  /** Telegram's legacy form of the origin's sender, present for a forward. */
+  readonly forward_origin?: MessageOrigin;
+  /** Telegram's legacy form of the origin's sender, present for a forward of a user's message. */
   readonly forward_from?: VirtualAccountProfile | MessageSenderBot;
+  /** Telegram's legacy form of the origin's name, present for a forward of a hidden user. */
+  readonly forward_sender_name?: string;
   /** Telegram's legacy form of the origin's date, present for a forward. */
   readonly forward_date?: number;
 }

@@ -6096,6 +6096,89 @@ Deno.test('an account forwards messages to bots, which receive their origin', as
   }
 });
 
+Deno.test('forwards and external replies show only the name of an account with private forwards', async () => {
+  const { api, sessionPath, owner, bot, supergroup, supergroupPath, sendSupergroupText } =
+    await createSupergroupFixture();
+  const readUpdates = createUpdateReader(api);
+  const accountResponse = await api.request(
+    `${sessionPath}/accounts`,
+    jsonRequest('POST', { first_name: 'Hedy', last_name: 'Lamarr', has_private_forwards: true }),
+  );
+  const invalidAccountResponse = await api.request(
+    `${sessionPath}/accounts`,
+    jsonRequest('POST', { first_name: 'Hedy', has_private_forwards: 'yes' }),
+  );
+  const { account: hedy } = await accountResponse.json() as { account: { id: number } };
+  await api.request(`${supergroupPath(owner.id)}/members/${hedy.id}`, { method: 'PUT' });
+  const hedyMessage = await sendSupergroupText(hedy.id, 'Frequency hopping');
+  await readUpdates(bot.botApiPath);
+
+  // A bot forwards the message, and replies to it from its private chat with the owner.
+  const forward = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/forwardMessage`, {
+      chat_id: supergroup.id,
+      from_chat_id: supergroup.id,
+      message_id: hedyMessage.message_id,
+    })).body,
+  );
+  await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: '/start' }),
+  );
+  const reply = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+      chat_id: owner.id,
+      text: 'Someone asks',
+      reply_parameters: { chat_id: supergroup.id, message_id: hedyMessage.message_id },
+    })).body,
+  );
+  // An account forwards it to the bot, which receives the same origin.
+  await readUpdates(bot.botApiPath);
+  await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', {
+      to: { type: 'private', botId: bot.bot.id },
+      forward: {
+        chat: { type: 'supergroup', chatId: supergroup.id },
+        message_id: hedyMessage.message_id,
+      },
+    }),
+  );
+  const [accountForwardUpdate] = await readUpdates(bot.botApiPath);
+
+  const hiddenOrigin = {
+    type: 'hidden_user',
+    sender_user_name: 'Hedy Lamarr',
+    date: hedyMessage.date,
+  };
+  const { forward_origin, forward_from, forward_sender_name, forward_date } = forward ?? {};
+  if (
+    accountResponse.status !== 201 || invalidAccountResponse.status !== 400 ||
+    JSON.stringify({ forward_origin, forward_from, forward_sender_name, forward_date }) !==
+      JSON.stringify({
+        forward_origin: hiddenOrigin,
+        forward_sender_name: 'Hedy Lamarr',
+        forward_date: hedyMessage.date,
+      }) ||
+    JSON.stringify((reply?.external_reply as Record<string, unknown>)?.origin) !==
+      JSON.stringify(hiddenOrigin) ||
+    JSON.stringify((accountForwardUpdate?.message as Record<string, unknown>)?.forward_origin) !==
+      JSON.stringify(hiddenOrigin)
+  ) {
+    throw new Error(
+      `Expected the origins to hide the account, received ${
+        JSON.stringify({
+          accountStatus: accountResponse.status,
+          invalidAccountStatus: invalidAccountResponse.status,
+          forward,
+          reply,
+          accountForwardUpdate,
+        })
+      }`,
+    );
+  }
+});
+
 Deno.test('a grammY support bot forwards questions to its team and copies answers back', async () => {
   const { api, sessionPath, member, bot, supergroup, supergroupPath } =
     await createSupergroupFixture();

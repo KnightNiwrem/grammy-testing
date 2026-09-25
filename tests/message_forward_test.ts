@@ -1,9 +1,18 @@
 import { createMessageForward, isForwardable } from '../src/types/message_forward.ts';
-import type { PrivateMessage, SupergroupMessage } from '../src/types/virtual_message.ts';
+import type {
+  MessageForwardInfo,
+  PrivateMessage,
+  SupergroupMessage,
+} from '../src/types/virtual_message.ts';
 
 const ACCOUNT_ID = 1_000_001;
 const BOT_ID = 1_000_002;
 const INLINE_BOT_ID = 1_000_003;
+
+/** Every user's forwards link to it. */
+const noPrivateForwards = () => undefined;
+/** Only the account's forwards show its name instead of linking to it. */
+const accountHasPrivateForwards = (userId: number) => userId === ACCOUNT_ID ? 'Ada' : undefined;
 
 function accountMessage(overrides: Partial<PrivateMessage> = {}): PrivateMessage {
   return {
@@ -21,12 +30,13 @@ function accountMessage(overrides: Partial<PrivateMessage> = {}): PrivateMessage
 Deno.test('createMessageForward shows the original sender and the inline bot of a message', () => {
   const forward = createMessageForward(
     accountMessage({ viaBot: { botId: INLINE_BOT_ID, inlineMessageId: 'inline' } }),
+    noPrivateForwards,
   );
 
   const expected = {
     content: { kind: 'text', text: 'Hello', entities: [] },
     forwardInfo: {
-      originalSenderId: ACCOUNT_ID,
+      originalSender: { kind: 'user', userId: ACCOUNT_ID },
       originalSentAtUnixSeconds: 1_700_000_000,
       viaBotId: INLINE_BOT_ID,
     },
@@ -37,8 +47,8 @@ Deno.test('createMessageForward shows the original sender and the inline bot of 
 });
 
 Deno.test('createMessageForward keeps the origin of a forward and only URL keyboards', () => {
-  const originalForwardInfo = {
-    originalSenderId: INLINE_BOT_ID,
+  const originalForwardInfo: MessageForwardInfo = {
+    originalSender: { kind: 'user', userId: INLINE_BOT_ID },
     originalSentAtUnixSeconds: 1_600_000_000,
   };
   const urlKeyboard = [[{ kind: 'url', text: 'Open', url: 'https://example.com/' }] as const];
@@ -52,17 +62,57 @@ Deno.test('createMessageForward keeps the origin of a forward and only URL keybo
     inlineKeyboard: [[{ kind: 'callback', text: 'Go', callbackData: 'go' }], ...urlKeyboard],
   });
 
-  const forwardOfForward = createMessageForward(botForward);
-  const forwardOfCallbackKeyboard = createMessageForward(callbackKeyboardMessage);
+  const forwardOfForward = createMessageForward(botForward, noPrivateForwards);
+  const forwardOfCallbackKeyboard = createMessageForward(
+    callbackKeyboardMessage,
+    noPrivateForwards,
+  );
   if (
     forwardOfForward.forwardInfo !== originalForwardInfo ||
     forwardOfForward.inlineKeyboard !== urlKeyboard ||
-    forwardOfCallbackKeyboard.forwardInfo.originalSenderId !== BOT_ID ||
+    JSON.stringify(forwardOfCallbackKeyboard.forwardInfo.originalSender) !==
+      JSON.stringify({ kind: 'user', userId: BOT_ID }) ||
     forwardOfCallbackKeyboard.inlineKeyboard !== undefined
   ) {
     throw new Error(
       `Expected forwards to keep origins and URL keyboards, received ${
         JSON.stringify({ forwardOfForward, forwardOfCallbackKeyboard })
+      }`,
+    );
+  }
+});
+
+Deno.test('createMessageForward shows only the name of a sender with private forwards', () => {
+  const forward = createMessageForward(accountMessage(), accountHasPrivateForwards);
+  const forwardOfBotMessage = createMessageForward(
+    accountMessage({ authorRole: 'bot' }),
+    accountHasPrivateForwards,
+  );
+  // As TDLib's copy_message_forward_info does, a forward of a forward hides its sender too.
+  const forwardOfForward = createMessageForward(
+    accountMessage({
+      authorRole: 'bot',
+      forwardInfo: {
+        originalSender: { kind: 'user', userId: ACCOUNT_ID },
+        originalSentAtUnixSeconds: 1_600_000_000,
+      },
+    }),
+    accountHasPrivateForwards,
+  );
+
+  const hiddenAccount = { kind: 'hidden_user', name: 'Ada' };
+  if (
+    JSON.stringify(forward.forwardInfo.originalSender) !== JSON.stringify(hiddenAccount) ||
+    JSON.stringify(forwardOfForward.forwardInfo) !== JSON.stringify({
+        originalSender: hiddenAccount,
+        originalSentAtUnixSeconds: 1_600_000_000,
+      }) ||
+    JSON.stringify(forwardOfBotMessage.forwardInfo.originalSender) !==
+      JSON.stringify({ kind: 'user', userId: BOT_ID })
+  ) {
+    throw new Error(
+      `Expected only the account to be hidden, received ${
+        JSON.stringify({ forward, forwardOfForward, forwardOfBotMessage })
       }`,
     );
   }

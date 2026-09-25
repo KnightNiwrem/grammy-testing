@@ -16,7 +16,7 @@ import type {
   BotApiMessage,
   BotApiMessageContent,
   BotApiMessageEntity,
-  BotApiMessageOriginUser,
+  BotApiMessageOrigin,
   BotApiMyChatMemberUpdated,
   BotApiPhotoSize,
   BotApiPrivateChat,
@@ -52,6 +52,7 @@ import type {
   FormattedText,
   MembershipServiceContent,
   MessageContent,
+  MessageForwardInfo,
   PrivateMessage,
   SupergroupMessage,
   SupergroupMessageContent,
@@ -83,7 +84,10 @@ interface MessageProjectionContext {
    * omitted for other messages.
    */
   readonly viaBot?: BotApiBotUser;
-  /** The sender of a forward's original message; omitted for a message that is no forward. */
+  /**
+   * The sender of a forward's original message; omitted for a message that is no forward, or
+   * whose origin shows only the name of a hidden user.
+   */
   readonly forwardSender?: BotApiUser;
   /**
    * What the message of another chat that the message replies to shows, resolved for the
@@ -94,8 +98,8 @@ interface MessageProjectionContext {
 
 /** What a reply to a message of another chat shows of it, resolved for the observer. */
 export interface ExternalReplyProjectionContext {
-  /** Who first wrote the replied message. */
-  readonly originSender: BotApiUser;
+  /** Who first wrote the replied message; omitted when its origin shows only a hidden user's name. */
+  readonly originSender?: BotApiUser;
   /** The replied message's supergroup; omitted for a message of a private chat. */
   readonly supergroup?: Supergroup;
   /** The replied photo or document; omitted for a replied text message. */
@@ -193,7 +197,7 @@ function projectMessageBody<Content extends BotApiSupergroupMessageContent, Repl
     ...(repliedMessage === undefined ? {} : { reply_to_message: repliedMessage }),
     ...(message.externalReply === undefined
       ? {}
-      : { external_reply: projectExternalReply(message.externalReply, externalReply) }),
+      : { external_reply: projectExternalReply(message.externalReply, externalReply, message) }),
     ...(message.quote === undefined ? {} : { quote: projectTextQuote(message.quote, context) }),
     ...content,
     ...(message.inlineKeyboard === undefined
@@ -212,16 +216,37 @@ function projectForward(message: ChatMessage, forwardSender: BotApiUser | undefi
   if (message.forwardInfo === undefined) {
     return {};
   }
-  if (forwardSender === undefined) {
-    throw new Error(`Expected the original sender of forward ${message.id} to be provided`);
-  }
-  const date = message.forwardInfo.originalSentAtUnixSeconds;
-  const forwardOrigin: BotApiMessageOriginUser = {
-    type: 'user',
-    sender_user: forwardSender,
-    date,
+  const forwardOrigin = projectMessageOrigin(message.forwardInfo, forwardSender, message);
+  return {
+    forward_origin: forwardOrigin,
+    ...(forwardOrigin.type === 'user'
+      ? { forward_from: forwardOrigin.sender_user }
+      : { forward_sender_name: forwardOrigin.sender_user_name }),
+    forward_date: forwardOrigin.date,
   };
-  return { forward_origin: forwardOrigin, forward_from: forwardSender, forward_date: date };
+}
+
+/**
+ * Shows where a forward, or a message of another chat that a message replies to, first appeared,
+ * as the official Bot API server's `JsonMessageOrigin` does: its sender, or only the name of a
+ * hidden user, and when.
+ */
+function projectMessageOrigin(
+  { originalSender, originalSentAtUnixSeconds }: MessageForwardInfo,
+  sender: BotApiUser | undefined,
+  message: ChatMessage,
+): BotApiMessageOrigin {
+  if (originalSender.kind === 'hidden_user') {
+    return {
+      type: 'hidden_user',
+      sender_user_name: originalSender.name,
+      date: originalSentAtUnixSeconds,
+    };
+  }
+  if (sender === undefined) {
+    throw new Error(`Expected the original sender of ${message.id} to be provided`);
+  }
+  return { type: 'user', sender_user: sender, date: originalSentAtUnixSeconds };
 }
 
 /**
@@ -231,6 +256,7 @@ function projectForward(message: ChatMessage, forwardSender: BotApiUser | undefi
 function projectExternalReply(
   { origin, supergroupMessage, media }: ExternalReply,
   context: ExternalReplyProjectionContext | undefined,
+  message: ChatMessage,
 ): BotApiExternalReplyInfo {
   if (context === undefined) {
     throw new Error('Expected the external reply of the message to be resolved');
@@ -240,11 +266,7 @@ function projectExternalReply(
     throw new Error(`Expected supergroup ${supergroupMessage.chatId} of the reply to be provided`);
   }
   return {
-    origin: {
-      type: 'user',
-      sender_user: context.originSender,
-      date: origin.originalSentAtUnixSeconds,
-    },
+    origin: projectMessageOrigin(origin, context.originSender, message),
     ...(supergroupMessage === undefined || supergroup === undefined ? {} : {
       chat: projectSupergroupChat(supergroup),
       message_id: supergroupMessage.messageId,

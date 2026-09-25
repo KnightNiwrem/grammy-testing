@@ -12,7 +12,7 @@ const SUPERGROUP_ID = -1_000_000_000_001;
 
 const textFixingContext = { isMentionableUser: () => true };
 
-Deno.test('createExternalReply shows a supergroup message by its origin and ID', () => {
+Deno.test('createExternalReply shows a supergroup message by its hidden origin and ID', () => {
   const message: SupergroupContentMessage = {
     kind: 'supergroup_message',
     id: 'message',
@@ -23,10 +23,17 @@ Deno.test('createExternalReply shows a supergroup message by its origin and ID',
     isContentProtected: false,
   };
 
-  const target = createExternalReply(message, 42);
+  const target = createExternalReply(
+    message,
+    42,
+    (userId) => userId === ACCOUNT_ID ? 'Ada' : undefined,
+  );
   const expected = {
     externalReply: {
-      origin: { originalSenderId: ACCOUNT_ID, originalSentAtUnixSeconds: 1_700_000_000 },
+      origin: {
+        originalSender: { kind: 'hidden_user', name: 'Ada' },
+        originalSentAtUnixSeconds: 1_700_000_000,
+      },
       supergroupMessage: { chatId: SUPERGROUP_ID, messageId: 42 },
     },
     repliedText: { text: 'Ship it', entities: [] },
@@ -54,7 +61,7 @@ Deno.test('createExternalReply keeps private media without its caption', () => {
     isContentProtected: false,
   };
 
-  const { externalReply, repliedText } = createExternalReply(message, 7);
+  const { externalReply, repliedText } = createExternalReply(message, 7, () => undefined);
   const expectedMedia = {
     kind: 'photo',
     fileId: 'photo',
@@ -64,7 +71,8 @@ Deno.test('createExternalReply keeps private media without its caption', () => {
   };
   if (
     externalReply.supergroupMessage !== undefined ||
-    externalReply.origin.originalSenderId !== BOT_ID ||
+    JSON.stringify(externalReply.origin.originalSender) !==
+      JSON.stringify({ kind: 'user', userId: BOT_ID }) ||
     JSON.stringify(externalReply.media) !== JSON.stringify(expectedMedia) ||
     JSON.stringify(repliedText) !== JSON.stringify(caption)
   ) {

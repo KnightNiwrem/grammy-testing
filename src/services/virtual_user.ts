@@ -6,6 +6,10 @@ import type {
 import type { VirtualAccount, VirtualAccountProfile } from '../types/virtual_account.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 
+/**
+ * An account's profile and privacy settings: `has_private_forwards` keeps forwards of the account's
+ * messages from linking to it, and is off by default, as for a new Telegram account.
+ */
 export type CreateVirtualAccountInput =
   & Pick<VirtualAccountProfile, 'first_name'>
   & Partial<
@@ -13,7 +17,8 @@ export type CreateVirtualAccountInput =
       VirtualAccountProfile,
       'last_name' | 'username' | 'language_code'
     >
-  >;
+  >
+  & { readonly has_private_forwards?: boolean };
 
 export type AccountCreationResult =
   | {
@@ -87,12 +92,13 @@ export class VirtualUserService {
       throw new Error('Account identity reservation returned a different identity kind');
     }
 
+    const { has_private_forwards: hasPrivateForwards = false, ...profileInput } = input;
     const profile: VirtualAccountProfile = {
-      ...input,
+      ...profileInput,
       id: identityReservation.identity.id,
       is_bot: false,
     };
-    const account: VirtualAccount = { profile };
+    const account: VirtualAccount = { profile, hasPrivateForwards };
     if (!this.#accounts.add(account)) {
       throw new Error(`Account ID ${profile.id} is already registered`);
     }

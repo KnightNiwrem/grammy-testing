@@ -147,13 +147,24 @@ export type BotApiSupergroupMessageContent =
   | BotApiMessageContent
   | BotApiMembershipServiceContent;
 
-/** Where a forward first appeared: always a user, because the emulator's senders are users. */
+/** Where a forward first appeared: a user, because the emulator's senders are users. */
 export interface BotApiMessageOriginUser {
   readonly type: 'user';
   readonly sender_user: BotApiUser;
   /** When the original message was sent. */
   readonly date: number;
 }
+
+/** Where a forward of a user whose privacy settings keep forwards from linking to it appeared. */
+export interface BotApiMessageOriginHiddenUser {
+  readonly type: 'hidden_user';
+  /** The name the user's forwards show instead. */
+  readonly sender_user_name: string;
+  /** When the original message was sent. */
+  readonly date: number;
+}
+
+export type BotApiMessageOrigin = BotApiMessageOriginUser | BotApiMessageOriginHiddenUser;
 
 /**
  * The media of a message of another chat that a message replies to, whose caption shows as the
@@ -171,7 +182,7 @@ export type BotApiExternalReplyMedia =
 /** A message of another chat that a message replies to, as Telegram's `ExternalReplyInfo`. */
 export type BotApiExternalReplyInfo =
   & {
-    readonly origin: BotApiMessageOriginUser;
+    readonly origin: BotApiMessageOrigin;
     /** The replied message's supergroup; omitted for a message of a private chat. */
     readonly chat?: BotApiSupergroupChat;
     /** The replied message's ID in its supergroup; omitted for a message of a private chat. */
@@ -206,9 +217,11 @@ interface BotApiMessageHeader<Chat> {
   /** Omitted for a message whose content was never edited. */
   readonly edit_date?: number;
   /** Present only for a forward. */
-  readonly forward_origin?: BotApiMessageOriginUser;
-  /** Legacy form of the origin's sender; present only for a forward. */
+  readonly forward_origin?: BotApiMessageOrigin;
+  /** Legacy form of the origin's sender; present only for a forward of a user's message. */
   readonly forward_from?: BotApiUser;
+  /** Legacy form of the origin's name; present only for a forward of a hidden user's message. */
+  readonly forward_sender_name?: string;
   /** Legacy form of the origin's date; present only for a forward. */
   readonly forward_date?: number;
 }

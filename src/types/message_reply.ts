@@ -1,4 +1,4 @@
-import { getMessageOrigin } from './message_forward.ts';
+import { getMessageOrigin, type PrivateForwardNameLookup } from './message_forward.ts';
 import {
   type ContentMessage,
   type ExternalReply,
@@ -47,12 +47,13 @@ export interface ExternalReplyTarget {
 export function createExternalReply(
   repliedMessage: ContentMessage,
   messageIdInChat: number,
+  getPrivateForwardName: PrivateForwardNameLookup,
 ): ExternalReplyTarget {
   const { content } = repliedMessage;
   const { text, entities } = getContentText(content);
   return {
     externalReply: {
-      origin: getMessageOrigin(repliedMessage),
+      origin: getMessageOrigin(repliedMessage, getPrivateForwardName),
       ...(repliedMessage.kind === 'supergroup_message'
         ? { supergroupMessage: { chatId: repliedMessage.chatId, messageId: messageIdInChat } }
         : {}),
