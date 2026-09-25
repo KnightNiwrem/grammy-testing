@@ -60,6 +60,11 @@ its dismissal is an [intentional deviation](#intentional-deviations).
   explicitly. Set `expired: true` when pressing a button to create an already expired query and
   exercise the query-too-old error. Missing queries, queries belonging to another bot and already
   answered queries also fail.
+- **No cached callback answers.** `cache_time` is recorded for inspection, and every press reaches
+  the bot. The Bot API describes it as client-side caching. TDLib's
+  [`GetBotCallbackAnswerQuery`][callback-answer] drops the server's `cache_time` when it builds
+  `callbackQueryAnswer`, so TDLib-based clients never reuse an answer. The emulated accounts follow
+  TDLib rather than apps that implement their own cache.
 - **Current button presses only.** Callback presses require a currently stored matching button
   because the intended tests only need those presses. Stale or arbitrary callback data and callbacks
   with inaccessible message payloads are not modeled.
@@ -78,9 +83,6 @@ its dismissal is an [intentional deviation](#intentional-deviations).
 - **URL acceptance rules.** Validation uses JavaScript's `URL` parser rather than Telegram's full
   link rules, so acceptance is not identical. Matching those rules is needed for button validation
   tests.
-
-- **Callback answer caching.** `cache_time` is recorded but never avoids a subsequent callback
-  update. Tests need simulated reuse of cached answers.
 
 ## Comparison limits
 
@@ -102,5 +104,6 @@ server behavior.
 [reply-markup]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10504-L10630
 [button-parsing]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10200-L10503
 [answer-callback]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L15544-L15565
+[callback-answer]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/CallbackQueriesManager.cpp#L77-L90
 [td-callback]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/CallbackQueriesManager.cpp#L145-L188
 [link-manager]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/LinkManager.cpp#L2055-L2084
