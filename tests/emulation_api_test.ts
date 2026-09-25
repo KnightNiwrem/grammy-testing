@@ -3336,7 +3336,7 @@ Deno.test('members leave or are removed from supergroups, which bots see as serv
   }
   await readNewUpdates(readerBot.botApiPath);
 
-  // A bot that leaves learns of its own departure, which other bots never see.
+  // A bot that leaves learns of its own departure. As a service message, it reaches other bots too.
   const readerLeaving = await callBotApi(api, `${readerBot.botApiPath}/leaveChat`, {
     chat_id: supergroup.id,
   });
@@ -3359,11 +3359,11 @@ Deno.test('members leave or are removed from supergroups, which bots see as serv
     { message: readerLeftMessage },
   ];
   const readerLeavingUpdates = withoutDates(await readNewUpdates(readerBot.botApiPath));
-  const botUpdatesAfterReaderLeft = await readNewUpdates(bot.botApiPath);
+  const botUpdatesAfterReaderLeft = withoutDates(await readNewUpdates(bot.botApiPath));
   if (
     JSON.stringify(readerLeaving.body) !== JSON.stringify({ ok: true, result: true }) ||
     JSON.stringify(readerLeavingUpdates) !== JSON.stringify(expectedLeavingUpdates) ||
-    botUpdatesAfterReaderLeft.length !== 0
+    JSON.stringify(botUpdatesAfterReaderLeft) !== JSON.stringify([{ message: readerLeftMessage }])
   ) {
     throw new Error(
       `Expected the reader bot to leave, received ${
@@ -3789,11 +3789,11 @@ Deno.test('banChatMember, unbanChatMember, and deleteMessage follow Telegram che
       };
       return [from.id, text ?? `left_chat_member ${left_chat_member?.id}`];
     });
-  const spamUpdate = [member.id, 'Buy now!'];
+  // As a service message, the ban's reaches the reader bot, though another bot made it.
+  const expectedUpdates = [[member.id, 'Buy now!'], [bot.bot.id, `left_chat_member ${member.id}`]];
   if (
-    JSON.stringify(describeUpdates(botUpdates)) !==
-      JSON.stringify([spamUpdate, [bot.bot.id, `left_chat_member ${member.id}`]]) ||
-    JSON.stringify(describeUpdates(readerUpdates)) !== JSON.stringify([spamUpdate])
+    JSON.stringify(describeUpdates(botUpdates)) !== JSON.stringify(expectedUpdates) ||
+    JSON.stringify(describeUpdates(readerUpdates)) !== JSON.stringify(expectedUpdates)
   ) {
     throw new Error(
       `Expected the spam and the ban's service message, received ${

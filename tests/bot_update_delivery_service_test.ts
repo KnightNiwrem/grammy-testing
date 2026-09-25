@@ -474,6 +474,85 @@ Deno.test('BotUpdateDeliveryService delivers a promotion and every message to an
   }
 });
 
+Deno.test("BotUpdateDeliveryService delivers bots' membership service messages to every bot", () => {
+  const {
+    virtualUsers,
+    sharedChats,
+    messages,
+    messageBoxes,
+    botUpdates,
+    updateSubscriptions,
+    botUpdateDelivery,
+  } = createDeliveryFixture();
+  const owner = createAccount(virtualUsers);
+  const spammer = createAccount(virtualUsers);
+  const moderatorBot = createBot(virtualUsers, 'moderator_bot');
+  const loggingBot = createBot(virtualUsers, 'logging_bot');
+  const unsubscribedBot = createBot(virtualUsers, 'unsubscribed_bot');
+  const removedBot = createBot(virtualUsers, 'removed_bot');
+  const leavingBot = createBot(virtualUsers, 'leaving_bot');
+  const supergroup = {
+    kind: 'supergroup',
+    id: -1_000_000_000_001,
+    title: 'Team',
+    chatInstance: '-42',
+  } as const;
+  sharedChats.registerSupergroup(supergroup, owner.profile.id);
+  for (
+    const memberId of [spammer, moderatorBot, loggingBot, unsubscribedBot, removedBot, leavingBot]
+  ) {
+    sharedChats.addChatMember(supergroup.id, memberId.profile.id);
+  }
+  updateSubscriptions.setAllowedUpdateTypes(
+    unsubscribedBot.profile.id,
+    new Set(['my_chat_member']),
+  );
+  // As the administration service does, a member leaves the chat before its departure is recorded.
+  const recordDeparture = (authorBotId: number, memberId: number) => {
+    sharedChats.removeChatMember(supergroup.id, memberId, { status: 'left' });
+    const message = messages.addSupergroupMessage({
+      chatId: supergroup.id,
+      author: { kind: 'bot', botId: authorBotId },
+      sentAtUnixSeconds: 1_700_000_000,
+      content: { kind: 'member_left', memberId },
+    });
+    messageBoxes.assignMessageId(supergroup.id, message.id);
+    botUpdateDelivery.publish({ type: 'message_created', message });
+  };
+  const departuresSeenBy = (botId: number) =>
+    botUpdates.confirmAndReadPendingUpdates(botId, { limit: 100 }).map((update) => {
+      const message = messageFromUpdate(update);
+      return message !== undefined && 'left_chat_member' in message
+        ? `${message.from?.id} removed ${message.left_chat_member.id}`
+        : JSON.stringify(update);
+    });
+
+  recordDeparture(moderatorBot.profile.id, spammer.profile.id);
+  recordDeparture(moderatorBot.profile.id, removedBot.profile.id);
+  recordDeparture(leavingBot.profile.id, leavingBot.profile.id);
+
+  const spammerRemoval = `${moderatorBot.profile.id} removed ${spammer.profile.id}`;
+  const botRemoval = `${moderatorBot.profile.id} removed ${removedBot.profile.id}`;
+  const leaving = `${leavingBot.profile.id} removed ${leavingBot.profile.id}`;
+  const expectedDepartures = new Map([
+    [moderatorBot, [spammerRemoval, botRemoval, leaving]],
+    [loggingBot, [spammerRemoval, botRemoval, leaving]],
+    [unsubscribedBot, []],
+    [removedBot, [spammerRemoval, botRemoval]],
+    [leavingBot, [spammerRemoval, botRemoval, leaving]],
+  ]);
+  for (const [bot, expected] of expectedDepartures) {
+    const received = departuresSeenBy(bot.profile.id);
+    if (JSON.stringify(received) !== JSON.stringify(expected)) {
+      throw new Error(
+        `Expected ${bot.profile.username} to see ${JSON.stringify(expected)}, received ${
+          JSON.stringify(received)
+        }`,
+      );
+    }
+  }
+});
+
 Deno.test('BotUpdateDeliveryService addresses supergroup media by caption and per-bot file IDs', () => {
   const {
     virtualUsers,

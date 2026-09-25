@@ -212,16 +212,18 @@ export class BotUpdateDeliveryService {
   /**
    * A service message about a membership change is observed by every bot of the supergroup,
    * privacy mode notwithstanding, and by a bot that left or was removed, which, as on Telegram,
-   * still learns of its own departure. A bot's service message, about its leaving, is observed
-   * only by that bot, since bots never observe other bots' messages.
+   * still learns of its own departure. Telegram delivers service messages to every bot, so, unlike
+   * other messages, a bot's service message, about its leaving or its removal of a member, reaches
+   * the other bots too, and, as the Bot API server does for removals, the bot that made it.
    */
   #deliverMembershipServiceMessage(message: SupergroupMessage): void {
     const departedMemberIds = message.content.kind === 'member_left'
       ? [message.content.memberId]
       : [];
-    const observerIds = message.author.kind === 'bot'
-      ? [message.author.botId]
-      : [...this.#sharedChats.getChatMemberIds(message.chatId), ...departedMemberIds];
+    const observerIds = new Set([
+      ...this.#sharedChats.getChatMemberIds(message.chatId),
+      ...departedMemberIds,
+    ]);
     for (const observerId of observerIds) {
       if (
         this.#bots.getById(observerId) === undefined || !this.#isSubscribed(observerId, 'message')

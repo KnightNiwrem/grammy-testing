@@ -103,50 +103,6 @@ not justify losing explicit reply precedence.
 Reply to A while commanding B; reply to A while sending via C; reply to an inline-generated message.
 Repeat with an administrator observer and with the selected recipient unsubscribed.
 
-## 3. P1 — Bot-authored membership service messages are hidden from other bots
-
-**Location:**
-[`src/services/bot_update_delivery.ts`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/src/services/bot_update_delivery.ts),
-`#deliverMembershipServiceMessage`.
-
-### Finding and context
-
-For an account-authored service message, the service considers the chat’s members and the departing
-member. For a bot-authored service message, it instead selects only the authoring bot:
-
-```ts
-message.author.kind === 'bot'
-  ? [message.author.botId]
-  : /* chat members and departing member */
-```
-
-This affects more than voluntary departures: the administration service also records bot-triggered
-removals as bot-authored service messages.
-
-**Example:** Moderator bot A bans a user while logging bot B is present. B receives no
-`left_chat_member` service message through this path.
-
-Telegram’s service-message delivery rule is not the ordinary rule suppressing messages authored by
-other bots. Its documentation says bots receive service messages regardless of their privacy
-settings.
-
-**Reference:**
-[Telegram Bots FAQ — what messages will my bot get?](https://core.telegram.org/bots/faq#what-messages-will-my-bot-get)
-
-### Recommendation
-
-Select eligible observers based on the service event and membership state, not solely on whether its
-actor is a bot. Preserve appropriate delivery to a departing bot and retain `allowed_updates`
-filtering.
-
-Do not fix this by allowing all ordinary bot-authored messages through. The distinction belongs in
-service-message recipient selection.
-
-### Regression coverage
-
-Account removal, bot removal, and voluntary bot departure should be tested with multiple observing
-bots. Distinguish `message.left_chat_member` from the separate `my_chat_member` update.
-
 ## 6. P2 — Webhook delivery has no emulator-controlled per-attempt deadline
 
 **Location:**
@@ -430,7 +386,7 @@ beneath an otherwise identical source revision.
 ## Bottom line
 
 **Retain the architecture and fix the behavioral invariants first.** The highest-value corrections
-are privacy recipient selection, service-message visibility, and bounded webhook attempts.
+are privacy recipient selection and bounded webhook attempts.
 
 The most important SRP improvements are not “split every large service.” They are more specific:
 separate recipient selection from update delivery, make method execution reusable across transports,

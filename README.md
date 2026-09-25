@@ -112,13 +112,13 @@ Bots can also take part in supergroups. An account creates a supergroup and adds
 to it, and each added bot receives a `my_chat_member` update. The Bot API methods above accept a
 supergroup's negative chat ID, and replies, inline keyboards, callback buttons, and account edits
 work as in private chats. A supergroup numbers its messages once, so every member sees the same
-message IDs. As on Telegram, bots never receive other bots' messages, and a bot in privacy mode, the
-default, receives only account messages addressed to it: commands not addressed to another bot,
-replies to its messages, and mentions of it. Telegram delivers a command without a bot's username
-only to the bot that last wrote to the group; the emulator delivers it to every bot in privacy mode.
-A bot created with `can_read_all_group_messages` receives every account message. In a supergroup, a
-bot edits only its own messages and those sent through it, and deletes only its own unless it is an
-administrator.
+message IDs. As on Telegram, bots never receive other bots' messages, apart from service messages,
+and a bot in privacy mode, the default, receives only account messages addressed to it: commands not
+addressed to another bot, replies to its messages, and mentions of it. Telegram delivers a command
+without a bot's username only to the bot that last wrote to the group; the emulator delivers it to
+every bot in privacy mode. A bot created with `can_read_all_group_messages` receives every account
+message. In a supergroup, a bot edits only its own messages and those sent through it, and deletes
+only its own unless it is an administrator.
 
 Members join and leave supergroups as on Telegram, so tests can drive welcome and moderation bots.
 Each addition, departure, and removal is a service message in the supergroup's history, with
