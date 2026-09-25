@@ -747,6 +747,121 @@ Deno.test('BotUpdateDeliveryService delivers supergroup messages sent through a 
   }
 });
 
+Deno.test('BotUpdateDeliveryService lets a message reach only the privacy-mode bot it is meant for', () => {
+  const {
+    virtualUsers,
+    sharedChats,
+    messages,
+    messageBoxes,
+    botUpdates,
+    updateSubscriptions,
+    botUpdateDelivery,
+  } = createDeliveryFixture();
+  const owner = createAccount(virtualUsers);
+  const botA = createBot(virtualUsers, 'a_bot');
+  const botB = createBot(virtualUsers, 'b_bot');
+  const botC = createInlineBot(virtualUsers, 'c_bot', false);
+  const administratorBot = createBot(virtualUsers, 'admin_bot');
+  const supergroup = {
+    kind: 'supergroup',
+    id: -1_000_000_000_001,
+    title: 'Team',
+    chatInstance: '-42',
+  } as const;
+  sharedChats.registerSupergroup(supergroup, owner.profile.id);
+  for (const bot of [botA, botB, botC, administratorBot]) {
+    sharedChats.addChatMember(supergroup.id, bot.profile.id);
+  }
+  sharedChats.updateChatMemberStatus(supergroup.id, administratorBot.profile.id, {
+    status: 'administrator',
+    rights: grantSupergroupAdministratorRights([]),
+  });
+  const bots = { a: botA, b: botB, c: botC, admin: administratorBot };
+  const send = (
+    author: { readonly kind: 'account'; readonly accountId: number } | {
+      readonly kind: 'bot';
+      readonly botId: number;
+    },
+    text: string,
+    options: { readonly replyToMessageId?: string; readonly viaBotId?: number } = {},
+  ) => {
+    const command = /^\/[a-z]+(@[a-z_]+)?/.exec(text)?.[0];
+    const message = messages.addSupergroupMessage({
+      chatId: supergroup.id,
+      author,
+      sentAtUnixSeconds: 1_700_000_000,
+      content: {
+        kind: 'text',
+        text,
+        entities: command === undefined
+          ? []
+          : [{ type: 'bot_command', offset: 0, length: command.length }],
+      },
+      ...options,
+    });
+    messageBoxes.assignMessageId(supergroup.id, message.id);
+    botUpdateDelivery.publish({ type: 'message_created', message });
+    return message;
+  };
+  const byAccount = { kind: 'account', accountId: owner.profile.id } as const;
+  const recipientsOf = (text: string) =>
+    Object.entries(bots).flatMap(([name, bot]) =>
+      botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 }).some((update) =>
+          textContentOf(messageFromUpdate(update))?.text === text
+        )
+        ? [name]
+        : []
+    );
+  const expectRecipients = (text: string, expected: readonly string[]) => {
+    const received = recipientsOf(text);
+    if (JSON.stringify(received) !== JSON.stringify(expected)) {
+      throw new Error(
+        `Expected ${JSON.stringify(text)} to reach ${JSON.stringify(expected)}, received ${
+          JSON.stringify(received)
+        }`,
+      );
+    }
+  };
+
+  const questionOfA = send({ kind: 'bot', botId: botA.profile.id }, 'Question of A');
+  const inlineMessageOfC = send(byAccount, 'Sent through C', { viaBotId: botC.profile.id });
+  expectRecipients('Sent through C', ['c', 'admin']);
+
+  // Replies take precedence over a command for another bot, an inline bot, and a mention.
+  send(byAccount, '/help@b_bot to A', { replyToMessageId: questionOfA.id });
+  expectRecipients('/help@b_bot to A', ['a', 'admin']);
+  send(byAccount, 'Through C to A', {
+    replyToMessageId: questionOfA.id,
+    viaBotId: botC.profile.id,
+  });
+  expectRecipients('Through C to A', ['a', 'admin']);
+  const replyToA = send(byAccount, 'To A, not @b_bot', { replyToMessageId: questionOfA.id });
+  expectRecipients('To A, not @b_bot', ['a', 'admin']);
+  // A reply to a message meant for a bot is meant for that bot too.
+  send(byAccount, 'Still to A', { replyToMessageId: replyToA.id });
+  expectRecipients('Still to A', ['a', 'admin']);
+  send(byAccount, '/help@b_bot to C', { replyToMessageId: inlineMessageOfC.id });
+  expectRecipients('/help@b_bot to C', ['c', 'admin']);
+
+  // Without a reply, the message is meant for its inline bot, then for the bot its command names.
+  send(byAccount, '/help@b_bot, not @a_bot');
+  expectRecipients('/help@b_bot, not @a_bot', ['b', 'admin']);
+  send(byAccount, '/help@b_bot through C', { viaBotId: botC.profile.id });
+  expectRecipients('/help@b_bot through C', ['c', 'admin']);
+  send(byAccount, '/help@missing_bot, not @a_bot');
+  expectRecipients('/help@missing_bot, not @a_bot', ['admin']);
+  // Only a message meant for no bot in particular reaches bots through mentions and commands.
+  send(byAccount, 'Hello @a_bot and @b_bot');
+  expectRecipients('Hello @a_bot and @b_bot', ['a', 'b', 'admin']);
+  send(byAccount, '/start');
+  expectRecipients('/start', ['a', 'b', 'c', 'admin']);
+
+  // A bot that does not subscribe to messages still keeps them from other bots in privacy mode.
+  updateSubscriptions.setAllowedUpdateTypes(botA.profile.id, new Set(['callback_query']));
+  send(byAccount, '/help@b_bot to unsubscribed A', { replyToMessageId: questionOfA.id });
+  expectRecipients('/help@b_bot to unsubscribed A', ['admin']);
+});
+
 function createDeliveryFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();

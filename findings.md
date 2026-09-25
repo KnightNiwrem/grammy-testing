@@ -57,52 +57,6 @@ The findings and recommendations are presented in one priority order, not groupe
 
 ---
 
-## 2. P1 — Privacy-mode routing does not resolve competing recipients correctly
-
-**Location:**
-[`src/services/bot_update_delivery.ts`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/src/services/bot_update_delivery.ts),
-`#deliverSupergroupMessage` and `isAddressedToBot`.
-
-### Finding and context
-
-The implementation independently evaluates every bot using an OR of several conditions: replying to
-that bot, sending via that bot, addressing a command to it, or mentioning it. This permits several
-privacy-enabled bots to receive the same message when those conditions identify different bots.
-
-A concrete case is a user replying to bot A’s message with `/help@B`. The emulator selects A because
-of the reply and B because of the command. Telegram specifies that replies take precedence and that
-such a message has only one privacy-mode recipient.
-
-There is a related omission: reply routing looks only at the replied message’s **author**, not its
-association with an inline bot. A reply to an account-authored message sent through a bot’s inline
-mode therefore lacks that connection in the current resolver. Telegram’s documented rule encompasses
-replies to messages meant for the bot, not merely messages physically authored by it.
-
-**Reference:**
-[Telegram Bots FAQ — what messages will my bot get?](https://core.telegram.org/bots/faq#what-messages-will-my-bot-get)
-
-### Practical impact
-
-Multi-bot tests can exercise handlers that Telegram would not invoke, while replies associated with
-an inline bot can fail to reach the intended recipient.
-
-### Recommendation
-
-Resolve the privacy-mode recipient at the **message level**, rather than asking each bot an
-independent yes/no question. Then combine that result with eligible administrator/privacy-disabled
-observers and finally apply update subscriptions.
-
-That last ordering matters: a bot excluding `message` from `allowed_updates` should not cause a
-different privacy-enabled bot to become the semantic recipient.
-
-Keep the already-documented generic-command broadcast simplification separate from this fix. It does
-not justify losing explicit reply precedence.
-
-### Regression coverage
-
-Reply to A while commanding B; reply to A while sending via C; reply to an inline-generated message.
-Repeat with an administrator observer and with the selected recipient unsubscribed.
-
 ## 6. P2 — Webhook delivery has no emulator-controlled per-attempt deadline
 
 **Location:**
@@ -385,12 +339,12 @@ beneath an otherwise identical source revision.
 
 ## Bottom line
 
-**Retain the architecture and fix the behavioral invariants first.** The highest-value corrections
-are privacy recipient selection and bounded webhook attempts.
+**Retain the architecture and fix the behavioral invariants first.** The highest-value remaining
+correction is bounded webhook attempts.
 
 The most important SRP improvements are not “split every large service.” They are more specific:
-separate recipient selection from update delivery, make method execution reusable across transports,
-and distinguish faithful emulation from strict diagnostics.
+make method execution reusable across transports, and distinguish faithful emulation from strict
+diagnostics.
 
 After those corrections, webhook-response execution, `chat_member` notifications, and a narrow
 `getChat` implementation offer useful coverage without requiring comprehensive Telegram emulation.

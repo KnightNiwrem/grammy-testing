@@ -26,6 +26,7 @@ import {
   getContentText,
   isSupergroupContentMessage,
   type PrivateMessage,
+  type SupergroupContentMessage,
   type SupergroupMessage,
 } from '../types/virtual_message.ts';
 
@@ -82,6 +83,15 @@ interface BotUpdateDeliveryServiceDependencies {
 
 /** What a bot receives of a message: a new message, or an edit of one. */
 type MessageUpdateType = Extract<BotApiUpdateType, 'message' | 'edited_message'>;
+
+/**
+ * The one bot in privacy mode that a supergroup message is explicitly meant for, which alone of
+ * such bots receives it: a bot known by its ID, or, for a command addressed by username, whichever
+ * bot of the supergroup has that username, if any.
+ */
+type PrivacyModeAddressee =
+  | { readonly kind: 'bot'; readonly botId: number }
+  | { readonly kind: 'username'; readonly username: string };
 
 /**
  * Turns chat domain events into Bot API updates.
@@ -177,6 +187,11 @@ export class BotUpdateDeliveryService {
    * A supergroup message, and each edit of it, is observed by the supergroup's bots that can read
    * it. As on Telegram, bots never observe messages of bots, their own included, and a bot in
    * privacy mode observes only messages addressed to it, unless it is an administrator.
+   *
+   * Telegram lets a message reach only one bot in privacy mode, the one it is explicitly meant
+   * for, if any, as `#findPrivacyModeAddressee` finds it. Only a message meant for no bot in
+   * particular reaches bots in privacy mode through a mention or a command without a username.
+   * Which bots subscribe to the update does not change who the message is meant for.
    */
   #deliverSupergroupMessage(
     message: SupergroupMessage,
@@ -189,16 +204,17 @@ export class BotUpdateDeliveryService {
     if (message.author.kind === 'bot') {
       return;
     }
-    const repliedMessage = message.replyToMessageId === undefined
-      ? undefined
-      : this.#messages.getSupergroupMessage(message.replyToMessageId);
+    const addressee = this.#findPrivacyModeAddressee(message);
     for (const memberId of this.#sharedChats.getChatMemberIds(message.chatId)) {
       const bot = this.#bots.getById(memberId)?.profile;
-      if (
-        bot === undefined || !this.#isSubscribed(bot.id, updateType) ||
-        !(this.#readsAllGroupMessages(bot, message.chatId) ||
-          isAddressedToBot(message, repliedMessage, bot))
-      ) {
+      if (bot === undefined) {
+        continue;
+      }
+      const readsMessage = this.#readsAllGroupMessages(bot, message.chatId) ||
+        (addressee === undefined
+          ? isImplicitlyAddressedToBot(message, bot)
+          : isPrivacyModeAddressee(addressee, bot));
+      if (!readsMessage || !this.#isSubscribed(bot.id, updateType)) {
         continue;
       }
       this.#enqueueMessage(
@@ -318,6 +334,49 @@ export class BotUpdateDeliveryService {
   }
 
   /**
+   * Finds the bot in privacy mode that an account's supergroup message is explicitly meant for, as
+   * Telegram documents it, in order of precedence: the bot that a replied message was meant for,
+   * since replies take precedence, the bot the message was sent through, and the bot a leading
+   * command names. Returns `undefined` for a message meant for no bot in particular.
+   *
+   * Telegram documents only that replies take precedence; the emulator ranks the inline bot of a
+   * message before the bot its command names.
+   */
+  #findPrivacyModeAddressee(message: SupergroupContentMessage): PrivacyModeAddressee | undefined {
+    const repliedMessage = message.replyToMessageId === undefined
+      ? undefined
+      : this.#messages.getSupergroupMessage(message.replyToMessageId);
+    const repliedMessageAddressee = repliedMessage === undefined
+      ? undefined
+      : this.#findRepliedMessageAddressee(repliedMessage);
+    if (repliedMessageAddressee !== undefined) {
+      return repliedMessageAddressee;
+    }
+    if (message.viaBot !== undefined) {
+      return { kind: 'bot', botId: message.viaBot.botId };
+    }
+    const commandUsername = findLeadingCommandUsername(message);
+    return commandUsername === undefined
+      ? undefined
+      : { kind: 'username', username: commandUsername };
+  }
+
+  /**
+   * Finds the bot a replied message was meant for, which a reply to it is meant for too: the bot
+   * that wrote it, or the bot an account's message was explicitly meant for.
+   */
+  #findRepliedMessageAddressee(
+    repliedMessage: SupergroupMessage,
+  ): PrivacyModeAddressee | undefined {
+    if (repliedMessage.author.kind === 'bot') {
+      return { kind: 'bot', botId: repliedMessage.author.botId };
+    }
+    return isSupergroupContentMessage(repliedMessage)
+      ? this.#findPrivacyModeAddressee(repliedMessage)
+      : undefined;
+  }
+
+  /**
    * Whether a bot receives every message of a group it is a member of: with privacy mode disabled,
    * or, as Telegram documents, as one of the group's administrators.
    */
@@ -331,37 +390,46 @@ export class BotUpdateDeliveryService {
   }
 }
 
+/** Usernames are matched as Telegram matches them, ignoring letter case. */
+function isPrivacyModeAddressee(addressee: PrivacyModeAddressee, bot: VirtualBotProfile): boolean {
+  return addressee.kind === 'bot'
+    ? addressee.botId === bot.id
+    : addressee.username.toLowerCase() === bot.username.toLowerCase();
+}
+
 /**
- * Whether an account's supergroup message is addressed to a bot in privacy mode, which then
- * receives it: a command at the start of the text or caption that is not addressed to another bot,
- * a reply to one of the bot's messages, a mention of the bot, or a message sent through the bot's
- * inline mode.
+ * Whether an account's supergroup message that is meant for no bot in particular reaches a bot in
+ * privacy mode: through a command without a username at the start of the text or caption, or a
+ * mention of the bot.
  *
  * Telegram documents that a command without a bot's username reaches only the bot that last wrote
  * to the group; the emulator delivers it to every bot in privacy mode.
  */
-function isAddressedToBot(
-  message: SupergroupMessage,
-  repliedMessage: SupergroupMessage | undefined,
-  bot: VirtualBotProfile,
-): boolean {
-  const isReplyToBot = repliedMessage?.author.kind === 'bot' &&
-    repliedMessage.author.botId === bot.id;
-  return isReplyToBot || message.viaBot?.botId === bot.id ||
-    startsWithCommandForBot(message, bot) || mentionsBot(message, bot);
+function isImplicitlyAddressedToBot(message: SupergroupMessage, bot: VirtualBotProfile): boolean {
+  return startsWithCommandWithoutUsername(message) || mentionsBot(message, bot);
 }
 
-function startsWithCommandForBot(message: SupergroupMessage, bot: VirtualBotProfile): boolean {
+/**
+ * The text of the bot command at the start of a message's text or caption, such as `/start` or
+ * `/start@test_bot`; `undefined` when the text starts with no command.
+ */
+function findLeadingCommand(message: SupergroupMessage): string | undefined {
   const { text, entities } = getContentText(message.content);
   const leadingCommand = entities.find((entity) =>
     entity.type === 'bot_command' && entity.offset === 0
   );
-  if (leadingCommand === undefined) {
-    return false;
-  }
-  const [, addressedUsername] = text.slice(0, leadingCommand.length).split('@');
-  return addressedUsername === undefined ||
-    addressedUsername.toLowerCase() === bot.username.toLowerCase();
+  return leadingCommand === undefined ? undefined : text.slice(0, leadingCommand.length);
+}
+
+/** The username that the command at the start of a message names, as in `/start@test_bot`. */
+function findLeadingCommandUsername(message: SupergroupMessage): string | undefined {
+  const [, addressedUsername] = findLeadingCommand(message)?.split('@') ?? [];
+  return addressedUsername;
+}
+
+function startsWithCommandWithoutUsername(message: SupergroupMessage): boolean {
+  const leadingCommand = findLeadingCommand(message);
+  return leadingCommand !== undefined && !leadingCommand.includes('@');
 }
 
 /** Mentions by username are matched as Telegram clients mark them, ignoring letter case. */
