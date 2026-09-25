@@ -116,6 +116,12 @@
         ]
       },
       {
+        "name": "chat-action-repository",
+        "patterns": [
+          "src/repositories/chat_action.ts"
+        ]
+      },
+      {
         "name": "identity-repository",
         "patterns": [
           "src/repositories/telegram_identity.ts"
@@ -164,7 +170,8 @@
           "src/services/shared_chat_administration.ts",
           "src/services/virtual_user.ts",
           "src/services/bot_command.ts",
-          "src/services/bot_blocking.ts"
+          "src/services/bot_blocking.ts",
+          "src/services/chat_action.ts"
         ]
       },
       {
@@ -309,6 +316,12 @@
         ]
       },
       {
+        "from": "chat-action-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "identity-repository",
         "allow": [
           "domain"
@@ -425,6 +438,7 @@
           "inline-query-repository",
           "bot-command-repository",
           "blocked-user-repository",
+          "chat-action-repository",
           "identity-repository",
           "session-repository",
           "bot-api-projection",

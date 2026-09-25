@@ -568,6 +568,23 @@ export interface BotCommand {
   readonly is_ephemeral: boolean;
 }
 
+/** What a bot shows it is doing in a chat, by the Bot API's lowercase action name. */
+export interface ChatAction {
+  readonly bot_id: number;
+  readonly action:
+    | 'typing'
+    | 'record_video'
+    | 'upload_video'
+    | 'record_voice'
+    | 'upload_voice'
+    | 'upload_photo'
+    | 'upload_document'
+    | 'choose_sticker'
+    | 'find_location'
+    | 'record_video_note'
+    | 'upload_video_note';
+}
+
 /** The commands one bot of a supergroup suggests to an account. */
 export interface SupergroupBotCommands {
   readonly bot_id: number;
@@ -745,6 +762,12 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
     input: AccountMessageHistoryInput<Target>,
   ): Promise<readonly MessageIn<Target>[]>;
   /**
+   * Returns the chat actions, such as typing, that this account's client shows in its private
+   * chat with a bot or in a supergroup it is a member of. A bot's action lasts 5.5 seconds unless
+   * the bot sends it again, and ends when the bot cancels it or sends a message to the chat.
+   */
+  getChatActions(input: AccountChatActionsInput): Promise<readonly ChatAction[]>;
+  /**
    * Presses a callback button on a bot's message, in a private chat or a supergroup, which sends
    * the bot a callback query. The bot answers asynchronously; read the answer with
    * `getCallbackQuery`.
@@ -795,6 +818,10 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    * bot as this account's message. Fails when the chat shows no keyboard with such a button.
    */
   pressReplyKeyboardButton(input: PressReplyKeyboardButtonInput): Promise<PrivateMessage>;
+}
+
+export interface AccountChatActionsInput {
+  readonly chat: MessageTarget;
 }
 
 export interface AccountBotCommandsInput {

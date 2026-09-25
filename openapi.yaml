@@ -466,6 +466,32 @@ paths:
           description: The account is not a member of the supergroup.
         '404':
           description: The session, account, or supergroup does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/chat-actions:
+    description: The chat actions, such as typing, a member's client shows in a supergroup.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/SupergroupChatId'
+    get:
+      operationId: getSupergroupChatActions
+      summary: Return the chat actions the supergroup's bots show
+      description: >-
+        Returns each bot's action in the order the bots last sent them. As for a private chat, an
+        action lasts 5.5 seconds unless the bot sends it again, and ends when the bot cancels it
+        or sends a message to the supergroup.
+      responses:
+        '200':
+          description: The bots' actions, which may be none.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountChatActions'
+        '400':
+          description: An account or supergroup path identifier is invalid.
+        '403':
+          description: The account is not a member of the supergroup.
+        '404':
+          description: The session, account, or supergroup does not exist.
   /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/messages/{messageId}:
     description: One message of a supergroup, addressed by its ID in the supergroup.
     parameters:
@@ -562,6 +588,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AccountBotCommands'
+        '400':
+          description: A path identifier is invalid.
+        '404':
+          description: The session, account, or bot does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/chat-actions:
+    description: The chat action, such as typing, an account's client shows in its private chat with a bot.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      operationId: getPrivateChatActions
+      summary: Return the chat action the bot shows in its private chat with the account
+      description: >-
+        As TDLib's `DialogActionManager` shows them, a bot's action from `sendChatAction` lasts
+        5.5 seconds unless the bot sends it again, and ends when the bot cancels it or sends a
+        message to the chat.
+      responses:
+        '200':
+          description: The bot's action, or none.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountChatActions'
         '400':
           description: A path identifier is invalid.
         '404':
@@ -2185,9 +2235,10 @@ paths:
   /sessions/{sessionId}/bot-api/bot{token}/sendChatAction:
     description: >-
       Telegram Bot API method for showing a chat action, such as typing, in a private chat with an
-      account that has written to the bot or in a supergroup the bot is a member of. Telegram
-      shows the action in the members' clients for a few seconds; the emulator checks the request as Telegram does but does not keep the action.
-      Topics and business connections are not supported.
+      account that has written to the bot or in a supergroup the bot is a member of. Accounts see
+      the action through their conversation's `chat-actions` for 5.5 seconds, until the bot
+      cancels it or sends a message to the chat. Topics and business connections are not
+      supported.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -5663,6 +5714,38 @@ components:
           type: string
         is_ephemeral:
           type: boolean
+    AccountChatActions:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_actions
+      properties:
+        chat_actions:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - bot_id
+              - action
+            properties:
+              bot_id:
+                type: integer
+              action:
+                type: string
+                description: The action by its Bot API name, in lowercase.
+                enum:
+                  - typing
+                  - record_video
+                  - upload_video
+                  - record_voice
+                  - upload_voice
+                  - upload_photo
+                  - upload_document
+                  - choose_sticker
+                  - find_location
+                  - record_video_note
+                  - upload_video_note
     AccountSupergroupBotCommands:
       type: object
       additionalProperties: false

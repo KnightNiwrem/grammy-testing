@@ -728,8 +728,8 @@ export class SupergroupMessagingService {
   }
 
   /**
-   * Shows a chat action, such as typing, from a bot to a supergroup it is a member of. The emulator
-   * only checks that the bot may send it.
+   * Shows a chat action, such as typing, from a bot to a supergroup it is a member of. This checks
+   * only that the bot may send it; the caller records the action members' clients show.
    */
   sendBotChatAction(
     { fromBotId, chatId }: SendSupergroupBotChatActionInput,

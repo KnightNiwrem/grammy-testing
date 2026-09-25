@@ -8,6 +8,7 @@ import { BotUpdateRepository } from '../repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../repositories/bot_update_subscription.ts';
 import { BotWebhookRepository } from '../repositories/bot_webhook.ts';
 import { CallbackQueryRepository } from '../repositories/callback_query.ts';
+import { ChatActionRepository } from '../repositories/chat_action.ts';
 import { FileRepository } from '../repositories/file.ts';
 import { InlineQueryRepository } from '../repositories/inline_query.ts';
 import { MessageRepository } from '../repositories/message.ts';
@@ -27,6 +28,7 @@ import {
   WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
 } from '../services/bot_webhook.ts';
 import { CallbackQueryService } from '../services/callback_query.ts';
+import { ChatActionService } from '../services/chat_action.ts';
 import { InlineQueryService } from '../services/inline_query.ts';
 import { MediaFileService } from '../services/media_file.ts';
 import { MessageForwardingService } from '../services/message_forwarding.ts';
@@ -127,6 +129,14 @@ export function createEmulationSession(id: string): EmulationSession {
     events: botUpdateDelivery,
   });
 
+  const chatActions = new ChatActionService({
+    accounts,
+    bots,
+    sharedChats,
+    chatActions: new ChatActionRepository(),
+    currentTimeMilliseconds: () => Date.now(),
+  });
+
   const botCommands = new BotCommandService({
     accounts,
     bots,
@@ -164,6 +174,7 @@ export function createEmulationSession(id: string): EmulationSession {
     inlineQueries,
     inlineMessages: messages,
     botCommands,
+    chatActions,
   });
 
   const session: EmulationSession = {
@@ -177,6 +188,7 @@ export function createEmulationSession(id: string): EmulationSession {
     callbackQueries,
     inlineQueries,
     botCommands,
+    chatActions,
     botMessageViews,
     mediaFiles,
     botApi,

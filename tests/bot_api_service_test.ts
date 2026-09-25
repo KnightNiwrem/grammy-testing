@@ -6,6 +6,7 @@ import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { BotWebhookRepository } from '../src/repositories/bot_webhook.ts';
 import { CallbackQueryRepository } from '../src/repositories/callback_query.ts';
+import { ChatActionRepository } from '../src/repositories/chat_action.ts';
 import { FileRepository } from '../src/repositories/file.ts';
 import { InlineQueryRepository } from '../src/repositories/inline_query.ts';
 import { MessageRepository } from '../src/repositories/message.ts';
@@ -25,6 +26,7 @@ import {
   WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
 } from '../src/services/bot_webhook.ts';
 import { CallbackQueryService } from '../src/services/callback_query.ts';
+import { ChatActionService } from '../src/services/chat_action.ts';
 import { InlineQueryService } from '../src/services/inline_query.ts';
 import { PrivateMessagingService } from '../src/services/private_messaging.ts';
 import { SupergroupMessagingService } from '../src/services/supergroup_messaging.ts';
@@ -243,6 +245,13 @@ function createBotApiFixture() {
       privateConversations,
       supergroupMembers: sharedChats,
       botCommands: new BotCommandRepository(),
+    }),
+    chatActions: new ChatActionService({
+      accounts,
+      bots,
+      sharedChats,
+      chatActions: new ChatActionRepository(),
+      currentTimeMilliseconds: () => 1_700_000_000_000,
     }),
   });
   return { virtualUsers, privateMessaging, botApi };

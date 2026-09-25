@@ -4,6 +4,7 @@ import { HTTP_STATUS_CREATED, HTTP_STATUS_NO_CONTENT, HTTP_STATUS_OK } from './c
 import {
   botCommandsResponseSchema,
   callbackQueryResponseSchema,
+  chatActionsResponseSchema,
   chosenInlineResultResponseSchema,
   createdSupergroupResponseSchema,
   createdVirtualAccountSchema,
@@ -19,6 +20,7 @@ import {
 } from './schemas.ts';
 import type {
   AccountBotCommandsInput,
+  AccountChatActionsInput,
   AccountEditMessageCaptionInput,
   AccountEditMessageInput,
   AccountForwardMessageInput,
@@ -32,6 +34,7 @@ import type {
   BotBlockInput,
   BotCommand,
   CallbackQuery,
+  ChatAction,
   ChooseInlineQueryResultInput,
   CreatedVirtualAccount,
   CreatedVirtualBot,
@@ -321,6 +324,15 @@ function createVirtualAccountClient(
         responseSchema: messageResponseSchemasFor(input.chat).history,
       });
       return response.messages;
+    },
+    async getChatActions(input: AccountChatActionsInput): Promise<readonly ChatAction[]> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'GET',
+        url: `${conversationUrl(accountUrl, input.chat)}/chat-actions`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: chatActionsResponseSchema,
+      });
+      return response.chat_actions;
     },
     async pressCallbackButton(input: PressCallbackButtonInput): Promise<CallbackQuery> {
       const response = await requestJson(fetchImplementation, {

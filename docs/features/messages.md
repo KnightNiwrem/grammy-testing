@@ -56,6 +56,12 @@ Replies to checklist tasks or poll options are [real gaps](#real-gaps). Text and
 [missing](sessions-and-requests.md#real-gaps); link-preview metadata is
 [intentionally absent](text-formatting.md#intentional-deviations).
 
+Bots show chat actions, such as typing, with `sendChatAction`. Tests read the actions an account's
+client shows through `account.getChatActions` for a private chat or a supergroup. As TDLib's
+[`DialogActionManager`][dialog-actions] shows them, an action lasts 5.5 seconds unless the bot sends
+it again. It ends when the bot sends `cancel` or a message to the chat, and a supergroup lists each
+bot's latest action.
+
 Private message IDs come from each observer's message box; a supergroup has one sequence shared by
 all members. Private conversation history in the emulation API uses the **bot's** message IDs, so a
 test can pass them to Bot API calls. History contains the currently stored messages, without
@@ -165,13 +171,15 @@ albums are [real gaps](#real-gaps).
 [private messaging](../../src/services/private_messaging.ts),
 [message projection](../../src/projections/bot_api_message.ts),
 [forward rules](../../src/types/message_forward.ts),
-[reply rules](../../src/types/message_reply.ts),
+[reply rules](../../src/types/message_reply.ts), [chat actions](../../src/services/chat_action.ts),
 [private messaging tests](../../tests/private_messaging_service_test.ts),
-[forward tests](../../tests/message_forward_test.ts) and
-[reply tests](../../tests/message_reply_test.ts).
+[forward tests](../../tests/message_forward_test.ts),
+[reply tests](../../tests/message_reply_test.ts) and
+[chat action tests](../../tests/chat_action_service_test.ts).
 
 [check-reply]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L9144-L9207
 [message-quote]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageQuote.cpp#L54-L71
+[dialog-actions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogActionManager.cpp#L240-L334
 [external-reply-input]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L21264-L21291
 [quote-entities]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L4840-L4853
 [replied-message-info]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/RepliedMessageInfo.cpp#L142-L200

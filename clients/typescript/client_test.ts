@@ -365,6 +365,19 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     throw new Error('Expected the client to exchange messages and press buttons in the supergroup');
   }
 
+  const chatActionResponse = await api.request(`${botApiPath}/sendChatAction`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: supergroup.id, action: 'typing' }),
+  });
+  const chatActions = await member.getChatActions({ chat });
+  if (
+    chatActionResponse.status !== 200 ||
+    JSON.stringify(chatActions) !== JSON.stringify([{ bot_id: bot.id, action: 'typing' }])
+  ) {
+    throw new Error(`Expected the client to see the bot typing, received ${chatActions}`);
+  }
+
   const groupCommandsResponse = await api.request(`${botApiPath}/setMyCommands`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

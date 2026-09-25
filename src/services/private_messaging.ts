@@ -856,8 +856,8 @@ export class PrivateMessagingService {
 
   /**
    * Shows a chat action, such as typing, from a bot to an account. As for messages, the account
-   * must have started a conversation with the bot and not block it. Telegram shows the action in
-   * the account's client for a few seconds; the emulator only checks that the bot may send it.
+   * must have started a conversation with the bot and not block it. This checks only that the bot
+   * may send it; the caller records the action the account's client shows.
    */
   sendBotChatAction({ fromBotId, to }: SendBotChatActionInput): SendBotChatActionResult {
     if (this.#bots.getById(fromBotId) === undefined) {

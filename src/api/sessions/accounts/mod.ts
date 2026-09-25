@@ -22,7 +22,7 @@ import {
   MIN_SUPERGROUP_OR_CHANNEL_ID,
   MIN_TELEGRAM_USER_ID,
 } from '../../../types/telegram_identity.ts';
-import type { Supergroup } from '../../../types/virtual_chat.ts';
+import type { Supergroup, VisibleChatAction } from '../../../types/virtual_chat.ts';
 import {
   type ChatMessage,
   countTextCharacters,
@@ -41,6 +41,7 @@ const PRIVATE_MESSAGE_PATH = `${PRIVATE_MESSAGE_HISTORY_PATH}/:${MESSAGE_ID_PARA
 const BLOCKED_BOT_PATH = `/:${ACCOUNT_ID_PARAMETER}/blocked-bots/:${BOT_ID_PARAMETER}` as const;
 const PRIVATE_CHAT_COMMANDS_PATH = `${PRIVATE_CONVERSATION_PATH}/commands` as const;
 const PRIVATE_CHAT_REPLY_INTERFACE_PATH = `${PRIVATE_CONVERSATION_PATH}/reply-interface` as const;
+const PRIVATE_CHAT_ACTIONS_PATH = `${PRIVATE_CONVERSATION_PATH}/chat-actions` as const;
 const REPLY_KEYBOARD_PRESS_COLLECTION_PATH =
   `/:${ACCOUNT_ID_PARAMETER}/reply-keyboard-presses` as const;
 const CALLBACK_QUERY_ID_PARAMETER = 'callbackQueryId';
@@ -57,6 +58,7 @@ const SUPERGROUP_CONVERSATION_PATH =
   `/:${ACCOUNT_ID_PARAMETER}/conversations/supergroup/:${CHAT_ID_PARAMETER}` as const;
 const SUPERGROUP_MESSAGE_HISTORY_PATH = `${SUPERGROUP_CONVERSATION_PATH}/messages` as const;
 const SUPERGROUP_COMMANDS_PATH = `${SUPERGROUP_CONVERSATION_PATH}/commands` as const;
+const SUPERGROUP_CHAT_ACTIONS_PATH = `${SUPERGROUP_CONVERSATION_PATH}/chat-actions` as const;
 const SUPERGROUP_MESSAGE_PATH =
   `${SUPERGROUP_MESSAGE_HISTORY_PATH}/:${MESSAGE_ID_PARAMETER}` as const;
 const USER_ID_PARAMETER = 'userId';
@@ -549,6 +551,27 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     });
   });
 
+  accountRoutes.get(SUPERGROUP_CHAT_ACTIONS_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const chatId = supergroupChatIdPathParameterSchema.safeParse(
+      context.req.param(CHAT_ID_PARAMETER),
+    );
+    if (!accountId.success || !chatId.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').chatActions.getSupergroupChatActions({
+      accountId: accountId.data,
+      chatId: chatId.data,
+    });
+    if (!result.found) {
+      return context.body(null, result.reason === 'not_a_member' ? 403 : 404);
+    }
+    return context.json({ chat_actions: result.chatActions.map(presentChatActionForAccount) });
+  });
+
   accountRoutes.patch(SUPERGROUP_MESSAGE_PATH, async (context) => {
     const accountId = telegramUserIdPathParameterSchema.safeParse(
       context.req.param(ACCOUNT_ID_PARAMETER),
@@ -699,6 +722,25 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 404);
     }
     return context.json({ commands: result.commands.map(presentBotCommandForAccount) });
+  });
+
+  accountRoutes.get(PRIVATE_CHAT_ACTIONS_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
+    if (!accountId.success || !botId.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').chatActions.getPrivateChatActions({
+      accountId: accountId.data,
+      botId: botId.data,
+    });
+    if (!result.found) {
+      return context.body(null, 404);
+    }
+    return context.json({ chat_actions: result.chatActions.map(presentChatActionForAccount) });
   });
 
   accountRoutes.get(PRIVATE_CHAT_REPLY_INTERFACE_PATH, (context) => {
@@ -1075,6 +1117,11 @@ function presentSupergroup({ id, title, description }: Supergroup) {
     title,
     ...(description === undefined ? {} : { description }),
   };
+}
+
+/** Shows a chat action as the account's client shows it: the bot and what it is doing. */
+function presentChatActionForAccount({ botId, action }: VisibleChatAction) {
+  return { bot_id: botId, action };
 }
 
 /** Shows a command as the account's client lists it. */

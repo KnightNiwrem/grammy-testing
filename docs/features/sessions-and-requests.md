@@ -77,16 +77,15 @@ accepted upstream; low-level HTTP errors and size limits can still fail there.
 
 ## Accepted options without their Telegram effects
 
-| Option or method                                          | Emulator behavior                               | Classification and details                                                                      |
-| --------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `disable_notification`                                    | Validated; no notification state                | [Real gap](#real-gaps)                                                                          |
-| `link_preview_options`, `disable_web_page_preview`        | Validated; no preview or returned options       | [Intentional](#intentional-deviations)                                                          |
-| `sendChatAction`                                          | Validates action/access; no typing/upload state | [Real gap](#real-gaps)                                                                          |
-| `disable_content_type_detection`                          | Documents always remain documents               | [Real gap](media-and-files.md#real-gaps)                                                        |
-| Webhook `max_connections`                                 | Clamped and reported; delivery remains serial   | [Real gap](webhooks.md#real-gaps)                                                               |
-| Inline `cache_time`, `is_personal`; callback `cache_time` | Recorded; no cache reuse                        | Real gaps: [inline](inline-mode.md#real-gaps), [callback](keyboards-and-callbacks.md#real-gaps) |
-| Ban `until_date`                                          | Normalized and reported; no automatic unban     | [Intentional](supergroups.md#intentional-deviations)                                            |
-| Ban `revoke_messages`                                     | Validated; no separate effect in supergroups    | [Upstream evidence limit](supergroups.md#administrator-operations)                              |
+| Option or method                                          | Emulator behavior                             | Classification and details                                                                      |
+| --------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `disable_notification`                                    | Validated; no notification state              | [Real gap](#real-gaps)                                                                          |
+| `link_preview_options`, `disable_web_page_preview`        | Validated; no preview or returned options     | [Intentional](#intentional-deviations)                                                          |
+| `disable_content_type_detection`                          | Documents always remain documents             | [Real gap](media-and-files.md#real-gaps)                                                        |
+| Webhook `max_connections`                                 | Clamped and reported; delivery remains serial | [Real gap](webhooks.md#real-gaps)                                                               |
+| Inline `cache_time`, `is_personal`; callback `cache_time` | Recorded; no cache reuse                      | Real gaps: [inline](inline-mode.md#real-gaps), [callback](keyboards-and-callbacks.md#real-gaps) |
+| Ban `until_date`                                          | Normalized and reported; no automatic unban   | [Intentional](supergroups.md#intentional-deviations)                                            |
+| Ban `revoke_messages`                                     | Validated; no separate effect in supergroups  | [Upstream evidence limit](supergroups.md#administrator-operations)                              |
 
 The linked feature pages describe these differences in context.
 
@@ -107,9 +106,6 @@ Tests need to change these settings during a session.
 **Individual profile management.** The emulation API has no individual bot/account profile read,
 update or deletion operations. Tests currently rely on creation responses and session teardown;
 managing individual profiles is missing.
-
-**Observable chat actions.** `sendChatAction` validates the action and chat access but stores no
-typing or upload state. Tests need to inspect that state.
 
 **Observable notification behavior.** `disable_notification` is accepted and validated, but tests
 cannot inspect its effect on notification state. The emulator needs to make that behavior

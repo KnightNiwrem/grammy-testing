@@ -21,6 +21,26 @@ export type ChatAction =
   | 'record_video_note'
   | 'upload_video_note';
 
+/** A chat action a bot shows, which `cancel` is not. */
+export type ShownChatActionType = Exclude<ChatAction, 'cancel'>;
+
+/**
+ * How long clients show a bot's chat action unless the bot renews it, as TDLib's
+ * `DialogActionManager::DIALOG_ACTION_TIMEOUT` sets it.
+ */
+export const CHAT_ACTION_TIMEOUT_MILLISECONDS = 5_500;
+
+/** A chat action an account's client shows: which bot shows it, and what the bot is doing. */
+export interface VisibleChatAction {
+  readonly botId: number;
+  readonly action: ShownChatActionType;
+}
+
+/** A chat a bot shows chat actions in: a private conversation, or a supergroup. */
+export type ChatActionChat =
+  | { readonly type: 'private'; readonly accountId: number; readonly botId: number }
+  | { readonly type: 'supergroup'; readonly chatId: number };
+
 /** Which participant of a private conversation, identified relative to its key. */
 export type PrivateConversationRole = 'account' | 'bot';
 

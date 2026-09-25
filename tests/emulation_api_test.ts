@@ -2195,6 +2195,40 @@ Deno.test('setMyCommands, getMyCommands, and deleteMyCommands follow Telegram ch
   }
 });
 
+Deno.test('accounts see the chat action a bot shows until its next message', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  const chatActionsPath =
+    `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/chat-actions`;
+  const shownActions = async () => (await api.request(chatActionsPath)).json();
+  await sendText('Hi');
+
+  const actionResponse = await callBotApi(api, `${botApiPath}/sendChatAction`, {
+    chat_id: accountId,
+    action: 'UPLOAD_PHOTO',
+  });
+  const whileUploading = await shownActions();
+  await callBotApi(api, `${botApiPath}/sendMessage`, { chat_id: accountId, text: 'Done' });
+  const afterMessage = await shownActions();
+  const unknownBotResponse = await api.request(
+    `${sessionPath}/accounts/${accountId}/conversations/private/999/chat-actions`,
+  );
+  if (
+    actionResponse.status !== 200 ||
+    JSON.stringify(whileUploading) !==
+      JSON.stringify({ chat_actions: [{ bot_id: createdBot.bot.id, action: 'upload_photo' }] }) ||
+    JSON.stringify(afterMessage) !== JSON.stringify({ chat_actions: [] }) ||
+    unknownBotResponse.status !== 404
+  ) {
+    throw new Error(
+      `Expected the action until the bot's message, received ${
+        JSON.stringify([whileUploading, afterMessage])
+      }`,
+    );
+  }
+});
+
 Deno.test('sendChatAction accepts Telegram actions in started private chats', async () => {
   const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
   const accountId = createdAccount.account.id;

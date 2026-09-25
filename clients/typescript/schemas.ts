@@ -359,6 +359,25 @@ export const botCommandsResponseSchema = z.strictObject({
   commands: z.array(botCommandSchema),
 });
 
+export const chatActionsResponseSchema = z.strictObject({
+  chat_actions: z.array(z.strictObject({
+    bot_id: z.number().int().positive(),
+    action: z.enum([
+      'typing',
+      'record_video',
+      'upload_video',
+      'record_voice',
+      'upload_voice',
+      'upload_photo',
+      'upload_document',
+      'choose_sticker',
+      'find_location',
+      'record_video_note',
+      'upload_video_note',
+    ]),
+  })),
+});
+
 export const supergroupBotCommandsResponseSchema = z.strictObject({
   bot_commands: z.array(z.strictObject({
     bot_id: z.number().int().positive(),

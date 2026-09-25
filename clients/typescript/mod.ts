@@ -9,6 +9,7 @@ export {
 } from './telegram_emulation_client.ts';
 export type {
   AccountBotCommandsInput,
+  AccountChatActionsInput,
   AccountEditMessageCaptionInput,
   AccountEditMessageInput,
   AccountForwardMessageInput,
@@ -25,6 +26,7 @@ export type {
   CallbackQuery,
   CallbackQueryAnswer,
   CallbackQueryStatus,
+  ChatAction,
   ChooseInlineQueryResultInput,
   CreatedVirtualAccount,
   CreatedVirtualBot,

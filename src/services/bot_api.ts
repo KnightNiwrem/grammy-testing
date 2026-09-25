@@ -24,7 +24,7 @@ import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
 import { isUserId } from '../types/telegram_identity.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
-import type { ChatAction } from '../types/virtual_chat.ts';
+import type { ChatAction, ChatActionChat } from '../types/virtual_chat.ts';
 import {
   type CanonicalMessageId,
   type ChatMessage,
@@ -1063,6 +1063,15 @@ interface BotMessageViews {
   viewChatMember(userId: number, status: ChatMemberStatus): BotApiChatMember | undefined;
 }
 
+interface ChatActions {
+  recordBotChatAction(input: {
+    readonly botId: number;
+    readonly chat: ChatActionChat;
+    readonly action: ChatAction;
+  }): void;
+  endBotChatAction(input: { readonly botId: number; readonly chat: ChatActionChat }): void;
+}
+
 interface BotApiServiceDependencies {
   readonly bots: BotCredentialLookup;
   readonly updatePolling: BotUpdatePolling;
@@ -1076,6 +1085,7 @@ interface BotApiServiceDependencies {
   readonly inlineQueries: InlineQueryAnswering;
   readonly inlineMessages: InlineMessageLookup;
   readonly botCommands: BotCommandLists;
+  readonly chatActions: ChatActions;
 }
 
 /**
@@ -1099,6 +1109,7 @@ export class BotApiService {
   readonly #inlineQueries: InlineQueryAnswering;
   readonly #inlineMessages: InlineMessageLookup;
   readonly #botCommands: BotCommandLists;
+  readonly #chatActions: ChatActions;
 
   constructor(
     {
@@ -1114,6 +1125,7 @@ export class BotApiService {
       inlineQueries,
       inlineMessages,
       botCommands,
+      chatActions,
     }: BotApiServiceDependencies,
   ) {
     this.#bots = bots;
@@ -1128,6 +1140,7 @@ export class BotApiService {
     this.#inlineQueries = inlineQueries;
     this.#inlineMessages = inlineMessages;
     this.#botCommands = botCommands;
+    this.#chatActions = chatActions;
   }
 
   /** Returns the profile of the bot that owns `token`, or `undefined` if no bot does. */
@@ -1532,9 +1545,17 @@ export class BotApiService {
       return { sent: false, reason: replyResolution.reason };
     }
     const { reply } = replyResolution;
-    return isUserId(options.chatId)
+    const result = isUserId(options.chatId)
       ? this.#sendPrivateMessage(authenticatedBot, content, options, reply, forwardInfo)
       : this.#sendSupergroupMessage(authenticatedBot, content, options, reply, forwardInfo);
+    if (result.sent) {
+      // As TDLib's `DialogActionManager` does, a bot's message ends its chat action.
+      this.#chatActions.endBotChatAction({
+        botId: authenticatedBot.id,
+        chat: getChatActionChat(authenticatedBot, options.chatId),
+      });
+    }
+    return result;
   }
 
   /**
@@ -1730,11 +1751,20 @@ export class BotApiService {
       : { resolved: false, failure: { reason: preparation.reason } };
   }
 
-  /** Shows a chat action, such as typing, in a private chat or a supergroup. */
+  /**
+   * Shows a chat action, such as typing, in a private chat or a supergroup, which the chat's
+   * accounts see until it expires, is canceled, or the bot sends a message there.
+   */
   sendChatAction(
     authenticatedBot: VirtualBotProfile,
     { chatId, action }: SendChatActionRequest,
   ): SendChatActionResult {
+    const recordAction = () =>
+      this.#chatActions.recordBotChatAction({
+        botId: authenticatedBot.id,
+        chat: getChatActionChat(authenticatedBot, chatId),
+        action,
+      });
     if (!isUserId(chatId)) {
       const supergroupResult = this.#supergroupBotMessages.sendBotChatAction({
         fromBotId: authenticatedBot.id,
@@ -1742,6 +1772,7 @@ export class BotApiService {
         action,
       });
       if (supergroupResult.sent) {
+        recordAction();
         return supergroupResult;
       }
       if (supergroupResult.reason === 'bot_not_found') {
@@ -1755,6 +1786,7 @@ export class BotApiService {
       action,
     });
     if (result.sent) {
+      recordAction();
       return result;
     }
     switch (result.reason) {
@@ -2517,6 +2549,13 @@ function fileIdFailure(
   return file === undefined
     ? { reason: 'file_id_invalid' }
     : { reason: 'file_type_mismatch', expectedFileType, actualFileType: file.type };
+}
+
+/** The chat a Bot API `chat_id` addresses, as chat actions identify it. */
+function getChatActionChat(authenticatedBot: VirtualBotProfile, chatId: number): ChatActionChat {
+  return isUserId(chatId)
+    ? { type: 'private', accountId: chatId, botId: authenticatedBot.id }
+    : { type: 'supergroup', chatId };
 }
 
 /** Shows a command as the Bot API does, with `is_ephemeral` only when set. */
