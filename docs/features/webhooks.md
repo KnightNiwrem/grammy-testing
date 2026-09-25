@@ -15,6 +15,17 @@ a delivery error. The first retry is immediate, and later ones back off as descr
 whole seconds, sets the wait before the next attempt instead, up to one hour, as in
 [`WebhookActor::on_update_error`][webhook-retry].
 
+Updates wait in queues, as in the official server's [`WebhookActor`][webhook-queues]: messages and
+their edits by chat, inline queries, chosen inline results and callback queries by the sending user,
+and `my_chat_member` or `chat_member` updates by chat or by member. The queue for each update is
+chosen by the [`Client::add_update`][webhook-queue-ids] calls, and for messages in
+[`process_new_message_queue`][message-queue-id]. Each queue sends one update at a time, in order,
+and moves on only once that update is confirmed. Up to `max_connections` queues send at once, so a
+failing update holds back only the later updates of its queue. Updates are therefore confirmed
+individually, as [`TQueue::forget`][webhook-forget] does, and a bot that switches to `getUpdates`
+receives the rest. The official server also opens connections gradually under flood control, which
+the emulator does not reproduce.
+
 `deleteWebhook`, or `setWebhook` with an empty URL, removes the registration. Both support
 `drop_pending_updates`. `setWebhook` also accepts `allowed_updates`. `getWebhookInfo` reports the
 URL, pending count, configured maximum connections, non-default subscription and most recent
@@ -63,6 +74,9 @@ grammY and Telegraf.
   deleted or replaced or the session ends. Upstream closes the webhook once HTTP 410 responses have
   continued for [23 hours][webhook-drop-timeout]; see [response handling][webhook-response]. Test
   sessions do not run that long, so the rule could not be exercised.
+- **Cloud `max_connections` range.** `max_connections` defaults to 40 and is clamped to 1–100, as in
+  cloud mode. The official [limit][max-connections] rises to 100,000 in local mode, which tests do
+  not need.
 - **No custom certificate uploads.** Local HTTP or trusted TLS is sufficient for webhook tests, so
   `setWebhook` does not accept custom certificates and `getWebhookInfo` always reports
   `has_custom_certificate: false`. Upstream accepts certificate uploads in
@@ -72,11 +86,6 @@ There is no Telegram synchronization error state because sessions have no Telegr
 
 ## Real gaps
 
-- **Concurrent delivery.** Only one update is delivered at a time per bot, so a failing update
-  blocks unrelated chats. `max_connections` defaults to 40, is clamped to 1–100 and is reported, but
-  has no effect on concurrency. Tests need concurrent delivery across chats that honors this
-  setting. Upstream uses [multiple connections and separate queues][webhook-queues]; its
-  [`max_connections` limit][max-connections] rises to 100,000 in local mode.
 - **Fixed IP addresses and address reporting.** `setWebhook` does not accept `ip_address`, and
   `getWebhookInfo` omits the resolved address. Tests cannot configure a fixed webhook IP or inspect
   address resolution. Upstream accepts the option in [`Client::do_set_webhook`][set-webhook] and
@@ -91,7 +100,10 @@ There is no Telegram synchronization error state because sessions have no Telegr
 
 [webhook-response]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L608-L680
 [webhook-network]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L685-L790
-[webhook-queues]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L365-L425
+[webhook-queues]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L400-L600
+[webhook-queue-ids]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L18383-L18716
+[message-queue-id]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L19351-L19412
+[webhook-forget]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L457-L491
 [webhook-retry]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.cpp#L493-L520
 [webhook-drop-timeout]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/WebhookActor.h#L75-L76
 [max-connections]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17215-L17225

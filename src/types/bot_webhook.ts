@@ -1,3 +1,5 @@
+import type { BotApiUpdate } from './bot_api.ts';
+
 /** The longest `secret_token` Telegram accepts. */
 export const MAX_WEBHOOK_SECRET_TOKEN_LENGTH = 256;
 
@@ -15,7 +17,7 @@ export interface BotWebhook {
   readonly url: string;
   /** Sent in the `X-Telegram-Bot-Api-Secret-Token` header; empty sends no header. */
   readonly secretToken: string;
-  /** Reported by `getWebhookInfo`; the emulator delivers one update at a time regardless. */
+  /** How many updates, each of a different queue, are delivered at once. */
   readonly maxConnections: number;
 }
 
@@ -44,4 +46,33 @@ export function parseWebhookUrl(url: string): URL | undefined {
 
 export function hasOnlyWebhookSecretTokenCharacters(secretToken: string): boolean {
   return WEBHOOK_SECRET_TOKEN_PATTERN.test(secretToken);
+}
+
+/**
+ * Names the queue of a bot's webhook updates that an update joins, as the official Bot API
+ * server's `Client::add_update` calls choose its webhook queue: messages and their edits by chat,
+ * inline queries, chosen inline results, and callback queries by the user who sent them, and
+ * membership changes by chat for the bot's own and by user for other members'. A queue's updates
+ * are delivered one at a time, in order, while different queues are delivered at once.
+ */
+export function getWebhookUpdateQueueKey(update: BotApiUpdate): string {
+  if ('message' in update) {
+    return `chat:${update.message.chat.id}`;
+  }
+  if ('edited_message' in update) {
+    return `chat:${update.edited_message.chat.id}`;
+  }
+  if ('inline_query' in update) {
+    return `inline_query:${update.inline_query.from.id}`;
+  }
+  if ('chosen_inline_result' in update) {
+    return `chosen_inline_result:${update.chosen_inline_result.from.id}`;
+  }
+  if ('callback_query' in update) {
+    return `callback_query:${update.callback_query.from.id}`;
+  }
+  if ('my_chat_member' in update) {
+    return `my_chat_member:${update.my_chat_member.chat.id}`;
+  }
+  return `chat_member:${update.chat_member.new_chat_member.user.id}`;
 }

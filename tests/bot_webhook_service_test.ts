@@ -10,6 +10,9 @@ import {
 import type { BotApiPrivateMessage } from '../src/types/bot_api.ts';
 
 const BOT_ID = 10;
+const ADA_ID = 1;
+const GRACE_ID = 2;
+const LINUS_ID = 3;
 const NOW_UNIX_SECONDS = 1_700_000_000;
 const WEBHOOK_URL = 'https://bot.example/webhook';
 
@@ -180,6 +183,78 @@ Deno.test('BotWebhookService retries a failed update and reports the latest fail
     botWebhooks.setWebhook(BOT_ID, { ...webhookRequest(), url: `${WEBHOOK_URL}/new` });
     if ('last_error_message' in botWebhooks.getWebhookInfo(BOT_ID)) {
       throw new Error('Expected a new webhook to forget the failure of the previous one');
+    }
+  } finally {
+    botWebhooks.endDelivery();
+  }
+});
+
+Deno.test('BotWebhookService keeps delivering other chats while one chat keeps failing', async () => {
+  // Update 1 always fails, and its retry waits until delivery ends.
+  let receivedRequests: readonly ReceivedWebhookRequest[] = [];
+  const fixture = createWebhookFixture(
+    (_request, requestIndex) =>
+      receivedRequests[requestIndex].body.update_id === 1
+        ? new Response(null, { status: 500, statusText: 'Internal Server Error' })
+        : new Response(null),
+    { waitBeforeRetry: (_delaySeconds, signal) => waitForAbort(signal) },
+  );
+  const { botUpdates, botWebhooks, waitForRequestCount } = fixture;
+  receivedRequests = fixture.receivedRequests;
+
+  try {
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1, ADA_ID));
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(2, ADA_ID));
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(3, GRACE_ID));
+    botWebhooks.setWebhook(BOT_ID, webhookRequest());
+    await waitForRequestCount(2);
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(4, GRACE_ID));
+    await waitForRequestCount(3);
+    await waitUntil(() => botWebhooks.getWebhookInfo(BOT_ID).pending_update_count === 2);
+
+    // Ada's update 2 waits behind her failing update 1, while Grace's updates are delivered.
+    const sentUpdateIds = receivedRequests.map(({ body }) => body.update_id);
+    if (JSON.stringify(sentUpdateIds.toSorted()) !== JSON.stringify([1, 3, 4])) {
+      throw new Error(
+        `Expected only Ada's chat to wait for its failing update, received ${sentUpdateIds}`,
+      );
+    }
+  } finally {
+    botWebhooks.endDelivery();
+  }
+});
+
+Deno.test('BotWebhookService sends at most max_connections updates at once, one per chat', async () => {
+  const responses: Array<(response: Response) => void> = [];
+  const { botUpdates, botWebhooks, receivedRequests, waitForRequestCount } = createWebhookFixture(
+    () => new Promise<Response>((resolve) => responses.push(resolve)),
+  );
+
+  try {
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1, ADA_ID));
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(2, GRACE_ID));
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(3, LINUS_ID));
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(4, ADA_ID));
+    botWebhooks.setWebhook(BOT_ID, { ...webhookRequest(), maxConnections: 2 });
+    await waitForRequestCount(2);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const inFlightAtFirst = receivedRequests.map(({ body }) => body.update_id);
+
+    // Ada's first update frees a connection for Linus, and Ada's next update waits its turn.
+    responses[0](new Response(null));
+    await waitForRequestCount(3);
+    responses[1](new Response(null));
+    await waitForRequestCount(4);
+    const sentUpdateIds = receivedRequests.map(({ body }) => body.update_id);
+    if (
+      JSON.stringify(inFlightAtFirst) !== JSON.stringify([1, 2]) ||
+      JSON.stringify(sentUpdateIds) !== JSON.stringify([1, 2, 3, 4])
+    ) {
+      throw new Error(
+        `Expected two connections shared by chats in turn, received ${
+          JSON.stringify({ inFlightAtFirst, sentUpdateIds })
+        }`,
+      );
     }
   } finally {
     botWebhooks.endDelivery();
@@ -601,6 +676,17 @@ async function waitUntil(condition: () => boolean): Promise<void> {
   }
 }
 
+/** Resolves once `signal` aborts. */
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    signal.addEventListener('abort', () => resolve(), { once: true });
+  });
+}
+
 /** Leaves the webhook request unanswered until it is aborted, as a hanging webhook would. */
 function respondOnlyByAborting(request: Request): Promise<Response> {
   return new Promise((_resolve, reject) => {
@@ -612,8 +698,9 @@ function webhookRequest(): SetWebhookRequest {
   return { url: WEBHOOK_URL, secretToken: '', maxConnections: 40, dropPendingUpdates: false };
 }
 
-function createPrivateMessage(messageId: number): BotApiPrivateMessage {
-  const author = { id: 1, is_bot: false as const, first_name: 'Ada' };
+/** A text message of the private chat of the account `authorId`, which is Ada's by default. */
+function createPrivateMessage(messageId: number, authorId = ADA_ID): BotApiPrivateMessage {
+  const author = { id: authorId, is_bot: false as const, first_name: 'Ada' };
   return {
     message_id: messageId,
     from: author,

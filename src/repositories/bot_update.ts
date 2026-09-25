@@ -121,6 +121,23 @@ export class BotUpdateRepository {
     return mailbox.updates.slice(0, limit);
   }
 
+  /** Returns the bot's pending updates, oldest first, without confirming any. */
+  readPendingUpdates(botId: number): readonly BotApiUpdate[] {
+    return [...this.#getOrCreateMailbox(botId).updates];
+  }
+
+  /**
+   * Confirms and forgets one pending update, whatever updates precede it, as TDLib's
+   * `TQueue::forget` does for an update a webhook accepted.
+   */
+  confirmPendingUpdate(botId: number, updateId: number): void {
+    const { updates } = this.#getOrCreateMailbox(botId);
+    const updateIndex = updates.findIndex((update) => update.update_id === updateId);
+    if (updateIndex !== -1) {
+      updates.splice(updateIndex, 1);
+    }
+  }
+
   countPendingUpdates(botId: number): number {
     return this.#getOrCreateMailbox(botId).updates.length;
   }

@@ -8,6 +8,7 @@ import {
 } from '../types/bot_api.ts';
 import {
   type BotWebhook,
+  getWebhookUpdateQueueKey,
   hasOnlyWebhookSecretTokenCharacters,
   MAX_WEBHOOK_SECRET_TOKEN_LENGTH,
   parseWebhookUrl,
@@ -93,10 +94,8 @@ interface BotWebhookStore {
 }
 
 interface PendingUpdateQueue {
-  confirmAndReadPendingUpdates(
-    botId: number,
-    input: { readonly firstUnconfirmedUpdateId?: number; readonly limit: number },
-  ): readonly BotApiUpdate[];
+  readPendingUpdates(botId: number): readonly BotApiUpdate[];
+  confirmPendingUpdate(botId: number, updateId: number): void;
   waitForUpdate(botId: number, input: { readonly signal: AbortSignal }): Promise<void>;
   countPendingUpdates(botId: number): number;
   discardPendingUpdates(botId: number): void;
@@ -160,9 +159,10 @@ const INITIAL_UPDATE_RETRY_BACKOFF: UpdateRetryBackoff = { failureCount: 0, dela
  *
  * As on Telegram, an update stays pending until its webhook answers it with a 2xx status, and a
  * failed update is sent again after a growing delay, or after the delay the webhook asks for in a
- * `Retry-After` header. Telegram sends updates of different chats over up to `max_connections`
- * connections at once; the emulator sends one update at a time, in order, so a failing update
- * holds back later ones.
+ * `Retry-After` header. As the official Bot API server's `WebhookActor` does, updates wait in
+ * queues, which `getWebhookUpdateQueueKey` names: each queue sends one update at a time, in order,
+ * so a failing update holds back only the later updates of its queue, and up to `max_connections`
+ * queues send at once. Telegram also opens its connections gradually, which the emulator does not.
  *
  * An attempt that takes too long fails as Telegram's read timeout does. Telegram times out a
  * connection that receives no data for a while; the emulator bounds each attempt as a whole,
@@ -334,33 +334,82 @@ export class BotWebhookService {
   }
 
   /**
-   * Sends the bot's pending updates to its webhook one at a time, until `signal` aborts. An update
-   * is confirmed once the webhook accepts it; aborting leaves the update in flight pending.
+   * Delivers the bot's pending updates to its webhook until `signal` aborts, sending each queue's
+   * updates with its own worker while the queue has any.
    */
   async #deliverPendingUpdates(
     botId: number,
     webhook: BotWebhook,
     signal: AbortSignal,
   ): Promise<void> {
-    let firstUnconfirmedUpdateId: number | undefined;
+    const connections = new WebhookConnectionLimit(webhook.maxConnections);
+    const deliveringQueueKeys = new Set<string>();
+    let wakeUp = () => {};
+    while (!signal.aborted) {
+      const queueEnded = new Promise<void>((resolve) => {
+        wakeUp = resolve;
+      });
+      for (const update of this.#pendingUpdates.readPendingUpdates(botId)) {
+        const queueKey = getWebhookUpdateQueueKey(update);
+        if (deliveringQueueKeys.has(queueKey)) {
+          continue;
+        }
+        deliveringQueueKeys.add(queueKey);
+        void this.#deliverQueue(botId, webhook, queueKey, connections, signal).finally(() => {
+          deliveringQueueKeys.delete(queueKey);
+          wakeUp();
+        });
+      }
+
+      const updateWait = new AbortController();
+      await Promise.race([
+        this.#pendingUpdates.waitForUpdate(botId, {
+          signal: AbortSignal.any([signal, updateWait.signal]),
+        }),
+        queueEnded,
+      ]);
+      updateWait.abort();
+    }
+  }
+
+  /**
+   * Sends the pending updates of one queue to the webhook one at a time, each over a connection
+   * of `connections`, until the queue has none left or `signal` aborts. An update is confirmed once
+   * the webhook accepts it; a failed update is sent again after its retry delay, during which the
+   * queue uses no connection. Aborting leaves the update in flight pending.
+   */
+  async #deliverQueue(
+    botId: number,
+    webhook: BotWebhook,
+    queueKey: string,
+    connections: WebhookConnectionLimit,
+    signal: AbortSignal,
+  ): Promise<void> {
     let failingUpdateId: number | undefined;
     let retryBackoff = INITIAL_UPDATE_RETRY_BACKOFF;
     while (!signal.aborted) {
-      const [update] = this.#pendingUpdates.confirmAndReadPendingUpdates(botId, {
-        firstUnconfirmedUpdateId,
-        limit: 1,
-      });
+      const update = this.#pendingUpdates.readPendingUpdates(botId).find((pendingUpdate) =>
+        getWebhookUpdateQueueKey(pendingUpdate) === queueKey
+      );
       if (update === undefined) {
-        await this.#pendingUpdates.waitForUpdate(botId, { signal });
-        continue;
+        return;
       }
 
-      const outcome = await this.#sendUpdate(botId, webhook, update, signal);
+      const releaseConnection = await connections.acquire(signal);
+      if (releaseConnection === undefined) {
+        return;
+      }
+      let outcome: UpdateDeliveryOutcome;
+      try {
+        outcome = await this.#sendUpdate(botId, webhook, update, signal);
+      } finally {
+        releaseConnection();
+      }
       if (signal.aborted) {
         return;
       }
       if (outcome.accepted) {
-        firstUnconfirmedUpdateId = update.update_id + 1;
+        this.#pendingUpdates.confirmPendingUpdate(botId, update.update_id);
         continue;
       }
 
@@ -387,8 +436,8 @@ export class BotWebhookService {
    *
    * As on Telegram, the webhook answers only once its whole response has arrived, so a response
    * whose body fails or does not arrive in time fails the attempt, whatever its status. A complete
-   * successful response may name a Bot API method, which runs before the next update is sent; the
-   * method's failure leaves the update delivered.
+   * successful response may name a Bot API method, which runs before the update's queue sends its
+   * next update; the method's failure leaves the update delivered.
    */
   async #sendUpdate(
     botId: number,
@@ -450,6 +499,62 @@ export class BotWebhookService {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+}
+
+/**
+ * Limits how many updates a webhook is sent at once, as `max_connections` limits the official Bot
+ * API server's connections to it. Waiting queues take connections in the order they asked.
+ */
+class WebhookConnectionLimit {
+  #availableConnectionCount: number;
+  readonly #waitingAcquirers: Array<() => void> = [];
+
+  constructor(maxConnections: number) {
+    this.#availableConnectionCount = maxConnections;
+  }
+
+  /**
+   * Resolves with the release of a connection once one is available, or with `undefined` when
+   * `signal` aborts first.
+   */
+  acquire(signal: AbortSignal): Promise<(() => void) | undefined> {
+    if (signal.aborted) {
+      return Promise.resolve(undefined);
+    }
+    if (this.#availableConnectionCount > 0) {
+      this.#availableConnectionCount--;
+      return Promise.resolve(this.#createRelease());
+    }
+    return new Promise((resolve) => {
+      const acquireConnection = () => {
+        signal.removeEventListener('abort', giveUp);
+        resolve(this.#createRelease());
+      };
+      const giveUp = () => {
+        this.#waitingAcquirers.splice(this.#waitingAcquirers.indexOf(acquireConnection), 1);
+        resolve(undefined);
+      };
+      this.#waitingAcquirers.push(acquireConnection);
+      signal.addEventListener('abort', giveUp, { once: true });
+    });
+  }
+
+  /** Creates the release of an acquired connection, which hands it to the longest waiting queue. */
+  #createRelease(): () => void {
+    let isReleased = false;
+    return () => {
+      if (isReleased) {
+        return;
+      }
+      isReleased = true;
+      const nextAcquirer = this.#waitingAcquirers.shift();
+      if (nextAcquirer === undefined) {
+        this.#availableConnectionCount++;
+      } else {
+        nextAcquirer();
+      }
+    };
   }
 }
 
