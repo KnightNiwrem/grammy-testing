@@ -135,6 +135,7 @@ export function createEmulationSession(id: string): EmulationSession {
     supergroupMessages: supergroupMessaging,
     inlineQueries: new InlineQueryRepository(),
     events: botUpdateDelivery,
+    currentTimeMilliseconds: () => Date.now(),
   });
 
   const chatActions = new ChatActionService({

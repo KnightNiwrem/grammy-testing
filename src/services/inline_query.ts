@@ -8,6 +8,7 @@ import {
   type InlineQueryId,
   type InlineQueryResult,
   type InlineQueryResultsButton,
+  isSameInlineQueryRequest,
   MAX_INLINE_QUERY_NEXT_OFFSET_BYTES,
   MAX_INLINE_QUERY_RESULT_COUNT,
   MAX_INLINE_QUERY_RESULT_ID_BYTES,
@@ -196,7 +197,12 @@ interface InlineQueryStore {
     readonly offset: string;
   }): InlineQuery;
   getInlineQuery(inlineQueryId: InlineQueryId): InlineQuery | undefined;
-  recordAnswer(inlineQueryId: InlineQueryId, answer: InlineQueryAnswer): InlineQuery;
+  listAnsweredInlineQueries(botId: number): readonly InlineQuery[];
+  recordAnswer(
+    inlineQueryId: InlineQueryId,
+    answer: InlineQueryAnswer,
+    answeredAtMilliseconds: number,
+  ): InlineQuery;
 }
 
 interface ChatDomainEventSink {
@@ -211,6 +217,7 @@ interface InlineQueryServiceDependencies {
   readonly supergroupMessages: SupergroupInlineResultMessaging;
   readonly inlineQueries: InlineQueryStore;
   readonly events: ChatDomainEventSink;
+  readonly currentTimeMilliseconds: () => number;
 }
 
 /** TDLib's `is_base64url_characters`, which a `start_parameter` must satisfy. */
@@ -234,6 +241,7 @@ export class InlineQueryService {
   readonly #supergroupMessages: SupergroupInlineResultMessaging;
   readonly #inlineQueries: InlineQueryStore;
   readonly #events: ChatDomainEventSink;
+  readonly #currentTimeMilliseconds: () => number;
 
   constructor(
     {
@@ -244,6 +252,7 @@ export class InlineQueryService {
       supergroupMessages,
       inlineQueries,
       events,
+      currentTimeMilliseconds,
     }: InlineQueryServiceDependencies,
   ) {
     this.#accounts = accounts;
@@ -253,11 +262,18 @@ export class InlineQueryService {
     this.#supergroupMessages = supergroupMessages;
     this.#inlineQueries = inlineQueries;
     this.#events = events;
+    this.#currentTimeMilliseconds = currentTimeMilliseconds;
   }
 
   /**
    * Sends an inline query from an account, typed in its private chat with a bot or in a supergroup
    * it is a member of, to a bot with inline mode turned on, and publishes it for that bot.
+   *
+   * A query answered within its cache time is not sent again: the new query receives the same
+   * answer at once, and the bot learns nothing of it. TDLib's
+   * `InlineQueriesManager::send_inline_query` reuses an answer for the account that received it,
+   * whatever `is_personal` says; Telegram's servers, as the Bot API describes `is_personal`, reuse
+   * an answer that is not personal for any account.
    */
   sendInlineQuery(input: SendInlineQueryInput): SendInlineQueryResult {
     if (this.#accounts.getById(input.fromAccountId) === undefined) {
@@ -282,6 +298,17 @@ export class InlineQueryService {
       query: input.query,
       offset: input.offset,
     });
+    const cachedState = this.#findCachedAnswer(inlineQuery);
+    if (cachedState !== undefined) {
+      return {
+        sent: true,
+        inlineQuery: this.#inlineQueries.recordAnswer(
+          inlineQuery.id,
+          cachedState.answer,
+          cachedState.answeredAtMilliseconds,
+        ),
+      };
+    }
     this.#events.publish({ type: 'inline_query_created', inlineQuery });
     return { sent: true, inlineQuery };
   }
@@ -329,15 +356,19 @@ export class InlineQueryService {
 
     return {
       answered: true,
-      inlineQuery: this.#inlineQueries.recordAnswer(inlineQuery.id, {
-        results: input.results.map((result, resultIndex) =>
-          toInlineQueryResult(result, messageContents[resultIndex])
-        ),
-        cacheTimeSeconds: input.cacheTimeSeconds,
-        isPersonal: input.isPersonal,
-        nextOffset: input.nextOffset,
-        ...(input.button === undefined ? {} : { button: input.button }),
-      }),
+      inlineQuery: this.#inlineQueries.recordAnswer(
+        inlineQuery.id,
+        {
+          results: input.results.map((result, resultIndex) =>
+            toInlineQueryResult(result, messageContents[resultIndex])
+          ),
+          cacheTimeSeconds: input.cacheTimeSeconds,
+          isPersonal: input.isPersonal,
+          nextOffset: input.nextOffset,
+          ...(input.button === undefined ? {} : { button: input.button }),
+        },
+        this.#currentTimeMilliseconds(),
+      ),
     };
   }
 
@@ -378,6 +409,27 @@ export class InlineQueryService {
       message: sending.message,
     });
     return { chosen: true, message: sending.message };
+  }
+
+  /**
+   * Finds the latest answer that can be reused for a query: one to the same request, still within
+   * its cache time, and given to the query's account unless it is not personal.
+   */
+  #findCachedAnswer(
+    inlineQuery: InlineQuery,
+  ): Extract<InlineQuery['state'], { readonly status: 'answered' }> | undefined {
+    const now = this.#currentTimeMilliseconds();
+    for (const answeredQuery of this.#inlineQueries.listAnsweredInlineQueries(inlineQuery.botId)) {
+      const { state } = answeredQuery;
+      if (
+        state.status === 'answered' && isSameInlineQueryRequest(answeredQuery, inlineQuery) &&
+        (!state.answer.isPersonal || answeredQuery.accountId === inlineQuery.accountId) &&
+        now < state.answeredAtMilliseconds + state.answer.cacheTimeSeconds * 1_000
+      ) {
+        return state;
+      }
+    }
+    return undefined;
   }
 
   /** Checks that the account can type in the query's chat, as it can write there. */

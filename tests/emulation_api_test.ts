@@ -5480,6 +5480,77 @@ Deno.test('an account sends an inline query, a bot answers, and the account send
   }
 });
 
+Deno.test('repeated inline queries reuse the answer within its cache time', async () => {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const sessionPath = (await api.request('/sessions', { method: 'POST' })).headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const ada = await createAccount(api, sessionPath, 'Ada');
+  const grace = await createAccount(api, sessionPath, 'Grace');
+  const inlineBot = await createBot(api, sessionPath, 'cats_bot', {
+    supports_inline_queries: true,
+  });
+  const readUpdates = createUpdateReader(api);
+  const sendQuery = async (accountId: number) => {
+    const response = await api.request(
+      `${sessionPath}/accounts/${accountId}/inline-queries`,
+      jsonRequest('POST', {
+        bot_id: inlineBot.bot.id,
+        chat: { type: 'private', botId: inlineBot.bot.id },
+        query: 'cats',
+      }),
+    );
+    return (await response.json() as {
+      inline_query: { id: string; status: string; answer: { results: unknown[] } | null };
+    }).inline_query;
+  };
+  const answer = (inlineQueryId: string, isPersonal: boolean) =>
+    callBotApi(api, `${inlineBot.botApiPath}/answerInlineQuery`, {
+      inline_query_id: inlineQueryId,
+      results: [{
+        type: 'article',
+        id: 'fact-1',
+        title: 'Cat fact',
+        input_message_content: { message_text: 'Cats sleep a lot' },
+      }],
+      is_personal: isPersonal,
+    });
+
+  await answer((await sendQuery(ada.id)).id, true);
+  const adaRepeat = await sendQuery(ada.id);
+  const graceQuery = await sendQuery(grace.id);
+  const updates = await readUpdates(inlineBot.botApiPath);
+  if (
+    adaRepeat.status !== 'answered' || adaRepeat.answer?.results.length !== 1 ||
+    graceQuery.status !== 'awaiting_answer' ||
+    JSON.stringify(
+        updates.map((update) => (update.inline_query as { from: { id: number } }).from.id),
+      ) !==
+      JSON.stringify([ada.id, grace.id])
+  ) {
+    throw new Error(
+      `Expected the personal answer to be reused only for Ada, received ${JSON.stringify(updates)}`,
+    );
+  }
+
+  await answer(graceQuery.id, false);
+  const reusedForAda = await sendQuery(ada.id);
+  const answerToCachedQuery = await answer(reusedForAda.id, false);
+  if (
+    reusedForAda.status !== 'answered' ||
+    (await readUpdates(inlineBot.botApiPath)).length !== 0 ||
+    !isBadRequestResponse(answerToCachedQuery.body) ||
+    answerToCachedQuery.body.description !==
+      'Bad Request: query is too old and response timeout expired or query ID is invalid'
+  ) {
+    throw new Error('Expected the shared answer to be reused without asking the bot');
+  }
+});
+
 Deno.test('answerInlineQuery and the inline query routes follow Telegram checks', async () => {
   const { api, sessionPath, createdBot: plainBot, createdAccount, sendText } =
     await createPrivateConversationFixture();

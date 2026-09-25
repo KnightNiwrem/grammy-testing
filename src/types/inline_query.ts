@@ -86,9 +86,9 @@ export type InlineQueryResultsButton =
 /** How the bot answered an inline query, as the querying account's client shows it. */
 export interface InlineQueryAnswer {
   readonly results: readonly InlineQueryResult[];
-  /** How long clients may reuse the answer for the same query. */
+  /** How long the answer is reused for the same query instead of asking the bot again. */
   readonly cacheTimeSeconds: number;
-  /** Whether clients may reuse the answer only for the account that sent the query. */
+  /** Whether the answer is reused only for the account that sent the query. */
   readonly isPersonal: boolean;
   /** The offset the client sends to request more results; empty when there are no more. */
   readonly nextOffset: string;
@@ -97,12 +97,20 @@ export interface InlineQueryAnswer {
 }
 
 /**
- * Where an inline query is in its life. The bot answers a query once; the emulator does not expire
- * queries by time.
+ * Where an inline query is in its life. The bot answers a query once, unless it was answered from
+ * the cache; the emulator does not expire queries by time.
  */
 export type InlineQueryState =
   | { readonly status: 'awaiting_answer' }
-  | { readonly status: 'answered'; readonly answer: InlineQueryAnswer };
+  | {
+    readonly status: 'answered';
+    readonly answer: InlineQueryAnswer;
+    /**
+     * When the bot gave the answer, which may be before the query for an answer reused from the
+     * cache; the answer is reused until `answer.cacheTimeSeconds` after it.
+     */
+    readonly answeredAtMilliseconds: number;
+  };
 
 /** Text an account typed after a bot's username, which asks the bot for results to send. */
 export interface InlineQuery {
@@ -130,6 +138,27 @@ export function getInlineQueryChatType(
     return 'supergroup';
   }
   return chat.botId === botId ? 'sender' : 'private';
+}
+
+/**
+ * Whether two queries ask a bot the same, so that an answer to one can be reused for the other.
+ * As TDLib's `InlineQueriesManager::send_inline_query` identifies a query, they must be sent to
+ * the same bot from the same kind of chat, with the same offset and the same text apart from
+ * surrounding ASCII whitespace.
+ */
+export function isSameInlineQueryRequest(
+  first: Pick<InlineQuery, 'botId' | 'chat' | 'query' | 'offset'>,
+  second: Pick<InlineQuery, 'botId' | 'chat' | 'query' | 'offset'>,
+): boolean {
+  return first.botId === second.botId &&
+    getInlineQueryChatType(first) === getInlineQueryChatType(second) &&
+    trimTdlibWhitespace(first.query) === trimTdlibWhitespace(second.query) &&
+    first.offset === second.offset;
+}
+
+/** Removes the characters that TDLib's `trim` treats as whitespace from both ends. */
+function trimTdlibWhitespace(text: string): string {
+  return text.replace(/^[ \t\r\n\0\v]+|[ \t\r\n\0\v]+$/g, '');
 }
 
 /** Finds the result the account chose in an answer by its identifier. */

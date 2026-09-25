@@ -944,6 +944,12 @@ paths:
         answerInlineQuery; read the answer from the created inline query, and send one of its
         results to the chat with the query's chosen-results route. The emulator never expires
         inline queries by time, and does not report user locations.
+
+        A query that repeats one answered within the answer's `cache_time` is created already
+        answered with the same answer, and the bot receives no update for it. A query repeats
+        another when it is sent to the same bot from the same kind of chat, with the same offset
+        and the same text apart from surrounding whitespace. A personal answer is reused only for
+        the account that received it.
       requestBody:
         required: true
         content:
@@ -6371,12 +6377,14 @@ components:
           type: integer
           default: 300
           description: >-
-            Seconds for which clients may reuse the answer for the same query; Telegram clamps it
-            to 0 through 86400.
+            Seconds for which the same query receives this answer again instead of reaching the
+            bot; Telegram clamps it to 0 through 86400.
         is_personal:
           type: boolean
           default: false
-          description: Whether clients may reuse the answer only for the account that sent the query.
+          description: >-
+            Whether the answer is reused only for the account that sent the query; otherwise the
+            same query from any account receives it.
         next_offset:
           type: string
           default: ''

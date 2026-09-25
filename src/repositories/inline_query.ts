@@ -36,8 +36,24 @@ export class InlineQueryRepository {
     return this.#inlineQueriesById.get(inlineQueryId);
   }
 
-  /** Records the answer to a query awaiting one and returns the answered query. */
-  recordAnswer(inlineQueryId: InlineQueryId, answer: InlineQueryAnswer): InlineQuery {
+  /** Returns the bot's answered queries, the latest query first. */
+  listAnsweredInlineQueries(botId: number): readonly InlineQuery[] {
+    return [...this.#inlineQueriesById.values()]
+      .filter((inlineQuery) =>
+        inlineQuery.botId === botId && inlineQuery.state.status === 'answered'
+      )
+      .reverse();
+  }
+
+  /**
+   * Records the answer to a query awaiting one, given when stated, and returns the answered
+   * query.
+   */
+  recordAnswer(
+    inlineQueryId: InlineQueryId,
+    answer: InlineQueryAnswer,
+    answeredAtMilliseconds: number,
+  ): InlineQuery {
     const inlineQuery = this.#inlineQueriesById.get(inlineQueryId);
     if (inlineQuery === undefined) {
       throw new Error(`Inline query ${inlineQueryId} does not exist`);
@@ -48,7 +64,7 @@ export class InlineQueryRepository {
 
     const answeredInlineQuery: InlineQuery = {
       ...inlineQuery,
-      state: { status: 'answered', answer: structuredClone(answer) },
+      state: { status: 'answered', answer: structuredClone(answer), answeredAtMilliseconds },
     };
     this.#inlineQueriesById.set(inlineQueryId, answeredInlineQuery);
     return answeredInlineQuery;

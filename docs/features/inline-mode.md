@@ -30,6 +30,18 @@ access the chat, it can also edit via `chat_id`/`message_id`; another bot cannot
 message. TDLib makes the originating bot check in
 [`MessagesManager::can_edit_message`][edit-inline].
 
+### Answer caching
+
+An answer is reused for `cache_time` seconds, 300 by default. A repeated query within that time is
+created already answered, and the bot receives no `inline_query` update. TDLib's
+[`send_inline_query`][cache] identifies a repeated query by bot, chat type, offset and text without
+surrounding whitespace, and reuses the answer for the account that received it whatever
+`is_personal` says; it records the expiry when the [answer arrives][cache-expiry]. An answer that is
+not personal is also reused for other accounts, as the Bot API documents for Telegram's server
+cache. The server's cache key is not in the open-source code, so the emulator uses TDLib's. Reused
+answers expire with the original, and the bot cannot answer a query that received one. Bots that
+need a fresh answer every time answer with `cache_time: 0`.
+
 ## Intentional deviations
 
 **Account-to-bot private chats only.** Private chat tests only need conversations between an account
@@ -66,10 +78,6 @@ TDLib-compatible encoding. Tests should treat them as opaque values.
 
 - **User locations.** Inline queries cannot carry a simulated user location, preventing tests of
   location-dependent inline behavior.
-- **Result caching.** `cache_time` and `is_personal` are stored but no cache is consulted. Every
-  emulated query reaches the bot if subscribed. Tests need simulated result caching that honors
-  these options. TDLib caches results using `cache_expire_time` in [`send_inline_query`][cache] and
-  records the server's cache duration on receipt.
 
 - **Prepared messages and sharing.** Prepared inline messages and result-sharing flows are not
   implemented. Tests currently have to use the supported query-and-choice workflow.
@@ -97,3 +105,4 @@ remote expiry and repeated-answer rules were not verified through live calls.
 [results]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L870-L1280
 [answer]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L696-L760
 [cache]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L1335-L1410
+[cache-expiry]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L2280-L2320

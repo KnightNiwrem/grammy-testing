@@ -237,6 +237,7 @@ function createBotApiFixture() {
       supergroupMessages: supergroupMessaging,
       inlineQueries: new InlineQueryRepository(),
       events,
+      currentTimeMilliseconds: () => 1_700_000_000_000,
     }),
     inlineMessages: messages,
     botCommands: new BotCommandService({

@@ -313,6 +313,115 @@ Deno.test('InlineQueryService sends results to supergroups the inline bot is not
   }
 });
 
+Deno.test('InlineQueryService reuses an answer within its cache time', () => {
+  const {
+    virtualUsers,
+    sharedChats,
+    inlineQueries,
+    publishedEvents,
+    account,
+    inlineBot,
+    sendQuery,
+    advanceClockMilliseconds,
+  } = createInlineQueryFixture();
+  sharedChats.registerSupergroup(SUPERGROUP, account.profile.id);
+  const answered = sendQuery();
+  inlineQueries.answerInlineQuery({
+    fromBotId: inlineBot.profile.id,
+    inlineQueryId: answered.id,
+    results: [article('1')],
+    cacheTimeSeconds: 10,
+    isPersonal: false,
+    nextOffset: '',
+  });
+  const publishedQueryCount = () =>
+    publishedEvents.filter((event) => event.type === 'inline_query_created').length;
+  const send = (input: {
+    readonly fromAccountId?: number;
+    readonly chat?: InlineQueryChat;
+    readonly query?: string;
+    readonly offset?: string;
+  }) => {
+    const result = inlineQueries.sendInlineQuery({
+      fromAccountId: input.fromAccountId ?? account.profile.id,
+      botId: inlineBot.profile.id,
+      chat: input.chat ?? { type: 'private', botId: inlineBot.profile.id },
+      query: input.query ?? 'cats',
+      offset: input.offset ?? '',
+    });
+    if (!result.sent) {
+      throw new Error(`Expected the query to be sent, received ${result.reason}`);
+    }
+    return result.inlineQuery;
+  };
+
+  advanceClockMilliseconds(9_000);
+  const repeated = send({ query: ' cats\n' });
+  const otherAccount = createAccount(virtualUsers, 'Grace');
+  const fromOtherAccount = send({ fromAccountId: otherAccount.profile.id });
+  if (
+    repeated.state.status !== 'answered' || fromOtherAccount.state.status !== 'answered' ||
+    repeated.id === answered.id || repeated.state.answer.results[0].id !== '1' ||
+    publishedQueryCount() !== 1
+  ) {
+    throw new Error('Expected repeated queries to receive the cached answer unpublished');
+  }
+  const differentRequests = [
+    send({ query: 'dogs' }),
+    send({ offset: '10' }),
+    send({ chat: { type: 'supergroup', chatId: SUPERGROUP.id } }),
+  ];
+  if (differentRequests.some((inlineQuery) => inlineQuery.state.status !== 'awaiting_answer')) {
+    throw new Error('Expected other text, offsets and chat types to reach the bot');
+  }
+
+  // A reused answer expires with the original, however recently it was reused.
+  advanceClockMilliseconds(1_000);
+  if (send({}).state.status !== 'awaiting_answer') {
+    throw new Error('Expected an expired answer to be asked for again');
+  }
+});
+
+Deno.test('InlineQueryService reuses a personal answer only for its account', () => {
+  const { virtualUsers, inlineQueries, account, inlineBot, sendQuery } = createInlineQueryFixture();
+  const otherAccount = createAccount(virtualUsers, 'Grace');
+  const answer = (inlineQueryId: string, input: Partial<AnswerInlineQueryInput>) =>
+    inlineQueries.answerInlineQuery({
+      fromBotId: inlineBot.profile.id,
+      inlineQueryId,
+      results: [article('1')],
+      cacheTimeSeconds: 300,
+      isPersonal: true,
+      nextOffset: '',
+      ...input,
+    });
+  answer(sendQuery().id, {});
+  const send = (fromAccountId: number) => {
+    const result = inlineQueries.sendInlineQuery({
+      fromAccountId,
+      botId: inlineBot.profile.id,
+      chat: { type: 'private', botId: inlineBot.profile.id },
+      query: 'cats',
+      offset: '',
+    });
+    if (!result.sent) {
+      throw new Error(`Expected the query to be sent, received ${result.reason}`);
+    }
+    return result.inlineQuery;
+  };
+
+  const ownRepeat = send(account.profile.id);
+  const otherQuery = send(otherAccount.profile.id);
+  if (ownRepeat.state.status !== 'answered' || otherQuery.state.status !== 'awaiting_answer') {
+    throw new Error('Expected a personal answer to be reused only for its own account');
+  }
+
+  answer(otherQuery.id, { cacheTimeSeconds: 0, isPersonal: false });
+  if (send(otherAccount.profile.id).state.status !== 'awaiting_answer') {
+    throw new Error('Expected an answer with no cache time never to be reused');
+  }
+});
+
 function article(
   id: string,
   text = `Result ${id}`,
@@ -360,6 +469,7 @@ function createInlineQueryFixture() {
     events,
     currentUnixTimeSeconds: () => 1_700_000_000,
   });
+  let currentTimeMilliseconds = 1_700_000_000_000;
   const inlineQueries = new InlineQueryService({
     accounts,
     bots,
@@ -368,6 +478,7 @@ function createInlineQueryFixture() {
     supergroupMessages: supergroupMessaging,
     inlineQueries: new InlineQueryRepository(),
     events,
+    currentTimeMilliseconds: () => currentTimeMilliseconds,
   });
   const account = createAccount(virtualUsers, 'Ada');
   const inlineBot = createBot(virtualUsers, 'inline_bot', { supports_inline_queries: true });
@@ -398,6 +509,9 @@ function createInlineQueryFixture() {
     account,
     inlineBot,
     sendQuery,
+    advanceClockMilliseconds: (milliseconds: number) => {
+      currentTimeMilliseconds += milliseconds;
+    },
   };
 }
 
