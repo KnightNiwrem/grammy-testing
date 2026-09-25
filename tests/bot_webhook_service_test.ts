@@ -355,6 +355,83 @@ Deno.test('BotWebhookService confirms an accepted update whose reply fails', asy
   }
 });
 
+Deno.test('BotWebhookService retries an accepted update whose response is cut short', async () => {
+  const replyBody = '{"method":"sendMessage","chat_id":1,"text":"Hi"}';
+  const { botUpdates, botWebhooks, receivedRequests, receivedReplies, waitForRequestCount } =
+    createWebhookFixture(
+      (_request, requestIndex) =>
+        new Response(
+          requestIndex === 0
+            ? new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode(replyBody.slice(0, 10)));
+                controller.error(new Error('The connection closed'));
+              },
+            })
+            : replyBody,
+          { headers: { 'Content-Type': 'application/json' } },
+        ),
+    );
+
+  try {
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
+    botWebhooks.setWebhook(BOT_ID, webhookRequest());
+    await waitForRequestCount(2);
+    await waitUntil(() => botWebhooks.getWebhookInfo(BOT_ID).pending_update_count === 0);
+
+    if (
+      JSON.stringify(receivedRequests.map(({ body }) => body.update_id)) !==
+        JSON.stringify([1, 1]) ||
+      JSON.stringify(receivedReplies) !== JSON.stringify([{ botId: BOT_ID, body: replyBody }])
+    ) {
+      throw new Error('Expected an incomplete response to leave its update pending, unreplied');
+    }
+    if ('last_error_message' in botWebhooks.getWebhookInfo(BOT_ID)) {
+      throw new Error('Expected a closed connection to be retried without a reported error');
+    }
+  } finally {
+    botWebhooks.endDelivery();
+  }
+});
+
+Deno.test('BotWebhookService fails an accepted update whose response body outlasts its timeout', async () => {
+  const { botUpdates, botWebhooks, receivedReplies, waitForRequestCount } = createWebhookFixture(
+    (_request, requestIndex) =>
+      requestIndex === 0
+        ? new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"method":'));
+            },
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        )
+        : new Response(null),
+    { attemptTimeoutMilliseconds: 20 },
+  );
+
+  try {
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
+    botWebhooks.setWebhook(BOT_ID, webhookRequest());
+    await waitForRequestCount(2);
+    await waitUntil(() => botWebhooks.getWebhookInfo(BOT_ID).pending_update_count === 0);
+
+    const webhookInfo = botWebhooks.getWebhookInfo(BOT_ID);
+    if (
+      webhookInfo.last_error_message !== 'Read timeout expired' ||
+      JSON.stringify(receivedReplies) !== JSON.stringify([{ botId: BOT_ID, body: '' }])
+    ) {
+      throw new Error(
+        `Expected a stalled response body to time out and be retried, received ${
+          JSON.stringify({ webhookInfo, receivedReplies })
+        }`,
+      );
+    }
+  } finally {
+    botWebhooks.endDelivery();
+  }
+});
+
 Deno.test('BotWebhookService ends delivery and keeps the update in flight pending', async () => {
   const { botUpdates, botWebhooks, receivedRequests, waitForRequestCount } = createWebhookFixture(
     respondOnlyByAborting,

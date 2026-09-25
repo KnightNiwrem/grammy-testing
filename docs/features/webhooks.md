@@ -6,11 +6,14 @@
 
 `setWebhook` registers or replaces a bot's webhook. The emulator posts updates as JSON and adds
 `X-Telegram-Bot-Api-Secret-Token` when `secret_token` is set. URL credentials become HTTP Basic
-authorization. Redirects are treated as delivery failures. A 2xx response confirms the update; other
-statuses and connection failures leave it pending for another attempt. The first retry is immediate,
-and later ones back off as described under [intentional deviations](#intentional-deviations). A
-failed response's `Retry-After` header, in whole seconds, sets the wait before the next attempt
-instead, up to one hour, as in [`WebhookActor::on_update_error`][webhook-retry].
+authorization. Redirects are treated as delivery failures. A 2xx response confirms the update once
+its whole body has arrived. Other statuses, connection failures and responses whose body fails or
+misses the attempt deadline leave it pending for another attempt. As in
+[`WebhookActor::handle`][webhook-response], a connection that closes mid-response is not reported as
+a delivery error. The first retry is immediate, and later ones back off as described under
+[intentional deviations](#intentional-deviations). A failed response's `Retry-After` header, in
+whole seconds, sets the wait before the next attempt instead, up to one hour, as in
+[`WebhookActor::on_update_error`][webhook-retry].
 
 `deleteWebhook`, or `setWebhook` with an empty URL, removes the registration. Both support
 `drop_pending_updates`. `setWebhook` also accepts `allowed_updates`. `getWebhookInfo` reports the
@@ -74,10 +77,6 @@ There is no Telegram synchronization error state because sessions have no Telegr
   has no effect on concurrency. Tests need concurrent delivery across chats that honors this
   setting. Upstream uses [multiple connections and separate queues][webhook-queues]; its
   [`max_connections` limit][max-connections] rises to 100,000 in local mode.
-- **Complete response before confirmation.** A 2xx response confirms delivery even if reading its
-  body later fails or times out. Confirmation should require a complete response so tests can
-  exercise incomplete deliveries. Upstream completes HTTP response parsing before delivering the
-  response to the webhook actor. See TDLib's [HTTP connection implementation][http-connection].
 - **Fixed IP addresses and address reporting.** `setWebhook` does not accept `ip_address`, and
   `getWebhookInfo` omits the resolved address. Tests cannot configure a fixed webhook IP or inspect
   address resolution. Upstream accepts the option in [`Client::do_set_webhook`][set-webhook] and

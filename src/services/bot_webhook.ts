@@ -136,8 +136,11 @@ type UpdateDeliveryOutcome =
   | { readonly accepted: true }
   | {
     readonly accepted: false;
-    /** Telegram's description of the failure, which `getWebhookInfo` reports. */
-    readonly errorMessage: string;
+    /**
+     * Telegram's description of the failure, which `getWebhookInfo` reports. Telegram describes
+     * no failure when the connection closes before the response is complete.
+     */
+    readonly errorMessage?: string;
     /** The wait the webhook asked for in its `Retry-After` header, or 0 when it asked for none. */
     readonly retryAfterSeconds: number;
   };
@@ -361,10 +364,12 @@ export class BotWebhookService {
         continue;
       }
 
-      this.#webhooks.recordDeliveryError(botId, {
-        dateUnixSeconds: this.#currentUnixTimeSeconds(),
-        message: outcome.errorMessage,
-      });
+      if (outcome.errorMessage !== undefined) {
+        this.#webhooks.recordDeliveryError(botId, {
+          dateUnixSeconds: this.#currentUnixTimeSeconds(),
+          message: outcome.errorMessage,
+        });
+      }
       if (failingUpdateId !== update.update_id) {
         failingUpdateId = update.update_id;
         retryBackoff = INITIAL_UPDATE_RETRY_BACKOFF;
@@ -380,9 +385,10 @@ export class BotWebhookService {
    * returns whether the webhook accepted it. The attempt ends when `deliverySignal` aborts, or
    * fails once it outlasts its timeout.
    *
-   * As on Telegram, a successful response may name a Bot API method, which runs before the next
-   * update is sent. The status alone decides the outcome of the delivery: the method's failure, or
-   * a response body that cannot be read in time, leaves the update delivered.
+   * As on Telegram, the webhook answers only once its whole response has arrived, so a response
+   * whose body fails or does not arrive in time fails the attempt, whatever its status. A complete
+   * successful response may name a Bot API method, which runs before the next update is sent; the
+   * method's failure leaves the update delivered.
    */
   async #sendUpdate(
     botId: number,
@@ -408,22 +414,39 @@ export class BotWebhookService {
           retryAfterSeconds: 0,
         };
       }
-      const isAccepted = response.status >= 200 && response.status <= 299;
+      let body: ArrayBuffer;
+      try {
+        body = await settleUnlessAborted(response.arrayBuffer(), attemptSignal);
+      } catch {
+        // Telegram reports a response cut short by its connection closing without a description.
+        return timeout.signal.aborted
+          ? { accepted: false, errorMessage: READ_TIMEOUT_ERROR_MESSAGE, retryAfterSeconds: 0 }
+          : { accepted: false, retryAfterSeconds: 0 };
+      }
+      if (response.status < 200 || response.status > 299) {
+        return {
+          accepted: false,
+          errorMessage:
+            `Wrong response from the webhook: ${response.status} ${response.statusText}`,
+          retryAfterSeconds: readRetryAfterSeconds(response),
+        };
+      }
+
+      const { status, statusText, headers } = response;
+      const reply = new Response(body.byteLength === 0 ? null : body, {
+        status,
+        statusText,
+        headers,
+      });
       try {
         await settleUnlessAborted(
-          isAccepted
-            ? this.#runWebhookReply(botId, response, attemptSignal)
-            : response.body?.cancel() ?? Promise.resolve(),
+          this.#runWebhookReply(botId, reply, attemptSignal),
           attemptSignal,
         );
       } catch {
-        // The status alone decides the outcome, so neither the reply nor the body changes it.
+        // The complete response decides the outcome, so the method it names cannot change it.
       }
-      return isAccepted ? { accepted: true } : {
-        accepted: false,
-        errorMessage: `Wrong response from the webhook: ${response.status} ${response.statusText}`,
-        retryAfterSeconds: readRetryAfterSeconds(response),
-      };
+      return { accepted: true };
     } finally {
       clearTimeout(timeoutId);
     }
