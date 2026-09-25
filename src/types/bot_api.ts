@@ -49,7 +49,13 @@ export type BotApiMessageEntity =
   | (BotApiTextSpan & { readonly type: 'pre'; readonly language?: string })
   | (BotApiTextSpan & { readonly type: 'text_link'; readonly url: string })
   | (BotApiTextSpan & { readonly type: 'text_mention'; readonly user: BotApiUser })
-  | (BotApiTextSpan & { readonly type: 'custom_emoji'; readonly custom_emoji_id: string });
+  | (BotApiTextSpan & { readonly type: 'custom_emoji'; readonly custom_emoji_id: string })
+  | (BotApiTextSpan & {
+    readonly type: 'date_time';
+    readonly unix_time: number;
+    /** Empty when the sender chose no format, which Telegram reports all the same. */
+    readonly date_time_format: string;
+  });
 
 export interface BotApiCallbackInlineKeyboardButton {
   readonly text: string;

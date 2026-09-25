@@ -91,8 +91,7 @@ export interface ReadFormattedTextRequest {
 export type ReadFormattedTextFailureReason =
   | 'text_too_long'
   | 'parse_mode_unsupported'
-  | 'text_encoding_invalid'
-  | 'date_time_unsupported';
+  | 'text_encoding_invalid';
 
 export type ReadFormattedTextResult =
   | { readonly read: true; readonly formattedText: SpecifiedFormattedText }
@@ -1141,9 +1140,7 @@ export class BotApiService {
     if (parsing.parsed) {
       return { read: true, formattedText: { text: parsing.text, entities: parsing.entities } };
     }
-    return parsing.reason === 'markup_invalid'
-      ? { read: false, reason: 'markup_invalid', markupError: parsing.error }
-      : { read: false, reason: parsing.reason };
+    return { read: false, reason: 'markup_invalid', markupError: parsing.error };
   }
 
   /**

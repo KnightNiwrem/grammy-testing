@@ -124,7 +124,6 @@ Deno.test('BotApiService reads text with its parse mode or entities', () => {
     [read('x'.repeat(2 ** 15 + 1)), 'text_too_long'],
     [read('a', 'XML'), 'parse_mode_unsupported'],
     [read('\ud800', 'HTML'), 'text_encoding_invalid'],
-    [read('<tg-time unix="1">now</tg-time>', 'html'), 'date_time_unsupported'],
     [read('<b>', 'HTML'), 'markup_invalid'],
   ];
   for (const [result, expectedReason] of failures) {

@@ -142,6 +142,12 @@ const messageEntitySchema: z.ZodType<MessageEntity> = z.union([
     ...messageEntitySpanShape,
     custom_emoji_id: z.string().regex(/^-?\d+$/),
   }),
+  z.strictObject({
+    type: z.literal('date_time'),
+    ...messageEntitySpanShape,
+    unix_time: z.int().positive(),
+    date_time_format: z.string().regex(/^(r|w?[dD]?[tT]?)$/),
+  }),
 ]);
 
 const inlineKeyboardMarkupSchema: z.ZodType<InlineKeyboardMarkup> = z.strictObject({

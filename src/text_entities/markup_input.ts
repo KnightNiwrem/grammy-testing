@@ -6,17 +6,11 @@ import type { TextEntity } from '../types/virtual_message.ts';
  */
 export type MarkupParsing =
   | { readonly parsed: true; readonly text: string; readonly entities: readonly TextEntity[] }
-  | { readonly parsed: false; readonly reason: 'markup_invalid'; readonly error: string }
-  | { readonly parsed: false; readonly reason: 'date_time_unsupported' };
+  | { readonly parsed: false; readonly reason: 'markup_invalid'; readonly error: string };
 
 export function markupInvalid(error: string): MarkupParsing {
   return { parsed: false, reason: 'markup_invalid', error };
 }
-
-export const DATE_TIME_UNSUPPORTED: MarkupParsing = {
-  parsed: false,
-  reason: 'date_time_unsupported',
-};
 
 const utf8Encoder = new TextEncoder();
 const utf8Decoder = new TextDecoder();

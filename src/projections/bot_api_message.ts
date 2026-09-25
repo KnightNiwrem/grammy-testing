@@ -43,6 +43,8 @@ import type { VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { BasicGroup, Supergroup } from '../types/virtual_chat.ts';
 import type {
   ChatMessage,
+  DateTimeFormat,
+  DateTimePartPrecision,
   FormattedText,
   MembershipServiceContent,
   MessageContent,
@@ -560,9 +562,47 @@ function projectTextEntity(
     }
     case 'custom_emoji':
       return { type: 'custom_emoji', offset, length, custom_emoji_id: entity.customEmojiId };
+    case 'date_time':
+      return {
+        type: 'date_time',
+        offset,
+        length,
+        unix_time: entity.unixTime,
+        date_time_format: writeDateTimeFormat(entity.format),
+      };
     default:
       return { type: entity.type, offset, length };
   }
+}
+
+/** The letters of Bot API date and time formats that choose each part's precision. */
+const DATE_PRECISION_LETTERS: Readonly<Record<DateTimePartPrecision, string>> = {
+  short: 'd',
+  long: 'D',
+};
+const TIME_PRECISION_LETTERS: Readonly<Record<DateTimePartPrecision, string>> = {
+  short: 't',
+  long: 'T',
+};
+
+/**
+ * Writes a date and time format as the official Bot API server's `get_date_time_format` does:
+ * `r` for relative time, otherwise `w` for the day of the week, then `d` or `D` for the date and
+ * `t` or `T` for the time, each shown in that order; empty for no format.
+ */
+function writeDateTimeFormat(format: DateTimeFormat | undefined): string {
+  if (format === undefined) {
+    return '';
+  }
+  if (format.kind === 'relative') {
+    return 'r';
+  }
+  const { showsDayOfWeek, datePrecision, timePrecision } = format;
+  return [
+    showsDayOfWeek ? 'w' : '',
+    datePrecision === undefined ? '' : DATE_PRECISION_LETTERS[datePrecision],
+    timePrecision === undefined ? '' : TIME_PRECISION_LETTERS[timePrecision],
+  ].join('');
 }
 
 function projectInlineKeyboardMarkup(inlineKeyboard: InlineKeyboard): BotApiInlineKeyboardMarkup {

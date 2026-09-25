@@ -1,11 +1,12 @@
 import { z } from 'zod';
 
-import type { PlainTextEntityType, TextEntity } from '../../../types/virtual_message.ts';
+import type {
+  DateTimeFormat,
+  DateTimePartPrecision,
+  PlainTextEntityType,
+  TextEntity,
+} from '../../../types/virtual_message.ts';
 import { jsonParameter } from './request_parameters.ts';
-
-/** Telegram's date and time entities, which the emulator does not support. */
-export const DATE_TIME_UNSUPPORTED_DESCRIPTION =
-  'Bad Request: date_time entities are not supported';
 
 export type MessageEntitiesParameterReading =
   | { readonly read: true; readonly entities: readonly TextEntity[] }
@@ -69,6 +70,13 @@ const customEmojiEntitySchema = z.strictObject({
   ...entitySpanShape,
   custom_emoji_id: z.string(),
 });
+// Telegram reads the Unix time as a 32-bit integer.
+const dateTimeEntitySchema = z.strictObject({
+  type: z.literal('date_time'),
+  ...entitySpanShape,
+  unix_time: z.int().min(-(2 ** 31)).max(2 ** 31 - 1),
+  date_time_format: z.string().optional(),
+});
 
 /** An `entities` parameter: a JSON array whose elements `readMessageEntitiesParameter` reads. */
 export function messageEntitiesParameter() {
@@ -77,7 +85,7 @@ export function messageEntitiesParameter() {
 
 /**
  * Reads the elements of an `entities` parameter as the official Bot API server's
- * `get_text_entity` does, failing with Telegram's description for an unsupported type.
+ * `get_text_entity` does, failing with Telegram's description for an entity it cannot parse.
  *
  * `invalidParametersDescription` answers entities that Telegram would read leniently, such as
  * numbers written as strings, which are rejected instead to surface the bot's mistake in tests.
@@ -95,13 +103,11 @@ export function readMessageEntitiesParameter(
         break;
       case 'ignored':
         break;
-      case 'unsupported_type':
+      case 'unparsable':
         return {
           read: false,
           description: `Bad Request: can't parse MessageEntity: ${reading.error}`,
         };
-      case 'date_time':
-        return { read: false, description: DATE_TIME_UNSUPPORTED_DESCRIPTION };
       case 'malformed':
         return { read: false, description: invalidParametersDescription };
       default: {
@@ -116,8 +122,8 @@ export function readMessageEntitiesParameter(
 type MessageEntityReading =
   | { readonly kind: 'entity'; readonly entity: TextEntity }
   | { readonly kind: 'ignored' }
-  | { readonly kind: 'unsupported_type'; readonly error: string }
-  | { readonly kind: 'date_time' }
+  /** Telegram cannot parse the entity, for the reason `error` gives. */
+  | { readonly kind: 'unparsable'; readonly error: string }
   | { readonly kind: 'malformed' };
 
 /** Reads one Bot API `MessageEntity` object, as the Bot API server's `get_text_entity` does. */
@@ -128,7 +134,7 @@ function readMessageEntity(value: unknown): MessageEntityReading {
   }
   const { type } = typeReading.data;
   if (type.length === 0) {
-    return { kind: 'unsupported_type', error: 'Type is not specified' };
+    return { kind: 'unparsable', error: 'Type is not specified' };
   }
 
   if (isOneOf(type, DETECTED_ENTITY_TYPES)) {
@@ -178,11 +184,76 @@ function readMessageEntity(value: unknown): MessageEntityReading {
         entity: { type, offset, length, customEmojiId: custom_emoji_id },
       };
     }
-    case 'date_time':
-      return { kind: 'date_time' };
+    case 'date_time': {
+      const entity = dateTimeEntitySchema.safeParse(value);
+      if (!entity.success) {
+        return { kind: 'malformed' };
+      }
+      const { offset, length, unix_time: unixTime, date_time_format } = entity.data;
+      const formatReading = readDateTimeFormat(date_time_format ?? '');
+      if (!formatReading.valid) {
+        return { kind: 'unparsable', error: 'Invalid date-time format specified' };
+      }
+      const { format } = formatReading;
+      return {
+        kind: 'entity',
+        entity: { type, offset, length, unixTime, ...(format === undefined ? {} : { format }) },
+      };
+    }
     default:
-      return { kind: 'unsupported_type', error: 'Unsupported type specified' };
+      return { kind: 'unparsable', error: 'Unsupported type specified' };
   }
+}
+
+/**
+ * Reads a `date_time_format` as the official Bot API server's `get_date_time_formatting_type`
+ * does: empty for no format, exactly `r` or `R` for relative time, or letters choosing the parts
+ * to show. `t` or `T` shows a short or long time, `d` or `D` a short or long date, and `w` or `W`
+ * the day of the week; the last letter for a part decides its precision.
+ */
+function readDateTimeFormat(
+  format: string,
+): { readonly valid: true; readonly format?: DateTimeFormat } | { readonly valid: false } {
+  if (format.length === 0) {
+    return { valid: true };
+  }
+  if (format === 'r' || format === 'R') {
+    return { valid: true, format: { kind: 'relative' } };
+  }
+  let timePrecision: DateTimePartPrecision | undefined;
+  let datePrecision: DateTimePartPrecision | undefined;
+  let showsDayOfWeek = false;
+  for (const letter of format) {
+    switch (letter) {
+      case 't':
+        timePrecision = 'short';
+        break;
+      case 'T':
+        timePrecision = 'long';
+        break;
+      case 'd':
+        datePrecision = 'short';
+        break;
+      case 'D':
+        datePrecision = 'long';
+        break;
+      case 'w':
+      case 'W':
+        showsDayOfWeek = true;
+        break;
+      default:
+        return { valid: false };
+    }
+  }
+  return {
+    valid: true,
+    format: {
+      kind: 'absolute',
+      ...(timePrecision === undefined ? {} : { timePrecision }),
+      ...(datePrecision === undefined ? {} : { datePrecision }),
+      showsDayOfWeek,
+    },
+  };
 }
 
 function isOneOf<Value extends string>(value: string, values: readonly Value[]): value is Value {

@@ -14,6 +14,8 @@ function getTypePriority(entity: TextEntity): number {
       return entity.language === undefined ? 11 : 10;
     case 'code':
       return 20;
+    case 'date_time':
+      return 30;
     case 'text_link':
     case 'text_mention':
       return 49;

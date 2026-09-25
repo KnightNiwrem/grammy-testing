@@ -1,14 +1,14 @@
 // Cases from `check_parse_html` and `check_parse_markdown` (MarkdownV2) in TDLib's
 // `test/message_entities.cpp` at commit ea97bcdd3a15523c58ddfe772b4547187cf5bbeb, with entity types
-// written as the Bot API names them. A case that expects a date and time entity expects the
-// emulator to report such entities as unsupported instead.
+// written as the Bot API names them. The date and time cases match that file at TDLib commit
+// bc9c263e2bfee06aaab41e82db51a103376030bc too; their `FormattedDate` flags are written as the
+// emulator's formats, in which a part given as both short and long is short, as the Bot API shows it.
 
 import type { TextEntity } from '../../src/types/virtual_message.ts';
 
 export type TdlibMarkupCase =
   | { readonly markup: string; readonly text: string; readonly entities: readonly TextEntity[] }
-  | { readonly markup: string; readonly error: string }
-  | { readonly markup: string; readonly dateTimeUnsupported: true };
+  | { readonly markup: string; readonly error: string };
 
 export const TDLIB_HTML_CASES: readonly TdlibMarkupCase[] = [
   {
@@ -337,35 +337,114 @@ export const TDLIB_HTML_CASES: readonly TdlibMarkupCase[] = [
   },
   {
     markup: '➡️ ➡️<tg-time unix = "12345", format = "r">➡️ ➡️</tg-time><b>➡️ ➡️</b>',
-    dateTimeUnsupported: true,
+    text: '➡️ ➡️➡️ ➡️➡️ ➡️',
+    entities: [
+      { type: 'date_time', offset: 5, length: 5, unixTime: 12345, format: { kind: 'relative' } },
+      { type: 'bold', offset: 10, length: 5 },
+    ],
   },
   {
     markup: '➡️ ➡️<tg-time unix = "12345", format = "t">➡️ ➡️</tg-time><b>➡️ ➡️</b>',
-    dateTimeUnsupported: true,
+    text: '➡️ ➡️➡️ ➡️➡️ ➡️',
+    entities: [
+      {
+        type: 'date_time',
+        offset: 5,
+        length: 5,
+        unixTime: 12345,
+        format: { kind: 'absolute', timePrecision: 'short', showsDayOfWeek: false },
+      },
+      { type: 'bold', offset: 10, length: 5 },
+    ],
   },
   {
     markup: '➡️ ➡️<tg-time unix = "12345", format = "T">➡️ ➡️</tg-time><b>➡️ ➡️</b>',
-    dateTimeUnsupported: true,
+    text: '➡️ ➡️➡️ ➡️➡️ ➡️',
+    entities: [
+      {
+        type: 'date_time',
+        offset: 5,
+        length: 5,
+        unixTime: 12345,
+        format: { kind: 'absolute', timePrecision: 'long', showsDayOfWeek: false },
+      },
+      { type: 'bold', offset: 10, length: 5 },
+    ],
   },
   {
     markup: '➡️ ➡️<tg-time unix = "12345", format = "d">➡️ ➡️</tg-time><b>➡️ ➡️</b>',
-    dateTimeUnsupported: true,
+    text: '➡️ ➡️➡️ ➡️➡️ ➡️',
+    entities: [
+      {
+        type: 'date_time',
+        offset: 5,
+        length: 5,
+        unixTime: 12345,
+        format: { kind: 'absolute', datePrecision: 'short', showsDayOfWeek: false },
+      },
+      { type: 'bold', offset: 10, length: 5 },
+    ],
   },
   {
     markup: '➡️ ➡️<tg-time unix = "12345", format = "D">➡️ ➡️</tg-time><b>➡️ ➡️</b>',
-    dateTimeUnsupported: true,
+    text: '➡️ ➡️➡️ ➡️➡️ ➡️',
+    entities: [
+      {
+        type: 'date_time',
+        offset: 5,
+        length: 5,
+        unixTime: 12345,
+        format: { kind: 'absolute', datePrecision: 'long', showsDayOfWeek: false },
+      },
+      { type: 'bold', offset: 10, length: 5 },
+    ],
   },
   {
     markup: '➡️ ➡️<tg-time unix = "12345", format = "w">➡️ ➡️</tg-time><b>➡️ ➡️</b>',
-    dateTimeUnsupported: true,
+    text: '➡️ ➡️➡️ ➡️➡️ ➡️',
+    entities: [
+      {
+        type: 'date_time',
+        offset: 5,
+        length: 5,
+        unixTime: 12345,
+        format: { kind: 'absolute', showsDayOfWeek: true },
+      },
+      { type: 'bold', offset: 10, length: 5 },
+    ],
   },
   {
     markup: '➡️ ➡️<tg-time unix = "12345", format = "W">➡️ ➡️</tg-time><b>➡️ ➡️</b>',
-    dateTimeUnsupported: true,
+    text: '➡️ ➡️➡️ ➡️➡️ ➡️',
+    entities: [
+      {
+        type: 'date_time',
+        offset: 5,
+        length: 5,
+        unixTime: 12345,
+        format: { kind: 'absolute', showsDayOfWeek: true },
+      },
+      { type: 'bold', offset: 10, length: 5 },
+    ],
   },
   {
     markup: '➡️ ➡️<tg-time unix = "12345", format = "tttTTdDwW">➡️ ➡️</tg-time><b>➡️ ➡️</b>',
-    dateTimeUnsupported: true,
+    text: '➡️ ➡️➡️ ➡️➡️ ➡️',
+    entities: [
+      {
+        type: 'date_time',
+        offset: 5,
+        length: 5,
+        unixTime: 12345,
+        format: {
+          kind: 'absolute',
+          timePrecision: 'short',
+          datePrecision: 'short',
+          showsDayOfWeek: true,
+        },
+      },
+      { type: 'bold', offset: 10, length: 5 },
+    ],
   },
   {
     markup: '➡️ ➡️<tg-time unix = "12345", format = "rt">➡️ ➡️</tg-time><b>➡️ ➡️</b>',
@@ -652,20 +731,75 @@ export const TDLIB_MARKDOWN_V2_CASES: readonly TdlibMarkupCase[] = [
     text: '🏟 🏟👍a',
     entities: [{ type: 'custom_emoji', offset: 5, length: 2, customEmojiId: '25' }],
   },
-  { markup: '🏟 🏟![👍](TG://TiME/?test=1231&unix=25#unix=32)a', dateTimeUnsupported: true },
-  { markup: '🏟 🏟![👍](TG://TiME/?test=1231&format=R&unix=25#unix=32)a', dateTimeUnsupported: true },
+  {
+    markup: '🏟 🏟![👍](TG://TiME/?test=1231&unix=25#unix=32)a',
+    text: '🏟 🏟👍a',
+    entities: [{ type: 'date_time', offset: 5, length: 2, unixTime: 25 }],
+  },
+  {
+    markup: '🏟 🏟![👍](TG://TiME/?test=1231&format=R&unix=25#unix=32)a',
+    text: '🏟 🏟👍a',
+    entities: [{
+      type: 'date_time',
+      offset: 5,
+      length: 2,
+      unixTime: 25,
+      format: { kind: 'relative' },
+    }],
+  },
   {
     markup: '🏟 🏟![👍](TG://TiME/?test=1231&format=dt&unix=25#unix=32)a',
-    dateTimeUnsupported: true,
+    text: '🏟 🏟👍a',
+    entities: [{
+      type: 'date_time',
+      offset: 5,
+      length: 2,
+      unixTime: 25,
+      format: {
+        kind: 'absolute',
+        timePrecision: 'short',
+        datePrecision: 'short',
+        showsDayOfWeek: false,
+      },
+    }],
   },
   {
     markup: '🏟 🏟![👍](TG://TiME/?test=1231&format=DT&unix=25#unix=32)a',
-    dateTimeUnsupported: true,
+    text: '🏟 🏟👍a',
+    entities: [{
+      type: 'date_time',
+      offset: 5,
+      length: 2,
+      unixTime: 25,
+      format: {
+        kind: 'absolute',
+        timePrecision: 'long',
+        datePrecision: 'long',
+        showsDayOfWeek: false,
+      },
+    }],
   },
-  { markup: '🏟 🏟![👍](TG://TiME/?test=1231&format=w&unix=25#unix=32)a', dateTimeUnsupported: true },
+  {
+    markup: '🏟 🏟![👍](TG://TiME/?test=1231&format=w&unix=25#unix=32)a',
+    text: '🏟 🏟👍a',
+    entities: [{
+      type: 'date_time',
+      offset: 5,
+      length: 2,
+      unixTime: 25,
+      format: { kind: 'absolute', showsDayOfWeek: true },
+    }],
+  },
   {
     markup: '🏟 🏟![👍](TG://TiME/?test=1231&format=Wt&unix=25#unix=32)a',
-    dateTimeUnsupported: true,
+    text: '🏟 🏟👍a',
+    entities: [{
+      type: 'date_time',
+      offset: 5,
+      length: 2,
+      unixTime: 25,
+      format: { kind: 'absolute', timePrecision: 'short', showsDayOfWeek: true },
+    }],
   },
   { markup: '> \n> \n>', text: ' \n \n', entities: [{ type: 'blockquote', offset: 0, length: 4 }] },
   {

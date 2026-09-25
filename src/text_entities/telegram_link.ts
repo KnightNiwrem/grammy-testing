@@ -1,8 +1,11 @@
 import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from '../types/telegram_identity.ts';
+import type { DateTimeFormat } from '../types/virtual_message.ts';
+import { readMarkupDateTimeFormat } from './date_time_format.ts';
 
 /**
  * Link rules that Telegram applies to text links, mirroring `LinkManager::check_link`,
- * `LinkManager::get_link_user_id`, and `LinkManager::get_link_custom_emoji_id` in TDLib's
+ * `LinkManager::get_link_user_id`, `LinkManager::get_link_custom_emoji_id`, and
+ * `LinkManager::get_link_formatted_date` in TDLib's
  * `td/telegram/LinkManager.cpp`, and `parse_url` in `tdutils/td/utils/HttpUrl.cpp`.
  *
  * Failures carry TDLib's own error message, which callers wrap as Telegram does.
@@ -97,14 +100,23 @@ export function getLinkCustomEmojiId(link: string): CustomEmojiLinkReading {
     : { kind: 'custom_emoji', customEmojiId };
 }
 
+/** The date and time that a `tg://time` link describes. */
+export interface LinkDateTime {
+  /** The positive Unix time of the link's `unix` parameter. */
+  readonly unixTime: number;
+  /** Omitted when the link chooses no format. */
+  readonly format?: DateTimeFormat;
+}
+
 /**
- * Whether a link is a valid `tg://time` link, which Telegram uses for date and time entities: it
- * needs a positive `unix` time and accepts a `format`. Mirrors TDLib's `get_link_formatted_date`.
+ * Reads a `tg://time` link, which Telegram uses for date and time entities: it needs a positive
+ * `unix` time and accepts a `format`, as `readMarkupDateTimeFormat` reads it. Mirrors TDLib's
+ * `get_link_formatted_date`; returns `undefined` for any other link.
  */
-export function isValidTgTimeLink(link: string): boolean {
+export function getLinkDateTime(link: string): LinkDateTime | undefined {
   const query = getTgLinkQuery(link, 'time');
   if (!query.found) {
-    return false;
+    return undefined;
   }
   let unixTime = 0;
   let format = '';
@@ -115,7 +127,7 @@ export function isValidTgTimeLink(link: string): boolean {
     if (key === 'unix') {
       const parsedUnixTime = parseInt64(value);
       if (parsedUnixTime === undefined || parsedUnixTime <= 0n || parsedUnixTime > INT32_MAX) {
-        return false;
+        return undefined;
       }
       unixTime = Number(parsedUnixTime);
     }
@@ -123,15 +135,16 @@ export function isValidTgTimeLink(link: string): boolean {
       format = value;
     }
   }
-  return unixTime !== 0 && isValidDateTimeFormat(format);
-}
-
-/**
- * Whether a date and time format is one Telegram accepts: `r` or `R` for relative time, or any
- * combination of `t`, `T`, `d`, `D`, `w`, and `W`. Mirrors TDLib's `FormattedDate::get_date_flags`.
- */
-export function isValidDateTimeFormat(format: string): boolean {
-  return format === 'r' || format === 'R' || /^[tTdDwW]*$/.test(format);
+  if (unixTime === 0) {
+    return undefined;
+  }
+  const formatReading = readMarkupDateTimeFormat(format);
+  if (!formatReading.valid) {
+    return undefined;
+  }
+  return formatReading.format === undefined
+    ? { unixTime }
+    : { unixTime, format: formatReading.format };
 }
 
 /**

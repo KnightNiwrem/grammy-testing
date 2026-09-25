@@ -1,7 +1,6 @@
 import type { TextEntity } from '../types/virtual_message.ts';
 import {
   asciiCode,
-  DATE_TIME_UNSUPPORTED,
   isTdlibSpace,
   isUtf8FirstCodeUnit,
   markupInvalid,
@@ -13,8 +12,8 @@ import {
 import {
   getCheckedLink,
   getLinkCustomEmojiId,
+  getLinkDateTime,
   getLinkUserId,
-  isValidTgTimeLink,
 } from './telegram_link.ts';
 import { compareTextEntities } from './text_entity_order.ts';
 
@@ -181,8 +180,6 @@ interface OpenMarkdownV2Entity {
 /**
  * Reads Telegram's MarkdownV2 parse mode, mirroring `parse_markdown_v2` in TDLib's
  * `td/telegram/MessageEntity.cpp`.
- *
- * Date and time entities, written as `![…](tg://time?…)`, are not supported by the emulator.
  */
 export function parseMarkdownV2Markup(text: string): MarkupParsing {
   const input = new Utf8MarkupInput(text);
@@ -408,11 +405,13 @@ export function parseMarkdownV2Markup(text: string): MarkupParsing {
         const customEmoji = getLinkCustomEmojiId(urlReading.url);
         if (customEmoji.kind === 'custom_emoji') {
           entity = { type: 'custom_emoji', ...span, customEmojiId: customEmoji.customEmojiId };
-        } else if (isValidTgTimeLink(urlReading.url)) {
-          return DATE_TIME_UNSUPPORTED;
-        } else {
+          break;
+        }
+        const dateTime = getLinkDateTime(urlReading.url);
+        if (dateTime === undefined) {
           return markupInvalid('Invalid tg://emoji or tg://time URL specified');
         }
+        entity = { type: 'date_time', ...span, ...dateTime };
         break;
       }
       case 'BlockQuote':

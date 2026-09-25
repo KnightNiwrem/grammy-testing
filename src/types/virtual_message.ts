@@ -89,13 +89,41 @@ export interface CustomEmojiEntity extends TextSpan {
   readonly customEmojiId: string;
 }
 
+/** How precisely clients show the time or the date of a date and time entity. */
+export type DateTimePartPrecision = 'short' | 'long';
+
+/**
+ * How clients show a date and time entity, as TDLib's `FormattedDate` flags describe it: relative
+ * to the present, or with the chosen parts.
+ */
+export type DateTimeFormat =
+  | { readonly kind: 'relative' }
+  | {
+    readonly kind: 'absolute';
+    /** Omitted to show no time. */
+    readonly timePrecision?: DateTimePartPrecision;
+    /** Omitted to show no date. */
+    readonly datePrecision?: DateTimePartPrecision;
+    readonly showsDayOfWeek: boolean;
+  };
+
+/** A date and time that clients show in each reader's time zone. */
+export interface DateTimeEntity extends TextSpan {
+  readonly type: 'date_time';
+  /** The shown moment in Unix seconds, which Telegram requires to be positive. */
+  readonly unixTime: number;
+  /** Omitted when the sender chose no format. */
+  readonly format?: DateTimeFormat;
+}
+
 /** A marked span of message text: formatting, a link, or a detected bot command. */
 export type TextEntity =
   | PlainTextEntity
   | PreTextEntity
   | TextLinkEntity
   | TextMentionEntity
-  | CustomEmojiEntity;
+  | CustomEmojiEntity
+  | DateTimeEntity;
 
 /** Text with the entities that mark spans of it. */
 export interface FormattedText {

@@ -2,8 +2,8 @@ import {
   checkLink,
   getCheckedLink,
   getLinkCustomEmojiId,
+  getLinkDateTime,
   getLinkUserId,
-  isValidTgTimeLink,
 } from '../src/text_entities/telegram_link.ts';
 
 Deno.test('getCheckedLink normalizes links as TDLib does', () => {
@@ -106,7 +106,7 @@ Deno.test('getLinkUserId reads user links as TDLib does', () => {
   }
 });
 
-Deno.test('getLinkCustomEmojiId and isValidTgTimeLink read tg:// entity links', () => {
+Deno.test('getLinkCustomEmojiId and getLinkDateTime read tg:// entity links', () => {
   const emoji = getLinkCustomEmojiId('TG://EMoJI/?test=1231&id=25#id=32');
   if (emoji.kind !== 'custom_emoji' || emoji.customEmojiId !== '25') {
     throw new Error(`Expected custom emoji 25, received ${JSON.stringify(emoji)}`);
@@ -118,13 +118,41 @@ Deno.test('getLinkCustomEmojiId and isValidTgTimeLink read tg:// entity links', 
     );
   }
 
-  for (const link of ['tg://time?unix=25', 'TG://TiME/?test=1&format=Wt&unix=25#unix=32']) {
-    if (!isValidTgTimeLink(link)) {
-      throw new Error(`Expected ${link} to be a valid time link`);
+  const dateTimes = [
+    ['tg://time?unix=25', { unixTime: 25 }],
+    [
+      'TG://TiME/?test=1&format=Wt&unix=25#unix=32',
+      {
+        unixTime: 25,
+        format: { kind: 'absolute', timePrecision: 'short', showsDayOfWeek: true },
+      },
+    ],
+    // Given both ways, a part is shown short.
+    [
+      'tg://time?unix=25&format=TtDd',
+      {
+        unixTime: 25,
+        format: {
+          kind: 'absolute',
+          timePrecision: 'short',
+          datePrecision: 'short',
+          showsDayOfWeek: false,
+        },
+      },
+    ],
+  ] as const;
+  for (const [link, expected] of dateTimes) {
+    const dateTime = getLinkDateTime(link);
+    if (JSON.stringify(dateTime) !== JSON.stringify(expected)) {
+      throw new Error(
+        `Expected ${link} to show ${JSON.stringify(expected)}, received ${
+          JSON.stringify(dateTime)
+        }`,
+      );
     }
   }
   for (const link of ['tg://time?format=r', 'tg://time?unix=0', 'tg://time?unix=5&format=rt']) {
-    if (isValidTgTimeLink(link)) {
+    if (getLinkDateTime(link) !== undefined) {
       throw new Error(`Expected ${link} to be an invalid time link`);
     }
   }

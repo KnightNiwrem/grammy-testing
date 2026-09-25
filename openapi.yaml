@@ -1084,9 +1084,7 @@ paths:
             Request: text must be non-empty`, `Bad Request: entity URL '…' is invalid: …`, or `Bad
             Request: user not found`); the normalized text is longer than 4096 characters (`Bad
             Request: message is too long`); or a button's callback data exceeds 64 bytes (`Bad
-            Request: BUTTON_DATA_INVALID`). Date and time entities are not supported (`Bad Request:
-            date_time entities are not supported`), and neither are replies to messages of other
-            chats (`Bad Request: replies to messages of other chats are not supported`) or reply
+            Request: BUTTON_DATA_INVALID`). Replies to messages of other chats are not supported (`Bad Request: replies to messages of other chats are not supported`) or reply
             keyboards, keyboard removals, and forced replies in supergroups (`Bad Request: reply
             keyboards, keyboard removals, and forced replies are not supported in groups`).
           content:
@@ -3575,6 +3573,7 @@ components:
             - text_link
             - text_mention
             - custom_emoji
+            - date_time
             - blockquote
             - expandable_blockquote
         offset:
@@ -3599,6 +3598,17 @@ components:
         custom_emoji_id:
           type: string
           description: For `custom_emoji`, the custom emoji's identifier.
+        unix_time:
+          type: integer
+          minimum: 1
+          description: For `date_time`, the shown moment as a Unix time.
+        date_time_format:
+          type: string
+          pattern: '^(r|w?[dD]?[tT]?)$'
+          description: >-
+            For `date_time`, how clients show it, as the official Bot API server reports it: `r`
+            for relative time, otherwise `w` for the day of the week, `d` or `D` for a short or long
+            date, then `t` or `T` for a short or long time; empty when the bot chose no format.
     MessageEntityParameter:
       type: object
       additionalProperties: false
@@ -3606,8 +3616,7 @@ components:
         An entity a bot specifies, as a Bot API `MessageEntity`. Types that Telegram detects by
         itself (`mention`, `hashtag`, `cashtag`, `bot_command`, `url`, `email`, `phone_number`,
         and `bank_card_number`) are accepted and ignored, so entities of a received message can be
-        sent back. `date_time` entities are not supported. Telegram reads numbers written as
-        strings; the emulator rejects them.
+        sent back. Telegram reads numbers written as strings; the emulator rejects them.
       required:
         - type
         - offset
@@ -3634,12 +3643,21 @@ components:
               type: integer
         custom_emoji_id:
           type: string
+        unix_time:
+          type: integer
+          description: For `date_time`, a positive Unix time.
+        date_time_format:
+          type: string
+          description: >-
+            For `date_time`, how clients show it: `r` or `R` for relative time, or letters choosing
+            the parts shown, `t` or `T` for a short or long time, `d` or `D` for a short or long
+            date, and `w` or `W` for the day of the week. The last letter for a part decides its
+            precision. Empty or omitted, no format is chosen.
     ParseMode:
       type: string
       description: >-
         Markup to read the text as, matched case-insensitively: `HTML`, `MarkdownV2`, or the
         legacy `Markdown`, parsed as Telegram does. `none` or omitting it leaves the text as it is.
-        Date and time markup (`<tg-time>` or a `tg://time` link) is not supported.
     SentMessage:
       type: object
       additionalProperties: false

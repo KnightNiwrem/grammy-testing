@@ -1874,11 +1874,6 @@ Deno.test('sendMessage and editMessageText format text from parse_mode or entiti
     text: 'Hi',
     entities: [{ type: 'text_mention', offset: 0, length: 2, user: { id: 999 } }],
   }, 'Bad Request: user not found');
-  await expectBadRequest('sendMessage', {
-    chat_id: accountId,
-    text: '<tg-time unix="1700000000">now</tg-time>',
-    parse_mode: 'HTML',
-  }, 'Bad Request: date_time entities are not supported');
   await expectBadRequest(
     'sendMessage',
     { chat_id: accountId, text: ' \n ' },
@@ -1930,6 +1925,80 @@ Deno.test('sendMessage and editMessageText format text from parse_mode or entiti
     throw new Error(
       `Expected history to show the formatted edit, received ${JSON.stringify(historyBody)}`,
     );
+  }
+});
+
+Deno.test('sendMessage reads and reports date and time entities as Telegram does', async () => {
+  const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
+  const accountId = createdAccount.account.id;
+  await sendText('Hi');
+  const sendMessage = async (parameters: Record<string, unknown>) =>
+    await callBotApi(api, `${botApiPath}/sendMessage`, { chat_id: accountId, ...parameters });
+
+  // A date holds no formatting, so bold text around it is split.
+  const htmlMessage = botApiResult(
+    (await sendMessage({
+      text: '<b>Due <tg-time unix="1700000000" format="Wtd">tomorrow</tg-time></b>',
+      parse_mode: 'HTML',
+    })).body,
+  );
+  const expectedHtmlEntities = [
+    { type: 'bold', offset: 0, length: 4 },
+    { type: 'date_time', offset: 4, length: 8, unix_time: 1700000000, date_time_format: 'wdt' },
+  ];
+  if (JSON.stringify(htmlMessage?.entities) !== JSON.stringify(expectedHtmlEntities)) {
+    throw new Error(`Expected a date entity, received ${JSON.stringify(htmlMessage)}`);
+  }
+
+  // The last letter for a part decides its precision, and a date without a format reports an
+  // empty one.
+  const dateTimeEntity = (offset: number, format?: string) => ({
+    type: 'date_time',
+    offset,
+    length: 1,
+    unix_time: 1,
+    ...(format === undefined ? {} : { date_time_format: format }),
+  });
+  const entitiesMessage = botApiResult(
+    (await sendMessage({
+      text: 'a b c d',
+      entities: [
+        dateTimeEntity(0, 'tT'),
+        dateTimeEntity(2, 'Ww'),
+        dateTimeEntity(4),
+        dateTimeEntity(6, 'R'),
+      ],
+    })).body,
+  );
+  const reportedFormats = (entitiesMessage?.entities as Array<{ date_time_format?: string }>)
+    ?.map(({ date_time_format }) => date_time_format);
+  if (JSON.stringify(reportedFormats) !== JSON.stringify(['T', 'w', '', 'r'])) {
+    throw new Error(`Expected normalized formats, received ${JSON.stringify(entitiesMessage)}`);
+  }
+
+  const failures = [
+    [
+      { text: 'a', entities: [dateTimeEntity(0, 'rt')] },
+      "Bad Request: can't parse MessageEntity: Invalid date-time format specified",
+    ],
+    [
+      { text: 'a', entities: [{ ...dateTimeEntity(0), unix_time: 0 }] },
+      'Bad Request: invalid date specified',
+    ],
+    [
+      { text: '![a](tg://time?unix=0)', parse_mode: 'MarkdownV2' },
+      "Bad Request: can't parse entities: Invalid tg://emoji or tg://time URL specified",
+    ],
+  ] as const;
+  for (const [parameters, expectedDescription] of failures) {
+    const { status, body } = await sendMessage(parameters);
+    if (status !== 400 || (body as { description?: unknown }).description !== expectedDescription) {
+      throw new Error(
+        `Expected ${JSON.stringify(parameters)} to fail with ${expectedDescription}, received ${
+          JSON.stringify(body)
+        }`,
+      );
+    }
   }
 });
 

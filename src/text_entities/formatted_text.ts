@@ -187,6 +187,13 @@ function validateEntityArguments(
         }
         validatedEntities.push({ ...entity });
         break;
+      case 'date_time':
+        // Mirrors `FormattedDate::get_formatted_date`.
+        if (entity.unixTime <= 0) {
+          return { valid: false, error: 'Invalid date specified' };
+        }
+        validatedEntities.push({ ...entity });
+        break;
       default:
         validatedEntities.push({ ...entity });
     }
@@ -313,7 +320,7 @@ function utf8Length(codePoint: number): number {
 
 /**
  * Entity categories from TDLib's type masks: formatting that can be split and merged, blockquotes,
- * code, and continuous entities that must stay whole.
+ * code and dates, which hold no other entities, and continuous entities that must stay whole.
  */
 type TextEntityCategory = 'splittable' | 'blockquote' | 'pre' | 'continuous';
 
@@ -339,6 +346,7 @@ function getEntityCategory(entity: TextEntity): TextEntityCategory {
       return 'blockquote';
     case 'pre':
     case 'code':
+    case 'date_time':
       return 'pre';
     case 'bot_command':
     case 'text_link':

@@ -1,7 +1,6 @@
 import type { TextEntity } from '../types/virtual_message.ts';
 import {
   asciiCode,
-  DATE_TIME_UNSUPPORTED,
   isAsciiDigit,
   isAsciiHexDigit,
   isAsciiLetter,
@@ -13,10 +12,10 @@ import {
   Utf8MarkupInput,
   Utf8MarkupOutput,
 } from './markup_input.ts';
+import { readMarkupDateTimeFormat } from './date_time_format.ts';
 import {
   getCheckedLink,
   getLinkUserId,
-  isValidDateTimeFormat,
   parseCustomEmojiId,
   toAsciiLowerCase,
 } from './telegram_link.ts';
@@ -82,8 +81,6 @@ interface HtmlEntity {
 /**
  * Reads Telegram's HTML parse mode, mirroring `parse_html` in TDLib's
  * `td/telegram/MessageEntity.cpp`.
- *
- * Date and time entities, written with `<tg-time>`, are not supported by the emulator.
  */
 export function parseHtmlMarkup(text: string): MarkupParsing {
   const input = new Utf8MarkupInput(text);
@@ -325,11 +322,23 @@ function closeTag(
       addEntity({ type: 'custom_emoji', offset, length, customEmojiId });
       return undefined;
     }
-    case 'tg-time':
-      if (!isValidDateTimeFormat(argument)) {
+    case 'tg-time': {
+      const formatReading = readMarkupDateTimeFormat(argument);
+      if (!formatReading.valid) {
         return markupInvalid('Invalid date format used');
       }
-      return unixTime > 0 ? DATE_TIME_UNSUPPORTED : undefined;
+      if (unixTime > 0) {
+        const { format } = formatReading;
+        addEntity({
+          type: 'date_time',
+          offset,
+          length,
+          unixTime,
+          ...(format === undefined ? {} : { format }),
+        });
+      }
+      return undefined;
+    }
     case 'a': {
       const url = argument.length > 0 ? argument : output.decode(entityBeginPosition);
       const userId = getLinkUserId(url);

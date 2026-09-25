@@ -16,9 +16,18 @@ message text fails; empty captions are allowed. Entity offsets and lengths use U
 must not split a surrogate pair.
 
 Supported explicit entities are `bold`, `italic`, `underline`, `strikethrough`, `spoiler`, `code`,
-`pre` (with optional language), `blockquote`, `expandable_blockquote`, `text_link`, `text_mention`
-and `custom_emoji`. `tg://user?id=…` text links become mentions of known session users. Bot commands
-such as `/start` are detected automatically, allowing bot framework command handlers to match them.
+`pre` (with optional language), `blockquote`, `expandable_blockquote`, `text_link`, `text_mention`,
+`custom_emoji` and `date_time`. `tg://user?id=…` text links become mentions of known session users.
+Bot commands such as `/start` are detected automatically, allowing bot framework command handlers to
+match them.
+
+Date and time entities come from explicit `date_time` entities, HTML `<tg-time>` tags or MarkdownV2
+`![…](tg://time?…)` links. As in [`Client::get_text_entity_type`][entity-input], a
+`date_time_format` is `r` or `R`, or letters for the parts shown; the last letter for a part decides
+its precision. Markup keeps every letter, as TDLib's
+[`FormattedDate::get_date_flags`][formatted-date] does, and a part given both ways is short.
+Returned entities always include `date_time_format`, normalized to `r` or to `w`, `d`/`D` and
+`t`/`T` in that order, and empty for no format. Like code, a date holds no other formatting.
 
 Normalized message text is limited to 4,096 Unicode code points; captions to 1,024. Bot API
 formatted input has an additional 32,768-byte UTF-8 limit before markup parsing, following
@@ -39,8 +48,6 @@ formatted input has an additional 32,768-byte UTF-8 limit before markup parsing,
   them in Bot API input but redetects only bot commands. Sending an existing Telegram entity list
   therefore does not preserve automatically detected URLs or mentions. See
   [`Client::get_text_entity_type`][entity-input] and [`TDLib::find_entities`][entity-detection].
-- **Date/time entities are unsupported.** Explicit `date_time` entities and markup that produces
-  them are rejected. Upstream reads these entities in [the same entity parser][entity-input].
 - **Simulated link-preview metadata.** Returned messages omit `link_preview_options`; tests need a
   simulated representation of that object. Upstream passes these options into message content via
   [`Client::get_input_message_text`][input-text].
@@ -71,6 +78,7 @@ also follow the emulator's intentional
 
 [formatted-input]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L11955-L12000
 [entity-input]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L11872-L11952
+[formatted-date]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/FormattedDate.cpp#L106-L132
 [entity-detection]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L1740-L1800
 [input-text]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L12000-L12080
 [message-entities]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L3650-L3800

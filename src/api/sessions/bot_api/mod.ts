@@ -17,7 +17,6 @@ import {
   readBotCommandScopeParameter,
 } from './bot_command_parameters.ts';
 import {
-  DATE_TIME_UNSUPPORTED_DESCRIPTION,
   messageEntitiesParameter,
   readMessageEntitiesParameter,
 } from './message_entities_parameter.ts';
@@ -1415,8 +1414,6 @@ function readFormattedTextParameters(
       return failure(PARSE_MODE_UNSUPPORTED_DESCRIPTION);
     case 'text_encoding_invalid':
       return failure(TEXT_ENCODING_INVALID_DESCRIPTION);
-    case 'date_time_unsupported':
-      return failure(DATE_TIME_UNSUPPORTED_DESCRIPTION);
     case 'markup_invalid':
       return failure(`Bad Request: can't parse entities: ${result.markupError}`);
     default: {
@@ -2146,10 +2143,7 @@ function readInlineQueryResultFormattedText(
     { text, parseMode, entities },
     invalidParametersDescription,
   );
-  if (
-    reading.read || reading.description === invalidParametersDescription ||
-    reading.description === DATE_TIME_UNSUPPORTED_DESCRIPTION
-  ) {
+  if (reading.read || reading.description === invalidParametersDescription) {
     return reading;
   }
   // Telegram's descriptions begin with a capital letter, which `badRequestDescription` lowered.

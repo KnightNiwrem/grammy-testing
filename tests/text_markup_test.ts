@@ -72,11 +72,29 @@ Deno.test('parseMarkdownMarkup reads legacy Markdown', () => {
   );
 });
 
-Deno.test('markup parsers report date and time entities as unsupported', () => {
-  assertDateTimeUnsupported(parseHtmlMarkup('<tg-time unix="1700000000">now</tg-time>'));
-  assertDateTimeUnsupported(parseMarkdownV2Markup('![now](tg://time?unix=1700000000)'));
-  // TDLib creates no entity for a time that is not positive.
+Deno.test('markup parsers read date and time entities', () => {
+  const expectedEntities = [{
+    type: 'date_time',
+    offset: 0,
+    length: 3,
+    unixTime: 1700000000,
+  }] as const;
+  assertParsed(
+    parseHtmlMarkup('<tg-time unix="1700000000">now</tg-time>'),
+    'now',
+    expectedEntities,
+  );
+  assertParsed(
+    parseMarkdownV2Markup('![now](tg://time?unix=1700000000)'),
+    'now',
+    expectedEntities,
+  );
+  // TDLib creates no entity for a time that is not positive, but still checks its format.
   assertParsed(parseHtmlMarkup('<tg-time unix="0">never</tg-time>'), 'never', []);
+  assertFailed(
+    parseHtmlMarkup('<tg-time unix="0" format="x">never</tg-time>'),
+    'Invalid date format used',
+  );
 });
 
 function assertTdlibCase(
@@ -86,8 +104,6 @@ function assertTdlibCase(
   const parsing = parse(tdlibCase.markup);
   if ('error' in tdlibCase) {
     assertFailed(parsing, tdlibCase.error);
-  } else if ('dateTimeUnsupported' in tdlibCase) {
-    assertDateTimeUnsupported(parsing);
   } else {
     assertParsed(parsing, tdlibCase.text, tdlibCase.entities);
   }
@@ -114,14 +130,6 @@ function assertFailed(parsing: MarkupParsing, expectedError: string): void {
   if (parsing.parsed || parsing.reason !== 'markup_invalid' || parsing.error !== expectedError) {
     throw new Error(
       `Expected error ${JSON.stringify(expectedError)}, received ${JSON.stringify(parsing)}`,
-    );
-  }
-}
-
-function assertDateTimeUnsupported(parsing: MarkupParsing): void {
-  if (parsing.parsed || parsing.reason !== 'date_time_unsupported') {
-    throw new Error(
-      `Expected date and time entities to be unsupported, received ${JSON.stringify(parsing)}`,
     );
   }
 }

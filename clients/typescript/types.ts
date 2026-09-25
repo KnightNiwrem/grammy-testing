@@ -259,7 +259,16 @@ export type MessageEntity =
     readonly type: 'text_mention';
     readonly user: VirtualAccountProfile | MessageSenderBot;
   })
-  | (MessageEntitySpan & { readonly type: 'custom_emoji'; readonly custom_emoji_id: string });
+  | (MessageEntitySpan & { readonly type: 'custom_emoji'; readonly custom_emoji_id: string })
+  | (MessageEntitySpan & {
+    readonly type: 'date_time';
+    readonly unix_time: number;
+    /**
+     * `r` for relative time, otherwise `w` for the day of the week, `d` or `D` for a short or
+     * long date, then `t` or `T` for a short or long time; empty when the bot chose no format.
+     */
+    readonly date_time_format: string;
+  });
 
 /** A bot as a message sender, without the capabilities that only getMe reports. */
 export interface MessageSenderBot {
