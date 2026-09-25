@@ -862,6 +862,123 @@ Deno.test('BotUpdateDeliveryService lets a message reach only the privacy-mode b
   expectRecipients('/help@b_bot to unsubscribed A', ['admin']);
 });
 
+Deno.test('BotUpdateDeliveryService delivers chat_member updates to subscribed administrator bots', () => {
+  const { virtualUsers, sharedChats, botUpdates, updateSubscriptions, botUpdateDelivery } =
+    createDeliveryFixture();
+  const owner = createAccount(virtualUsers);
+  const newcomer = createAccount(virtualUsers);
+  const subscribedAdministratorBot = createBot(virtualUsers, 'subscribed_admin_bot');
+  const unsubscribedAdministratorBot = createBot(virtualUsers, 'unsubscribed_admin_bot');
+  const subscribedMemberBot = createBot(virtualUsers, 'subscribed_member_bot');
+  const supergroup = {
+    kind: 'supergroup',
+    id: -1_000_000_000_001,
+    title: 'Team',
+    chatInstance: '-42',
+  } as const;
+  const administratorStatus = {
+    status: 'administrator',
+    rights: grantSupergroupAdministratorRights(['can_restrict_members']),
+  } as const;
+  sharedChats.registerSupergroup(supergroup, owner.profile.id);
+  for (const bot of [subscribedAdministratorBot, unsubscribedAdministratorBot]) {
+    sharedChats.addChatMember(supergroup.id, bot.profile.id);
+    sharedChats.updateChatMemberStatus(supergroup.id, bot.profile.id, administratorStatus);
+  }
+  sharedChats.addChatMember(supergroup.id, subscribedMemberBot.profile.id);
+  for (const bot of [subscribedAdministratorBot, subscribedMemberBot]) {
+    updateSubscriptions.setAllowedUpdateTypes(
+      bot.profile.id,
+      new Set(['message', 'my_chat_member', 'chat_member']),
+    );
+  }
+
+  sharedChats.addChatMember(supergroup.id, newcomer.profile.id);
+  botUpdateDelivery.publish({
+    type: 'chat_member_status_changed',
+    chat: supergroup,
+    actorId: owner.profile.id,
+    memberId: newcomer.profile.id,
+    oldStatus: { status: 'left' },
+    newStatus: { status: 'member' },
+    changedAtUnixSeconds: 1_700_000_000,
+  });
+  sharedChats.removeChatMember(supergroup.id, newcomer.profile.id, {
+    status: 'kicked',
+    bannedUntilUnixSeconds: undefined,
+  });
+  botUpdateDelivery.publish({
+    type: 'chat_member_status_changed',
+    chat: supergroup,
+    actorId: subscribedAdministratorBot.profile.id,
+    memberId: newcomer.profile.id,
+    oldStatus: { status: 'member' },
+    newStatus: { status: 'kicked' },
+    changedAtUnixSeconds: 1_700_000_001,
+  });
+  // A change of the administrator bot's own standing is its my_chat_member update instead.
+  sharedChats.updateChatMemberStatus(supergroup.id, subscribedAdministratorBot.profile.id, {
+    status: 'member',
+  });
+  botUpdateDelivery.publish({
+    type: 'chat_member_status_changed',
+    chat: supergroup,
+    actorId: owner.profile.id,
+    memberId: subscribedAdministratorBot.profile.id,
+    oldStatus: administratorStatus,
+    newStatus: { status: 'member' },
+    changedAtUnixSeconds: 1_700_000_002,
+  });
+
+  const administratorUpdates = botUpdates.confirmAndReadPendingUpdates(
+    subscribedAdministratorBot.profile.id,
+    { limit: 100 },
+  );
+  const chat = { id: supergroup.id, title: 'Team', type: 'supergroup' };
+  const expectedChatMemberUpdates = [
+    {
+      chat,
+      from: owner.profile,
+      date: 1_700_000_000,
+      old_chat_member: { user: newcomer.profile, status: 'left' },
+      new_chat_member: { user: newcomer.profile, status: 'member' },
+    },
+    {
+      chat,
+      from: {
+        id: subscribedAdministratorBot.profile.id,
+        is_bot: true,
+        first_name: 'Test Bot',
+        username: 'subscribed_admin_bot',
+      },
+      date: 1_700_000_001,
+      old_chat_member: { user: newcomer.profile, status: 'member' },
+      new_chat_member: { user: newcomer.profile, status: 'kicked', until_date: 0 },
+    },
+  ];
+  if (
+    JSON.stringify(administratorUpdates.map((update) => Object.keys(update)[1])) !==
+      JSON.stringify(['chat_member', 'chat_member', 'my_chat_member']) ||
+    JSON.stringify(
+        administratorUpdates.flatMap((update) =>
+          'chat_member' in update ? [update.chat_member] : []
+        ),
+      ) !== JSON.stringify(expectedChatMemberUpdates)
+  ) {
+    throw new Error(
+      `Expected the subscribed administrator to observe other members' changes, received ${
+        JSON.stringify(administratorUpdates)
+      }`,
+    );
+  }
+  for (const bot of [unsubscribedAdministratorBot, subscribedMemberBot]) {
+    const updates = botUpdates.confirmAndReadPendingUpdates(bot.profile.id, { limit: 100 });
+    if (updates.some((update) => 'chat_member' in update)) {
+      throw new Error(`Expected ${bot.profile.username} to receive no chat_member update`);
+    }
+  }
+});
+
 function createDeliveryFixture() {
   const identities = new TelegramIdentityRepository();
   const accounts = new AccountRepository();

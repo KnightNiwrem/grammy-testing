@@ -2,6 +2,7 @@ import type {
   BotApiBotUser,
   BotApiCallbackQuery,
   BotApiChatMember,
+  BotApiChatMemberUpdated,
   BotApiChosenInlineResult,
   BotApiDocument,
   BotApiGroupChat,
@@ -412,6 +413,28 @@ export function projectBotMembershipChangeForBot(
     date: event.changedAtUnixSeconds,
     old_chat_member: projectGroupChatBotMember(user, event.oldStatus),
     new_chat_member: projectGroupChatBotMember(user, event.newStatus),
+  };
+}
+
+export interface ChatMemberChangeProjectionInput {
+  readonly event: ChatMemberStatusChangedEvent;
+  readonly chat: BasicGroup | Supergroup;
+  /** The user that made the change: the member itself when it left. */
+  readonly actor: BotApiUser;
+  /** The account or bot whose standing changed. */
+  readonly member: BotApiUser;
+}
+
+/** Projects a change of a user's standing in a group as administrator bots observe it. */
+export function projectChatMemberChange(
+  { event, chat, actor, member }: ChatMemberChangeProjectionInput,
+): BotApiChatMemberUpdated {
+  return {
+    chat: projectGroupChat(chat),
+    from: actor,
+    date: event.changedAtUnixSeconds,
+    old_chat_member: projectChatMember(member, event.oldStatus),
+    new_chat_member: projectChatMember(member, event.newStatus),
   };
 }
 

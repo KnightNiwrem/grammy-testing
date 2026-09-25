@@ -3682,6 +3682,58 @@ Deno.test('the owner promotes administrators, whom bots find with getChatMember 
   }
 });
 
+Deno.test('administrator bots that request chat_member updates observe members joining', async () => {
+  const { api, sessionPath, owner, bot, readerBot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const outsider = await createAccount(api, sessionPath, 'Linus');
+  const promotion = await api.request(
+    `${supergroupPath(owner.id)}/administrators/${bot.bot.id}`,
+    jsonRequest('PUT', { can_restrict_members: true }),
+  );
+  // Both bots confirm their earlier updates and request chat_member updates from now on.
+  for (const { botApiPath } of [bot, readerBot]) {
+    const { body } = await callBotApi(api, `${botApiPath}/getUpdates`, {
+      allowed_updates: ['message', 'my_chat_member', 'chat_member'],
+    });
+    const lastUpdateId = (body as { result: Array<{ update_id: number }> }).result.at(-1)
+      ?.update_id;
+    await callBotApi(api, `${botApiPath}/getUpdates`, { offset: (lastUpdateId ?? 0) + 1 });
+  }
+  const addition = await api.request(`${supergroupPath(owner.id)}/members/${outsider.id}`, {
+    method: 'PUT',
+  });
+
+  const readUpdates = async (botApiPath: string) =>
+    ((await callBotApi(api, `${botApiPath}/getUpdates`, {})).body as {
+      result: Array<Record<string, unknown>>;
+    }).result;
+  const [administratorUpdates, readerUpdates] = await Promise.all([
+    readUpdates(bot.botApiPath),
+    readUpdates(readerBot.botApiPath),
+  ]);
+  const chatMember = administratorUpdates[0]?.chat_member as Record<string, unknown> | undefined;
+  if (
+    promotion.status !== 204 || addition.status !== 204 ||
+    JSON.stringify(administratorUpdates.map((update) => Object.keys(update)[1])) !==
+      JSON.stringify(['chat_member', 'message']) ||
+    JSON.stringify({ ...chatMember, date: 0 }) !== JSON.stringify({
+        chat: { id: supergroup.id, title: 'Team', type: 'supergroup' },
+        from: owner,
+        date: 0,
+        old_chat_member: { user: outsider, status: 'left' },
+        new_chat_member: { user: outsider, status: 'member' },
+      }) ||
+    JSON.stringify(readerUpdates.map((update) => Object.keys(update)[1])) !==
+      JSON.stringify(['message'])
+  ) {
+    throw new Error(
+      `Expected only the administrator bot to observe the join, received ${
+        JSON.stringify([administratorUpdates, readerUpdates])
+      }`,
+    );
+  }
+});
+
 Deno.test('banChatMember, unbanChatMember, and deleteMessage follow Telegram checks for administrators', async () => {
   const {
     api,

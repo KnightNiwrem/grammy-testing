@@ -309,12 +309,13 @@ export type BotApiGroupChatBotMember = Exclude<
   { readonly status: 'creator' }
 >;
 
-/** A change of the bot's own membership in a chat, in the field order Telegram uses. */
-interface BotApiMyChatMemberUpdatedInChat<Chat, ChatMember> {
+/** A change of a user's membership in a chat, in the field order Telegram uses. */
+interface BotApiChatMemberUpdatedInChat<Chat, ChatMember> {
   readonly chat: Chat;
   /**
    * The user who changed the membership: in a private chat, the account at its other end; in a
-   * group, the account that added or removed the bot, or the bot itself when it left.
+   * group, the account or bot that added, removed, promoted, demoted, banned, or unbanned the
+   * member, or the member itself when it left.
    */
   readonly from: BotApiUser;
   readonly date: number;
@@ -322,9 +323,16 @@ interface BotApiMyChatMemberUpdatedInChat<Chat, ChatMember> {
   readonly new_chat_member: ChatMember;
 }
 
+/** A change of the bot's own membership in a chat. */
 export type BotApiMyChatMemberUpdated =
-  | BotApiMyChatMemberUpdatedInChat<BotApiPrivateChat, BotApiPrivateChatBotMember>
-  | BotApiMyChatMemberUpdatedInChat<BotApiGroupChat, BotApiGroupChatBotMember>;
+  | BotApiChatMemberUpdatedInChat<BotApiPrivateChat, BotApiPrivateChatBotMember>
+  | BotApiChatMemberUpdatedInChat<BotApiGroupChat, BotApiGroupChatBotMember>;
+
+/** A change of another user's standing in a group, which administrator bots may subscribe to. */
+export type BotApiChatMemberUpdated = BotApiChatMemberUpdatedInChat<
+  BotApiGroupChat,
+  BotApiChatMember
+>;
 
 export interface BotApiMessageUpdate {
   readonly update_id: number;
@@ -356,13 +364,19 @@ export interface BotApiMyChatMemberUpdate {
   readonly my_chat_member: BotApiMyChatMemberUpdated;
 }
 
+export interface BotApiChatMemberUpdate {
+  readonly update_id: number;
+  readonly chat_member: BotApiChatMemberUpdated;
+}
+
 export type BotApiUpdate =
   | BotApiMessageUpdate
   | BotApiEditedMessageUpdate
   | BotApiInlineQueryUpdate
   | BotApiChosenInlineResultUpdate
   | BotApiCallbackQueryUpdate
-  | BotApiMyChatMemberUpdate;
+  | BotApiMyChatMemberUpdate
+  | BotApiChatMemberUpdate;
 
 /**
  * Every update type name the official Bot API server recognizes in `allowed_updates`, including

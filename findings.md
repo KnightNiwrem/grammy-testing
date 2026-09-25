@@ -106,44 +106,6 @@ A successful response containing `sendMessage` should create one message. Separa
 webhook acknowledgement and the embedded method’s success are not incorrectly treated as the same
 outcome.
 
-## 8. P2 — Add `chat_member` updates for membership transitions already implemented
-
-**Classification:** High-value capability recommendation, not a demand for complete membership
-emulation.
-
-**Location:**
-[`src/services/bot_update_delivery.ts`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/src/services/bot_update_delivery.ts),
-`#deliverChatMemberStatusChange`.
-
-### Finding and context
-
-The domain already publishes membership changes with old status, new status, actor, chat, and time.
-The delivery layer currently uses that event only to notify a bot about its own membership through
-`my_chat_member`; it does not project general `chat_member` updates to observer bots.
-
-Telegram makes these updates available to administrator bots that explicitly subscribe to
-`chat_member`.
-
-**Reference:** [Bot API `Update`](https://core.telegram.org/bots/api#update).
-
-### Recommendation
-
-Support notifications for the transitions the emulator can already perform, rather than introducing
-every missing membership state or administrative operation.
-
-This is a good fit for the low-hanging-fruit strategy: it unlocks membership-driven handlers using
-state and events that already exist. A service-message substitute does not exercise the same handler
-or payload contract.
-
-Architecturally, generalizing the membership-event projection is preferable to manufacturing these
-updates separately inside each ban, unban, add, or promotion operation.
-
-### Regression coverage
-
-A subscribed administrator receives the transition with accurate old/new status; an unsubscribed
-administrator and an ordinary member bot do not receive the general update. Preserve the existing
-own-bot membership notification behavior.
-
 ## 9. P2 — Implement a narrow `getChat` before less frequently exercised options
 
 **Classification:** Capability recommendation.
@@ -308,7 +270,7 @@ The most important SRP improvements are not “split every large service.” The
 make method execution reusable across transports, and distinguish faithful emulation from strict
 diagnostics.
 
-After those corrections, webhook-response execution, `chat_member` notifications, and a narrow
-`getChat` implementation offer useful coverage without requiring comprehensive Telegram emulation.
-Notification behavior and less frequently tested options can remain lower priority while these
-changes make the supported workflows substantially more trustworthy.
+After those corrections, webhook-response execution and a narrow `getChat` implementation offer
+useful coverage without requiring comprehensive Telegram emulation. Notification behavior and less
+frequently tested options can remain lower priority while these changes make the supported workflows
+substantially more trustworthy.

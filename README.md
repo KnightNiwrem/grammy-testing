@@ -148,12 +148,14 @@ service message of the bot, and lifts bans with `unbanChatMember`, which, as on 
 removes a member unless `only_if_banned` is set. The emulator checks these requests in TDLib's order
 and fails them with Telegram's errors, such as `can't remove chat owner` and
 `not enough rights to restrict/unrestrict chat member`. Bots read users' standings with
-`getChatMember`, `getChatAdministrators`, and `getChatMemberCount`. Bots see the other rights, but
-the emulator does not enforce them, and bots cannot promote members. A ban lasts until it is lifted,
-even when its `until_date` passes. Restricting members with `restrictChatMember`, `chat_member`
-updates, anonymous administrators, and custom titles are not supported yet, nor are reply keyboards
-and forced replies in groups, members joining on their own, chat scopes of command lists for
-supergroups, basic groups, and channels.
+`getChatMember`, `getChatAdministrators`, and `getChatMemberCount`, and, as on Telegram, an
+administrator bot that requests `chat_member` in `allowed_updates` receives a `chat_member` update
+for each addition, departure, removal, promotion, demotion, ban, and unban of another user. Bots see
+the other rights, but the emulator does not enforce them, and bots cannot promote members. A ban
+lasts until it is lifted, even when its `until_date` passes. Restricting members with
+`restrictChatMember`, anonymous administrators, and custom titles are not supported yet, nor are
+reply keyboards and forced replies in groups, members joining on their own, chat scopes of command
+lists for supergroups, basic groups, and channels.
 
 ## TypeScript client
 

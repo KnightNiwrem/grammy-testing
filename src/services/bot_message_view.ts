@@ -5,6 +5,7 @@ import {
   projectBotMembershipChangeForBot,
   projectCallbackQueryForBot,
   projectChatMember,
+  projectChatMemberChange,
   projectChosenInlineResultForBot,
   projectInlineQueryForBot,
   projectPrivateMessageForBot,
@@ -14,6 +15,7 @@ import type {
   BotApiBotUser,
   BotApiCallbackQuery,
   BotApiChatMember,
+  BotApiChatMemberUpdated,
   BotApiChosenInlineResult,
   BotApiInlineQuery,
   BotApiMessage,
@@ -229,6 +231,26 @@ export class BotMessageViewService {
       throw new Error(`Member ${event.memberId} whose membership changed is no bot`);
     }
     return projectBotMembershipChangeForBot({ event, chat, actor, bot: bot.profile });
+  }
+
+  /**
+   * Returns a change of a user's standing in a group as administrator bots observe it. The chat
+   * must be a basic group or a supergroup.
+   */
+  viewChatMemberChange(event: ChatMemberStatusChangedEvent): BotApiChatMemberUpdated {
+    const { chat } = event;
+    if (chat.kind === 'channel') {
+      throw new Error(`Channel ${chat.id} has no chat member updates`);
+    }
+    const actor = this.#findUser(event.actorId);
+    if (actor === undefined) {
+      throw new Error(`User ${event.actorId} that changed a membership does not exist`);
+    }
+    const member = this.#findUser(event.memberId);
+    if (member === undefined) {
+      throw new Error(`Member ${event.memberId} whose membership changed does not exist`);
+    }
+    return projectChatMemberChange({ event, chat, actor, member });
   }
 
   /**

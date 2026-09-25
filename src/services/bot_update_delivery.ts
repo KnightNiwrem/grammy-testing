@@ -1,5 +1,6 @@
 import type {
   BotApiCallbackQuery,
+  BotApiChatMemberUpdated,
   BotApiChosenInlineResult,
   BotApiInlineQuery,
   BotApiMessage,
@@ -41,6 +42,7 @@ interface BotMessageViews {
   viewChosenInlineResultForBot(event: InlineQueryResultChosenEvent): BotApiChosenInlineResult;
   viewBotBlockChangeForBot(event: BotBlockChangedEvent): BotApiMyChatMemberUpdated;
   viewBotMembershipChangeForBot(event: ChatMemberStatusChangedEvent): BotApiMyChatMemberUpdated;
+  viewChatMemberChange(event: ChatMemberStatusChangedEvent): BotApiChatMemberUpdated;
 }
 
 interface BotUpdateMailboxes {
@@ -53,6 +55,7 @@ interface BotUpdateMailboxes {
     chosenInlineResult: BotApiChosenInlineResult,
   ): void;
   enqueueMyChatMemberUpdate(botId: number, myChatMember: BotApiMyChatMemberUpdated): void;
+  enqueueChatMemberUpdate(botId: number, chatMember: BotApiChatMemberUpdated): void;
 }
 
 interface BotUpdateSubscriptionLookup {
@@ -316,21 +319,33 @@ export class BotUpdateDeliveryService {
   }
 
   /**
-   * A change of a bot's standing in a group is observed by that bot. The group's bots learn of
-   * members joining and leaving from the service messages that record it.
+   * A change of a bot's standing in a group is observed by that bot as a `my_chat_member` update.
+   * As on Telegram, the group's administrator bots that subscribe to `chat_member` updates
+   * observe changes of other members' standing, including changes they made; other bots learn of
+   * members joining and leaving only from the service messages that record it.
    */
   #deliverChatMemberStatusChange(event: ChatMemberStatusChangedEvent): void {
     if (
-      this.#bots.getById(event.memberId) === undefined ||
-      !this.#isSubscribed(event.memberId, 'my_chat_member')
+      this.#bots.getById(event.memberId) !== undefined &&
+      this.#isSubscribed(event.memberId, 'my_chat_member')
     ) {
-      return;
+      this.#botUpdates.enqueueMyChatMemberUpdate(
+        event.memberId,
+        this.#botMessageViews.viewBotMembershipChangeForBot(event),
+      );
     }
 
-    this.#botUpdates.enqueueMyChatMemberUpdate(
-      event.memberId,
-      this.#botMessageViews.viewBotMembershipChangeForBot(event),
+    const observerIds = this.#sharedChats.getChatMemberIds(event.chat.id).filter((memberId) =>
+      memberId !== event.memberId && this.#bots.getById(memberId) !== undefined &&
+      this.#isAdministrator(memberId, event.chat.id) && this.#isSubscribed(memberId, 'chat_member')
     );
+    if (observerIds.length === 0) {
+      return;
+    }
+    const chatMember = this.#botMessageViews.viewChatMemberChange(event);
+    for (const observerId of observerIds) {
+      this.#botUpdates.enqueueChatMemberUpdate(observerId, chatMember);
+    }
   }
 
   /**
@@ -381,8 +396,11 @@ export class BotUpdateDeliveryService {
    * or, as Telegram documents, as one of the group's administrators.
    */
   #readsAllGroupMessages(bot: VirtualBotProfile, chatId: number): boolean {
-    return bot.can_read_all_group_messages ||
-      this.#sharedChats.getChatMembership(chatId, bot.id)?.status === 'administrator';
+    return bot.can_read_all_group_messages || this.#isAdministrator(bot.id, chatId);
+  }
+
+  #isAdministrator(memberId: number, chatId: number): boolean {
+    return this.#sharedChats.getChatMembership(chatId, memberId)?.status === 'administrator';
   }
 
   #isSubscribed(botId: number, updateType: BotApiUpdateType): boolean {
