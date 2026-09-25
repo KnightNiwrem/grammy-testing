@@ -12,6 +12,7 @@ import type {
   BotApiInlineKeyboardButton,
   BotApiInlineKeyboardMarkup,
   BotApiInlineQuery,
+  BotApiKeyboardButtonFace,
   BotApiMembershipServiceContent,
   BotApiMessage,
   BotApiMessageContent,
@@ -31,6 +32,7 @@ import type {
   BotApiTextQuote,
   BotApiUser,
 } from '../types/bot_api.ts';
+import type { ButtonAppearance } from '../types/button_appearance.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
 import type {
   BotBlockChangedEvent,
@@ -725,14 +727,29 @@ function projectInlineKeyboardMarkup(inlineKeyboard: InlineKeyboard): BotApiInli
 }
 
 function projectInlineKeyboardButton(button: InlineKeyboardButton): BotApiInlineKeyboardButton {
+  const face = projectKeyboardButtonFace(button);
   switch (button.kind) {
     case 'callback':
-      return { text: button.text, callback_data: button.callbackData };
+      return { ...face, callback_data: button.callbackData };
     case 'url':
-      return { text: button.text, url: button.url };
+      return { ...face, url: button.url };
     default: {
       const unhandledButton: never = button;
       throw new Error(`Unhandled inline keyboard button: ${JSON.stringify(unhandledButton)}`);
     }
   }
+}
+
+/**
+ * Shows a button's text and appearance as the official Bot API server's
+ * `JsonInlineKeyboardButton` does, omitting the default style and a missing icon.
+ */
+function projectKeyboardButtonFace(
+  { text, style, iconCustomEmojiId }: ButtonAppearance & { readonly text: string },
+): BotApiKeyboardButtonFace {
+  return {
+    text,
+    ...(iconCustomEmojiId === undefined ? {} : { icon_custom_emoji_id: iconCustomEmojiId }),
+    ...(style === undefined ? {} : { style }),
+  };
 }

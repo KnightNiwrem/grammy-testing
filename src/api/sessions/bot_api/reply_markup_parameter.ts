@@ -1,29 +1,65 @@
 import { z } from 'zod';
 
+import type { ButtonAppearance } from '../../../types/button_appearance.ts';
 import type { InlineKeyboard, InlineKeyboardButton } from '../../../types/inline_keyboard.ts';
 import type {
   BotMessageReplyMarkup,
   ReplyInterfaceMarkup,
   ReplyKeyboardButton,
 } from '../../../types/reply_interface.ts';
-import { jsonParameter } from './request_parameters.ts';
+import { jsonParameter, optionalInt64Identifier } from './request_parameters.ts';
 
 /** Telegram's documented limit on an input field placeholder. */
 const MAX_INPUT_FIELD_PLACEHOLDER_LENGTH = 64;
 
+/**
+ * A button's appearance, read as the official Bot API server's `get_button_style` reads its
+ * `style`: the name in any ASCII letter case, where an empty name or `default` chooses the
+ * client's default. Telegram also reads the icon's identifier from a JSON number, which cannot
+ * hold every 64-bit identifier exactly, so the emulator requires the documented string.
+ */
+const buttonAppearanceShape = {
+  style: z.string()
+    .transform((style) => style.replace(/[A-Z]/g, (letter) => letter.toLowerCase()))
+    .pipe(z.enum(['', 'default', 'primary', 'danger', 'success']))
+    .transform((style) => style === '' || style === 'default' ? undefined : style)
+    .optional(),
+  icon_custom_emoji_id: optionalInt64Identifier().optional(),
+};
+
+function readButtonAppearance(
+  { style, icon_custom_emoji_id }: {
+    readonly style?: ButtonAppearance['style'];
+    readonly icon_custom_emoji_id?: string;
+  },
+): ButtonAppearance {
+  return {
+    ...(style === undefined ? {} : { style }),
+    ...(icon_custom_emoji_id === undefined ? {} : { iconCustomEmojiId: icon_custom_emoji_id }),
+  };
+}
+
 const callbackButtonSchema = z.strictObject({
   text: z.string().min(1),
+  ...buttonAppearanceShape,
   callback_data: z.string().min(1),
-}).transform(({ text, callback_data }): InlineKeyboardButton => ({
+}).transform((button): InlineKeyboardButton => ({
   kind: 'callback',
-  text,
-  callbackData: callback_data,
+  text: button.text,
+  ...readButtonAppearance(button),
+  callbackData: button.callback_data,
 }));
 
 const urlButtonSchema = z.strictObject({
   text: z.string().min(1),
+  ...buttonAppearanceShape,
   url: z.string().refine((url) => URL.canParse(url)),
-}).transform(({ text, url }): InlineKeyboardButton => ({ kind: 'url', text, url }));
+}).transform((button): InlineKeyboardButton => ({
+  kind: 'url',
+  text: button.text,
+  ...readButtonAppearance(button),
+  url: button.url,
+}));
 
 /**
  * An `InlineKeyboardMarkup` object, as `inlineKeyboardMarkupParameter` describes it, for objects
@@ -37,10 +73,12 @@ export const inlineKeyboardMarkupSchema = z.strictObject({
 
 const replyKeyboardButtonSchema = z.union([
   z.string().min(1),
-  z.strictObject({ text: z.string().min(1) }),
-]).transform((button): ReplyKeyboardButton => ({
-  text: typeof button === 'string' ? button : button.text,
-}));
+  z.strictObject({ text: z.string().min(1), ...buttonAppearanceShape }),
+]).transform((button): ReplyKeyboardButton =>
+  typeof button === 'string'
+    ? { text: button }
+    : { text: button.text, ...readButtonAppearance(button) }
+);
 
 const inputFieldPlaceholderSchema = z.string().min(1).max(MAX_INPUT_FIELD_PLACEHOLDER_LENGTH);
 

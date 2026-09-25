@@ -15,7 +15,7 @@ import {
   type InlineQueryResultsButton,
   MAX_INLINE_QUERY_LENGTH,
 } from '../../../types/inline_query.ts';
-import type { ReplyInterface } from '../../../types/reply_interface.ts';
+import type { ReplyInterface, ReplyKeyboardButton } from '../../../types/reply_interface.ts';
 import {
   MAX_SUPERGROUP_OR_CHANNEL_ID,
   MAX_TELEGRAM_USER_ID,
@@ -1318,7 +1318,7 @@ function presentReplyInterfaceForAccount(messageId: number, replyInterface: Repl
       return {
         type: 'keyboard' as const,
         message_id: messageId,
-        keyboard: replyInterface.rows.map((row) => row.map(({ text }) => ({ text }))),
+        keyboard: replyInterface.rows.map((row) => row.map(presentReplyKeyboardButtonForAccount)),
         is_persistent: replyInterface.isPersistent,
         resize_keyboard: replyInterface.resizesToFit,
         one_time_keyboard: replyInterface.isOneTime,
@@ -1331,6 +1331,17 @@ function presentReplyInterfaceForAccount(messageId: number, replyInterface: Repl
       throw new Error(`Unhandled reply interface: ${JSON.stringify(unhandledReplyInterface)}`);
     }
   }
+}
+
+/** Shows a reply keyboard button's text and appearance, as the Bot API writes a `KeyboardButton`. */
+function presentReplyKeyboardButtonForAccount(
+  { text, style, iconCustomEmojiId }: ReplyKeyboardButton,
+) {
+  return {
+    text,
+    ...(iconCustomEmojiId === undefined ? {} : { icon_custom_emoji_id: iconCustomEmojiId }),
+    ...(style === undefined ? {} : { style }),
+  };
 }
 
 /** Shows a callback query to the account that created it, with the bot's answer once given. */

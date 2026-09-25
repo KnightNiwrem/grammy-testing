@@ -154,7 +154,9 @@ Deno.test('TypeScript client manages all currently implemented session resources
     body: JSON.stringify({
       chat_id: createdAccount.account.id,
       text: 'Continue?',
-      reply_markup: { inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] },
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Yes', callback_data: 'yes', style: 'success' }]],
+      },
     }),
   });
   if (menuResponse.status !== 200) {
@@ -166,7 +168,9 @@ Deno.test('TypeScript client manages all currently implemented session resources
   if (
     menu === undefined ||
     JSON.stringify(menu.reply_markup) !==
-      JSON.stringify({ inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] })
+      JSON.stringify({
+        inline_keyboard: [[{ text: 'Yes', style: 'success', callback_data: 'yes' }]],
+      })
   ) {
     throw new Error('Expected the client to return the inline keyboard of a bot message');
   }
@@ -239,7 +243,10 @@ Deno.test('TypeScript client manages all currently implemented session resources
     body: JSON.stringify({
       chat_id: createdAccount.account.id,
       text: 'Pick a color',
-      reply_markup: { keyboard: [['Red', 'Green']], is_persistent: true },
+      reply_markup: {
+        keyboard: [['Red', { text: 'Green', icon_custom_emoji_id: '5368324170671202286' }]],
+        is_persistent: true,
+      },
     }),
   });
   const keyboardMessageId = (await keyboardResponse.json()).result.message_id;
@@ -252,7 +259,10 @@ Deno.test('TypeScript client manages all currently implemented session resources
     JSON.stringify(replyInterface) !== JSON.stringify({
         type: 'keyboard',
         message_id: keyboardMessageId,
-        keyboard: [[{ text: 'Red' }, { text: 'Green' }]],
+        keyboard: [[{ text: 'Red' }, {
+          text: 'Green',
+          icon_custom_emoji_id: '5368324170671202286',
+        }]],
         is_persistent: true,
         resize_keyboard: false,
         one_time_keyboard: false,
@@ -336,7 +346,9 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
       chat_id: supergroup.id,
       text: 'Continue?',
       reply_parameters: { message_id: greeting.message_id },
-      reply_markup: { inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] },
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Yes', callback_data: 'yes', style: 'success' }]],
+      },
     }),
   });
   if (menuResponse.status !== 200) {

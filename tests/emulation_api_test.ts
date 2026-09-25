@@ -1096,6 +1096,101 @@ Deno.test('sendMessage attaches an inline keyboard from every request encoding',
   }
 });
 
+Deno.test('keyboard buttons keep their style and custom emoji icon', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  await sendText('/start');
+  const accountId = createdAccount.account.id;
+  const iconId = '5368324170671202286';
+
+  const styledReply = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Buy?',
+    reply_markup: {
+      inline_keyboard: [[
+        { text: 'Buy', callback_data: 'buy', style: 'Primary', icon_custom_emoji_id: iconId },
+        { text: 'Cancel', callback_data: 'cancel', style: 'default', icon_custom_emoji_id: '0' },
+        { text: 'Docs', url: 'https://grammy.dev/', style: 'DANGER' },
+      ]],
+    },
+  });
+  const styledMessage = botApiResult(styledReply.body);
+  const expectedMarkup = {
+    inline_keyboard: [[
+      { text: 'Buy', icon_custom_emoji_id: iconId, style: 'primary', callback_data: 'buy' },
+      { text: 'Cancel', callback_data: 'cancel' },
+      { text: 'Docs', style: 'danger', url: 'https://grammy.dev/' },
+    ]],
+  };
+  if (
+    styledReply.status !== 200 ||
+    JSON.stringify(styledMessage?.reply_markup) !== JSON.stringify(expectedMarkup)
+  ) {
+    throw new Error(`Expected the buttons' appearance, received ${JSON.stringify(styledMessage)}`);
+  }
+
+  const restyle = await callBotApi(api, `${botApiPath}/editMessageReplyMarkup`, {
+    chat_id: accountId,
+    message_id: styledMessage?.message_id,
+    reply_markup: {
+      inline_keyboard: [[
+        { text: 'Buy', callback_data: 'buy', style: 'success', icon_custom_emoji_id: iconId },
+        { text: 'Cancel', callback_data: 'cancel' },
+        { text: 'Docs', url: 'https://grammy.dev/', style: 'danger' },
+      ]],
+    },
+  });
+  if (
+    restyle.status !== 200 ||
+    (botApiResult(restyle.body)?.reply_markup as typeof expectedMarkup | undefined)
+        ?.inline_keyboard[0][0].style !== 'success'
+  ) {
+    throw new Error('Expected a changed style alone to modify the keyboard');
+  }
+
+  const keyboardReply = await callBotApi(api, `${botApiPath}/sendMessage`, {
+    chat_id: accountId,
+    text: 'Pick',
+    reply_markup: {
+      keyboard: [['Plain', { text: 'Stop', style: 'danger', icon_custom_emoji_id: iconId }]],
+    },
+  });
+  const replyInterfaceBody = await (await api.request(
+    `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/reply-interface`,
+  )).json() as { reply_interface: { keyboard?: unknown } | null };
+  if (
+    keyboardReply.status !== 200 ||
+    JSON.stringify(replyInterfaceBody.reply_interface?.keyboard) !==
+      JSON.stringify([[
+        { text: 'Plain' },
+        { text: 'Stop', icon_custom_emoji_id: iconId, style: 'danger' },
+      ]])
+  ) {
+    throw new Error(
+      `Expected the account to see the reply buttons' appearance, received ${
+        JSON.stringify(replyInterfaceBody)
+      }`,
+    );
+  }
+
+  const invalidButtons: unknown[] = [
+    { text: 'Link', callback_data: 'x', style: 'link' },
+    { text: 'Blue', callback_data: 'x', style: 'blue' },
+    { text: 'Icon', callback_data: 'x', icon_custom_emoji_id: 'smile' },
+    { text: 'Number', callback_data: 'x', icon_custom_emoji_id: 5368324170671202 },
+  ];
+  for (const button of invalidButtons) {
+    const { status } = await callBotApi(api, `${botApiPath}/sendMessage`, {
+      chat_id: accountId,
+      text: 'Hello',
+      reply_markup: { inline_keyboard: [[button]] },
+    });
+    if (status !== 400) {
+      throw new Error(`Expected ${JSON.stringify(button)} to be rejected`);
+    }
+  }
+});
+
 Deno.test('an account presses a callback button and reads the bot answer', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
     await createPrivateConversationFixture();

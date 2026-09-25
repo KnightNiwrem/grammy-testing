@@ -290,13 +290,20 @@ export interface MessageSenderBot {
   readonly username: string;
 }
 
-export interface CallbackInlineKeyboardButton {
+/** A button's text and how Telegram clients draw it. */
+export interface KeyboardButtonFace {
   readonly text: string;
+  /** The custom emoji shown before the text; omitted for none. */
+  readonly icon_custom_emoji_id?: string;
+  /** Omitted for the client's default style. */
+  readonly style?: 'primary' | 'danger' | 'success';
+}
+
+export interface CallbackInlineKeyboardButton extends KeyboardButtonFace {
   readonly callback_data: string;
 }
 
-export interface UrlInlineKeyboardButton {
-  readonly text: string;
+export interface UrlInlineKeyboardButton extends KeyboardButtonFace {
   readonly url: string;
 }
 
@@ -542,9 +549,7 @@ export type SupergroupMessage =
   & MessageTrailer;
 
 /** A reply keyboard button, which sends its text to the chat when pressed. */
-export interface ReplyKeyboardButton {
-  readonly text: string;
-}
+export type ReplyKeyboardButton = KeyboardButtonFace;
 
 /** A custom keyboard the account's client shows in place of its letter keyboard. */
 export interface ReplyKeyboardInterface {

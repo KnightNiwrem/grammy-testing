@@ -188,6 +188,22 @@ export function booleanParameter() {
     .transform((text) => (TRUE_BOOLEAN_TEXTS as readonly string[]).includes(text));
 }
 
+/** The range of Telegram's 64-bit identifiers. */
+const MIN_INT64 = -(2n ** 63n);
+const MAX_INT64 = 2n ** 63n - 1n;
+
+/**
+ * A 64-bit identifier, such as a message effect's or a custom emoji's, read from its decimal text,
+ * where 0 chooses none as it does on Telegram; parses as the identifier's canonical decimal text
+ * or `undefined` for none. Telegram reads some such parameters from any leading digits and ignores
+ * the rest; rejecting other text instead surfaces the bot's mistake in tests.
+ */
+export function optionalInt64Identifier() {
+  return z.string().regex(DECIMAL_INTEGER_PATTERN).transform(BigInt)
+    .refine((identifier) => identifier >= MIN_INT64 && identifier <= MAX_INT64)
+    .transform((identifier) => identifier === 0n ? undefined : identifier.toString());
+}
+
 /** A parameter holding JSON text, such as an array serialized by a form-encoded request. */
 export function jsonParameter<Output>(valueSchema: z.ZodType<Output>) {
   return z.string().transform((text, context): unknown => {

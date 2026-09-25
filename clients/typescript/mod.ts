@@ -47,6 +47,7 @@ export type {
   InlineQueryResultListing,
   InlineQueryResultsButton,
   InlineQueryStatus,
+  KeyboardButtonFace,
   LeaveChatInput,
   MembershipChangeContent,
   MessageContent,

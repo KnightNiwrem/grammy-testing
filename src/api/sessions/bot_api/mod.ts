@@ -49,6 +49,7 @@ import {
   decodeBotApiRequestParameters,
   integerParameter,
   jsonParameter,
+  optionalInt64Identifier,
 } from './request_parameters.ts';
 
 const BOT_TOKEN_PATH_PARAMETER = 'botTokenPathSegment';
@@ -302,21 +303,6 @@ const setWebhookParametersSchema = z.strictObject({
 
 const getWebhookInfoParametersSchema = z.strictObject({});
 
-/** The range of Telegram's 64-bit message effect identifiers. */
-const MIN_MESSAGE_EFFECT_ID = -(2n ** 63n);
-const MAX_MESSAGE_EFFECT_ID = 2n ** 63n - 1n;
-
-/**
- * A `message_effect_id`: the 64-bit identifier of a message effect, read as its decimal text, where
- * 0 chooses none, as Telegram reads it. Telegram reads any leading digits and ignores the rest;
- * rejecting other text instead surfaces the bot's mistake in tests.
- */
-function messageEffectIdParameter() {
-  return z.string().regex(/^-?\d+$/).transform(BigInt).refine((effectId) =>
-    effectId >= MIN_MESSAGE_EFFECT_ID && effectId <= MAX_MESSAGE_EFFECT_ID
-  ).transform((effectId) => effectId === 0n ? undefined : effectId.toString());
-}
-
 /**
  * Link preview parameters, which the emulator validates and ignores because it generates no link
  * previews. `disable_web_page_preview` is the older form that Telegram still accepts.
@@ -334,7 +320,7 @@ const sendOptionsParametersShape = {
   chat_id: integerParameter(z.int()).optional(),
   disable_notification: booleanParameter().default(false),
   protect_content: booleanParameter().default(false),
-  message_effect_id: messageEffectIdParameter().optional(),
+  message_effect_id: optionalInt64Identifier().optional(),
   reply_parameters: replyParametersParameter().optional(),
   reply_to_message_id: integerParameter(z.int()).optional(),
   allow_sending_without_reply: booleanParameter().default(false),
@@ -382,7 +368,7 @@ const forwardMessageParametersSchema = z.strictObject({
   message_id: integerParameter(z.int()).optional(),
   disable_notification: booleanParameter().default(false),
   protect_content: booleanParameter().default(false),
-  message_effect_id: messageEffectIdParameter().optional(),
+  message_effect_id: optionalInt64Identifier().optional(),
 });
 
 // A caption, even an empty one, replaces the caption of copied media; without one, its parse mode
@@ -405,7 +391,7 @@ const repeatMessagesParametersShape = {
   message_ids: jsonParameter(z.array(z.int())).optional(),
   disable_notification: booleanParameter().default(false),
   protect_content: booleanParameter().default(false),
-  message_effect_id: messageEffectIdParameter().optional(),
+  message_effect_id: optionalInt64Identifier().optional(),
 };
 
 const forwardMessagesParametersSchema = z.strictObject(repeatMessagesParametersShape);

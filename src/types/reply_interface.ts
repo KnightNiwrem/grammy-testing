@@ -1,7 +1,8 @@
+import type { ButtonAppearance } from './button_appearance.ts';
 import type { InlineKeyboard } from './inline_keyboard.ts';
 
 /** A reply keyboard button, which sends its text to the chat as the user's message. */
-export interface ReplyKeyboardButton {
+export interface ReplyKeyboardButton extends ButtonAppearance {
   readonly text: string;
 }
 

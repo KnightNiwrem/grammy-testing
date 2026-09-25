@@ -1,3 +1,4 @@
+import type { ButtonStyle } from './button_appearance.ts';
 import type { SupergroupAdministratorRight } from './chat_membership.ts';
 import type { VirtualAccountProfile } from './virtual_account.ts';
 import type { PlainTextEntityType } from './virtual_message.ts';
@@ -57,13 +58,19 @@ export type BotApiMessageEntity =
     readonly date_time_format: string;
   });
 
-export interface BotApiCallbackInlineKeyboardButton {
+/** A button's text and appearance, in the field order Telegram uses. */
+export interface BotApiKeyboardButtonFace {
   readonly text: string;
+  readonly icon_custom_emoji_id?: string;
+  /** Omitted for the client's default style. */
+  readonly style?: ButtonStyle;
+}
+
+export interface BotApiCallbackInlineKeyboardButton extends BotApiKeyboardButtonFace {
   readonly callback_data: string;
 }
 
-export interface BotApiUrlInlineKeyboardButton {
-  readonly text: string;
+export interface BotApiUrlInlineKeyboardButton extends BotApiKeyboardButtonFace {
   readonly url: string;
 }
 

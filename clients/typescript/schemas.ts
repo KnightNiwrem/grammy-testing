@@ -150,12 +150,18 @@ const messageEntitySchema: z.ZodType<MessageEntity> = z.union([
   }),
 ]);
 
+const keyboardButtonFaceShape = {
+  text: z.string().min(1),
+  icon_custom_emoji_id: z.string().regex(/^-?[1-9]\d*$/).optional(),
+  style: z.enum(['primary', 'danger', 'success']).optional(),
+};
+
 const inlineKeyboardMarkupSchema: z.ZodType<InlineKeyboardMarkup> = z.strictObject({
   inline_keyboard: z.array(
     z.array(
       z.union([
-        z.strictObject({ text: z.string(), callback_data: z.string() }),
-        z.strictObject({ text: z.string(), url: z.string() }),
+        z.strictObject({ ...keyboardButtonFaceShape, callback_data: z.string() }),
+        z.strictObject({ ...keyboardButtonFaceShape, url: z.string() }),
       ]),
     ).min(1),
   ).min(1),
@@ -403,7 +409,7 @@ const replyInterfaceSchema: z.ZodType<ReplyInterface> = z.discriminatedUnion('ty
   z.strictObject({
     type: z.literal('keyboard'),
     message_id: z.number().int().positive(),
-    keyboard: z.array(z.array(z.strictObject({ text: z.string().min(1) })).min(1)).min(1),
+    keyboard: z.array(z.array(z.strictObject(keyboardButtonFaceShape)).min(1)).min(1),
     is_persistent: z.boolean(),
     resize_keyboard: z.boolean(),
     one_time_keyboard: z.boolean(),

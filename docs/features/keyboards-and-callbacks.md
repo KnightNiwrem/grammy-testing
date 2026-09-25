@@ -63,6 +63,20 @@ chats. The bot that sent the keyboard therefore receives the press even in priva
 buttons that request contacts, locations or other data are [missing](#real-gaps); TDLib only allows
 them in private chats.
 
+## Button appearance
+
+Inline and reply keyboard buttons accept `style` and `icon_custom_emoji_id`, as the official
+server's [`get_button_style`][button-style] and [button parsing][button-parsing] read them. `style`
+is `primary`, `danger` or `success` in any ASCII letter case; an empty style or `default` chooses
+the client's default. An icon of `0` means none; Telegram also reads an icon given as a JSON number,
+which cannot hold every 64-bit identifier exactly, so the emulator requires a string. Bots see the
+appearance in returned inline keyboards, in the field order of
+[`JsonInlineKeyboardButton`][button-json], and accounts see it on inline and reply keyboard buttons.
+The default style and a missing icon are omitted. As TDLib's [button comparison][td-button-equality]
+does, an edit that only changes a button's appearance still changes the keyboard. The emulator draws
+no buttons, and it checks only the icon identifier's syntax, as it does for
+[custom emoji entities](text-formatting.md#real-gaps).
+
 ## Intentional deviations
 
 - **Inspectable keyboard data without a client UI.** Tests inspect keyboard data without reproducing
@@ -96,8 +110,6 @@ them in private chats.
 
 - **Inline button types.** Login, Mini Apps, games, payments, inline switching, copy-text and
   disabled buttons are absent. Tests cannot exercise those button definitions or actions.
-- **Button styles and icons.** Tests cannot submit or inspect button appearance metadata. Supporting
-  that data is required even though rendering a client UI is intentionally out of scope.
 - **Reply keyboard request buttons.** Requests for contacts, locations, polls, users, chats and web
   apps are absent. Compare these missing types and fields with upstream's
   [keyboard button parsing][button-parsing].
@@ -128,6 +140,9 @@ server behavior.
 [dismiss-reply]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L16043-L16082
 [reply-markup]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10504-L10630
 [button-parsing]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10200-L10503
+[button-style]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10226-L10246
+[button-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L4247-L4263
+[td-button-equality]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L84-L87
 [answer-callback]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L15544-L15565
 [callback-answer]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/CallbackQueriesManager.cpp#L77-L90
 [td-callback]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/CallbackQueriesManager.cpp#L145-L188

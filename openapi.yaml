@@ -3868,6 +3868,19 @@ components:
             minItems: 1
             items:
               $ref: '#/components/schemas/InlineKeyboardButton'
+    ButtonStyle:
+      type: string
+      description: >-
+        How clients color the button: `primary`, `danger` or `success`. As a request field, the
+        name is read in any ASCII letter case, and an empty name or `default` chooses the client's
+        default style, which responses omit.
+    ButtonIconCustomEmojiId:
+      type: string
+      pattern: '^-?\d+$'
+      description: >-
+        The 64-bit identifier of the custom emoji that clients show before the button's text, as
+        decimal text; as a request field, `0` chooses none. Responses omit it for none. The
+        emulator keeps the identifier for inspection without checking that the emoji exists.
     InlineKeyboardButton:
       description: >-
         A button with exactly one action. Telegram also accepts other button types and buttons
@@ -3882,6 +3895,10 @@ components:
             text:
               type: string
               minLength: 1
+            icon_custom_emoji_id:
+              $ref: '#/components/schemas/ButtonIconCustomEmojiId'
+            style:
+              $ref: '#/components/schemas/ButtonStyle'
             callback_data:
               type: string
               minLength: 1
@@ -3896,6 +3913,10 @@ components:
             text:
               type: string
               minLength: 1
+            icon_custom_emoji_id:
+              $ref: '#/components/schemas/ButtonIconCustomEmojiId'
+            style:
+              $ref: '#/components/schemas/ButtonStyle'
             url:
               type: string
               format: uri
@@ -4803,6 +4824,10 @@ components:
         text:
           type: string
           minLength: 1
+        icon_custom_emoji_id:
+          $ref: '#/components/schemas/ButtonIconCustomEmojiId'
+        style:
+          $ref: '#/components/schemas/ButtonStyle'
     ReplyKeyboardRemove:
       type: object
       additionalProperties: false

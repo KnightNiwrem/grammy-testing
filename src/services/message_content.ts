@@ -5,6 +5,7 @@ import {
 } from '../text_entities/formatted_text.ts';
 import { areTextEntitiesEqual } from '../text_entities/text_entity_equality.ts';
 import { compareTextEntities } from '../text_entities/text_entity_order.ts';
+import { isSameButtonAppearance } from '../types/button_appearance.ts';
 import { type InlineKeyboard, MAX_CALLBACK_DATA_BYTES } from '../types/inline_keyboard.ts';
 import {
   createAutomaticQuote,
@@ -549,6 +550,9 @@ function areInlineKeyboardsEqual(
     const secondRow = second[rowIndex];
     return firstRow.length === secondRow.length && firstRow.every((firstButton, buttonIndex) => {
       const secondButton = secondRow[buttonIndex];
+      if (!isSameButtonAppearance(firstButton, secondButton)) {
+        return false;
+      }
       switch (firstButton.kind) {
         case 'callback':
           return secondButton.kind === 'callback' && firstButton.text === secondButton.text &&
