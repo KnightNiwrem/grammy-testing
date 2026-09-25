@@ -62,6 +62,7 @@ const SUPERGROUP_MESSAGE_HISTORY_PATH = `${SUPERGROUP_CONVERSATION_PATH}/message
 const SUPERGROUP_COMMANDS_PATH = `${SUPERGROUP_CONVERSATION_PATH}/commands` as const;
 const SUPERGROUP_CHAT_ACTIONS_PATH = `${SUPERGROUP_CONVERSATION_PATH}/chat-actions` as const;
 const SUPERGROUP_NOTIFICATIONS_PATH = `${SUPERGROUP_CONVERSATION_PATH}/notifications` as const;
+const SUPERGROUP_REPLY_INTERFACE_PATH = `${SUPERGROUP_CONVERSATION_PATH}/reply-interface` as const;
 const SUPERGROUP_MESSAGE_PATH =
   `${SUPERGROUP_MESSAGE_HISTORY_PATH}/:${MESSAGE_ID_PARAMETER}` as const;
 const USER_ID_PARAMETER = 'userId';
@@ -180,10 +181,7 @@ const editMessageRequestSchema = z.union([
 ]);
 
 const pressReplyKeyboardButtonRequestSchema = z.strictObject({
-  chat: z.strictObject({
-    type: z.literal('private'),
-    botId: telegramUserIdSchema,
-  }),
+  chat: chatSchema,
   text: z.string().min(1),
 });
 
@@ -605,6 +603,35 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     });
   });
 
+  accountRoutes.get(SUPERGROUP_REPLY_INTERFACE_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const chatId = supergroupChatIdPathParameterSchema.safeParse(
+      context.req.param(CHAT_ID_PARAMETER),
+    );
+    if (!accountId.success || !chatId.success) {
+      return context.body(null, 400);
+    }
+
+    const { supergroupMessaging, botMessageViews } = context.get('emulationSession');
+    const result = supergroupMessaging.getReplyInterface({
+      accountId: accountId.data,
+      chatId: chatId.data,
+    });
+    if (!result.found) {
+      return context.body(null, supergroupMemberFailureStatus(result.reason));
+    }
+    const { shownReplyInterface } = result;
+    return context.json({
+      reply_interface: shownReplyInterface === undefined ? null : presentReplyInterfaceForAccount(
+        botMessageViews.viewSupergroupMessage(shownReplyInterface.message, accountId.data)
+          .message_id,
+        shownReplyInterface.replyInterface,
+      ),
+    });
+  });
+
   accountRoutes.patch(SUPERGROUP_MESSAGE_PATH, async (context) => {
     const accountId = telegramUserIdPathParameterSchema.safeParse(
       context.req.param(ACCOUNT_ID_PARAMETER),
@@ -899,11 +926,28 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 400);
     }
 
-    const { privateMessaging, botMessageViews } = context.get('emulationSession');
+    const { privateMessaging, supergroupMessaging, botMessageViews } = context.get(
+      'emulationSession',
+    );
+    const { chat, text } = parsedRequest.data;
+    if (chat.type === 'supergroup') {
+      const result = supergroupMessaging.pressReplyKeyboardButton({
+        fromAccountId: accountId.data,
+        chatId: chat.chatId,
+        text,
+      });
+      if (!result.sent) {
+        return context.body(null, supergroupMemberFailureStatus(result.reason));
+      }
+      return context.json(
+        { message: botMessageViews.viewSupergroupMessage(result.message, accountId.data) },
+        201,
+      );
+    }
     const result = privateMessaging.pressReplyKeyboardButton({
       fromAccountId: accountId.data,
-      chat: parsedRequest.data.chat,
-      text: parsedRequest.data.text,
+      chat,
+      text,
     });
     if (!result.sent) {
       return context.body(null, accountMessageFailureStatus(result.reason));
@@ -1143,6 +1187,10 @@ type SupergroupMessaging = EmulationSession['supergroupMessaging'];
 /** Why an account's message, edit, or history request in a supergroup failed. */
 type SupergroupAccountFailureReason =
   | Extract<ReturnType<SupergroupMessaging['sendAccountMessage']>, { sent: false }>['reason']
+  | Extract<
+    ReturnType<SupergroupMessaging['pressReplyKeyboardButton']>,
+    { sent: false }
+  >['reason']
   | Extract<ReturnType<SupergroupMessaging['editAccountMessage']>, { edited: false }>['reason']
   | Extract<ReturnType<SupergroupMessaging['getMessageHistory']>, { found: false }>['reason'];
 

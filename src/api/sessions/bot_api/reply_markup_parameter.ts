@@ -46,13 +46,15 @@ const inputFieldPlaceholderSchema = z.string().min(1).max(MAX_INPUT_FIELD_PLACEH
 
 // `selective` shows the markup only to mentioned users and the replied message's sender; as on
 // Telegram, it has no effect in private chats.
+const selectiveSchema = z.boolean().default(false);
+
 const replyKeyboardMarkupSchema = z.strictObject({
   keyboard: z.array(z.array(replyKeyboardButtonSchema).min(1)),
   is_persistent: z.boolean().default(false),
   resize_keyboard: z.boolean().default(false),
   one_time_keyboard: z.boolean().default(false),
   input_field_placeholder: inputFieldPlaceholderSchema.optional(),
-  selective: z.boolean().optional(),
+  selective: selectiveSchema,
 }).transform((markup): ReplyInterfaceMarkup | undefined =>
   markup.keyboard.length === 0 ? undefined : {
     kind: 'reply_keyboard',
@@ -63,23 +65,28 @@ const replyKeyboardMarkupSchema = z.strictObject({
     ...(markup.input_field_placeholder === undefined
       ? {}
       : { inputFieldPlaceholder: markup.input_field_placeholder }),
+    isSelective: markup.selective,
   }
 );
 
 const replyKeyboardRemovalSchema = z.strictObject({
   remove_keyboard: z.literal(true),
-  selective: z.boolean().optional(),
-}).transform((): ReplyInterfaceMarkup => ({ kind: 'reply_keyboard_removal' }));
+  selective: selectiveSchema,
+}).transform(({ selective }): ReplyInterfaceMarkup => ({
+  kind: 'reply_keyboard_removal',
+  isSelective: selective,
+}));
 
 const forcedReplySchema = z.strictObject({
   force_reply: z.literal(true),
   input_field_placeholder: inputFieldPlaceholderSchema.optional(),
-  selective: z.boolean().optional(),
-}).transform(({ input_field_placeholder }): ReplyInterfaceMarkup => ({
+  selective: selectiveSchema,
+}).transform(({ input_field_placeholder, selective }): ReplyInterfaceMarkup => ({
   kind: 'forced_reply',
   ...(input_field_placeholder === undefined
     ? {}
     : { inputFieldPlaceholder: input_field_placeholder }),
+  isSelective: selective,
 }));
 
 /**

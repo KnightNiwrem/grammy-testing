@@ -23,6 +23,12 @@ export interface ReplyKeyboard {
   readonly isOneTime: boolean;
   /** Shown in the input field while the keyboard is shown; omitted for the client's default. */
   readonly inputFieldPlaceholder?: string;
+  /**
+   * The Bot API's `selective`: in a group, applies the markup only to the users the message
+   * mentions and the sender of the message of the chat that it replies to, rather than to every
+   * member. As in TDLib's `get_reply_markup`, it has no effect in private chats.
+   */
+  readonly isSelective: boolean;
 }
 
 /** A request that the recipient's client show a reply interface to the message. */
@@ -30,6 +36,8 @@ export interface ForcedReply {
   readonly kind: 'forced_reply';
   /** Shown in the input field while replying; omitted for the client's default. */
   readonly inputFieldPlaceholder?: string;
+  /** As `ReplyKeyboard` describes it. */
+  readonly isSelective: boolean;
 }
 
 /**
@@ -41,6 +49,8 @@ export type ReplyInterface = ReplyKeyboard | ForcedReply;
 /** A request that the recipient's client remove the reply keyboard it shows. */
 export interface ReplyKeyboardRemoval {
   readonly kind: 'reply_keyboard_removal';
+  /** As `ReplyKeyboard` describes it. */
+  readonly isSelective: boolean;
 }
 
 /**
@@ -48,6 +58,27 @@ export interface ReplyKeyboardRemoval {
  * client instead of adding buttons to the message.
  */
 export type ReplyInterfaceMarkup = ReplyInterface | ReplyKeyboardRemoval;
+
+/** Whether a reply keyboard has a button with the given text, which pressing it sends. */
+export function hasReplyKeyboardButton(replyKeyboard: ReplyKeyboard, text: string): boolean {
+  return replyKeyboard.rows.some((row) => row.some((button) => button.text === text));
+}
+
+/**
+ * Whether a group message's reply interface markup applies to a member, as TDLib's
+ * `get_reply_markup` decides for received markup: markup that is not selective applies to every
+ * member, and selective markup only to a member whom the message mentions or whose message it
+ * replies to, which Telegram marks as mentioning the member.
+ */
+export function appliesReplyInterfaceTo(
+  { isSelective }: ReplyInterfaceMarkup,
+  { mentionsMember, repliesToMember }: {
+    readonly mentionsMember: boolean;
+    readonly repliesToMember: boolean;
+  },
+): boolean {
+  return !isSelective || mentionsMember || repliesToMember;
+}
 
 /**
  * The reply markup a bot sends with a message: an inline keyboard on the message, or a change of

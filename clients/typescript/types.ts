@@ -573,14 +573,14 @@ export interface ForceReplyInterface {
 /** What the account's client shows in place of its usual input in a chat with a bot. */
 export type ReplyInterface = ReplyKeyboardInterface | ForceReplyInterface;
 
-export interface PressReplyKeyboardButtonInput {
-  readonly chat: PrivateMessageTarget;
+export interface PressReplyKeyboardButtonInput<Target extends MessageTarget = MessageTarget> {
+  readonly chat: Target;
   /** The text of the button to press, which the account then sends to the chat. */
   readonly text: string;
 }
 
 export interface AccountReplyInterfaceInput {
-  readonly chat: PrivateMessageTarget;
+  readonly chat: MessageTarget;
 }
 
 /** A bot command as an account's client lists it. */
@@ -854,14 +854,19 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
   ): Promise<readonly SupergroupBotCommands[]>;
   /**
    * Returns the reply keyboard or forced reply this account's client shows in its private chat
-   * with a bot, or `null` when it shows its usual input.
+   * with a bot or in a supergroup it is a member of, or `null` when it shows its usual input. In a
+   * supergroup, a bot's selective markup reaches only the members its message mentions and the
+   * sender of the message it replies to.
    */
   getReplyInterface(input: AccountReplyInterfaceInput): Promise<ReplyInterface | null>;
   /**
-   * Presses a button of the reply keyboard the chat shows, which sends the button's text to the
-   * bot as this account's message. Fails when the chat shows no keyboard with such a button.
+   * Presses a button of the reply keyboard the chat shows, which sends the button's text as this
+   * account's message; in a supergroup, the message replies to the keyboard's message, as
+   * Telegram's clients send it. Fails when the chat shows no keyboard with such a button.
    */
-  pressReplyKeyboardButton(input: PressReplyKeyboardButtonInput): Promise<PrivateMessage>;
+  pressReplyKeyboardButton<Target extends MessageTarget>(
+    input: PressReplyKeyboardButtonInput<Target>,
+  ): Promise<MessageIn<Target>>;
 }
 
 export interface AccountChatActionsInput {

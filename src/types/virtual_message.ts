@@ -223,6 +223,27 @@ export function getContentText(content: SupergroupMessageContent): FormattedText
 }
 
 /**
+ * Whether a message's text or caption mentions a user: by a text mention of the user, or by the
+ * user's username after an `@`, which is matched as Telegram clients mark mentions, ignoring
+ * letter case.
+ */
+export function mentionsUser(
+  content: SupergroupMessageContent,
+  user: { readonly id: number; readonly username?: string },
+): boolean {
+  const { text, entities } = getContentText(content);
+  if (entities.some((entity) => entity.type === 'text_mention' && entity.userId === user.id)) {
+    return true;
+  }
+  if (user.username === undefined) {
+    return false;
+  }
+  // Usernames consist of letters, digits, and underscores, which need no escaping.
+  const usernameMention = new RegExp(`(?<![\\p{L}\\p{N}_])@${user.username}(?![A-Za-z0-9_])`, 'iu');
+  return usernameMention.test(text);
+}
+
+/**
  * A quoted part of the text or caption of the message a message replies to, as Telegram shows it
  * with the reply.
  */
@@ -340,6 +361,11 @@ export interface SupergroupMessage {
   /** Omitted for a message that is no forward. */
   readonly forwardInfo?: MessageForwardInfo;
   /**
+   * The change of the reply interface of the members' clients that the message carries, as
+   * `PrivateMessage` describes it; its selectivity chooses the members it applies to.
+   */
+  readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
+  /**
    * When the text or caption was last edited; omitted for a message whose content was never
    * edited.
    */
@@ -385,10 +411,7 @@ export function getInlineKeyboardOwnerId(message: ChatMessage): number | undefin
  * removal or a keyboard the client no longer shows.
  */
 export function canBotEditMessage(message: ChatMessage, botId: number): boolean {
-  if (
-    message.forwardInfo !== undefined ||
-    (message.kind === 'private_message' && message.replyInterfaceMarkup !== undefined)
-  ) {
+  if (message.forwardInfo !== undefined || message.replyInterfaceMarkup !== undefined) {
     return false;
   }
   if (message.viaBot !== undefined) {

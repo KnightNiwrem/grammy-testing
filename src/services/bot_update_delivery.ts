@@ -26,6 +26,7 @@ import {
   type ChatMessage,
   getContentText,
   isSupergroupContentMessage,
+  mentionsUser,
   type PrivateMessage,
   type SupergroupContentMessage,
   type SupergroupMessage,
@@ -424,7 +425,7 @@ function isPrivacyModeAddressee(addressee: PrivacyModeAddressee, bot: VirtualBot
  * to the group; the emulator delivers it to every bot in privacy mode.
  */
 function isImplicitlyAddressedToBot(message: SupergroupMessage, bot: VirtualBotProfile): boolean {
-  return startsWithCommandWithoutUsername(message) || mentionsBot(message, bot);
+  return startsWithCommandWithoutUsername(message) || mentionsUser(message.content, bot);
 }
 
 /**
@@ -448,15 +449,4 @@ function findLeadingCommandUsername(message: SupergroupMessage): string | undefi
 function startsWithCommandWithoutUsername(message: SupergroupMessage): boolean {
   const leadingCommand = findLeadingCommand(message);
   return leadingCommand !== undefined && !leadingCommand.includes('@');
-}
-
-/** Mentions by username are matched as Telegram clients mark them, ignoring letter case. */
-function mentionsBot(message: SupergroupMessage, bot: VirtualBotProfile): boolean {
-  const { text, entities } = getContentText(message.content);
-  const mentionsById = entities.some((entity) =>
-    entity.type === 'text_mention' && entity.userId === bot.id
-  );
-  // Usernames consist of letters, digits, and underscores, which need no escaping.
-  const usernameMention = new RegExp(`(?<![\\p{L}\\p{N}_])@${bot.username}(?![A-Za-z0-9_])`, 'iu');
-  return mentionsById || usernameMention.test(text);
 }

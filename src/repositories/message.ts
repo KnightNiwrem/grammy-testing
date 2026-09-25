@@ -59,6 +59,7 @@ export interface AddSupergroupMessageInput {
   /** As `AddPrivateMessageInput` describes it. */
   readonly quote?: TextQuote;
   readonly inlineKeyboard?: InlineKeyboard;
+  readonly replyInterfaceMarkup?: ReplyInterfaceMarkup;
   /** As `AddPrivateMessageInput` describes it. */
   readonly viaBotId?: number;
   /** Omitted for a message that is no forward. */
@@ -225,6 +226,9 @@ export class MessageRepository {
         : { inlineKeyboard: copyInlineKeyboard(input.inlineKeyboard) }),
       ...this.#createViaBot(input.viaBotId),
       ...(input.forwardInfo === undefined ? {} : { forwardInfo: { ...input.forwardInfo } }),
+      ...(input.replyInterfaceMarkup === undefined
+        ? {}
+        : { replyInterfaceMarkup: copyReplyInterfaceMarkup(input.replyInterfaceMarkup) }),
       isContentProtected: input.isContentProtected ?? false,
       isSilent: input.isSilent ?? false,
     };
@@ -261,6 +265,7 @@ export class MessageRepository {
       replyToMessageId,
       viaBot,
       forwardInfo,
+      replyInterfaceMarkup,
       isContentProtected,
       isSilent,
     } = storedMessage;
@@ -278,6 +283,7 @@ export class MessageRepository {
         : { inlineKeyboard: copyInlineKeyboard(edit.inlineKeyboard) }),
       ...(viaBot === undefined ? {} : { viaBot }),
       ...(forwardInfo === undefined ? {} : { forwardInfo }),
+      ...(replyInterfaceMarkup === undefined ? {} : { replyInterfaceMarkup }),
       ...(edit.contentEditedAtUnixSeconds === undefined
         ? {}
         : { contentEditedAtUnixSeconds: edit.contentEditedAtUnixSeconds }),

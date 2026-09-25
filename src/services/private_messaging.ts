@@ -2,11 +2,11 @@ import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import type { ExternalReplyTarget } from '../types/message_reply.ts';
 import type { MessageForward } from '../types/message_forward.ts';
-import type {
-  BotMessageReplyMarkup,
-  ReplyInterface,
-  ReplyInterfaceMarkup,
-  ReplyKeyboard,
+import {
+  type BotMessageReplyMarkup,
+  hasReplyKeyboardButton,
+  type ReplyInterface,
+  type ReplyInterfaceMarkup,
 } from '../types/reply_interface.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
@@ -988,7 +988,10 @@ export class PrivateMessagingService {
       accountId: input.fromAccountId,
       botId: input.chat.botId,
     })?.replyInterface;
-    if (replyInterface?.kind !== 'reply_keyboard' || !hasButton(replyInterface, input.text)) {
+    if (
+      replyInterface?.kind !== 'reply_keyboard' ||
+      !hasReplyKeyboardButton(replyInterface, input.text)
+    ) {
       return { sent: false, reason: 'reply_keyboard_button_not_found' };
     }
 
@@ -1337,8 +1340,4 @@ export class PrivateMessagingService {
 
     return storedMessage;
   }
-}
-
-function hasButton(replyKeyboard: ReplyKeyboard, text: string): boolean {
-  return replyKeyboard.rows.some((row) => row.some((button) => button.text === text));
 }

@@ -113,6 +113,7 @@ Deno.test('MessageRepository keeps what an edit cannot change', () => {
     isPersistent: true,
     resizesToFit: false,
     isOneTime: false,
+    isSelective: false,
   };
   const answer = messages.addPrivateMessage({
     conversation,

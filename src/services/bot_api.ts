@@ -208,7 +208,6 @@ export type SendFailureReason =
   | 'callback_data_invalid'
   | 'quote_invalid'
   | 'bot_blocked'
-  | 'reply_interface_unsupported_in_groups'
   | 'file_empty'
   | 'image_invalid'
   | 'photo_dimensions_invalid'
@@ -849,19 +848,23 @@ interface SupergroupBotMessaging {
         | FormerSupergroupMemberFailureReason
         | 'message_not_found';
     };
-  sendBotMessage(input: {
-    readonly fromBotId: number;
-    readonly chatId: number;
-    readonly content: OutgoingMessageContent;
-    readonly inlineKeyboard?: InlineKeyboard;
-    readonly replyTo?: { readonly messageId: number; readonly allowSendingWithoutReply: boolean };
-    readonly externalReply?: ExternalReplyTarget;
-    readonly quote?: SpecifiedQuote;
-    readonly isContentProtected?: boolean;
-    readonly isSilent?: boolean;
-    readonly forwardInfo?: MessageForwardInfo;
-    readonly messageEffectId?: string;
-  }):
+  sendBotMessage(
+    input: BotMessageReplyMarkup & {
+      readonly fromBotId: number;
+      readonly chatId: number;
+      readonly content: OutgoingMessageContent;
+      readonly replyTo?: {
+        readonly messageId: number;
+        readonly allowSendingWithoutReply: boolean;
+      };
+      readonly externalReply?: ExternalReplyTarget;
+      readonly quote?: SpecifiedQuote;
+      readonly isContentProtected?: boolean;
+      readonly isSilent?: boolean;
+      readonly forwardInfo?: MessageForwardInfo;
+      readonly messageEffectId?: string;
+    },
+  ):
     | { readonly sent: true; readonly message: SupergroupMessage }
     | {
       readonly sent: false;
@@ -1692,25 +1695,16 @@ export class BotApiService {
   #sendSupergroupMessage(
     authenticatedBot: VirtualBotProfile,
     content: OutgoingMessageContent,
-    {
-      chatId,
-      isContentProtected,
-      isSilent,
-      messageEffectId,
-      inlineKeyboard,
-      replyInterfaceMarkup,
-    }: SendDestinationOptions,
+    { chatId, isContentProtected, isSilent, messageEffectId, ...replyMarkup }:
+      SendDestinationOptions,
     { replyTo, externalReply, quote }: OutgoingReply,
     forwardInfo: MessageForwardInfo | undefined,
   ): SendResult {
-    if (replyInterfaceMarkup !== undefined) {
-      return { sent: false, reason: 'reply_interface_unsupported_in_groups' };
-    }
     const result = this.#supergroupBotMessages.sendBotMessage({
+      ...replyMarkup,
       fromBotId: authenticatedBot.id,
       chatId,
       content,
-      inlineKeyboard,
       replyTo,
       externalReply,
       quote,

@@ -429,23 +429,22 @@ function createVirtualAccountClient(
       return response.bot_commands;
     },
     async getReplyInterface(input: AccountReplyInterfaceInput): Promise<ReplyInterface | null> {
-      const botId = encodeURIComponent(input.chat.botId);
       const response = await requestJson(fetchImplementation, {
         method: 'GET',
-        url: `${accountUrl}/conversations/private/${botId}/reply-interface`,
+        url: `${conversationUrl(accountUrl, input.chat)}/reply-interface`,
         expectedStatus: HTTP_STATUS_OK,
         responseSchema: replyInterfaceResponseSchema,
       });
       return response.reply_interface;
     },
-    async pressReplyKeyboardButton(
-      input: PressReplyKeyboardButtonInput,
-    ): Promise<PrivateMessage> {
+    async pressReplyKeyboardButton<Target extends MessageTarget>(
+      input: PressReplyKeyboardButtonInput<Target>,
+    ): Promise<MessageIn<Target>> {
       const response = await requestJson(fetchImplementation, {
         method: 'POST',
         url: `${accountUrl}/reply-keyboard-presses`,
         expectedStatus: HTTP_STATUS_CREATED,
-        responseSchema: sentMessageResponseSchema,
+        responseSchema: messageResponseSchemasFor(input.chat).sent,
         body: input,
       });
       return response.message;

@@ -519,12 +519,13 @@ Deno.test('PrivateMessagingService shows the reply interface the latest bot mess
   const forcedReplyMessage = sendWithReplyInterfaceMarkup({
     kind: 'forced_reply',
     inputFieldPlaceholder: 'Your name',
+    isSelective: false,
   });
   if (shownReplyInterface()?.message.id !== forcedReplyMessage.id || pressButton('Red').sent) {
     throw new Error('Expected a forced reply to replace the keyboard');
   }
   sendWithReplyInterfaceMarkup(COLOR_KEYBOARD);
-  sendWithReplyInterfaceMarkup({ kind: 'reply_keyboard_removal' });
+  sendWithReplyInterfaceMarkup({ kind: 'reply_keyboard_removal', isSelective: false });
   if (shownReplyInterface() !== undefined) {
     throw new Error('Expected a removal to clear the shown keyboard');
   }
@@ -843,8 +844,8 @@ Deno.test('PrivateMessagingService refuses edits of messages with reply markup o
   ];
   const replyInterfaceMarkups: ReplyInterfaceMarkup[] = [
     COLOR_KEYBOARD,
-    { kind: 'forced_reply' },
-    { kind: 'reply_keyboard_removal' },
+    { kind: 'forced_reply', isSelective: false },
+    { kind: 'reply_keyboard_removal', isSelective: false },
   ];
 
   for (const replyInterfaceMarkup of replyInterfaceMarkups) {
@@ -870,7 +871,7 @@ Deno.test('PrivateMessagingService refuses edits of messages with reply markup o
 
   // A keyboard stays with its message after a later message removes it from the client.
   const keyboardMessage = sendBotText({ replyInterfaceMarkup: COLOR_KEYBOARD });
-  sendBotText({ replyInterfaceMarkup: { kind: 'reply_keyboard_removal' } });
+  sendBotText({ replyInterfaceMarkup: { kind: 'reply_keyboard_removal', isSelective: false } });
   const shown = privateMessaging.getPrivateChatReplyInterface({
     accountId: account.profile.id,
     botId: bot.profile.id,
@@ -1724,6 +1725,7 @@ const COLOR_KEYBOARD: ReplyInterfaceMarkup = {
   isPersistent: false,
   resizesToFit: true,
   isOneTime: true,
+  isSelective: false,
 };
 
 const YES_NO_KEYBOARD: InlineKeyboard = [[

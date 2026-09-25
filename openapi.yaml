@@ -511,6 +511,35 @@ paths:
           description: The account is not a member of the supergroup.
         '404':
           description: The session, account, or supergroup does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/reply-interface:
+    description: The reply keyboard or forced reply a member's client shows in a supergroup.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/SupergroupChatId'
+    get:
+      operationId: getSupergroupReplyInterface
+      summary: Return the reply interface the member sees in the supergroup
+      description: >-
+        As TDLib tracks it for a received message, a bot's reply keyboard or forced reply applies
+        to every member, or, when selective, only to the members its message mentions and the
+        sender of the message it replies to; the chat then shows it. A keyboard removal that
+        applies to the member removes an interface the same bot set. The interface also
+        disappears when its message is deleted or its bot leaves or is removed from the
+        supergroup.
+      responses:
+        '200':
+          description: The reply interface, or `null` when the client shows its usual input.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountReplyInterface'
+        '400':
+          description: An account or supergroup path identifier is invalid.
+        '403':
+          description: The account is not a member of the supergroup.
+        '404':
+          description: The session, account, or supergroup does not exist.
   /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/notifications:
     description: The notifications a member's client shows for the messages of a supergroup.
     parameters:
@@ -741,11 +770,13 @@ paths:
       - $ref: '#/components/parameters/AccountId'
     post:
       operationId: pressReplyKeyboardButton
-      summary: Press a button of the reply keyboard a private chat shows
+      summary: Press a button of the reply keyboard a private chat or a supergroup shows
       description: >-
-        Sends the button's text to the bot as the account's message, as a Telegram client does.
-        The keyboard stays shown afterward, even a one-time keyboard, which Telegram clients only
-        hide until the user shows it again.
+        Sends the button's text as the account's message, as a Telegram client does. In a
+        supergroup, as Telegram Desktop's `HistoryWidget::sendBotCommand` does outside private
+        chats, the message replies to the keyboard's message, so that the bot that sent it
+        receives it even in privacy mode. The keyboard stays shown afterward, even a one-time
+        keyboard, which Telegram clients only hide until the user shows it again.
       requestBody:
         required: true
         content:
@@ -761,13 +792,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SentMessage'
+                oneOf:
+                  - $ref: '#/components/schemas/SentMessage'
+                  - $ref: '#/components/schemas/SentSupergroupMessage'
         '400':
           description: >-
             The request is invalid, or the chat shows no reply keyboard with a button of that
             text.
+        '403':
+          description: The account is not a member of the supergroup.
         '404':
-          description: The session, account, or bot does not exist.
+          description: The session, account, bot, or supergroup does not exist.
         '409':
           description: The account blocks the bot and must unblock it before writing to it.
   /sessions/{sessionId}/accounts/{accountId}/callback-queries:
@@ -1264,9 +1299,7 @@ paths:
             a supergroup the bot left or was removed from), or the replied message is not found
             and sending without a reply is not allowed (`Bad Request: message to be replied not
             found`). A chosen quote that is not an exact part of the replied message fails last,
-            as Telegram's servers check it (`Bad Request: QUOTE_TEXT_INVALID`). Reply keyboards,
-            keyboard removals, and forced replies in supergroups (`Bad Request: reply keyboards, keyboard removals, and
-            forced replies are not supported in groups`) are not supported.
+            as Telegram's servers check it (`Bad Request: QUOTE_TEXT_INVALID`).
           content:
             application/json:
               schema:
@@ -4705,9 +4738,12 @@ components:
             `reply_parameters` is given.
         reply_markup:
           description: >-
-            An inline keyboard to attach, or, in a private chat, a change of the reply interface
-            the account's client shows. Markup that combines kinds is rejected. `selective` is
-            accepted and, as on Telegram in private chats, has no effect.
+            An inline keyboard to attach, or a change of the reply interface the account's client
+            shows. Markup that combines kinds is rejected. In a supergroup, the change applies to
+            every account member, or, with `selective`, only to the members the message mentions
+            and the sender of the message it replies to; as on Telegram, `selective` has no effect
+            in private chats. A keyboard removal removes only a keyboard or forced reply the same
+            bot sent.
           oneOf:
             - $ref: '#/components/schemas/InlineKeyboardMarkup'
             - $ref: '#/components/schemas/ReplyKeyboardMarkup'
@@ -4750,6 +4786,10 @@ components:
           maxLength: 64
         selective:
           type: boolean
+          default: false
+          description: >-
+            In a supergroup, applies the markup only to the members the message mentions and the
+            sender of the message it replies to. It has no effect in private chats.
     ReplyKeyboardButton:
       type: object
       additionalProperties: false
@@ -4770,6 +4810,10 @@ components:
           const: true
         selective:
           type: boolean
+          default: false
+          description: >-
+            In a supergroup, applies the markup only to the members the message mentions and the
+            sender of the message it replies to. It has no effect in private chats.
     ForceReply:
       type: object
       additionalProperties: false
@@ -4785,6 +4829,10 @@ components:
           maxLength: 64
         selective:
           type: boolean
+          default: false
+          description: >-
+            In a supergroup, applies the markup only to the members the message mentions and the
+            sender of the message it replies to. It has no effect in private chats.
     AccountReplyInterface:
       type: object
       additionalProperties: false
@@ -4884,7 +4932,7 @@ components:
         - text
       properties:
         chat:
-          $ref: '#/components/schemas/PrivateMessageTarget'
+          $ref: '#/components/schemas/MessageTarget'
         text:
           type: string
           minLength: 1

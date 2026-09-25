@@ -473,10 +473,33 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     );
   }
 
+  const keyboardResponse = await api.request(`${botApiPath}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: supergroup.id,
+      text: 'Ready?',
+      reply_markup: { keyboard: [['Yes']] },
+    }),
+  });
+  const shownKeyboard = await member.getReplyInterface({ chat });
+  const keyboardPress = await member.pressReplyKeyboardButton({ chat, text: 'Yes' });
+  if (
+    keyboardResponse.status !== 200 || shownKeyboard?.type !== 'keyboard' ||
+    keyboardPress.chat.id !== supergroup.id ||
+    keyboardPress.reply_to_message?.message_id !== shownKeyboard.message_id
+  ) {
+    throw new Error(
+      `Expected the client to press the supergroup keyboard, received ${
+        JSON.stringify({ shownKeyboard, keyboardPress })
+      }`,
+    );
+  }
+
   await owner.removeChatMember({ chat, userId: bot.id });
   await owner.removeChatMember({ chat, userId: bot.id });
   await member.leaveChat({ chat });
-  const departures = (await owner.getMessages({ chat })).slice(3);
+  const departures = (await owner.getMessages({ chat })).slice(-2);
   if (
     JSON.stringify(
       departures.map(({ from, left_chat_member }) => [from.id, left_chat_member?.id]),

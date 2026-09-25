@@ -1,5 +1,6 @@
 import type { ChatMembership, FormerChatMemberStatus } from '../types/chat_membership.ts';
 import type { BasicGroup, Channel, SharedChat, Supergroup } from '../types/virtual_chat.ts';
+import type { CanonicalMessageId } from '../types/virtual_message.ts';
 
 export type SharedChatRegistrationFailureReason = 'chat_id_taken';
 
@@ -72,6 +73,8 @@ export class SharedChatRepository {
   readonly #sharedChatsById = new Map<number, SharedChat>();
   readonly #sharedChatMembershipsByChatId = new Map<number, Map<number, ChatMembership>>();
   readonly #formerMemberStatusesByChatId = new Map<number, Map<number, FormerChatMemberStatus>>();
+  /** Keyed by chat ID, then by the ID of the account whose client shows the reply interface. */
+  readonly #replyInterfaceMessageIdsByChatId = new Map<number, Map<number, CanonicalMessageId>>();
 
   registerBasicGroup(
     group: BasicGroup,
@@ -191,6 +194,33 @@ export class SharedChatRepository {
 
     membershipsByIdentityId.set(memberId, status);
     return { updated: true };
+  }
+
+  /**
+   * Returns the message whose reply interface a member's client shows in the chat, as TDLib's
+   * `reply_markup_message_id` identifies it, or `undefined` when it shows none.
+   */
+  getReplyInterfaceMessageId(chatId: number, accountId: number): CanonicalMessageId | undefined {
+    return this.#replyInterfaceMessageIdsByChatId.get(chatId)?.get(accountId);
+  }
+
+  /** Records the message whose reply interface a member's client shows; `undefined` shows none. */
+  setReplyInterfaceMessageId(
+    chatId: number,
+    accountId: number,
+    messageId: CanonicalMessageId | undefined,
+  ): void {
+    if (this.#sharedChatsById.get(chatId) === undefined) {
+      throw new Error(`Chat ${chatId} does not exist`);
+    }
+    const messageIdsByAccountId = this.#replyInterfaceMessageIdsByChatId.get(chatId) ??
+      new Map<number, CanonicalMessageId>();
+    if (messageId === undefined) {
+      messageIdsByAccountId.delete(accountId);
+    } else {
+      messageIdsByAccountId.set(accountId, messageId);
+    }
+    this.#replyInterfaceMessageIdsByChatId.set(chatId, messageIdsByAccountId);
   }
 
   /** Ends a membership, remembering how it ended. */

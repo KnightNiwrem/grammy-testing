@@ -123,13 +123,6 @@ const BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION =
   'Forbidden: bot is not a member of the supergroup chat';
 const BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION = 'Forbidden: bot was kicked from the supergroup chat';
 
-/**
- * The emulator's description for a reply keyboard, keyboard removal, or forced reply sent to a
- * group, where Telegram shows them to chosen members; the emulator does not support that.
- */
-const GROUP_REPLY_INTERFACE_UNSUPPORTED_DESCRIPTION =
-  'Bad Request: reply keyboards, keyboard removals, and forced replies are not supported in groups';
-
 /** Telegram's descriptions for files a message cannot send. */
 const FILE_EMPTY_DESCRIPTION = 'Bad Request: file must be non-empty';
 const IMAGE_INVALID_DESCRIPTION = 'Bad Request: IMAGE_PROCESS_FAILED';
@@ -1270,8 +1263,6 @@ function sendMethodAnswer(result: SendResult | SendFailure): BotApiMethodAnswer 
       return botApiError(400, QUOTE_TEXT_INVALID_DESCRIPTION);
     case 'bot_blocked':
       return botApiError(403, BOT_BLOCKED_DESCRIPTION);
-    case 'reply_interface_unsupported_in_groups':
-      return botApiError(400, GROUP_REPLY_INTERFACE_UNSUPPORTED_DESCRIPTION);
     case 'file_empty':
       return botApiError(400, FILE_EMPTY_DESCRIPTION);
     case 'image_invalid':

@@ -3511,6 +3511,100 @@ Deno.test('bots reply to messages of their other chats with an external reply', 
   }
 });
 
+Deno.test('bots show reply keyboards and forced replies to all or chosen supergroup members', async () => {
+  const { api, sessionPath, owner, member, bot, readerBot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const readUpdates = createUpdateReader(api);
+  const send = async (botApiPath: string, parameters: Record<string, unknown>) =>
+    botApiResult(
+      (await callBotApi(api, `${botApiPath}/sendMessage`, {
+        chat_id: supergroup.id,
+        ...parameters,
+      })).body,
+    );
+  const shownInterface = async (accountId: number) =>
+    (await (await api.request(`${supergroupPath(accountId)}/reply-interface`)).json() as {
+      reply_interface: { type: string; message_id: number } | null;
+    }).reply_interface;
+  const press = (accountId: number, text: string) =>
+    api.request(
+      `${sessionPath}/accounts/${accountId}/reply-keyboard-presses`,
+      jsonRequest('POST', { chat: { type: 'supergroup', chatId: supergroup.id }, text }),
+    );
+
+  // A keyboard for every member; a press replies to it, so the bot receives it in privacy mode.
+  const keyboard = await send(bot.botApiPath, {
+    text: 'Pick a color',
+    reply_markup: { keyboard: [['Red', 'Green']], one_time_keyboard: true },
+  });
+  await readUpdates(bot.botApiPath);
+  const pressResponse = await press(member.id, 'Red');
+  const { message: pressed } = await pressResponse.json() as {
+    message: { message_id: number; text: string; reply_to_message?: { message_id: number } };
+  };
+  const [pressUpdate] = await readUpdates(bot.botApiPath);
+  const keyboardEdit = await callBotApi(api, `${bot.botApiPath}/editMessageText`, {
+    chat_id: supergroup.id,
+    message_id: keyboard?.message_id,
+    text: 'Pick another color',
+  });
+  if (
+    (await shownInterface(owner.id))?.message_id !== keyboard?.message_id ||
+    pressResponse.status !== 201 || pressed.reply_to_message?.message_id !== keyboard?.message_id ||
+    (pressUpdate?.message as { text?: string } | undefined)?.text !== 'Red' ||
+    (keyboardEdit.body as { description?: string }).description !==
+      "Bad Request: message can't be edited" ||
+    (await press(member.id, 'Blue')).status !== 400
+  ) {
+    throw new Error(
+      `Expected every member to see and press the keyboard, received ${
+        JSON.stringify({ keyboard, pressed, pressUpdate, keyboardEdit: keyboardEdit.body })
+      }`,
+    );
+  }
+
+  // A selective forced reply reaches only the sender of the replied message, and a selective
+  // removal only the mentioned member; another bot's removal leaves this bot's interface.
+  const forcedReply = await send(bot.botApiPath, {
+    text: 'Why red?',
+    reply_parameters: { message_id: pressed.message_id },
+    reply_markup: { force_reply: true, selective: true },
+  });
+  await send(bot.botApiPath, {
+    text: 'Ada, done',
+    entities: [{ type: 'text_mention', offset: 0, length: 3, user: { id: owner.id } }],
+    reply_markup: { remove_keyboard: true, selective: true },
+  });
+  await send(readerBot.botApiPath, { text: 'Reset', reply_markup: { remove_keyboard: true } });
+  const shownAfterSelectiveMarkup = [
+    await shownInterface(owner.id),
+    await shownInterface(member.id),
+  ];
+  if (
+    JSON.stringify(shownAfterSelectiveMarkup) !== JSON.stringify([
+      null,
+      { type: 'force_reply', message_id: forcedReply?.message_id },
+    ])
+  ) {
+    throw new Error(
+      `Expected selective markup to reach only its targets, received ${
+        JSON.stringify(shownAfterSelectiveMarkup)
+      }`,
+    );
+  }
+
+  // Removing the bot removes the interfaces it set.
+  await api.request(`${supergroupPath(owner.id)}/members/${bot.bot.id}`, { method: 'DELETE' });
+  const outsider = await createAccount(api, sessionPath, 'Linus');
+  const outsiderStatus = (await api.request(`${supergroupPath(outsider.id)}/reply-interface`))
+    .status;
+  if ((await shownInterface(member.id)) !== null || outsiderStatus !== 403) {
+    throw new Error(
+      `Expected the removed bot's forced reply to disappear, received ${outsiderStatus}`,
+    );
+  }
+});
+
 Deno.test('bots in privacy mode receive only supergroup messages addressed to them', async () => {
   const { api, owner, member, bot, readerBot, supergroup, sendSupergroupText } =
     await createSupergroupFixture();
@@ -3688,16 +3782,6 @@ Deno.test('Bot API methods follow Telegram checks in supergroups', async () => {
     chat_id: supergroup.id,
     action: 'typing',
   }, 'Bad Request: chat not found');
-  await expectFailure(
-    bot.botApiPath,
-    'sendMessage',
-    {
-      chat_id: supergroup.id,
-      text: 'Pick one',
-      reply_markup: { keyboard: [[{ text: 'A' }]] },
-    },
-    'Bad Request: reply keyboards, keyboard removals, and forced replies are not supported in groups',
-  );
   await expectFailure(bot.botApiPath, 'sendMessage', {
     chat_id: supergroup.id,
     text: 'Hi',
@@ -6177,16 +6261,6 @@ Deno.test('copyMessage copies messages without their origin and follows Telegram
     },
     400,
     'Bad Request: message caption is too long',
-  );
-  await expectFailure(
-    {
-      chat_id: supergroup.id,
-      from_chat_id: owner.id,
-      message_id: photoMessage.message_id,
-      reply_markup: { keyboard: [[{ text: 'Yes' }]] },
-    },
-    400,
-    'Bad Request: reply keyboards, keyboard removals, and forced replies are not supported in groups',
   );
   await api.request(`${sessionPath}/accounts/${owner.id}/blocked-bots/${bot.bot.id}`, {
     method: 'PUT',

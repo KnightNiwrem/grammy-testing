@@ -40,6 +40,29 @@ removal follow the corresponding private-chat logic in TDLib's
 uneditable, even after the interface clears. A forced reply stays shown after the account replies;
 its dismissal is an [intentional deviation](#intentional-deviations).
 
+### In supergroups
+
+Bots also send reply keyboards, removals and forced replies to supergroups, which the official
+server's [`Client::get_reply_markup`][reply-markup] reads as for private chats. Each account member
+inspects and presses what its own client shows. As TDLib's [`get_reply_markup`][received-markup]
+decides for received markup, markup applies to every member unless it is `selective`. Selective
+markup applies only to the members the message mentions, by `@username` or a text mention, and to
+the sender of the message of the chat that it replies to. Telegram's servers decide whom a message
+mentions, which the open-source code does not show; the emulator matches mentions as it does for
+[privacy mode](supergroups.md#privacy-mode).
+
+Markup that applies to a member changes what its client shows as in a private chat, except that, as
+TDLib's [`add_message_to_dialog`][dialog-markup] does, a removal removes only an interface that the
+same bot set. An interface also disappears when its message is deleted, or when its bot leaves or is
+removed from the supergroup, as TDLib does for that service message and in
+[`on_dialog_bots_updated`][bots-updated].
+
+Pressing a button sends its text as the account's message, replying to the keyboard's message as
+Telegram Desktop's [`HistoryWidget::sendBotCommand`][desktop-bot-command] does outside private
+chats. The bot that sent the keyboard therefore receives the press even in privacy mode. Reply
+buttons that request contacts, locations or other data are [missing](#real-gaps); TDLib only allows
+them in private chats.
+
 ## Intentional deviations
 
 - **Inspectable keyboard data without a client UI.** Tests inspect keyboard data without reproducing
@@ -71,8 +94,6 @@ its dismissal is an [intentional deviation](#intentional-deviations).
 
 ## Real gaps
 
-- **Supergroup reply interfaces.** Reply keyboards and forced replies in supergroups are rejected.
-  Telegram's [`Client::get_reply_markup`][reply-markup] and TDLib support them in groups.
 - **Inline button types.** Login, Mini Apps, games, payments, inline switching, copy-text and
   disabled buttons are absent. Tests cannot exercise those button definitions or actions.
 - **Button styles and icons.** Tests cannot submit or inspect button appearance metadata. Supporting
@@ -99,6 +120,10 @@ server behavior.
 [callback tests](../../tests/callback_query_service_test.ts) and
 [private message tests](../../tests/private_messaging_service_test.ts).
 
+[received-markup]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/ReplyMarkup.cpp#L104-L198
+[dialog-markup]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L31226-L31241
+[bots-updated]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L29539-L29546
+[desktop-bot-command]: https://github.com/telegramdesktop/tdesktop/blob/64ca5475f24dde7331a388176d3fe60c0849b965/Telegram/SourceFiles/history/history_widget.cpp#L6437-L6458
 [reply-state]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L12453-L12515
 [dismiss-reply]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L16043-L16082
 [reply-markup]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10504-L10630
