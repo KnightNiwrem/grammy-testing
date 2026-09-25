@@ -110,8 +110,13 @@ inline queries or cache answers, and a test reads the button above the results b
 Bot API requests follow Telegram's conventions: GET or POST, case-insensitive method names, and
 parameters in the query string or a JSON, URL-encoded, or multipart body. Bot API failures,
 including calls to methods the emulator does not implement, return Telegram-shaped JSON errors that
-clients report as API errors. The session creation response identifies its Bot API root. Other
-routes described in `openapi.yaml` are not implemented yet.
+clients report as API errors. Well-formed requests behave as on Telegram, but the emulator is
+deliberately stricter with malformed ones, so tests catch a bot's mistakes: where Telegram reads a
+parameter leniently or ignores it, such as a number written as a string inside a JSON parameter, an
+integer with trailing text, a boolean spelled other than `true`, `false`, `yes`, `no`, `1`, or `0`,
+a malformed `allowed_updates`, or a body it cannot parse, the emulator fails the request with
+`400 Bad Request`, usually `invalid <method> parameters`. The session creation response identifies
+its Bot API root. Other routes described in `openapi.yaml` are not implemented yet.
 
 Bots can also take part in supergroups. An account creates a supergroup and adds accounts and bots
 to it, and each added bot receives a `my_chat_member` update. The Bot API methods above accept a

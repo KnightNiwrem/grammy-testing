@@ -125,40 +125,6 @@ investigation recommendation, not a confirmed historical-routing defect.
 Keep these reference-capture tests separate from the ordinary offline suite. Behavioral fidelity
 does not require embedding TDLib or copying its actor architecture.
 
-## 11. P2 — Separate Telegram compatibility from deliberate “strict testing” validation
-
-**Locations:** Bot API parameter schemas, including
-[`src/api/sessions/bot_api/mod.ts`](https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/5b02d7f129bf81ba79e6ce5f46903e6f213bb42c/src/api/sessions/bot_api/mod.ts),
-`reply_markup_parameter.ts`, and inline-result parameter readers.
-
-### Finding and context
-
-Several comments explicitly describe a policy of rejecting inputs Telegram accepts in order to
-surface mistakes. Examples include string-valued message IDs inside `deleteMessages`, malformed
-`allowed_updates`, and ambiguous markup shapes. This is therefore not simply an accidental parser
-defect.
-
-**The architectural issue is that an emulator and a linter have different responsibilities.** A
-production bot can legitimately rely on behavior that a stricter testing tool dislikes. Rejecting
-that behavior by default makes the test environment less representative.
-
-### Recommendation
-
-Make the distinction explicit. Prefer Telegram-compatible wire behavior for emulation, with stricter
-diagnostics as an opt-in policy—or, at minimum, document the stricter mode as part of the public
-compatibility contract.
-
-This should not become blanket acceptance of unsupported parameters. Distinguish:
-
-- Supported semantics, including known Telegram coercions.
-- Accepted options with intentionally unmodeled effects.
-- Unsupported behavior that must fail explicitly.
-
-A small capability table backed by tests may be enough initially; this does not need a new
-configuration framework. The important result is that “Telegram rejects this,” “the emulator does
-not implement this,” and “strict diagnostics discourage this” no longer collapse into the same
-generic invalid-parameters response.
-
 ## 13. P3 — Complete the clock-injection seam with a session-level scheduler
 
 **Locations:**
@@ -216,9 +182,6 @@ beneath an otherwise identical source revision.
 ---
 
 ## Bottom line
-
-The most important SRP improvement is not “split every large service.” It is more specific:
-distinguish faithful emulation from strict diagnostics.
 
 A narrow `getChat` implementation offers useful coverage without requiring comprehensive Telegram
 emulation. Notification behavior and less frequently tested options can remain lower priority while
