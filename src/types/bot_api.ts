@@ -74,9 +74,42 @@ export interface BotApiUrlInlineKeyboardButton extends BotApiKeyboardButtonFace 
   readonly url: string;
 }
 
+export interface BotApiCopyTextInlineKeyboardButton extends BotApiKeyboardButtonFace {
+  readonly copy_text: { readonly text: string };
+}
+
+export interface BotApiSwitchInlineQueryInlineKeyboardButton extends BotApiKeyboardButtonFace {
+  readonly switch_inline_query: string;
+}
+
+export interface BotApiSwitchInlineQueryCurrentChatInlineKeyboardButton
+  extends BotApiKeyboardButtonFace {
+  readonly switch_inline_query_current_chat: string;
+}
+
+export interface BotApiSwitchInlineQueryChosenChatInlineKeyboardButton
+  extends BotApiKeyboardButtonFace {
+  readonly switch_inline_query_chosen_chat: {
+    readonly query: string;
+    readonly allow_user_chats: boolean;
+    readonly allow_bot_chats: boolean;
+    readonly allow_group_chats: boolean;
+    readonly allow_channel_chats: boolean;
+  };
+}
+
+export interface BotApiDisabledInlineKeyboardButton extends BotApiKeyboardButtonFace {
+  readonly disabled: Record<string, never>;
+}
+
 export type BotApiInlineKeyboardButton =
   | BotApiCallbackInlineKeyboardButton
-  | BotApiUrlInlineKeyboardButton;
+  | BotApiUrlInlineKeyboardButton
+  | BotApiCopyTextInlineKeyboardButton
+  | BotApiSwitchInlineQueryInlineKeyboardButton
+  | BotApiSwitchInlineQueryCurrentChatInlineKeyboardButton
+  | BotApiSwitchInlineQueryChosenChatInlineKeyboardButton
+  | BotApiDisabledInlineKeyboardButton;
 
 export interface BotApiInlineKeyboardMarkup {
   readonly inline_keyboard: readonly (readonly BotApiInlineKeyboardButton[])[];

@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
 import type { ButtonAppearance } from '../../../types/button_appearance.ts';
-import type { InlineKeyboard, InlineKeyboardButton } from '../../../types/inline_keyboard.ts';
+import {
+  type InlineKeyboard,
+  type InlineKeyboardButton,
+  MAX_COPIED_TEXT_LENGTH,
+} from '../../../types/inline_keyboard.ts';
 import type {
   BotMessageReplyMarkup,
   ReplyInterfaceMarkup,
@@ -63,12 +67,116 @@ const urlButtonSchema = z.strictObject({
   url: button.url,
 }));
 
+const copyTextButtonSchema = z.strictObject({
+  text: z.string().min(1),
+  ...buttonAppearanceShape,
+  // TDLib accepts any copied text; the emulator enforces the Bot API's documented length.
+  copy_text: z.strictObject({ text: z.string().min(1).max(MAX_COPIED_TEXT_LENGTH) }),
+}).transform((button): InlineKeyboardButton => ({
+  kind: 'copy_text',
+  text: button.text,
+  ...readButtonAppearance(button),
+  copiedText: button.copy_text.text,
+}));
+
+/**
+ * `switch_inline_query` lets the user choose any chat, as the official Bot API server's
+ * `get_inline_keyboard_button_type` reads it.
+ */
+const switchInlineQueryButtonSchema = z.strictObject({
+  text: z.string().min(1),
+  ...buttonAppearanceShape,
+  switch_inline_query: z.string(),
+}).transform((button): InlineKeyboardButton => ({
+  kind: 'switch_inline_query',
+  text: button.text,
+  ...readButtonAppearance(button),
+  query: button.switch_inline_query,
+  target: {
+    kind: 'chosen_chat',
+    chatTypes: {
+      allowsUserChats: true,
+      allowsBotChats: true,
+      allowsGroupChats: true,
+      allowsChannelChats: true,
+    },
+  },
+}));
+
+/**
+ * `switch_inline_query_chosen_chat` limits the chats the user may choose; an omitted kind is not
+ * allowed. Sending checks that it allows at least one, as TDLib does.
+ */
+const switchInlineQueryChosenChatButtonSchema = z.strictObject({
+  text: z.string().min(1),
+  ...buttonAppearanceShape,
+  switch_inline_query_chosen_chat: z.strictObject({
+    query: z.string().default(''),
+    allow_user_chats: z.boolean().default(false),
+    allow_bot_chats: z.boolean().default(false),
+    allow_group_chats: z.boolean().default(false),
+    allow_channel_chats: z.boolean().default(false),
+  }),
+}).transform((button): InlineKeyboardButton => {
+  const chosenChat = button.switch_inline_query_chosen_chat;
+  return {
+    kind: 'switch_inline_query',
+    text: button.text,
+    ...readButtonAppearance(button),
+    query: chosenChat.query,
+    target: {
+      kind: 'chosen_chat',
+      chatTypes: {
+        allowsUserChats: chosenChat.allow_user_chats,
+        allowsBotChats: chosenChat.allow_bot_chats,
+        allowsGroupChats: chosenChat.allow_group_chats,
+        allowsChannelChats: chosenChat.allow_channel_chats,
+      },
+    },
+  };
+});
+
+const switchInlineQueryCurrentChatButtonSchema = z.strictObject({
+  text: z.string().min(1),
+  ...buttonAppearanceShape,
+  switch_inline_query_current_chat: z.string(),
+}).transform((button): InlineKeyboardButton => ({
+  kind: 'switch_inline_query',
+  text: button.text,
+  ...readButtonAppearance(button),
+  query: button.switch_inline_query_current_chat,
+  target: { kind: 'current_chat' },
+}));
+
+// Telegram reads any `disabled` value; the emulator requires the documented empty object.
+const disabledButtonSchema = z.strictObject({
+  text: z.string().min(1),
+  ...buttonAppearanceShape,
+  disabled: z.strictObject({}),
+}).transform((button): InlineKeyboardButton => ({
+  kind: 'disabled',
+  text: button.text,
+  ...readButtonAppearance(button),
+}));
+
 /**
  * An `InlineKeyboardMarkup` object, as `inlineKeyboardMarkupParameter` describes it, for objects
  * that hold one, such as inline query results.
  */
 export const inlineKeyboardMarkupSchema = z.strictObject({
-  inline_keyboard: z.array(z.array(z.union([callbackButtonSchema, urlButtonSchema])).min(1)),
+  inline_keyboard: z.array(
+    z.array(
+      z.union([
+        callbackButtonSchema,
+        urlButtonSchema,
+        copyTextButtonSchema,
+        switchInlineQueryButtonSchema,
+        switchInlineQueryChosenChatButtonSchema,
+        switchInlineQueryCurrentChatButtonSchema,
+        disabledButtonSchema,
+      ]),
+    ).min(1),
+  ),
 }).transform(({ inline_keyboard }): InlineKeyboard | undefined =>
   inline_keyboard.length === 0 ? undefined : inline_keyboard
 );
@@ -130,8 +238,8 @@ const forcedReplySchema = z.strictObject({
 }));
 
 /**
- * A `reply_markup` parameter holding an inline keyboard of callback and URL buttons, for methods
- * that edit a message.
+ * A `reply_markup` parameter holding an inline keyboard of callback, URL, copy-text,
+ * switch-inline and disabled buttons, for methods that edit a message.
  *
  * As on Telegram, a keyboard without rows attaches no keyboard, so it parses as `undefined`.
  * Telegram also accepts other button types and buttons with several actions, using the first

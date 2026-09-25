@@ -339,7 +339,48 @@ export interface UrlInlineKeyboardButton extends KeyboardButtonFace {
   readonly url: string;
 }
 
-export type InlineKeyboardButton = CallbackInlineKeyboardButton | UrlInlineKeyboardButton;
+/** A button that copies text to the clipboard. */
+export interface CopyTextInlineKeyboardButton extends KeyboardButtonFace {
+  readonly copy_text: { readonly text: string };
+}
+
+/**
+ * A button that puts the bot's username and a query into the input field of a chat the user
+ * chooses; tests send the inline query itself.
+ */
+export interface SwitchInlineQueryInlineKeyboardButton extends KeyboardButtonFace {
+  readonly switch_inline_query: string;
+}
+
+/** A button that puts the bot's username and a query into the message's own chat. */
+export interface SwitchInlineQueryCurrentChatInlineKeyboardButton extends KeyboardButtonFace {
+  readonly switch_inline_query_current_chat: string;
+}
+
+/** A switch-inline button that lets the user choose only some kinds of chats. */
+export interface SwitchInlineQueryChosenChatInlineKeyboardButton extends KeyboardButtonFace {
+  readonly switch_inline_query_chosen_chat: {
+    readonly query: string;
+    readonly allow_user_chats: boolean;
+    readonly allow_bot_chats: boolean;
+    readonly allow_group_chats: boolean;
+    readonly allow_channel_chats: boolean;
+  };
+}
+
+/** A button that does nothing. */
+export interface DisabledInlineKeyboardButton extends KeyboardButtonFace {
+  readonly disabled: Record<string, never>;
+}
+
+export type InlineKeyboardButton =
+  | CallbackInlineKeyboardButton
+  | UrlInlineKeyboardButton
+  | CopyTextInlineKeyboardButton
+  | SwitchInlineQueryInlineKeyboardButton
+  | SwitchInlineQueryCurrentChatInlineKeyboardButton
+  | SwitchInlineQueryChosenChatInlineKeyboardButton
+  | DisabledInlineKeyboardButton;
 
 export interface InlineKeyboardMarkup {
   readonly inline_keyboard: readonly (readonly InlineKeyboardButton[])[];

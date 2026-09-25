@@ -18,7 +18,11 @@ import {
   getSupergroupNonMemberFailureReason,
 } from '../types/chat_membership.ts';
 import type { InlineQueryId, InlineQueryResultsButton } from '../types/inline_query.ts';
-import type { InlineKeyboard, InlineKeyboardButton } from '../types/inline_keyboard.ts';
+import {
+  allowsSomeInlineQueryChat,
+  type InlineKeyboard,
+  type InlineKeyboardButton,
+} from '../types/inline_keyboard.ts';
 import {
   createMessageForward,
   isForwardable,
@@ -1248,18 +1252,25 @@ export class BotApiService {
   }
 
   /**
-   * Reads the links of an inline keyboard's URL buttons as TDLib's `get_inline_keyboard_button`
-   * does for a keyboard being sent: a `tg://user?id=` link opens the user's profile and is kept in
-   * that canonical form, and any other link must pass `check_link`, which normalizes it, so that
-   * `grammy.dev` opens `http://grammy.dev/`. Telegram's servers decide whether the user of a
-   * profile link may be shown, which the emulator does not check. The keyboard still has to pass
-   * the checks that sending or editing applies.
+   * Reads an inline keyboard as TDLib's `get_inline_keyboard_button` does for a keyboard being
+   * sent. A switch-inline button for a chosen chat must allow at least one kind of chat. Of URL
+   * buttons' links, a `tg://user?id=` link opens the user's profile and is kept in that canonical
+   * form, and any other link must pass `check_link`, which normalizes it, so that `grammy.dev`
+   * opens `http://grammy.dev/`. Telegram's servers decide whether the user of a profile link may
+   * be shown, which the emulator does not check. The keyboard still has to pass the checks that
+   * sending or editing applies.
    */
   readInlineKeyboard(inlineKeyboard: InlineKeyboard): ReadInlineKeyboardResult {
     const readRows: InlineKeyboardButton[][] = [];
     for (const row of inlineKeyboard) {
       const readRow: InlineKeyboardButton[] = [];
       for (const button of row) {
+        if (
+          button.kind === 'switch_inline_query' && button.target.kind === 'chosen_chat' &&
+          !allowsSomeInlineQueryChat(button.target.chatTypes)
+        ) {
+          return { read: false, keyboardError: 'At least one chat type must be allowed' };
+        }
         if (button.kind !== 'url') {
           readRow.push(button);
           continue;

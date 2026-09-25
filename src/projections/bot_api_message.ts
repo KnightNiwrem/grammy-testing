@@ -40,7 +40,11 @@ import type {
   InlineQueryResultChosenEvent,
 } from '../types/chat_domain_event.ts';
 import type { ChatMemberStatus, SupergroupAdministratorRights } from '../types/chat_membership.ts';
-import type { InlineKeyboard, InlineKeyboardButton } from '../types/inline_keyboard.ts';
+import {
+  allowsEveryInlineQueryChat,
+  type InlineKeyboard,
+  type InlineKeyboardButton,
+} from '../types/inline_keyboard.ts';
 import { getInlineQueryChatType, type InlineQuery } from '../types/inline_query.ts';
 import type { StoredFile } from '../types/stored_file.ts';
 import type { VirtualAccountProfile } from '../types/virtual_account.ts';
@@ -726,6 +730,11 @@ function projectInlineKeyboardMarkup(inlineKeyboard: InlineKeyboard): BotApiInli
   return { inline_keyboard: inlineKeyboard.map((row) => row.map(projectInlineKeyboardButton)) };
 }
 
+/**
+ * Shows a button's action as the official Bot API server's
+ * `json_store_inline_keyboard_button_type` does: a switch-inline button for a chosen chat that
+ * allows every kind of chat shows as a plain `switch_inline_query` button.
+ */
 function projectInlineKeyboardButton(button: InlineKeyboardButton): BotApiInlineKeyboardButton {
   const face = projectKeyboardButtonFace(button);
   switch (button.kind) {
@@ -733,6 +742,29 @@ function projectInlineKeyboardButton(button: InlineKeyboardButton): BotApiInline
       return { ...face, callback_data: button.callbackData };
     case 'url':
       return { ...face, url: button.url };
+    case 'copy_text':
+      return { ...face, copy_text: { text: button.copiedText } };
+    case 'switch_inline_query': {
+      const { target, query } = button;
+      if (target.kind === 'current_chat') {
+        return { ...face, switch_inline_query_current_chat: query };
+      }
+      if (allowsEveryInlineQueryChat(target.chatTypes)) {
+        return { ...face, switch_inline_query: query };
+      }
+      return {
+        ...face,
+        switch_inline_query_chosen_chat: {
+          query,
+          allow_user_chats: target.chatTypes.allowsUserChats,
+          allow_bot_chats: target.chatTypes.allowsBotChats,
+          allow_group_chats: target.chatTypes.allowsGroupChats,
+          allow_channel_chats: target.chatTypes.allowsChannelChats,
+        },
+      };
+    }
+    case 'disabled':
+      return { ...face, disabled: {} };
     default: {
       const unhandledButton: never = button;
       throw new Error(`Unhandled inline keyboard button: ${JSON.stringify(unhandledButton)}`);

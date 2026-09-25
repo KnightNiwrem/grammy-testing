@@ -1295,8 +1295,9 @@ paths:
       Telegram Bot API method for sending a text message. The emulator supports text sent to a
       private chat with an account that has written to the bot, formatted with `parse_mode` or
       `entities`, optionally as a reply to a message of the chat, protected from forwarding and
-      saving, and with reply markup: an inline keyboard of callback and URL buttons, a reply
-      keyboard of text buttons, a reply keyboard removal, or a forced reply. As on Telegram, the
+      saving, and with reply markup: an inline keyboard of callback, URL, copy-text, switch-inline
+      and disabled buttons, a reply keyboard of text buttons, a reply keyboard removal, or a forced
+      reply. As on Telegram, the
       message a bot receives in the response never shows reply markup other than an inline
       keyboard; a test reads the reply interface the account's client shows instead. Link preview
       options are validated and have no effect, because the emulator generates no link previews.
@@ -1574,8 +1575,10 @@ paths:
       legacy `forward_from` and `forward_date`; a forward of a forward shows the original's origin.
       As TDLib's `hide_sender_if_needed` does, the origin of an account created with
       `has_private_forwards` is a hidden user that shows only the account's name, also in the legacy
-      `forward_sender_name`. It keeps the inline keyboard only when every button opens a URL. As on
-      Telegram, a forward cannot be edited and the bot receives no update for it. Topics, paid
+      `forward_sender_name`. As TDLib's `dup_reply_markup` does, it keeps the inline keyboard only
+      when every button works away from the original message: URL, copy-text and disabled buttons,
+      and the switch-inline buttons of a message sent through an inline bot, which then let the user
+      choose any chat. As on Telegram, a forward cannot be edited and the bot receives no update for it. Topics, paid
       broadcasts, suggested posts, and video start timestamps are not supported.
     parameters:
       - $ref: '#/components/parameters/SessionId'
@@ -4001,8 +4004,9 @@ components:
         emulator keeps the identifier for inspection without checking that the emoji exists.
     InlineKeyboardButton:
       description: >-
-        A button with exactly one action. Telegram also accepts other button types and buttons
-        with several actions, using the first action it recognizes; the emulator rejects them.
+        A button with exactly one action. Telegram also accepts login, Web App, game and payment
+        buttons, and buttons with several actions, using the first action it recognizes; the
+        emulator rejects them.
       oneOf:
         - type: object
           additionalProperties: false
@@ -4044,6 +4048,117 @@ components:
                 `http://grammy.dev/` for `grammy.dev`; a `tg://user?id=` link opens the user's
                 profile. A link Telegram refuses fails with `Bad Request: inline keyboard button
                 URL '…' is invalid: …`.
+        - type: object
+          additionalProperties: false
+          required:
+            - text
+            - copy_text
+          properties:
+            text:
+              type: string
+              minLength: 1
+            icon_custom_emoji_id:
+              $ref: '#/components/schemas/ButtonIconCustomEmojiId'
+            style:
+              $ref: '#/components/schemas/ButtonStyle'
+            copy_text:
+              type: object
+              additionalProperties: false
+              description: The text the button copies to the clipboard.
+              required:
+                - text
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+        - type: object
+          additionalProperties: false
+          required:
+            - text
+            - switch_inline_query
+          properties:
+            text:
+              type: string
+              minLength: 1
+            icon_custom_emoji_id:
+              $ref: '#/components/schemas/ButtonIconCustomEmojiId'
+            style:
+              $ref: '#/components/schemas/ButtonStyle'
+            switch_inline_query:
+              type: string
+              description: >-
+                The query that pressing the button puts after the bot's username in a chat the
+                user chooses; empty for the username alone. Pressing the button involves only the
+                user's client, so tests send the inline query itself.
+        - type: object
+          additionalProperties: false
+          required:
+            - text
+            - switch_inline_query_current_chat
+          properties:
+            text:
+              type: string
+              minLength: 1
+            icon_custom_emoji_id:
+              $ref: '#/components/schemas/ButtonIconCustomEmojiId'
+            style:
+              $ref: '#/components/schemas/ButtonStyle'
+            switch_inline_query_current_chat:
+              type: string
+              description: >-
+                The query that pressing the button puts after the bot's username in the message's
+                own chat.
+        - type: object
+          additionalProperties: false
+          required:
+            - text
+            - switch_inline_query_chosen_chat
+          properties:
+            text:
+              type: string
+              minLength: 1
+            icon_custom_emoji_id:
+              $ref: '#/components/schemas/ButtonIconCustomEmojiId'
+            style:
+              $ref: '#/components/schemas/ButtonStyle'
+            switch_inline_query_chosen_chat:
+              type: object
+              additionalProperties: false
+              description: >-
+                A query for a chat the user chooses among the allowed kinds. As a request field,
+                omitted fields default to an empty query and to kinds that are not allowed; at
+                least one kind must be allowed (`Bad Request: At least one chat type must be
+                allowed`). As on Telegram, responses show a button that allows every kind as a
+                `switch_inline_query` button, and every field of any other.
+              properties:
+                query:
+                  type: string
+                allow_user_chats:
+                  type: boolean
+                allow_bot_chats:
+                  type: boolean
+                allow_group_chats:
+                  type: boolean
+                allow_channel_chats:
+                  type: boolean
+        - type: object
+          additionalProperties: false
+          required:
+            - text
+            - disabled
+          properties:
+            text:
+              type: string
+              minLength: 1
+            icon_custom_emoji_id:
+              $ref: '#/components/schemas/ButtonIconCustomEmojiId'
+            style:
+              $ref: '#/components/schemas/ButtonStyle'
+            disabled:
+              type: object
+              additionalProperties: false
+              description: Marks a button that does nothing when pressed.
     MessageSenderBot:
       type: object
       additionalProperties: false

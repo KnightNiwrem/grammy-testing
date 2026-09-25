@@ -1,4 +1,8 @@
-import type { InlineKeyboard } from './inline_keyboard.ts';
+import type {
+  InlineKeyboard,
+  InlineKeyboardButton,
+  InlineQuerySwitchTarget,
+} from './inline_keyboard.ts';
 import {
   type ChatMessage,
   type ContentMessage,
@@ -35,23 +39,76 @@ export function isForwardable(message: ChatMessage): message is ContentMessage {
 /**
  * Creates the forward of a message as TDLib's `forward_messages_impl` does: the forward repeats the
  * content and the inline bot it was sent through, and shows who first sent it and when; a forward
- * of a forward shows the original's origin. As TDLib's `dup_reply_markup` does, the forward keeps
- * the inline keyboard only when every button opens a URL, because other buttons act for the
- * original message.
+ * of a forward shows the original's origin. The forward keeps the inline keyboard as
+ * `forwardInlineKeyboard` decides.
  */
 export function createMessageForward(
   message: ContentMessage,
   getPrivateForwardName: PrivateForwardNameLookup,
 ): MessageForward {
   const forwardInfo = getMessageOrigin(message, getPrivateForwardName);
-  const keepsInlineKeyboard = message.inlineKeyboard?.every((row) =>
-    row.every((button) => button.kind === 'url')
-  );
+  const inlineKeyboard = message.inlineKeyboard === undefined
+    ? undefined
+    : forwardInlineKeyboard(message.inlineKeyboard, message.viaBot !== undefined);
   return {
     content: message.content,
     forwardInfo,
-    ...(keepsInlineKeyboard ? { inlineKeyboard: message.inlineKeyboard } : {}),
+    ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }),
   };
+}
+
+const EVERY_INLINE_QUERY_CHAT: InlineQuerySwitchTarget = {
+  kind: 'chosen_chat',
+  chatTypes: {
+    allowsUserChats: true,
+    allowsBotChats: true,
+    allowsGroupChats: true,
+    allowsChannelChats: true,
+  },
+};
+
+/**
+ * The inline keyboard a forward shows, as TDLib's `dup_reply_markup` decides: the forward keeps the
+ * keyboard only when every button still works away from the original message, and drops it
+ * otherwise. URL, copy-text and disabled buttons work anywhere. Switch-inline buttons of a message
+ * sent through an inline bot work too, and let the user choose any chat, since the forward's chat
+ * is not the original's. TDLib keeps a disabled button without its text, which the emulator keeps.
+ */
+function forwardInlineKeyboard(
+  inlineKeyboard: InlineKeyboard,
+  isSentViaBot: boolean,
+): InlineKeyboard | undefined {
+  const forwardedRows: InlineKeyboardButton[][] = [];
+  for (const row of inlineKeyboard) {
+    const forwardedRow: InlineKeyboardButton[] = [];
+    for (const button of row) {
+      switch (button.kind) {
+        case 'url':
+        case 'copy_text':
+        case 'disabled':
+          forwardedRow.push(button);
+          break;
+        case 'switch_inline_query':
+          if (!isSentViaBot) {
+            return undefined;
+          }
+          forwardedRow.push(
+            button.target.kind === 'current_chat'
+              ? { ...button, target: EVERY_INLINE_QUERY_CHAT }
+              : button,
+          );
+          break;
+        case 'callback':
+          return undefined;
+        default: {
+          const unhandledButton: never = button;
+          throw new Error(`Unhandled inline keyboard button: ${JSON.stringify(unhandledButton)}`);
+        }
+      }
+    }
+    forwardedRows.push(forwardedRow);
+  }
+  return forwardedRows;
 }
 
 /**

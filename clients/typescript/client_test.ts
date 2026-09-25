@@ -155,7 +155,14 @@ Deno.test('TypeScript client manages all currently implemented session resources
       chat_id: createdAccount.account.id,
       text: 'Continue?',
       reply_markup: {
-        inline_keyboard: [[{ text: 'Yes', callback_data: 'yes', style: 'success' }]],
+        inline_keyboard: [
+          [{ text: 'Yes', callback_data: 'yes', style: 'success' }],
+          [
+            { text: 'Copy', copy_text: { text: 'yes' } },
+            { text: 'Ask', switch_inline_query_chosen_chat: { allow_group_chats: true } },
+            { text: 'Later', disabled: {} },
+          ],
+        ],
       },
     }),
   });
@@ -169,7 +176,23 @@ Deno.test('TypeScript client manages all currently implemented session resources
     menu === undefined ||
     JSON.stringify(menu.reply_markup) !==
       JSON.stringify({
-        inline_keyboard: [[{ text: 'Yes', style: 'success', callback_data: 'yes' }]],
+        inline_keyboard: [
+          [{ text: 'Yes', style: 'success', callback_data: 'yes' }],
+          [
+            { text: 'Copy', copy_text: { text: 'yes' } },
+            {
+              text: 'Ask',
+              switch_inline_query_chosen_chat: {
+                query: '',
+                allow_user_chats: false,
+                allow_bot_chats: false,
+                allow_group_chats: true,
+                allow_channel_chats: false,
+              },
+            },
+            { text: 'Later', disabled: {} },
+          ],
+        ],
       })
   ) {
     throw new Error('Expected the client to return the inline keyboard of a bot message');
@@ -347,7 +370,14 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
       text: 'Continue?',
       reply_parameters: { message_id: greeting.message_id },
       reply_markup: {
-        inline_keyboard: [[{ text: 'Yes', callback_data: 'yes', style: 'success' }]],
+        inline_keyboard: [
+          [{ text: 'Yes', callback_data: 'yes', style: 'success' }],
+          [
+            { text: 'Copy', copy_text: { text: 'yes' } },
+            { text: 'Ask', switch_inline_query_chosen_chat: { allow_group_chats: true } },
+            { text: 'Later', disabled: {} },
+          ],
+        ],
       },
     }),
   });

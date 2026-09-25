@@ -70,7 +70,7 @@ Deno.test('createMessageForward keeps the origin of a forward and only URL keybo
   );
   if (
     forwardOfForward.forwardInfo !== originalForwardInfo ||
-    forwardOfForward.inlineKeyboard !== urlKeyboard ||
+    JSON.stringify(forwardOfForward.inlineKeyboard) !== JSON.stringify(urlKeyboard) ||
     JSON.stringify(forwardOfCallbackKeyboard.forwardInfo.originalSender) !==
       JSON.stringify({ kind: 'user', userId: BOT_ID }) ||
     forwardOfCallbackKeyboard.inlineKeyboard !== undefined

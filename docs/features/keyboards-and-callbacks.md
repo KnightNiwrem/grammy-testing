@@ -4,16 +4,27 @@
 
 ## Inline keyboards
 
-Messages can carry inline keyboards with callback and URL buttons in private chats and supergroups.
-Callback data must contain 1–64 UTF-8 bytes. URL buttons accept the links TDLib's
-[`get_inline_keyboard_button`][td-inline-button] accepts: a `tg://user?id=` link opens the user's
-profile, and any other link must pass [`LinkManager::check_link`][check-link], the same rule the
-emulator applies to text links. The keyboard keeps and returns the normalized link, so `grammy.dev`
-becomes `http://grammy.dev/`, and a refused link fails with TDLib's error, such as
-`Bad Request: inline keyboard button URL 'grammy' is invalid: Wrong HTTP URL`. Telegram's servers
-decide whether a profile link's user may be shown, which the emulator does not check. Bots replace
-or remove a keyboard with `editMessageReplyMarkup`, or supply it when editing text/captions. An
-empty `inline_keyboard` removes the keyboard.
+Messages can carry inline keyboards with callback, URL, copy-text, switch-inline and disabled
+buttons in private chats and supergroups. Callback data must contain 1–64 UTF-8 bytes. URL buttons
+accept the links TDLib's [`get_inline_keyboard_button`][td-inline-button] accepts: a `tg://user?id=`
+link opens the user's profile, and any other link must pass [`LinkManager::check_link`][check-link],
+the same rule the emulator applies to text links. The keyboard keeps and returns the normalized
+link, so `grammy.dev` becomes `http://grammy.dev/`, and a refused link fails with TDLib's error,
+such as `Bad Request: inline keyboard button URL 'grammy' is invalid: Wrong HTTP URL`. Telegram's
+servers decide whether a profile link's user may be shown, which the emulator does not check. Bots
+replace or remove a keyboard with `editMessageReplyMarkup`, or supply it when editing text/captions.
+An empty `inline_keyboard` removes the keyboard.
+
+Copy-text, switch-inline and disabled buttons act only in the user's client, so the emulator stores
+them for inspection and nothing happens when they are pressed. The official server's
+[`get_inline_keyboard_button_type`][button-parsing] reads `switch_inline_query` as a switch to a
+chat of any kind, and `switch_inline_query_chosen_chat` as one limited to the kinds it allows, of
+which TDLib's [`get_inline_keyboard_button`][td-inline-button] requires at least one:
+`Bad Request: at least one chat type must be allowed`. As the official server's
+[`JsonInlineKeyboardButton`][button-json] does, a returned keyboard shows a chosen-chat button that
+allows every kind as a `switch_inline_query` button. To test what follows a switch-inline press,
+send the inline query from the account. Copied text is limited to the documented 256 characters,
+which TDLib does not check.
 
 An account presses a callback button using its message ID and `callback_data`. The emulator creates
 a `callback_query` update for the bot responsible for that keyboard. The query includes the account,
@@ -114,8 +125,9 @@ no buttons, and it checks only the icon identifier's syntax, as it does for
 
 ## Real gaps
 
-- **Inline button types.** Login, Mini Apps, games, payments, inline switching, copy-text and
-  disabled buttons are absent. Tests cannot exercise those button definitions or actions.
+- **Inline button types.** Login and Mini App buttons are absent, along with game and payment
+  buttons, which need their [missing features](README.md#unimplemented-areas). Tests cannot exercise
+  those button definitions or actions.
 - **Reply keyboard request buttons.** Requests for contacts, locations, polls, users, chats and web
   apps are absent. Compare these missing types and fields with upstream's
   [keyboard button parsing][button-parsing].

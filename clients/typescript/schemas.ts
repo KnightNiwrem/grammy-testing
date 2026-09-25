@@ -179,6 +179,26 @@ const inlineKeyboardMarkupSchema: z.ZodType<InlineKeyboardMarkup> = z.strictObje
       z.union([
         z.strictObject({ ...keyboardButtonFaceShape, callback_data: z.string() }),
         z.strictObject({ ...keyboardButtonFaceShape, url: z.string() }),
+        z.strictObject({
+          ...keyboardButtonFaceShape,
+          copy_text: z.strictObject({ text: z.string() }),
+        }),
+        z.strictObject({ ...keyboardButtonFaceShape, switch_inline_query: z.string() }),
+        z.strictObject({
+          ...keyboardButtonFaceShape,
+          switch_inline_query_current_chat: z.string(),
+        }),
+        z.strictObject({
+          ...keyboardButtonFaceShape,
+          switch_inline_query_chosen_chat: z.strictObject({
+            query: z.string(),
+            allow_user_chats: z.boolean(),
+            allow_bot_chats: z.boolean(),
+            allow_group_chats: z.boolean(),
+            allow_channel_chats: z.boolean(),
+          }),
+        }),
+        z.strictObject({ ...keyboardButtonFaceShape, disabled: z.strictObject({}) }),
       ]),
     ).min(1),
   ).min(1),

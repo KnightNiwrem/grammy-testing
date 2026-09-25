@@ -1159,6 +1159,207 @@ Deno.test('URL buttons follow Telegram link rules', async () => {
   }
 });
 
+Deno.test('copy-text, switch-inline and disabled buttons follow Telegram rules', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  await sendText('/start');
+  const accountId = createdAccount.account.id;
+  const sendButtons = (buttons: readonly unknown[]) =>
+    callBotApi(api, `${botApiPath}/sendMessage`, {
+      chat_id: accountId,
+      text: 'Share',
+      reply_markup: { inline_keyboard: [buttons] },
+    });
+
+  const reply = await sendButtons([
+    { text: 'Copy', copy_text: { text: 'PROMO-2026' } },
+    { text: 'Share', switch_inline_query: '' },
+    { text: 'Search here', switch_inline_query_current_chat: 'cats' },
+    {
+      text: 'Everywhere',
+      switch_inline_query_chosen_chat: {
+        query: 'dogs',
+        allow_user_chats: true,
+        allow_bot_chats: true,
+        allow_group_chats: true,
+        allow_channel_chats: true,
+      },
+    },
+    { text: 'Groups', switch_inline_query_chosen_chat: { allow_group_chats: true } },
+    { text: 'Sold out', disabled: {} },
+  ]);
+  const sentMessage = botApiResult(reply.body);
+  const expectedButtons = [
+    { text: 'Copy', copy_text: { text: 'PROMO-2026' } },
+    { text: 'Share', switch_inline_query: '' },
+    { text: 'Search here', switch_inline_query_current_chat: 'cats' },
+    { text: 'Everywhere', switch_inline_query: 'dogs' },
+    {
+      text: 'Groups',
+      switch_inline_query_chosen_chat: {
+        query: '',
+        allow_user_chats: false,
+        allow_bot_chats: false,
+        allow_group_chats: true,
+        allow_channel_chats: false,
+      },
+    },
+    { text: 'Sold out', disabled: {} },
+  ];
+  if (
+    reply.status !== 200 ||
+    JSON.stringify(sentMessage?.reply_markup) !==
+      JSON.stringify({ inline_keyboard: [expectedButtons] })
+  ) {
+    throw new Error(
+      `Expected the buttons as Telegram shows them, received ${JSON.stringify(reply)}`,
+    );
+  }
+
+  const history = await (await api.request(
+    `${sessionPath}/accounts/${accountId}/conversations/private/${createdBot.bot.id}/messages`,
+  )).json() as { messages: Array<{ message_id: number; reply_markup?: unknown }> };
+  const accountView = history.messages.find(({ message_id }) =>
+    message_id === sentMessage?.message_id
+  );
+  if (
+    JSON.stringify(accountView?.reply_markup) !==
+      JSON.stringify({ inline_keyboard: [expectedButtons] })
+  ) {
+    throw new Error(`Expected the account to see the buttons, received ${JSON.stringify(history)}`);
+  }
+
+  const edit = (buttons: readonly unknown[]) =>
+    callBotApi(api, `${botApiPath}/editMessageReplyMarkup`, {
+      chat_id: accountId,
+      message_id: sentMessage?.message_id,
+      reply_markup: { inline_keyboard: [buttons] },
+    });
+  const unchangedEdit = await edit(expectedButtons);
+  const changedEdit = await edit([
+    { text: 'Copy', copy_text: { text: 'PROMO-2027' } },
+    ...expectedButtons.slice(1),
+  ]);
+  if (
+    !isBadRequestResponse(unchangedEdit.body) ||
+    unchangedEdit.body.description !==
+      'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message' ||
+    changedEdit.status !== 200
+  ) {
+    throw new Error(
+      `Expected only a changed copied text to modify the keyboard, received ${
+        JSON.stringify([unchangedEdit, changedEdit])
+      }`,
+    );
+  }
+
+  const noChatType = await sendButtons([
+    { text: 'Nowhere', switch_inline_query_chosen_chat: { query: 'cats' } },
+  ]);
+  if (
+    !isBadRequestResponse(noChatType.body) ||
+    noChatType.body.description !== 'Bad Request: at least one chat type must be allowed'
+  ) {
+    throw new Error(`Expected TDLib's chat type error, received ${JSON.stringify(noChatType)}`);
+  }
+  const invalidButtons: unknown[] = [
+    { text: 'Copy', copy_text: { text: '' } },
+    { text: 'Copy', copy_text: { text: 'x'.repeat(257) } },
+    { text: 'Copy', copy_text: 'PROMO' },
+    { text: 'Share', switch_inline_query: 1 },
+    { text: 'Off', disabled: true },
+  ];
+  for (const button of invalidButtons) {
+    const { status } = await sendButtons([button]);
+    if (status !== 400) {
+      throw new Error(`Expected ${JSON.stringify(button)} to be rejected, received ${status}`);
+    }
+  }
+});
+
+Deno.test('forwards keep switch-inline buttons only of messages sent through an inline bot', async () => {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const sessionPath = (await api.request('/sessions', { method: 'POST' })).headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const account = await createAccount(api, sessionPath, 'Ada');
+  const inlineBot = await createBot(api, sessionPath, 'cats_bot', {
+    supports_inline_queries: true,
+  });
+  const accountPath = `${sessionPath}/accounts/${account.id}`;
+  const chat = { type: 'private', botId: inlineBot.bot.id };
+  await api.request(`${accountPath}/messages`, jsonRequest('POST', { to: chat, text: '/start' }));
+
+  const queryResponse = await api.request(
+    `${accountPath}/inline-queries`,
+    jsonRequest('POST', { bot_id: inlineBot.bot.id, chat, query: 'cats' }),
+  );
+  const { inline_query: inlineQuery } = await queryResponse.json() as {
+    inline_query: { id: string };
+  };
+  const switchKeyboard = [[
+    { text: 'More here', switch_inline_query_current_chat: 'more cats' },
+    { text: 'Copy', copy_text: { text: 'cats' } },
+  ]];
+  await callBotApi(api, `${inlineBot.botApiPath}/answerInlineQuery`, {
+    inline_query_id: inlineQuery.id,
+    results: [{
+      type: 'article',
+      id: 'cats',
+      title: 'Cats',
+      input_message_content: { message_text: 'Cats' },
+      reply_markup: { inline_keyboard: switchKeyboard },
+    }],
+  });
+  const chooseResponse = await api.request(
+    `${accountPath}/inline-queries/${inlineQuery.id}/chosen-results`,
+    jsonRequest('POST', { result_id: 'cats' }),
+  );
+  const { message: viaBotMessage } = await chooseResponse.json() as {
+    message: { message_id: number };
+  };
+  const botMessage = botApiResult(
+    (await callBotApi(api, `${inlineBot.botApiPath}/sendMessage`, {
+      chat_id: account.id,
+      text: 'Cats',
+      reply_markup: { inline_keyboard: switchKeyboard },
+    })).body,
+  );
+
+  const forwardedMarkups = [];
+  for (const messageId of [viaBotMessage.message_id, botMessage?.message_id]) {
+    forwardedMarkups.push(
+      botApiResult(
+        (await callBotApi(api, `${inlineBot.botApiPath}/forwardMessage`, {
+          chat_id: account.id,
+          from_chat_id: account.id,
+          message_id: messageId,
+        })).body,
+      )?.reply_markup,
+    );
+  }
+  const expectedMarkups = [
+    {
+      inline_keyboard: [[
+        { text: 'More here', switch_inline_query: 'more cats' },
+        { text: 'Copy', copy_text: { text: 'cats' } },
+      ]],
+    },
+    undefined,
+  ];
+  if (JSON.stringify(forwardedMarkups) !== JSON.stringify(expectedMarkups)) {
+    throw new Error(
+      `Expected a switch to any chat only on the inline message's forward, received ${
+        JSON.stringify(forwardedMarkups)
+      }`,
+    );
+  }
+});
+
 Deno.test('messages carry the entities Telegram detects in their text', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount } =
     await createPrivateConversationFixture();

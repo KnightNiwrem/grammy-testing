@@ -6,7 +6,12 @@ import {
 import { areTextEntitiesEqual } from '../text_entities/text_entity_equality.ts';
 import { compareTextEntities } from '../text_entities/text_entity_order.ts';
 import { isSameButtonAppearance } from '../types/button_appearance.ts';
-import { type InlineKeyboard, MAX_CALLBACK_DATA_BYTES } from '../types/inline_keyboard.ts';
+import {
+  type InlineKeyboard,
+  type InlineKeyboardButton,
+  type InlineQuerySwitchTarget,
+  MAX_CALLBACK_DATA_BYTES,
+} from '../types/inline_keyboard.ts';
 import {
   createAutomaticQuote,
   type ExternalReplyTarget,
@@ -550,23 +555,48 @@ function areInlineKeyboardsEqual(
     const secondRow = second[rowIndex];
     return firstRow.length === secondRow.length && firstRow.every((firstButton, buttonIndex) => {
       const secondButton = secondRow[buttonIndex];
-      if (!isSameButtonAppearance(firstButton, secondButton)) {
-        return false;
-      }
-      switch (firstButton.kind) {
-        case 'callback':
-          return secondButton.kind === 'callback' && firstButton.text === secondButton.text &&
-            firstButton.callbackData === secondButton.callbackData;
-        case 'url':
-          return secondButton.kind === 'url' && firstButton.text === secondButton.text &&
-            firstButton.url === secondButton.url;
-        default: {
-          const unhandledButton: never = firstButton;
-          throw new Error(`Unhandled inline keyboard button: ${JSON.stringify(unhandledButton)}`);
-        }
-      }
+      return firstButton.text === secondButton.text &&
+        isSameButtonAppearance(firstButton, secondButton) &&
+        isSameInlineKeyboardButtonAction(firstButton, secondButton);
     });
   });
+}
+
+/** Whether two buttons act the same, as TDLib compares their type and data. */
+function isSameInlineKeyboardButtonAction(
+  first: InlineKeyboardButton,
+  second: InlineKeyboardButton,
+): boolean {
+  switch (first.kind) {
+    case 'callback':
+      return second.kind === 'callback' && first.callbackData === second.callbackData;
+    case 'url':
+      return second.kind === 'url' && first.url === second.url;
+    case 'copy_text':
+      return second.kind === 'copy_text' && first.copiedText === second.copiedText;
+    case 'switch_inline_query':
+      return second.kind === 'switch_inline_query' && first.query === second.query &&
+        isSameInlineQuerySwitchTarget(first.target, second.target);
+    case 'disabled':
+      return second.kind === 'disabled';
+    default: {
+      const unhandledButton: never = first;
+      throw new Error(`Unhandled inline keyboard button: ${JSON.stringify(unhandledButton)}`);
+    }
+  }
+}
+
+function isSameInlineQuerySwitchTarget(
+  first: InlineQuerySwitchTarget,
+  second: InlineQuerySwitchTarget,
+): boolean {
+  if (first.kind === 'current_chat' || second.kind === 'current_chat') {
+    return first.kind === second.kind;
+  }
+  return first.chatTypes.allowsUserChats === second.chatTypes.allowsUserChats &&
+    first.chatTypes.allowsBotChats === second.chatTypes.allowsBotChats &&
+    first.chatTypes.allowsGroupChats === second.chatTypes.allowsGroupChats &&
+    first.chatTypes.allowsChannelChats === second.chatTypes.allowsChannelChats;
 }
 
 /** The Bot API `quote_position` bound beyond which TDLib's `MessageQuote` reads position 0. */
