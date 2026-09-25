@@ -80,8 +80,15 @@ URL/callback button types follows [`dup_reply_markup`][forward-markup] and
 [`InlineKeyboardButton::clone`][forward-buttons]. Upstream can also retain some button kinds that
 the emulator cannot create, such as copy-text and login buttons.
 
-Origins are always users. Other origin types, sender privacy, `forwardMessages` and `copyMessages`
-are [real gaps](#real-gaps), as are video start timestamps and media albums.
+`forwardMessages` and `copyMessages` repeat up to 100 messages of one chat, whose IDs must be in
+strictly increasing order, and return the new `message_id`s. As in TDLib's
+[`forward_messages_impl`][forward-messages], missing messages and messages that cannot be forwarded
+or copied are skipped, and the request fails only when none is left. A message that replies to an
+earlier message of the same request replies to that message's new counterpart. Batch copies keep no
+reply markup, and `remove_caption` drops media captions.
+
+Origins are always users. Other origin types, sender privacy, video start timestamps and media
+albums are [real gaps](#real-gaps).
 
 ## Intentional deviations
 
@@ -118,8 +125,6 @@ are [real gaps](#real-gaps), as are video start timestamps and media albums.
 - **Forward origins and sender privacy.** Forward origins are always visible users. Tests cannot
   exercise hidden-sender, channel or chat origins, which TDLib's
   [forward origin model][forward-origin] supports.
-- **Batched forwarding and copying.** `forwardMessages` and `copyMessages` are not implemented. Only
-  the corresponding single-message methods are available.
 - **Video start timestamps.** Forwarding and copying cannot specify a video start timestamp. This
   option is missing along with video message support.
 - **Message-effect metadata.** The emulator rejects `message_effect_id` and exposes no effect
@@ -143,5 +148,6 @@ are [real gaps](#real-gaps), as are video start timestamps and media albums.
 [forward-permissions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8270-L8330
 [forward-markup]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/ReplyMarkup.cpp
 [forward-origin]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageForwardInfo.cpp
+[forward-messages]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L24816-L24965
 [forward-buttons]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L42-L81
 [message-effects]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17343-L17375

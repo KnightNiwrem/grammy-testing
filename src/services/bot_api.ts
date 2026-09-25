@@ -24,9 +24,11 @@ import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_fi
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { ChatAction } from '../types/virtual_chat.ts';
 import {
+  type CanonicalMessageId,
   type ChatMessage,
   type InlineMessageId,
   isContentMessage,
+  type MessageContent,
   type MessageForwardInfo,
   type PrivateMessage,
   type SupergroupMessage,
@@ -237,6 +239,48 @@ export type CopyMessageResult =
   | { readonly sent: true; readonly messageId: number }
   | Extract<SendResult, { readonly sent: false }>
   | RepetitionFailure<'message_not_copyable'>;
+
+/** Messages of one of the bot's chats that `forwardMessages` or `copyMessages` repeats at once. */
+export interface RepeatMessagesRequest {
+  /** The Bot API `chat_id` of the chat the messages go to. */
+  readonly chatId: number;
+  /** The Bot API `from_chat_id` of the chat of the repeated messages. */
+  readonly fromChatId: number;
+  /** The repeated messages' IDs in the bot's chat, in strictly increasing order. */
+  readonly messageIds: readonly number[];
+  /** The Bot API `protect_content`; omitted for unprotected messages. */
+  readonly isContentProtected?: boolean;
+}
+
+export type CopyMessagesRequest = RepeatMessagesRequest & {
+  /** The Bot API `remove_caption`, which sends media without their captions. */
+  readonly removesCaptions: boolean;
+};
+
+/**
+ * The Bot API answers `forwardMessages` and `copyMessages` with the new messages' IDs, in the
+ * order of the repeated messages. As TDLib does, a request fails only when no message is left to
+ * repeat: identifiers of no message are skipped, and so are messages that cannot be repeated.
+ */
+export type RepeatMessagesResult =
+  | { readonly sent: true; readonly messageIds: readonly number[] }
+  | Extract<SendResult, { readonly sent: false }>
+  | {
+    readonly sent: false;
+    readonly reason:
+      | 'repeated_messages_not_found'
+      | 'repeated_message_ids_not_increasing'
+      | 'messages_not_repeatable';
+  };
+
+/** What a message sent by `forwardMessages` or `copyMessages` repeats of the original. */
+interface MessageRepetition {
+  readonly content: MessageContent;
+  /** Omitted for a copy, which does not show where it came from. */
+  readonly forwardInfo?: MessageForwardInfo;
+  /** Omitted when the repetition shows no inline keyboard. */
+  readonly inlineKeyboard?: InlineKeyboard;
+}
 
 export interface EditMessageTextRequest extends MessageTarget, SpecifiedFormattedText {
   /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
@@ -1223,6 +1267,43 @@ export class BotApiService {
     return result.sent ? { sent: true, messageId: result.message.message_id } : result;
   }
 
+  /**
+   * Forwards up to 100 messages of one of the bot's chats to a private chat or a supergroup, each
+   * as `forwardMessage` does, as TDLib's `forward_messages` does. A message that is not found, or
+   * that cannot be forwarded, is skipped; the request fails only when none is left.
+   */
+  forwardMessages(
+    authenticatedBot: VirtualBotProfile,
+    request: RepeatMessagesRequest,
+  ): RepeatMessagesResult {
+    return this.#repeatMessages(authenticatedBot, request, (message) => {
+      if (!isForwardable(message)) {
+        return undefined;
+      }
+      const { content, forwardInfo, inlineKeyboard } = createMessageForward(message);
+      return { content, forwardInfo, ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }) };
+    });
+  }
+
+  /**
+   * Copies up to 100 messages of one of the bot's chats to a private chat or a supergroup, as
+   * `forwardMessages` forwards them. As TDLib's `dup_reply_markup` does for copies, the copies keep
+   * no reply markup; `removesCaptions` sends media without their captions.
+   */
+  copyMessages(
+    authenticatedBot: VirtualBotProfile,
+    { removesCaptions, ...request }: CopyMessagesRequest,
+  ): RepeatMessagesResult {
+    return this.#repeatMessages(
+      authenticatedBot,
+      request,
+      (message) =>
+        isContentMessage(message)
+          ? { content: removesCaptions ? withoutCaption(message.content) : message.content }
+          : undefined,
+    );
+  }
+
   /** Returns a file the bot knows by its `file_id`, with the `file_path` to download it from. */
   getFile(authenticatedBot: VirtualBotProfile, fileId: string): GetFileResult {
     const result = this.#mediaFiles.getBotFile(authenticatedBot.id, fileId);
@@ -1244,6 +1325,75 @@ export class BotApiService {
   /** Returns the file at a `file_path` that `getFile` gave the bot, for download. */
   downloadFile(authenticatedBot: VirtualBotProfile, filePath: string): StoredFile | undefined {
     return this.#mediaFiles.findBotFileByPath(authenticatedBot.id, filePath);
+  }
+
+  /**
+   * Sends the repetitions of messages of one of the bot's chats to a chat, in the order of their
+   * IDs, as TDLib's `forward_messages_impl` does: a message that `repeat` cannot repeat is skipped,
+   * and a message that replies to an earlier message of the request replies to that message's
+   * repetition.
+   *
+   * As for `forwardMessage`, the messages are checked before the chat they go to; every repetition
+   * goes to that chat, so a chat the bot cannot send to fails before any message is sent.
+   */
+  #repeatMessages(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, fromChatId, messageIds, isContentProtected }: RepeatMessagesRequest,
+    repeat: (message: ChatMessage) => MessageRepetition | undefined,
+  ): RepeatMessagesResult {
+    const repeatedMessages: Array<{ readonly messageId: number; readonly message: ChatMessage }> =
+      [];
+    for (const messageId of messageIds) {
+      const lookup = this.#findRepeatedMessage(authenticatedBot, { chatId: fromChatId, messageId });
+      if (lookup.found) {
+        repeatedMessages.push({ messageId, message: lookup.message });
+      } else if (lookup.reason !== 'repeated_message_not_found') {
+        return { sent: false, reason: lookup.reason };
+      }
+    }
+    if (repeatedMessages.length === 0) {
+      return { sent: false, reason: 'repeated_messages_not_found' };
+    }
+    if (
+      repeatedMessages.some(({ messageId }, index) =>
+        index > 0 && messageId <= repeatedMessages[index - 1].messageId
+      )
+    ) {
+      return { sent: false, reason: 'repeated_message_ids_not_increasing' };
+    }
+    const repetitions = repeatedMessages.flatMap(({ message }) => {
+      const repetition = repeat(message);
+      return repetition === undefined ? [] : [{ message, repetition }];
+    });
+    if (repetitions.length === 0) {
+      return { sent: false, reason: 'messages_not_repeatable' };
+    }
+
+    const sentMessageIdsByRepeatedMessageId = new Map<CanonicalMessageId, number>();
+    for (const { message, repetition } of repetitions) {
+      const repliedMessageId = message.replyToMessageId === undefined
+        ? undefined
+        : sentMessageIdsByRepeatedMessageId.get(message.replyToMessageId);
+      const { content, forwardInfo, inlineKeyboard } = repetition;
+      const result = this.#send(
+        authenticatedBot,
+        { kind: 'existing', content },
+        {
+          chatId,
+          isContentProtected,
+          ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }),
+          ...(repliedMessageId === undefined
+            ? {}
+            : { replyTo: { messageId: repliedMessageId, allowSendingWithoutReply: true } }),
+        },
+        forwardInfo,
+      );
+      if (!result.sent) {
+        return result;
+      }
+      sentMessageIdsByRepeatedMessageId.set(message.id, result.message.message_id);
+    }
+    return { sent: true, messageIds: [...sentMessageIdsByRepeatedMessageId.values()] };
   }
 
   /**
@@ -2301,4 +2451,9 @@ function toEditInlineMessageFailureReason(
       throw new Error(`Unhandled inline message edit failure: ${unhandledReason}`);
     }
   }
+}
+
+/** Media content without its caption, as a copy that removes captions sends it; text is kept. */
+function withoutCaption(content: MessageContent): MessageContent {
+  return content.kind === 'text' ? content : { ...content, caption: { text: '', entities: [] } };
 }

@@ -1428,6 +1428,142 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '404':
           description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/forwardMessages:
+    description: >-
+      Telegram Bot API method for forwarding up to 100 messages of one of the bot's chats at once,
+      each as `forwardMessage` forwards it, to a chat that `forwardMessage` can address. As TDLib
+      does, identifiers of no message are skipped, as are messages that cannot be forwarded, and a
+      message that replies to an earlier message of the request replies to that message's forward.
+      Topics, message effects, paid broadcasts, and suggested posts are not supported.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: forwardMessages
+      summary: Forward several messages from one of the authenticated virtual bot's chats
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForwardMessagesRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ForwardMessagesRequest'
+            encoding:
+              message_ids:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ForwardMessagesRequest'
+            encoding:
+              message_ids:
+                contentType: application/json
+      responses:
+        '200':
+          description: >-
+            The forwards were stored in the chat they were sent to. As on Telegram, the response
+            holds only their message IDs, in the order of the forwarded messages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageIdsResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, or Telegram would reject
+            it, checking in this order: `from_chat_id` is missing (`Bad Request: parameter
+            "from_chat_id" is required`); `message_ids` is missing or empty (`Bad Request: message
+            identifiers are not specified`); it has more than 100 identifiers (`Bad Request: too
+            many message identifiers specified`); an identifier is not positive (`Bad Request:
+            invalid message identifier specified`); `chat_id` is missing (`Bad Request: chat_id is
+            empty`); the chat of the forwarded messages is unknown to the bot (`Bad Request: chat
+            not found`); no identifier identifies a message of that chat (`Bad Request: there are
+            no messages to forward`); the identifiers of its messages do not increase (`Bad
+            Request: message identifiers must be in a strictly increasing order`); none of its
+            messages can be forwarded (`Bad Request: messages can't be forwarded`); or the chat the
+            forwards go to is unknown to the bot (`Bad Request: chat not found`). Telegram checks
+            the chat the forwards go to before the forwarded messages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: As for `forwardMessage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+  /sessions/{sessionId}/bot-api/bot{token}/copyMessages:
+    description: >-
+      Telegram Bot API method for copying up to 100 messages of one of the bot's chats at once, as
+      `forwardMessages` forwards them. Each copy repeats its message's content as `copyMessage`
+      does; as TDLib does for copies of several messages, the copies keep no reply markup, and
+      `remove_caption` sends photos and documents without their captions. As TDLib lets bots do,
+      a bot may copy messages whose sender protected them. Topics, message effects, paid
+      broadcasts, and suggested posts are not supported.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: copyMessages
+      summary: Copy several messages from one of the authenticated virtual bot's chats
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CopyMessagesRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CopyMessagesRequest'
+            encoding:
+              message_ids:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CopyMessagesRequest'
+            encoding:
+              message_ids:
+                contentType: application/json
+      responses:
+        '200':
+          description: >-
+            The copies were stored in the chat they were sent to. As on Telegram, the response
+            holds only their message IDs, in the order of the copied messages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageIdsResponse'
+        '400':
+          description: >-
+            As for `forwardMessages`, whose descriptions Telegram uses for copies too. Only service
+            messages cannot be copied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: As for `forwardMessage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
   /sessions/{sessionId}/bot-api/bot{token}/editMessageCaption:
     description: >-
       Telegram Bot API method for editing the caption of a photo or document the bot sent to a
@@ -4546,6 +4682,66 @@ components:
           type: boolean
           default: false
           description: As for `sendMessage`.
+    ForwardMessagesRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+        - from_chat_id
+        - message_ids
+      properties:
+        chat_id:
+          type: integer
+          description: Identifier of the chat to forward to, as for `forwardMessage`.
+        from_chat_id:
+          type: integer
+          description: Identifier of the chat of the forwarded messages, as for `chat_id`.
+        message_ids:
+          $ref: '#/components/schemas/RepeatedMessageIds'
+        disable_notification:
+          type: boolean
+          description: Validated and without effect, because notifications are not modeled.
+        protect_content:
+          type: boolean
+          default: false
+          description: As for `sendMessage`.
+    CopyMessagesRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+        - from_chat_id
+        - message_ids
+      properties:
+        chat_id:
+          type: integer
+          description: Identifier of the chat to copy to, as for `forwardMessage`.
+        from_chat_id:
+          type: integer
+          description: Identifier of the chat of the copied messages, as for `chat_id`.
+        message_ids:
+          $ref: '#/components/schemas/RepeatedMessageIds'
+        disable_notification:
+          type: boolean
+          description: Validated and without effect, because notifications are not modeled.
+        protect_content:
+          type: boolean
+          default: false
+          description: As for `sendMessage`.
+        remove_caption:
+          type: boolean
+          default: false
+          description: Sends copies of photos and documents without their captions.
+    RepeatedMessageIds:
+      type: array
+      minItems: 1
+      maxItems: 100
+      items:
+        type: integer
+        minimum: 1
+      description: >-
+        Identifiers of messages in the bot's chat, in strictly increasing order. Identifiers of no
+        message are skipped.
     CopyMessageRequest:
       type: object
       additionalProperties: false
@@ -4787,6 +4983,30 @@ components:
               type: integer
               minimum: 1
               description: The new message's ID in the bot's chat.
+    MessageIdsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - message_id
+            properties:
+              message_id:
+                type: integer
+                minimum: 1
+                description: A new message's ID in the bot's chat.
     EditMessageResponse:
       type: object
       additionalProperties: false

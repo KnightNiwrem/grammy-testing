@@ -176,6 +176,14 @@ const MESSAGE_TO_FORWARD_NOT_FOUND_DESCRIPTION = 'Bad Request: message to forwar
 const MESSAGE_TO_COPY_NOT_FOUND_DESCRIPTION = 'Bad Request: message to copy not found';
 const MESSAGE_NOT_FORWARDABLE_DESCRIPTION = "Bad Request: the message can't be forwarded";
 const MESSAGE_NOT_COPYABLE_DESCRIPTION = "Bad Request: the message can't be copied";
+/** TDLib words these alike for forwardMessages and copyMessages, which both forward in TDLib. */
+const NO_MESSAGES_TO_FORWARD_DESCRIPTION = 'Bad Request: there are no messages to forward';
+const MESSAGE_IDS_NOT_INCREASING_DESCRIPTION =
+  'Bad Request: message identifiers must be in a strictly increasing order';
+const MESSAGES_NOT_FORWARDABLE_DESCRIPTION = "Bad Request: messages can't be forwarded";
+
+/** Telegram forwards or copies at most 100 messages in one request. */
+const MAX_REPEATED_MESSAGES_COUNT = 100;
 
 /** Telegram deletes at most 100 messages in one deleteMessages request. */
 const MAX_DELETE_MESSAGES_COUNT = 100;
@@ -377,6 +385,23 @@ const copyMessageParametersSchema = z.strictObject({
   show_caption_above_media: booleanParameter().default(false),
 });
 
+// As for forwardMessage, topics, message effects, paid broadcasts, and suggested posts are not
+// supported. Telegram also accepts message identifiers written as strings, as for deleteMessages.
+const repeatMessagesParametersShape = {
+  chat_id: integerParameter(z.int()).optional(),
+  from_chat_id: integerParameter(z.int()).optional(),
+  message_ids: jsonParameter(z.array(z.int())).optional(),
+  disable_notification: booleanParameter().optional(),
+  protect_content: booleanParameter().default(false),
+};
+
+const forwardMessagesParametersSchema = z.strictObject(repeatMessagesParametersShape);
+
+const copyMessagesParametersSchema = z.strictObject({
+  ...repeatMessagesParametersShape,
+  remove_caption: booleanParameter().default(false),
+});
+
 /** Where an edit method finds the message: in a chat, or sent through the bot's inline mode. */
 const editedMessageParametersShape = {
   chat_id: integerParameter(z.int()).optional(),
@@ -527,6 +552,13 @@ type SendResult = ReturnType<EmulationSession['botApi']['sendMessage']>;
 
 type SendFailure = Extract<SendResult, { readonly sent: false }>;
 
+/** The messages that `forwardMessages` or `copyMessages` repeats, and the chat they go to. */
+type RepeatMessagesRequest = Parameters<EmulationSession['botApi']['forwardMessages']>[1];
+
+type RepeatMessagesResult =
+  | ReturnType<EmulationSession['botApi']['forwardMessages']>
+  | ReturnType<EmulationSession['botApi']['copyMessages']>;
+
 /** The outcome of any edit method for an inline message; each fails for a subset of the reasons. */
 type InlineMessageEditResult =
   | ReturnType<EmulationSession['botApi']['editInlineMessageText']>
@@ -613,6 +645,7 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['answerinlinequery', handleAnswerInlineQuery],
   ['banchatmember', handleBanChatMember],
   ['copymessage', handleCopyMessage],
+  ['copymessages', handleCopyMessages],
   ['deletemessage', handleDeleteMessage],
   ['deletemessages', handleDeleteMessages],
   ['deletemycommands', handleDeleteMyCommands],
@@ -621,6 +654,7 @@ const BOT_API_METHOD_HANDLERS_BY_LOWERCASE_NAME = new Map<string, BotApiMethodHa
   ['editmessagereplymarkup', handleEditMessageReplyMarkup],
   ['editmessagetext', handleEditMessageText],
   ['forwardmessage', handleForwardMessage],
+  ['forwardmessages', handleForwardMessages],
   ['getchatadministrators', handleGetChatAdministrators],
   ['getchatmember', handleGetChatMember],
   ['getchatmembercount', handleGetChatMemberCount],
@@ -1014,6 +1048,93 @@ function handleCopyMessage(
       return botApiError(400, MESSAGE_TO_COPY_NOT_FOUND_DESCRIPTION);
     case 'message_not_copyable':
       return botApiError(400, MESSAGE_NOT_COPYABLE_DESCRIPTION);
+    default:
+      return sendMethodAnswer(result);
+  }
+}
+
+function handleForwardMessages(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const parsedParameters = forwardMessagesParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, 'Bad Request: invalid forwardMessages parameters');
+  }
+  const reading = readRepeatMessagesRequest(parsedParameters.data);
+  if (!reading.read) {
+    return reading.errorAnswer;
+  }
+  return repeatMessagesAnswer(context.session.botApi.forwardMessages(context.bot, reading.request));
+}
+
+function handleCopyMessages(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const parsedParameters = copyMessagesParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, 'Bad Request: invalid copyMessages parameters');
+  }
+  const reading = readRepeatMessagesRequest(parsedParameters.data);
+  if (!reading.read) {
+    return reading.errorAnswer;
+  }
+  return repeatMessagesAnswer(
+    context.session.botApi.copyMessages(context.bot, {
+      ...reading.request,
+      removesCaptions: parsedParameters.data.remove_caption,
+    }),
+  );
+}
+
+/**
+ * Reads the messages that `forwardMessages` or `copyMessages` repeats and where to, checking them
+ * in the order the official Bot API server does.
+ */
+function readRepeatMessagesRequest(
+  parameters: z.output<z.ZodObject<typeof repeatMessagesParametersShape>>,
+):
+  | { readonly read: true; readonly request: RepeatMessagesRequest }
+  | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
+  const {
+    chat_id: chatId,
+    from_chat_id: fromChatId,
+    message_ids: messageIds,
+    protect_content: isContentProtected,
+  } = parameters;
+  if (fromChatId === undefined) {
+    return { read: false, errorAnswer: botApiError(400, FROM_CHAT_ID_REQUIRED_DESCRIPTION) };
+  }
+  if (messageIds === undefined || messageIds.length === 0) {
+    return {
+      read: false,
+      errorAnswer: botApiError(400, MESSAGE_IDENTIFIERS_NOT_SPECIFIED_DESCRIPTION),
+    };
+  }
+  if (messageIds.length > MAX_REPEATED_MESSAGES_COUNT) {
+    return { read: false, errorAnswer: botApiError(400, TOO_MANY_MESSAGE_IDENTIFIERS_DESCRIPTION) };
+  }
+  if (messageIds.some((messageId) => messageId <= 0)) {
+    return { read: false, errorAnswer: botApiError(400, INVALID_MESSAGE_IDENTIFIER_DESCRIPTION) };
+  }
+  if (chatId === undefined) {
+    return { read: false, errorAnswer: botApiError(400, CHAT_ID_EMPTY_DESCRIPTION) };
+  }
+  return { read: true, request: { chatId, fromChatId, messageIds, isContentProtected } };
+}
+
+function repeatMessagesAnswer(result: RepeatMessagesResult): BotApiMethodAnswer {
+  if (result.sent) {
+    return botApiResult(result.messageIds.map((messageId) => ({ message_id: messageId })));
+  }
+  switch (result.reason) {
+    case 'repeated_messages_not_found':
+      return botApiError(400, NO_MESSAGES_TO_FORWARD_DESCRIPTION);
+    case 'repeated_message_ids_not_increasing':
+      return botApiError(400, MESSAGE_IDS_NOT_INCREASING_DESCRIPTION);
+    case 'messages_not_repeatable':
+      return botApiError(400, MESSAGES_NOT_FORWARDABLE_DESCRIPTION);
     default:
       return sendMethodAnswer(result);
   }

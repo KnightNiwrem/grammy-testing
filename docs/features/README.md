@@ -44,7 +44,7 @@ The two legacy aliases below are also accepted.
 | Identity         | `getMe`                                                                                                         |
 | Updates          | `getUpdates`, `setWebhook`, `deleteWebhook`, `getWebhookInfo`                                                   |
 | Sending          | `sendMessage`, `sendPhoto`, `sendDocument`, `sendChatAction`                                                    |
-| Reusing messages | `forwardMessage`, `copyMessage`                                                                                 |
+| Reusing messages | `forwardMessage`, `forwardMessages`, `copyMessage`, `copyMessages`                                              |
 | Editing          | `editMessageText`, `editMessageCaption`, `editMessageReplyMarkup`                                               |
 | Deletion         | `deleteMessage`, `deleteMessages`                                                                               |
 | Files            | `getFile`, plus HTTP file downloads                                                                             |

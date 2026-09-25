@@ -5193,6 +5193,168 @@ Deno.test('forwardMessage forwards messages with their origin and follows Telegr
   }
 });
 
+Deno.test('forwardMessages and copyMessages repeat messages that can be repeated, in order', async () => {
+  const { api, sessionPath, owner, bot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const sendAccountMessage = async (message: Record<string, unknown>) => {
+    const response = await api.request(
+      `${sessionPath}/accounts/${owner.id}/messages`,
+      jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, ...message }),
+    );
+    return ((await response.json()) as { message: { message_id: number } }).message.message_id;
+  };
+  const questionId = await sendAccountMessage({ text: 'Where is my order?' });
+  const followUpId = await sendAccountMessage({
+    text: 'It was due today',
+    reply_to_message_id: questionId,
+  });
+  const protectedMessageId = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+      chat_id: owner.id,
+      text: 'Your code is 1234',
+      protect_content: true,
+    })).body,
+  )?.message_id as number;
+  const receiptId = await sendAccountMessage({
+    photo: { content_base64: gifImage(4, 3).toBase64() },
+    caption: 'Receipt',
+  });
+  const repeatMessages = (method: string, parameters: Record<string, unknown>) =>
+    callBotApi(api, `${bot.botApiPath}/${method}`, parameters);
+  const readSupergroupMessages = async (messageIds: unknown) => {
+    const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+      messages: Array<Record<string, unknown>>;
+    };
+    return (messageIds as Array<{ message_id: number }>).map(({ message_id }) =>
+      history.messages.find((message) => message.message_id === message_id)
+    );
+  };
+  const describe = (message: Record<string, unknown> | undefined) => ({
+    text: message?.text ?? message?.caption,
+    originDate: (message?.forward_origin as { date?: number } | undefined)?.date,
+    repliedMessageId: (message?.reply_to_message as { message_id?: number } | undefined)
+      ?.message_id,
+  });
+
+  // A missing message and a protected message are skipped; replies within the request are kept.
+  const forwarded = await repeatMessages('forwardMessages', {
+    chat_id: supergroup.id,
+    from_chat_id: owner.id,
+    message_ids: [questionId, followUpId, 1_000, protectedMessageId, receiptId],
+  });
+  const forwards = await readSupergroupMessages(botApiResult(forwarded.body));
+  const [forwardedQuestion] = forwards;
+  const originDate = (forwardedQuestion?.forward_origin as { date?: number } | undefined)?.date;
+  if (
+    forwarded.status !== 200 || originDate === undefined ||
+    JSON.stringify(forwards.map(describe)) !== JSON.stringify([
+        { text: 'Where is my order?', originDate },
+        {
+          text: 'It was due today',
+          originDate,
+          repliedMessageId: forwardedQuestion?.message_id,
+        },
+        { text: 'Receipt', originDate },
+      ])
+  ) {
+    throw new Error(
+      `Expected the repeatable messages to be forwarded, received ${JSON.stringify(forwarded)}`,
+    );
+  }
+
+  // A bot may copy a protected message, and captions can be removed.
+  const copied = await repeatMessages('copyMessages', {
+    chat_id: supergroup.id,
+    from_chat_id: owner.id,
+    message_ids: [questionId, followUpId, protectedMessageId, receiptId],
+    remove_caption: true,
+  });
+  const copies = await readSupergroupMessages(botApiResult(copied.body));
+  if (
+    copied.status !== 200 ||
+    JSON.stringify(copies.map(describe)) !== JSON.stringify([
+        { text: 'Where is my order?' },
+        { text: 'It was due today', repliedMessageId: copies[0]?.message_id },
+        { text: 'Your code is 1234' },
+        {},
+      ]) ||
+    photoSizeOf(copies[3]) === undefined
+  ) {
+    throw new Error(`Expected the messages to be copied, received ${JSON.stringify(copied)}`);
+  }
+
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: Array<{ message_id: number }>;
+  };
+  const serviceMessageId = history.messages[0].message_id;
+  const expectFailure = async (
+    method: string,
+    parameters: Record<string, unknown>,
+    description: string,
+  ) => {
+    const { status, body } = await repeatMessages(method, parameters);
+    const actualDescription = (body as { description?: unknown }).description;
+    if (status !== 400 || actualDescription !== description) {
+      throw new Error(
+        `Expected ${method} to fail with "${description}", received ${JSON.stringify(body)}`,
+      );
+    }
+  };
+  const target = { chat_id: supergroup.id, from_chat_id: owner.id };
+  await expectFailure(
+    'forwardMessages',
+    { chat_id: supergroup.id, message_ids: [questionId] },
+    'Bad Request: parameter "from_chat_id" is required',
+  );
+  for (const messageIds of [undefined, []]) {
+    await expectFailure(
+      'copyMessages',
+      { ...target, message_ids: messageIds },
+      'Bad Request: message identifiers are not specified',
+    );
+  }
+  await expectFailure(
+    'forwardMessages',
+    { ...target, message_ids: Array.from({ length: 101 }, (_, index) => index + 1) },
+    'Bad Request: too many message identifiers specified',
+  );
+  await expectFailure(
+    'forwardMessages',
+    { ...target, message_ids: [questionId, 0] },
+    'Bad Request: invalid message identifier specified',
+  );
+  await expectFailure(
+    'forwardMessages',
+    { from_chat_id: owner.id, message_ids: [questionId] },
+    'Bad Request: chat_id is empty',
+  );
+  await expectFailure(
+    'forwardMessages',
+    { chat_id: supergroup.id, from_chat_id: owner.id + 1_000, message_ids: [questionId] },
+    'Bad Request: chat not found',
+  );
+  await expectFailure(
+    'copyMessages',
+    { ...target, message_ids: [followUpId, questionId] },
+    'Bad Request: message identifiers must be in a strictly increasing order',
+  );
+  await expectFailure(
+    'forwardMessages',
+    { ...target, message_ids: [1_000, 1_001] },
+    'Bad Request: there are no messages to forward',
+  );
+  await expectFailure(
+    'forwardMessages',
+    { ...target, message_ids: [protectedMessageId] },
+    "Bad Request: messages can't be forwarded",
+  );
+  await expectFailure(
+    'copyMessages',
+    { chat_id: owner.id, from_chat_id: supergroup.id, message_ids: [serviceMessageId] },
+    "Bad Request: messages can't be forwarded",
+  );
+});
+
 Deno.test('copyMessage copies messages without their origin and follows Telegram checks', async () => {
   const { api, sessionPath, owner, bot, supergroup, supergroupPath } =
     await createSupergroupFixture();
