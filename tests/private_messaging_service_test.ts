@@ -1005,6 +1005,70 @@ Deno.test('PrivateMessagingService rejects bot text Telegram cannot normalize af
   }
 });
 
+Deno.test('PrivateMessagingService limits text by its characters, not its UTF-16 code units', () => {
+  const { virtualUsers, privateMessaging } = createPrivateMessagingFixture();
+  const account = createAccount(virtualUsers, 'Ada');
+  const bot = createBot(virtualUsers, 'Test Bot', 'test_bot');
+  sendPrivateText(privateMessaging, account.profile.id, bot);
+  const send = (text: string, entities: readonly TextEntity[] = []) =>
+    privateMessaging.sendBotMessage({
+      fromBotId: bot.profile.id,
+      to: { type: 'private', accountId: account.profile.id },
+      content: { kind: 'text', text, entities },
+    });
+  const describe = (text: string) => `${[...text].length} characters, ${text.length} code units`;
+
+  const fittingTexts = [
+    'a'.repeat(MAX_TEXT_MESSAGE_LENGTH),
+    '😀'.repeat(MAX_TEXT_MESSAGE_LENGTH / 2 + 1),
+    `${'a'.repeat(MAX_TEXT_MESSAGE_LENGTH - 1)}😀`,
+    '😀'.repeat(MAX_TEXT_MESSAGE_LENGTH),
+  ];
+  for (const text of fittingTexts) {
+    const result = send(text);
+    if (!result.sent) {
+      throw new Error(`Expected text of ${describe(text)} to be sent, received ${result.reason}`);
+    }
+  }
+  const tooLongTexts = [
+    'a'.repeat(MAX_TEXT_MESSAGE_LENGTH + 1),
+    `${'a'.repeat(MAX_TEXT_MESSAGE_LENGTH)}😀`,
+    '😀'.repeat(MAX_TEXT_MESSAGE_LENGTH + 1),
+  ];
+  for (const text of tooLongTexts) {
+    const result = send(text);
+    if (result.sent || result.reason !== 'message_text_too_long') {
+      throw new Error(`Expected text of ${describe(text)} to be too long`);
+    }
+  }
+
+  // Entities count UTF-16 code units, while the limit counts the characters of the fixed text.
+  const emojiText = '😀'.repeat(MAX_TEXT_MESSAGE_LENGTH);
+  const formatted = send(`  ${emojiText}  `, [
+    { type: 'bold', offset: 2, length: emojiText.length },
+  ]);
+  if (
+    !formatted.sent || formatted.message.content.kind !== 'text' ||
+    formatted.message.content.text !== emojiText ||
+    JSON.stringify(formatted.message.content.entities) !==
+      JSON.stringify([{ type: 'bold', offset: 0, length: emojiText.length }])
+  ) {
+    throw new Error('Expected formatted text to be limited after it is trimmed');
+  }
+
+  const edited = privateMessaging.editBotMessageText({
+    fromBotId: bot.profile.id,
+    chat: { type: 'private', accountId: account.profile.id },
+    botMessageId: 2,
+    text: `${'😀'.repeat(MAX_TEXT_MESSAGE_LENGTH - 1)}a`,
+  });
+  if (!edited.edited) {
+    throw new Error(
+      `Expected an edit to the character limit to succeed, received ${edited.reason}`,
+    );
+  }
+});
+
 Deno.test('PrivateMessagingService normalizes account text as a Telegram client does', () => {
   const { virtualUsers, publishedEvents, privateMessaging } = createPrivateMessagingFixture();
   const account = createAccount(virtualUsers, 'Ada');

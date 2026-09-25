@@ -15,6 +15,7 @@ import type {
   StoredPhotoFile,
 } from '../types/stored_file.ts';
 import {
+  countTextCharacters,
   type DocumentMessageContent,
   type FormattedText,
   MAX_CAPTION_LENGTH,
@@ -202,7 +203,7 @@ function normalizeMessageText(
   if (!fixing.fixed) {
     return { normalized: false, failure: { reason: 'text_invalid', textError: fixing.error } };
   }
-  if (fixing.formattedText.text.length > MAX_TEXT_MESSAGE_LENGTH) {
+  if (countTextCharacters(fixing.formattedText.text) > MAX_TEXT_MESSAGE_LENGTH) {
     return { normalized: false, failure: { reason: 'message_text_too_long' } };
   }
   return { normalized: true, formattedText: fixing.formattedText };
@@ -232,8 +233,7 @@ function normalizeCaption(
   if (!fixing.fixed) {
     return { normalized: false, failure: { reason: 'text_invalid', textError: fixing.error } };
   }
-  // TDLib counts the characters of a caption, not its UTF-16 code units.
-  if ([...fixing.formattedText.text].length > MAX_CAPTION_LENGTH) {
+  if (countTextCharacters(fixing.formattedText.text) > MAX_CAPTION_LENGTH) {
     return { normalized: false, failure: { reason: 'caption_too_long' } };
   }
   return { normalized: true, caption: fixing.formattedText };

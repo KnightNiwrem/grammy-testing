@@ -3,6 +3,7 @@ import type { ReplyInterface } from './reply_interface.ts';
 import type { StoredFileId } from './stored_file.ts';
 import type { PrivateConversationKey, PrivateConversationRole } from './virtual_chat.ts';
 
+/** The most characters of message text that Telegram accepts, as `countTextCharacters` counts them. */
 export const MAX_TEXT_MESSAGE_LENGTH = 4_096;
 
 /**
@@ -102,8 +103,19 @@ export interface FormattedText {
   readonly entities: readonly TextEntity[];
 }
 
-/** The most UTF-16 code units of a caption that Telegram accepts from bots and non-premium users. */
+/**
+ * The most characters of a caption that Telegram accepts from bots and non-premium users, as
+ * `countTextCharacters` counts them.
+ */
 export const MAX_CAPTION_LENGTH = 1_024;
+
+/**
+ * Counts the characters of message text or a caption as Telegram's length limits do: TDLib counts
+ * Unicode code points, whereas entity offsets and lengths count UTF-16 code units.
+ */
+export function countTextCharacters(text: string): number {
+  return [...text].length;
+}
 
 export interface TextMessageContent extends FormattedText {
   readonly kind: 'text';

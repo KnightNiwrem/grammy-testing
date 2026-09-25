@@ -23,7 +23,11 @@ import {
   MIN_TELEGRAM_USER_ID,
 } from '../../../types/telegram_identity.ts';
 import type { Supergroup } from '../../../types/virtual_chat.ts';
-import { type ChatMessage, MAX_TEXT_MESSAGE_LENGTH } from '../../../types/virtual_message.ts';
+import {
+  type ChatMessage,
+  countTextCharacters,
+  MAX_TEXT_MESSAGE_LENGTH,
+} from '../../../types/virtual_message.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 
 const ACCOUNT_ID_PARAMETER = 'accountId';
@@ -112,6 +116,12 @@ const sentMessageTargetShape = {
 /** A caption, which Telegram's service limits, so its length is checked when sending. */
 const captionSchema = z.string().default('');
 
+/** Message text, whose length counts characters as Telegram's limit does, not UTF-16 code units. */
+const messageTextSchema = z.string().min(1).refine(
+  (text) => countTextCharacters(text) <= MAX_TEXT_MESSAGE_LENGTH,
+  { message: `Text must have at most ${MAX_TEXT_MESSAGE_LENGTH} characters` },
+);
+
 /**
  * A text message, a photo, or a document, each with an optional caption; or a forward of a message
  * of one of the account's chats, which, as in Telegram's clients, replies to none.
@@ -127,7 +137,7 @@ const sendMessageRequestSchema = z.union([
   }),
   z.strictObject({
     ...sentMessageTargetShape,
-    text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH),
+    text: messageTextSchema,
   }),
   z.strictObject({
     ...sentMessageTargetShape,
@@ -157,7 +167,7 @@ const createSupergroupRequestSchema = z.strictObject({
 
 /** New text for a text message, or a new caption for a photo or document; empty removes it. */
 const editMessageRequestSchema = z.union([
-  z.strictObject({ text: z.string().min(1).max(MAX_TEXT_MESSAGE_LENGTH) }),
+  z.strictObject({ text: messageTextSchema }),
   z.strictObject({ caption: z.string() }),
 ]);
 

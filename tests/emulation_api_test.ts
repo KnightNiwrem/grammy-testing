@@ -1591,6 +1591,15 @@ Deno.test('private message routes validate participants and request bodies', asy
       body: JSON.stringify({ to: { type: 'private', botId: 999 }, text: '' }),
     },
   );
+  // The text limit counts characters, so 4,096 emoji fit though they take 8,192 UTF-16 code units.
+  const sendEmojiText = (emojiCount: number) =>
+    api.request(`${sessionPath}/accounts/${createdAccount.account.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: { type: 'private', botId: 999 }, text: '😀'.repeat(emojiCount) }),
+    });
+  const longestEmojiTextResponse = await sendEmojiText(4_096);
+  const tooLongEmojiTextResponse = await sendEmojiText(4_097);
   const highestValidAccountIdResponse = await api.request(
     `${sessionPath}/accounts/${MAX_TELEGRAM_USER_ID}/messages`,
     {
@@ -1625,6 +1634,8 @@ Deno.test('private message routes validate participants and request bodies', asy
   if (
     missingBotResponse.status !== 404 ||
     emptyTextResponse.status !== 400 ||
+    longestEmojiTextResponse.status !== 404 ||
+    tooLongEmojiTextResponse.status !== 400 ||
     highestValidAccountIdResponse.status !== 404 ||
     excessiveAccountIdResponse.status !== 400 ||
     excessiveBotIdResponse.status !== 400
