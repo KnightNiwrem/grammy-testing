@@ -1,0 +1,32 @@
+type: object
+additionalProperties: false
+required:
+  - url
+  - has_custom_certificate
+  - pending_update_count
+properties:
+  url:
+    type: string
+    description: The webhook URL as the bot specified it; empty without a webhook.
+  has_custom_certificate:
+    type: boolean
+    const: false
+  pending_update_count:
+    type: integer
+    description: Updates not yet delivered to the webhook or confirmed through getUpdates.
+  last_error_date:
+    type: integer
+    description: Unix time of the latest failure to deliver an update to the current webhook.
+  last_error_message:
+    type: string
+    description: >-
+      Telegram's description of that failure, such as `Wrong response from the webhook: 500
+      Internal Server Error` or `Can't connect to the webhook`.
+  max_connections:
+    type: integer
+    description: Present while a webhook is set.
+  allowed_updates:
+    type: array
+    items:
+      type: string
+    description: The bot's subscription, present only when it differs from Telegram's default.

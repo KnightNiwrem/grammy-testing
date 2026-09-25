@@ -1,0 +1,5 @@
+type: integer
+minimum: 1
+description: >-
+  ID of the chat's message to reply to, as message history shows it. Omit it to send a
+  message that replies to none.

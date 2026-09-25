@@ -1,0 +1,68 @@
+description: >-
+  Telegram Bot API method for sending a file as a document with an optional caption, as
+  `sendPhoto` sends a photo. The Bot API server cleans the name of an uploaded file, and the
+  name's extension decides the document's MIME type. Telegram sends some files, such as videos
+  and GIF animations, as other media unless `disable_content_type_detection` is set; the
+  emulator always sends a document. An uploaded `thumbnail` is kept as the document's
+  thumbnail, as described for that parameter.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: sendDocument
+  summary: Send a document from the authenticated virtual bot to an account or a supergroup
+  requestBody:
+    required: true
+    content:
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/SendDocumentRequest.yaml
+        encoding:
+          caption_entities:
+            contentType: application/json
+          reply_parameters:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+      application/json:
+        schema:
+          $ref: ../components/schemas/SendDocumentRequest.yaml
+  responses:
+    '200':
+      description: >-
+        The document was stored in the private conversation or supergroup. No bot receives an
+        update for a bot's message.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MessageResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it for the reasons `sendPhoto` gives, apart from those about images: the request names
+        no file (`Bad Request: there is no document in the request`), the uploaded file is
+        empty, or the `file_id` identifies no file the bot knows or identifies a photo (`Bad
+        Request: can't use file of type Photo as Document`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The account blocks the bot (`Forbidden: bot was blocked by the user`), or the bot left
+        the supergroup (`Forbidden: bot is not a member of the supergroup chat`) or was removed
+        from it (`Forbidden: bot was kicked from the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

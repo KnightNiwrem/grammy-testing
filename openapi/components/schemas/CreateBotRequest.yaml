@@ -1,0 +1,37 @@
+type: object
+additionalProperties: false
+required:
+  - first_name
+  - username
+properties:
+  first_name:
+    type: string
+    minLength: 1
+  username:
+    type: string
+    minLength: 1
+  can_read_all_group_messages:
+    type: boolean
+    default: false
+    description: >-
+      Turns off the bot's privacy mode, as BotFather does, so that it receives every account
+      message of its supergroups rather than only those addressed to it.
+  supports_inline_queries:
+    type: boolean
+    default: false
+    description: >-
+      Turns on the bot's inline mode, as BotFather does, so that accounts can send it inline
+      queries. `getMe` reports it.
+  receives_chosen_inline_results:
+    type: boolean
+    default: false
+    description: >-
+      Turns on the bot's inline feedback, as BotFather does, so that it receives a
+      `chosen_inline_result` update for each inline query result an account sends. It has
+      effect only with inline mode.
+  requests_inline_location:
+    type: boolean
+    default: false
+    description: >-
+      Turns on the bot's inline location requests, as BotFather does, so that accounts can
+      share their location with its inline queries. It has effect only with inline mode.

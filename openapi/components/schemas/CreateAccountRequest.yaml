@@ -1,0 +1,24 @@
+type: object
+additionalProperties: false
+required:
+  - first_name
+properties:
+  first_name:
+    type: string
+    minLength: 1
+  last_name:
+    type: string
+    minLength: 1
+  username:
+    type: string
+    minLength: 1
+  language_code:
+    type: string
+    minLength: 1
+  has_private_forwards:
+    type: boolean
+    default: false
+    description: >-
+      Sets the account's "Forwarded messages" privacy setting so that forwards of its
+      messages, and replies to them from other chats, do not link to it. Their origin is a
+      hidden user that shows only the account's first and last name.

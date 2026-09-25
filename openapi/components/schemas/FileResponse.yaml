@@ -1,0 +1,32 @@
+type: object
+additionalProperties: false
+required:
+  - ok
+  - result
+properties:
+  ok:
+    type: boolean
+    const: true
+  result:
+    type: object
+    additionalProperties: false
+    required:
+      - file_id
+      - file_unique_id
+      - file_size
+      - file_path
+    properties:
+      file_id:
+        $ref: ./FileId.yaml
+      file_unique_id:
+        $ref: ./FileUniqueId.yaml
+      file_size:
+        type: integer
+        minimum: 1
+        description: Size of the file in bytes.
+      file_path:
+        type: string
+        description: >-
+          Where the bot downloads the file under the Bot API file route: a directory for
+          the file's type, `photos` or `documents`, and a numbered name, such as
+          `documents/file_0.pdf`.

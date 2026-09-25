@@ -1,0 +1,23 @@
+description: The menu button an account's client shows in its private chat with a bot.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/BotId.yaml
+get:
+  operationId: getPrivateChatMenuButton
+  summary: Return the menu button the account sees in its private chat with the bot
+  description: >-
+    Returns the button the bot chose for its chat with this account, or else the one it chose
+    for all its private chats, or `default` if it chose neither. The account need not have
+    written to the bot.
+  responses:
+    '200':
+      description: The menu button.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/AccountMenuButton.yaml
+    '400':
+      description: A path identifier is invalid.
+    '404':
+      description: The session, account, or bot does not exist.

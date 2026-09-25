@@ -1,0 +1,77 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+  - text
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+      its negative chat ID, or `@` followed by the username of a public supergroup.
+  text:
+    type: string
+    minLength: 1
+    description: >-
+      Message text, at most 32768 bytes before formatting is applied and 4096 characters
+      after. As on Telegram, control characters become spaces, carriage returns are removed,
+      and leading and trailing whitespace is trimmed, but leading whitespace only up to the
+      first entity.
+  parse_mode:
+    $ref: ./ParseMode.yaml
+  entities:
+    type: array
+    description: Entities marking the text; ignored when `parse_mode` formats it.
+    items:
+      $ref: ./MessageEntityParameter.yaml
+  link_preview_options:
+    $ref: ./LinkPreviewOptions.yaml
+  disable_web_page_preview:
+    type: boolean
+    description: The older form of `link_preview_options`, validated and without effect.
+  disable_notification:
+    type: boolean
+    default: false
+    description: >-
+      Makes the recipients' notifications of the message silent, as the chat's notifications
+      show.
+  protect_content:
+    type: boolean
+    default: false
+    description: >-
+      Protects the message from forwarding and saving, which its `has_protected_content`
+      shows.
+  message_effect_id:
+    type: string
+    pattern: '^-?\d+$'
+    description: >-
+      Identifier of a message effect for a private chat, which the message's `effect_id`
+      shows; `0` chooses none. Telegram refuses effects in supergroups (`Bad Request: can't
+      use message effects in the chat`). The emulator has no catalogue of Telegram's
+      effects, so any 64-bit identifier is accepted.
+  reply_parameters:
+    $ref: ./ReplyParameters.yaml
+  reply_to_message_id:
+    type: integer
+    description: >-
+      The older form of `reply_parameters.message_id`, which Telegram still accepts; ignored
+      when `reply_parameters` is given.
+  allow_sending_without_reply:
+    type: boolean
+    default: false
+    description: >-
+      The older form of `reply_parameters.allow_sending_without_reply`; ignored when
+      `reply_parameters` is given.
+  reply_markup:
+    description: >-
+      An inline keyboard to attach, or a change of the reply interface the account's client
+      shows. Markup that combines kinds is rejected. In a supergroup, the change applies to
+      every account member, or, with `selective`, only to the members the message mentions
+      and the sender of the message it replies to; as on Telegram, `selective` has no effect
+      in private chats. A keyboard removal removes only a keyboard or forced reply the same
+      bot sent.
+    oneOf:
+      - $ref: ./InlineKeyboardMarkup.yaml
+      - $ref: ./ReplyKeyboardMarkup.yaml
+      - $ref: ./ReplyKeyboardRemove.yaml
+      - $ref: ./ForceReply.yaml

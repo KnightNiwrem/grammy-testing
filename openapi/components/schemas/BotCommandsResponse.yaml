@@ -1,0 +1,13 @@
+type: object
+additionalProperties: false
+required:
+  - ok
+  - result
+properties:
+  ok:
+    type: boolean
+    const: true
+  result:
+    type: array
+    items:
+      $ref: ./BotCommand.yaml

@@ -1,0 +1,7 @@
+type: object
+additionalProperties: false
+required:
+  - message
+properties:
+  message:
+    $ref: ./PrivateMessage.yaml

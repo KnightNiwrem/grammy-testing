@@ -1,0 +1,21 @@
+description: >-
+  The content of a photo or document of the session's messages, addressed by its
+  `file_unique_id`, which, unlike `file_id`, is the same for every user.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/FileUniqueId.yaml
+get:
+  operationId: downloadFile
+  summary: Return a file's content by its unique identifier
+  responses:
+    '200':
+      description: >-
+        The file's content, as it was sent, with its document's MIME type or its photo's
+        image type.
+      content:
+        application/octet-stream:
+          schema:
+            type: string
+            contentMediaType: application/octet-stream
+    '404':
+      description: The session or the file does not exist.

@@ -1,0 +1,12 @@
+type: object
+additionalProperties: false
+required:
+  - chat
+  - text
+properties:
+  chat:
+    $ref: ./MessageTarget.yaml
+  text:
+    type: string
+    minLength: 1
+    description: The text of the button to press.

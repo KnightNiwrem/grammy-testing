@@ -1,0 +1,57 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat, as for `sendMessage`: for a private chat, the account's user
+      ID; for a supergroup, its negative chat ID.
+  photo:
+    type: string
+    description: >-
+      The `file_id` of a photo the bot knows, or `attach://<part name>` for a photo uploaded
+      in that part. Without it, the photo is the part named `photo`.
+  caption:
+    $ref: ./Caption.yaml
+  parse_mode:
+    $ref: ./ParseMode.yaml
+  caption_entities:
+    $ref: ./CaptionEntitiesParameter.yaml
+  show_caption_above_media:
+    type: boolean
+    default: false
+    description: Shows the caption above the photo, which the message's field shows.
+  has_spoiler:
+    type: boolean
+    default: false
+    description: Covers the photo until the user reveals it, which `has_media_spoiler` shows.
+  disable_notification:
+    type: boolean
+    default: false
+    description: As for `sendMessage`.
+  protect_content:
+    type: boolean
+    default: false
+    description: As for `sendMessage`.
+  message_effect_id:
+    type: string
+    pattern: '^-?\d+$'
+    description: As for `sendMessage`.
+  reply_parameters:
+    $ref: ./ReplyParameters.yaml
+  reply_to_message_id:
+    type: integer
+    description: As for `sendMessage`.
+  allow_sending_without_reply:
+    type: boolean
+    default: false
+    description: As for `sendMessage`.
+  reply_markup:
+    description: As for `sendMessage`.
+    oneOf:
+      - $ref: ./InlineKeyboardMarkup.yaml
+      - $ref: ./ReplyKeyboardMarkup.yaml
+      - $ref: ./ReplyKeyboardRemove.yaml
+      - $ref: ./ForceReply.yaml

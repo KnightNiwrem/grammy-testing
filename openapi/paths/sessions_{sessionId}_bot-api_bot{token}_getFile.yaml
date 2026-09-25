@@ -1,0 +1,50 @@
+description: >-
+  Telegram Bot API method for preparing a file the bot knows by its `file_id` for download.
+  The result's `file_path` addresses the file under the session's Bot API file route, as
+  `https://api.telegram.org/file/bot<token>/<file_path>` does on Telegram; the path stays valid
+  for the whole session.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getFile
+  summary: Return a file the authenticated virtual bot knows, with its download path
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/GetFileRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/GetFileRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/GetFileRequest.yaml
+  responses:
+    '200':
+      description: The file with its download path.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/FileResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, `file_id` is missing
+        (`Bad Request: file_id not specified`), no file the bot knows has that `file_id` (`Bad
+        Request: invalid file_id`), or the file is larger than 20 MB (`Bad Request: file is too
+        big`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

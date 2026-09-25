@@ -1,0 +1,31 @@
+type: object
+additionalProperties: false
+required:
+  - chat_actions
+properties:
+  chat_actions:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required:
+        - bot_id
+        - action
+      properties:
+        bot_id:
+          type: integer
+        action:
+          type: string
+          description: The action by its Bot API name, in lowercase.
+          enum:
+            - typing
+            - record_video
+            - upload_video
+            - record_voice
+            - upload_voice
+            - upload_photo
+            - upload_document
+            - choose_sticker
+            - find_location
+            - record_video_note
+            - upload_video_note

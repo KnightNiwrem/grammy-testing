@@ -1,0 +1,14 @@
+description: >-
+  A test queued a rate limit answer for this call with `queueRateLimitResponses`. As on
+  Telegram, the `Retry-After` header and `parameters.retry_after` say how many seconds to
+  wait before retrying.
+headers:
+  Retry-After:
+    required: true
+    schema:
+      type: integer
+      minimum: 1
+content:
+  application/json:
+    schema:
+      $ref: ../schemas/BotApiErrorResponse.yaml

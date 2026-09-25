@@ -1,0 +1,15 @@
+type: object
+additionalProperties: false
+required:
+  - inline_keyboard
+properties:
+  inline_keyboard:
+    type: array
+    description: >-
+      Rows of buttons. As a request parameter, an empty array attaches no keyboard, as on
+      Telegram; empty rows are rejected.
+    items:
+      type: array
+      minItems: 1
+      items:
+        $ref: ./InlineKeyboardButton.yaml

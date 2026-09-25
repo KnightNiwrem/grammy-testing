@@ -1,0 +1,34 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+  - from_chat_id
+  - message_ids
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: Identifier of the chat to copy to, as for `forwardMessage`.
+  from_chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: Identifier of the chat of the copied messages, as for `chat_id`.
+  message_ids:
+    $ref: ./RepeatedMessageIds.yaml
+  disable_notification:
+    type: boolean
+    default: false
+    description: As for `sendMessage`.
+  protect_content:
+    type: boolean
+    default: false
+    description: As for `sendMessage`.
+  message_effect_id:
+    type: string
+    pattern: '^-?\d+$'
+    description: >-
+      As for `sendMessage`. As on Telegram, only a request whose identifiers find a
+      single message may use one (`Bad Request: can't use message effects in the
+      method`).
+  remove_caption:
+    type: boolean
+    default: false
+    description: Sends copies of photos and documents without their captions.

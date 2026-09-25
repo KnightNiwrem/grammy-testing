@@ -1,0 +1,9 @@
+type: array
+minItems: 1
+maxItems: 100
+items:
+  type: integer
+  minimum: 1
+description: >-
+  Identifiers of messages in the bot's chat, in strictly increasing order. Identifiers of no
+  message are skipped.

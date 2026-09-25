@@ -1,0 +1,13 @@
+type: object
+additionalProperties: false
+required:
+  - command
+  - description
+  - is_ephemeral
+properties:
+  command:
+    type: string
+  description:
+    type: string
+  is_ephemeral:
+    type: boolean

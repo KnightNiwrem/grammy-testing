@@ -1,0 +1,18 @@
+type: object
+additionalProperties: false
+required:
+  - ok
+  - result
+  - description
+properties:
+  ok:
+    type: boolean
+    const: true
+  result:
+    type: boolean
+    const: true
+  description:
+    type: string
+    enum:
+      - Webhook was deleted
+      - Webhook is already deleted

@@ -1,0 +1,10 @@
+type: object
+additionalProperties: false
+required:
+  - reply_interface
+properties:
+  reply_interface:
+    oneOf:
+      - $ref: ./ReplyKeyboardInterface.yaml
+      - $ref: ./ForceReplyInterface.yaml
+      - type: 'null'

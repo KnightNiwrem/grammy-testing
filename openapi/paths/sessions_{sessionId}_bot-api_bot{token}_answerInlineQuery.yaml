@@ -1,0 +1,88 @@
+description: >-
+  Telegram Bot API method for answering an inline query an account sent to the bot, once, with
+  up to 50 results that the account's client lists and sends. Article results, and photo and
+  document results with files the bot knows by `file_id`, are supported. Results of other
+  types (`Bad Request: inline query results of type "<type>" are not supported`), files given
+  by URL (`Bad Request: sending files by URL is not supported`), and `input_message_content`
+  of a location, venue, contact, invoice, or rich message (`Bad Request: inline query results
+  sending a location, venue, contact, invoice, or rich message are not supported`) are
+  rejected with these emulator errors. Thumbnails, and the dimensions of
+  a photo, are validated and ignored. Text and captions are read and normalized as by
+  `sendMessage` and `sendPhoto`. The older `switch_pm_text` and `switch_pm_parameter`
+  parameters form the `button` when it is omitted.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: answerInlineQuery
+  summary: Answer an inline query sent to the authenticated virtual bot
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/AnswerInlineQueryRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/AnswerInlineQueryRequest.yaml
+        encoding:
+          results:
+            contentType: application/json
+          button:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/AnswerInlineQueryRequest.yaml
+        encoding:
+          results:
+            contentType: application/json
+          button:
+            contentType: application/json
+  responses:
+    '200':
+      description: The answer was recorded.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/TrueResultResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it. The Bot API server reads the results first: a result of an unknown type (`Bad
+        Request: can't parse InlineQueryResult: type "<type>" is unsupported for the inline
+        query result`), an article without message text (`Bad Request: can't parse
+        InlineQueryResult: Input message content is not specified`), or text or formatting it
+        cannot read, described as for `sendMessage` after `Bad Request: can't parse
+        InlineQueryResult: `. Every result's file is then resolved: a `file_id` the bot does
+        not know (`Bad Request: wrong remote file identifier specified: can't unserialize it`)
+        or of another file type (`Bad Request: can't use file of type Document as Photo`).
+        TDLib then checks the button's `start_parameter` for being empty (`Bad Request: can't
+        use empty start_parameter`), longer than 64 characters (`Bad Request: too long
+        start_parameter specified`), or holding characters other than letters, digits, `_`,
+        and `-` (`Bad Request: unallowed characters in start_parameter are used`); more than
+        50 results (`Bad Request: too many inline query results specified`); and each
+        result's message content as when sending it, where normalized text longer than 4096
+        characters fails with `Bad Request: MESSAGE_TOO_LONG` and a caption longer than 1024
+        characters with `Bad Request: MEDIA_CAPTION_TOO_LONG`. Telegram's servers finally
+        check the query, which must exist, have been sent to this bot, and be unanswered
+        (`Bad Request: query is too old and response timeout expired or query ID is
+        invalid`); a `next_offset` longer than 64 bytes (`Bad Request: NEXT_OFFSET_INVALID`);
+        and each result for an empty identifier (`Bad Request: RESULT_ID_EMPTY`), one longer
+        than 64 bytes (`Bad Request: RESULT_ID_INVALID`), a repeated one (`Bad Request:
+        RESULT_ID_DUPLICATE`), an empty article title (`Bad Request: ARTICLE_TITLE_EMPTY`), an
+        empty document title (`Bad Request: FILE_TITLE_EMPTY`), and callback data longer than
+        64 bytes (`Bad Request: BUTTON_DATA_INVALID`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

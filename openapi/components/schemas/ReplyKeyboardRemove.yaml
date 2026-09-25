@@ -1,0 +1,14 @@
+type: object
+additionalProperties: false
+required:
+  - remove_keyboard
+properties:
+  remove_keyboard:
+    type: boolean
+    const: true
+  selective:
+    type: boolean
+    default: false
+    description: >-
+      In a supergroup, applies the markup only to the members the message mentions and the
+      sender of the message it replies to. It has no effect in private chats.

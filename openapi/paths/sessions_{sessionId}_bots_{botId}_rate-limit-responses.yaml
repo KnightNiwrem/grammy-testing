@@ -1,0 +1,51 @@
+description: >-
+  `429 Too Many Requests` answers queued for a bot's next Bot API calls, for testing how the
+  bot handles Telegram's rate limits. The emulator reproduces none of Telegram's traffic
+  thresholds. Each call takes one answer from the earliest queued answers that apply to its
+  method, whatever its parameters, instead of running; webhook replies that call methods take
+  them too. Answers that no call takes end with the session.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotId.yaml
+post:
+  operationId: queueRateLimitResponses
+  summary: Queue rate limit answers for a bot's next calls
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/QueueRateLimitResponsesRequest.yaml
+  responses:
+    '201':
+      description: The answers were queued.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/RateLimitResponses.yaml
+    '400':
+      description: >-
+        The request body is malformed, or `method` names no Bot API method the emulator
+        implements.
+    '404':
+      description: No active test session or virtual bot has the supplied identifier.
+get:
+  operationId: listRateLimitResponses
+  summary: List the rate limit answers still queued for a bot
+  responses:
+    '200':
+      description: The queued answers, earliest first.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - rate_limit_responses
+            properties:
+              rate_limit_responses:
+                type: array
+                items:
+                  $ref: ../components/schemas/RateLimitResponses.yaml
+    '404':
+      description: No active test session or virtual bot has the supplied identifier.

@@ -1,0 +1,6 @@
+name: botId
+in: path
+required: true
+description: Server-assigned identifier of a virtual bot.
+schema:
+  $ref: ../schemas/TelegramUserId.yaml

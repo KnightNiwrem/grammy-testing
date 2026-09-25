@@ -1,0 +1,14 @@
+type: object
+additionalProperties: false
+description: >-
+  Received only by a bot that requests `chat_member` in `allowed_updates` and is an
+  administrator of the supergroup, as on Telegram.
+required:
+  - update_id
+  - chat_member
+properties:
+  update_id:
+    type: integer
+    minimum: 1
+  chat_member:
+    $ref: ./SupergroupMemberUpdated.yaml

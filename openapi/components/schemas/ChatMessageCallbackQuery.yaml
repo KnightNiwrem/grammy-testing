@@ -1,0 +1,26 @@
+type: object
+additionalProperties: false
+required:
+  - id
+  - from
+  - message
+  - chat_instance
+  - data
+properties:
+  id:
+    type: string
+    description: Identifier to pass to answerCallbackQuery.
+  from:
+    $ref: ./Account.yaml
+    description: The account that pressed the button.
+  message:
+    $ref: ./Message.yaml
+    description: The message carrying the button, as it was when the button was pressed.
+  chat_instance:
+    type: string
+    description: >-
+      Opaque signed 64-bit decimal identifying the message's chat, fixed for each private
+      chat and each supergroup.
+  data:
+    type: string
+    description: The pressed button's callback data.

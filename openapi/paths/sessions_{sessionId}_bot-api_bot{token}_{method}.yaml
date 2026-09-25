@@ -1,0 +1,6 @@
+description: Telegram Bot API methods invoked for a virtual bot within a test session.
+x-implementation-status: unimplemented
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+  - $ref: ../components/parameters/BotApiMethod.yaml

@@ -1,0 +1,57 @@
+description: >-
+  A user's standing in a chat, in the field order Telegram uses. Member tags are not
+  supported.
+oneOf:
+  - type: object
+    additionalProperties: false
+    description: The supergroup's owner.
+    required:
+      - user
+      - status
+      - is_anonymous
+    properties:
+      user:
+        $ref: ./MessageUser.yaml
+      status:
+        type: string
+        const: creator
+      custom_title:
+        $ref: ./CustomTitle.yaml
+      is_anonymous:
+        type: boolean
+        const: false
+  - $ref: ./ChatAdministrator.yaml
+  - type: object
+    additionalProperties: false
+    description: >-
+      A member without administrator rights, or a user that left the supergroup or never
+      joined it.
+    required:
+      - user
+      - status
+    properties:
+      user:
+        $ref: ./MessageUser.yaml
+      status:
+        type: string
+        enum:
+          - member
+          - left
+  - type: object
+    additionalProperties: false
+    description: A banned user, which cannot be a member until its ban is lifted.
+    required:
+      - user
+      - status
+      - until_date
+    properties:
+      user:
+        $ref: ./MessageUser.yaml
+      status:
+        type: string
+        const: kicked
+      until_date:
+        type: integer
+        minimum: 0
+        description: >-
+          Unix timestamp when the ban ends, or 0 for a ban that lasts until it is lifted.

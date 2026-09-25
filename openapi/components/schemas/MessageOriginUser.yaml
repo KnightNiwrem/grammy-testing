@@ -1,0 +1,18 @@
+type: object
+additionalProperties: false
+description: >-
+  Where a forward, or a message of another chat that a message replies to, first appeared:
+  the account or bot that sent the original message, and when.
+required:
+  - type
+  - sender_user
+  - date
+properties:
+  type:
+    type: string
+    const: user
+  sender_user:
+    $ref: ./MessageUser.yaml
+  date:
+    type: integer
+    minimum: 0

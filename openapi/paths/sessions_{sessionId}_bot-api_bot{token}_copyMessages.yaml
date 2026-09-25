@@ -1,0 +1,64 @@
+description: >-
+  Telegram Bot API method for copying up to 100 messages of one of the bot's chats at once, as
+  `forwardMessages` forwards them. Each copy repeats its message's content as `copyMessage`
+  does; as TDLib does for copies of several messages, the copies keep no reply markup, and
+  `remove_caption` sends photos and documents without their captions. As TDLib lets bots do,
+  a bot may copy messages whose sender protected them. Topics, paid broadcasts, and suggested
+  posts are not supported.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: copyMessages
+  summary: Copy several messages from one of the authenticated virtual bot's chats
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/CopyMessagesRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/CopyMessagesRequest.yaml
+        encoding:
+          message_ids:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/CopyMessagesRequest.yaml
+        encoding:
+          message_ids:
+            contentType: application/json
+  responses:
+    '200':
+      description: >-
+        The copies were stored in the chat they were sent to. As on Telegram, the response
+        holds only their message IDs, in the order of the copied messages.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MessageIdsResponse.yaml
+    '400':
+      description: >-
+        As for `forwardMessages`, whose descriptions Telegram uses for copies too. Only service
+        messages cannot be copied.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: As for `forwardMessage`.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

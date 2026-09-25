@@ -1,0 +1,59 @@
+description: >-
+  Telegram Bot API method for counting a chat's members: the two participants of a private
+  chat, or a supergroup's members, its owner and bots included. Telegram's older name,
+  `getChatMembersCount`, is accepted too.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getChatMemberCount
+  summary: Count the members of one of the authenticated virtual bot's chats
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/GetChatMemberCountRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/GetChatMemberCountRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/GetChatMemberCountRequest.yaml
+  responses:
+    '200':
+      description: The number of members of the chat.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/IntegerResultResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram
+        would reject it: `chat_id` is missing (`Bad Request: chat_id is empty`), or
+        the chat is neither a private chat with an account that has written to the
+        bot nor a supergroup the bot is or was a member of (`Bad Request: chat not
+        found`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The bot left the supergroup (`Forbidden: bot is not a member of the
+        supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+        the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

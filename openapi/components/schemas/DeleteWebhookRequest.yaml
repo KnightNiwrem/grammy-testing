@@ -1,0 +1,10 @@
+type: object
+additionalProperties: false
+properties:
+  drop_pending_updates:
+    type: boolean
+    default: false
+    description: >-
+      Discards the bot's pending updates; later updates continue its update ID sequence. As
+      on Telegram, text values `true`, `yes`, and `1` are true, compared case-insensitively;
+      the emulator also accepts `false`, `no`, and `0`, and rejects any other text.

@@ -1,0 +1,14 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+  - message_id
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+      its negative chat ID.
+  message_id:
+    type: integer
+    description: Identifier of the message in the bot's chat.

@@ -1,0 +1,29 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+  - action
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+      its negative chat ID.
+  action:
+    type: string
+    description: >-
+      The action, matched case-insensitively. Telegram's older names `record_audio`,
+      `upload_audio`, and `pick_up_location` are accepted too.
+    enum:
+      - typing
+      - upload_photo
+      - record_video
+      - upload_video
+      - record_voice
+      - upload_voice
+      - upload_document
+      - choose_sticker
+      - find_location
+      - record_video_note
+      - upload_video_note
+      - cancel

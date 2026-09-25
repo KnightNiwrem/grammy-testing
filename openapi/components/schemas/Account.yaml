@@ -1,0 +1,21 @@
+type: object
+additionalProperties: false
+required:
+  - id
+  - is_bot
+  - first_name
+properties:
+  id:
+    $ref: ./TelegramUserId.yaml
+    description: Server-assigned Telegram user identifier for the account.
+  is_bot:
+    type: boolean
+    const: false
+  first_name:
+    type: string
+  last_name:
+    type: string
+  username:
+    type: string
+  language_code:
+    type: string

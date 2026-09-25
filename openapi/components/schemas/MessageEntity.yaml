@@ -1,0 +1,68 @@
+type: object
+additionalProperties: false
+description: >-
+  A marked span of message text. Formatting that overlaps other entities is split so that
+  entities nest properly, as on Telegram. Mentions, hashtags, cashtags, bot commands, URLs,
+  email addresses and bank card numbers are detected in the text as Telegram detects them,
+  outside other entities; phone numbers are not detected.
+required:
+  - type
+  - offset
+  - length
+properties:
+  type:
+    type: string
+    enum:
+      - mention
+      - hashtag
+      - cashtag
+      - bot_command
+      - url
+      - email
+      - bank_card_number
+      - bold
+      - italic
+      - underline
+      - strikethrough
+      - spoiler
+      - code
+      - pre
+      - text_link
+      - text_mention
+      - custom_emoji
+      - date_time
+      - blockquote
+      - expandable_blockquote
+  offset:
+    type: integer
+    minimum: 0
+    description: Offset in UTF-16 code units to the start of the entity.
+  length:
+    type: integer
+    minimum: 1
+    description: Length of the entity in UTF-16 code units.
+  language:
+    type: string
+    description: For `pre`, the programming language of the code, when one is given.
+  url:
+    type: string
+    description: For `text_link`, the link as Telegram normalized it.
+  user:
+    description: For `text_mention`, the mentioned user.
+    oneOf:
+      - $ref: ./Account.yaml
+      - $ref: ./MessageSenderBot.yaml
+  custom_emoji_id:
+    type: string
+    description: For `custom_emoji`, the custom emoji's identifier.
+  unix_time:
+    type: integer
+    minimum: 1
+    description: For `date_time`, the shown moment as a Unix time.
+  date_time_format:
+    type: string
+    pattern: '^(r|w?[dD]?[tT]?)$'
+    description: >-
+      For `date_time`, how clients show it, as the official Bot API server reports it: `r`
+      for relative time, otherwise `w` for the day of the week, `d` or `D` for a short or long
+      date, then `t` or `T` for a short or long time; empty when the bot chose no format.

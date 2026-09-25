@@ -1,0 +1,26 @@
+type: object
+additionalProperties: false
+required:
+  - type
+  - id
+properties:
+  type:
+    type: string
+    enum:
+      - article
+      - photo
+      - document
+  id:
+    type: string
+  title:
+    type: string
+    minLength: 1
+    description: Omitted for a photo without a title.
+  description:
+    type: string
+    minLength: 1
+    description: Omitted when the bot gave none.
+  url:
+    type: string
+    minLength: 1
+    description: The URL of an article, omitted when the bot gave none or hid it.

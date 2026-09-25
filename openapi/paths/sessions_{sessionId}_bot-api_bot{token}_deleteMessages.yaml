@@ -1,0 +1,68 @@
+description: >-
+  Telegram Bot API method for deleting several messages of a chat at once, as deleteMessage
+  deletes one. As on Telegram, identifiers that identify no message of the chat are skipped,
+  and none is deleted when one identifies a message the bot cannot delete.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: deleteMessages
+  summary: Delete several messages of one of the authenticated virtual bot's chats
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/DeleteMessagesRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/DeleteMessagesRequest.yaml
+        encoding:
+          message_ids:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/DeleteMessagesRequest.yaml
+        encoding:
+          message_ids:
+            contentType: application/json
+  responses:
+    '200':
+      description: The messages that the identifiers found were deleted.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MessageDeletionResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: `message_ids` is missing (`Bad Request: message
+        identifiers are not specified`); it has more than 100 identifiers (`Bad Request: too
+        many message identifiers specified`); an identifier is not positive (`Bad Request:
+        invalid message identifier specified`); `chat_id` is missing (`Bad Request: chat_id is
+        empty`); the chat is not one the bot can address, as for `sendMessage` (`Bad Request:
+        chat not found`); or an identifier identifies another member's message of a supergroup
+        (`Bad Request: message can't be deleted`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The chat is a supergroup that the bot left the supergroup (`Forbidden: bot is not a
+        member of the supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+        the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

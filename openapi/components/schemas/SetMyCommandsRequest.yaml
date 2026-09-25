@@ -1,0 +1,12 @@
+type: object
+additionalProperties: false
+properties:
+  commands:
+    type: array
+    items:
+      $ref: ./BotCommand.yaml
+  scope:
+    $ref: ./BotCommandScope.yaml
+  language_code:
+    type: string
+    pattern: '^([a-z]{2})?$'

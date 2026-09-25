@@ -1,0 +1,37 @@
+type: object
+additionalProperties: false
+description: An inline query, in the field order Telegram uses.
+required:
+  - id
+  - from
+  - chat_type
+  - query
+  - offset
+properties:
+  id:
+    type: string
+    description: Identifier to pass to answerInlineQuery.
+  from:
+    $ref: ./Account.yaml
+    description: The account that sent the query.
+  location:
+    $ref: ./Location.yaml
+    description: >-
+      Where the account is, present only when it shared its location with a bot created with
+      `requests_inline_location`.
+  chat_type:
+    type: string
+    enum:
+      - sender
+      - private
+      - supergroup
+    description: >-
+      The chat where the account typed the query: `sender` for its private chat with the
+      inline bot itself, `private` for its private chat with another bot.
+  query:
+    type: string
+    maxLength: 256
+  offset:
+    type: string
+    description: >-
+      The `next_offset` of an earlier answer, requesting more results; empty for the first.

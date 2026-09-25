@@ -1,0 +1,52 @@
+description: One message of a private conversation, addressed by its ID as the bot sees it.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/BotId.yaml
+  - $ref: ../components/parameters/MessageId.yaml
+patch:
+  operationId: editAccountMessage
+  summary: Edit the text or caption of a message the account sent
+  description: >-
+    Replaces the text of the account's text message, or the caption of its photo or document,
+    normalized as when sending it, and dates the edit. Unless the bot's allowed_updates subscription excludes edited_message updates, the
+    bot receives an edited_message update carrying the edited message.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/EditAccountMessageRequest.yaml
+  responses:
+    '200':
+      description: The message was edited.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/SentMessage.yaml
+    '400':
+      description: >-
+        The request, text, or caption is invalid, the bot wrote the message, the request gives
+        text for a photo or document or a caption for a text message, or the normalized text or
+        caption is the message's current one.
+    '404':
+      description: The session, account, bot, or message of their private chat does not exist.
+delete:
+  operationId: deleteAccountMessage
+  summary: Delete a message of the private chat for both participants
+  description: >-
+    Deletes the account's message or the bot's message for both participants, as Telegram's
+    clients do when deleting for everyone; as TDLib's `can_revoke_message` allows users in
+    private chats, either participant's messages can be deleted, without a time limit. As on
+    Telegram, the bot receives no update, and then no longer finds the message, for example to
+    edit or reply to it. Deleting the message that asked for the reply interface the client
+    shows removes that interface.
+  responses:
+    '204':
+      description: The message was deleted.
+    '400':
+      description: A path identifier is invalid.
+    '404':
+      description: >-
+        The session, account, bot, or message of their private chat does not exist, including
+        a deleted message.

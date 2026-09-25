@@ -1,0 +1,7 @@
+type: object
+additionalProperties: false
+required:
+  - inline_query
+properties:
+  inline_query:
+    $ref: ./InlineQuery.yaml

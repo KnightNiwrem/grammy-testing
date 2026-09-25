@@ -1,0 +1,36 @@
+type: object
+additionalProperties: false
+required:
+  - type
+  - message_id
+  - keyboard
+  - is_persistent
+  - resize_keyboard
+  - one_time_keyboard
+properties:
+  type:
+    type: string
+    const: keyboard
+  message_id:
+    type: integer
+    minimum: 1
+    description: The ID of the bot message that sent the keyboard, as the bot sees it.
+  keyboard:
+    type: array
+    minItems: 1
+    items:
+      type: array
+      minItems: 1
+      items:
+        $ref: ./ReplyKeyboardButton.yaml
+  is_persistent:
+    type: boolean
+  resize_keyboard:
+    type: boolean
+  one_time_keyboard:
+    type: boolean
+    description: >-
+      Whether clients hide the keyboard once it is used. The keyboard stays available, so
+      its buttons can still be pressed.
+  input_field_placeholder:
+    type: string

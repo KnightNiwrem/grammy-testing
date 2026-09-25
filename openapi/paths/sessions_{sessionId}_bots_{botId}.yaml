@@ -1,0 +1,5 @@
+description: One virtual bot owned by a test session.
+x-implementation-status: unimplemented
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotId.yaml

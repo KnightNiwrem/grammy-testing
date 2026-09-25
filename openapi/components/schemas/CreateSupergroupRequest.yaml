@@ -1,0 +1,17 @@
+type: object
+additionalProperties: false
+required:
+  - title
+properties:
+  title:
+    type: string
+    minLength: 1
+  username:
+    type: string
+    minLength: 1
+    description: >-
+      Makes the supergroup public under this username, which must be unique among the
+      session's usernames, compared without case; omitted for a private supergroup.
+  description:
+    type: string
+    minLength: 1

@@ -1,0 +1,20 @@
+type: object
+additionalProperties: false
+required:
+  - bot_commands
+properties:
+  bot_commands:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required:
+        - bot_id
+        - commands
+      properties:
+        bot_id:
+          type: integer
+        commands:
+          type: array
+          items:
+            $ref: ./AccountBotCommand.yaml

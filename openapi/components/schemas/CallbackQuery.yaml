@@ -1,0 +1,46 @@
+type: object
+additionalProperties: false
+required:
+  - id
+  - callback_data
+  - status
+  - answer
+properties:
+  id:
+    type: string
+    description: Identifier the bot receives in its callback_query update.
+  callback_data:
+    type: string
+  status:
+    type: string
+    enum:
+      - awaiting_answer
+      - answered
+      - expired
+    description: >-
+      Whether the bot can still answer the query. A query is created awaiting an answer or
+      already expired; the bot's accepted answer moves an awaiting query to answered. An
+      answered or expired query accepts no answer.
+  answer:
+    description: The bot's answer when the status is `answered`, and null otherwise.
+    oneOf:
+      - type: 'null'
+      - type: object
+        additionalProperties: false
+        required:
+          - show_alert
+          - cache_time
+        properties:
+          text:
+            type: string
+            description: Notification text, omitted when the answer shows none.
+          show_alert:
+            type: boolean
+          url:
+            type: string
+            description: >-
+              The link that starts the bot, which the account's client opens; omitted when
+              the answer has none.
+          cache_time:
+            type: integer
+            minimum: 0

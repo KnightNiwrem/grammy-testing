@@ -1,0 +1,9 @@
+type: object
+additionalProperties: false
+required:
+  - result_id
+properties:
+  result_id:
+    type: string
+    minLength: 1
+    description: Identifier of the result in the bot's answer.

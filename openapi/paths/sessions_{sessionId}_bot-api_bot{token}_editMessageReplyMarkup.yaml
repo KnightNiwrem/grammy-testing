@@ -1,0 +1,66 @@
+description: >-
+  Telegram Bot API method for replacing the inline keyboard of a message the bot sent to a
+  private chat or a supergroup. Omitting `reply_markup` removes the keyboard. The content and edit
+  date are unchanged, and the bot receives no update for its own edit. Without `chat_id` and
+  `message_id`, the method edits a message an account sent through the bot's inline mode, which
+  `inline_message_id` identifies, as `editMessageText` does.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: editMessageReplyMarkup
+  summary: Replace the inline keyboard of a message the authenticated virtual bot sent
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/EditMessageReplyMarkupRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/EditMessageReplyMarkupRequest.yaml
+        encoding:
+          reply_markup:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/EditMessageReplyMarkupRequest.yaml
+        encoding:
+          reply_markup:
+            contentType: application/json
+  responses:
+    '200':
+      description: >-
+        The message's keyboard was replaced: the edited message for a message of a chat, or
+        `true` for an inline message.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/EditMessageResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it for the reasons editMessageText gives, apart from those about the text.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The chat is a supergroup that the bot left the supergroup (`Forbidden: bot is not a
+        member of the supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+        the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

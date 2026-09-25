@@ -1,0 +1,25 @@
+type: object
+additionalProperties: false
+required:
+  - chat
+  - message_id
+  - callback_data
+properties:
+  chat:
+    $ref: ./MessageTarget.yaml
+  message_id:
+    type: integer
+    minimum: 1
+    description: >-
+      Identifier of the message carrying the button, as message history shows it, which is
+      its identifier in the bot's chat.
+  callback_data:
+    type: string
+    minLength: 1
+    description: Callback data of the button to press.
+  expired:
+    type: boolean
+    default: false
+    description: >-
+      Creates the callback query already expired: the bot still receives it but cannot
+      answer it.

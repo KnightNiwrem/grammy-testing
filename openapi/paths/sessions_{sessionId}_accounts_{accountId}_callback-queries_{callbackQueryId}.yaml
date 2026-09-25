@@ -1,0 +1,19 @@
+description: One callback query created by an account.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/CallbackQueryId.yaml
+get:
+  operationId: getCallbackQuery
+  summary: Return a callback query with the bot's answer once given
+  responses:
+    '200':
+      description: The callback query, answered or not.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/CallbackQueryResponse.yaml
+    '400':
+      description: The account path identifier is invalid.
+    '404':
+      description: The session does not exist, or the account created no such callback query.

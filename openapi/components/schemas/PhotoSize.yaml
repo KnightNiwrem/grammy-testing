@@ -1,0 +1,23 @@
+type: object
+additionalProperties: false
+required:
+  - file_id
+  - file_unique_id
+  - file_size
+  - width
+  - height
+properties:
+  file_id:
+    $ref: ./FileId.yaml
+  file_unique_id:
+    $ref: ./FileUniqueId.yaml
+  file_size:
+    type: integer
+    minimum: 1
+    description: Size of the file in bytes.
+  width:
+    type: integer
+    minimum: 1
+  height:
+    type: integer
+    minimum: 1

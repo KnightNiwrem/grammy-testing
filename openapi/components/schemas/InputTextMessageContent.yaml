@@ -1,0 +1,18 @@
+type: object
+additionalProperties: false
+properties:
+  message_text:
+    type: string
+    description: The text to send, read and normalized as by `sendMessage`; an empty text is none.
+  parse_mode:
+    $ref: ./ParseMode.yaml
+  entities:
+    type: array
+    description: Entities marking the text; ignored when `parse_mode` formats it.
+    items:
+      $ref: ./MessageEntityParameter.yaml
+  link_preview_options:
+    $ref: ./LinkPreviewOptions.yaml
+  disable_web_page_preview:
+    type: boolean
+    description: The older form of `link_preview_options`, validated and without effect.

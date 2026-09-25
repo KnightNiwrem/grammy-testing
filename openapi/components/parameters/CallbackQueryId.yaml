@@ -1,0 +1,6 @@
+name: callbackQueryId
+in: path
+required: true
+description: Identifier of a callback query created by the addressed account.
+schema:
+  type: string

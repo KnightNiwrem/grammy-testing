@@ -1,0 +1,4 @@
+type: array
+description: Entities marking the caption; ignored when `parse_mode` formats it.
+items:
+  $ref: ./MessageEntityParameter.yaml

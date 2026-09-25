@@ -1,0 +1,4 @@
+type: integer
+minimum: -1997852516352
+maximum: -1000000000001
+description: Bot API chat identifier of a supergroup, which carries Telegram's `-100` prefix.

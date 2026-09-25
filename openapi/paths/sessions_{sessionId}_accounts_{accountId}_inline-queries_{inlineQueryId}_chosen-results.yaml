@@ -1,0 +1,47 @@
+description: Results of an inline query's answer that the account sent to the query's chat.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/InlineQueryId.yaml
+post:
+  operationId: chooseInlineQueryResult
+  summary: Send a result of the bot's answer as a virtual account
+  description: >-
+    Sends a result of the bot's answer to the chat where the account typed the query, as the
+    account's own message sent through the inline bot, which its `via_bot` shows. The message
+    holds the text of the result's `input_message_content`, or else its photo or document with
+    its caption, and the result's inline keyboard. The chat's bots receive it as they receive
+    the account's other messages; in a supergroup, the inline bot receives it in privacy mode
+    too when it is a member. Then, if the inline bot was created with
+    `receives_chosen_inline_results`, it receives a chosen_inline_result update, which carries
+    the message's `inline_message_id` when the message has an inline keyboard. The inline bot
+    edits the message by that identifier, and presses of its callback buttons reach the inline
+    bot as callback queries carrying it instead of the message. As on Telegram, the account
+    can send a result again, each time as a new message.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/ChooseInlineQueryResultRequest.yaml
+  responses:
+    '201':
+      description: >-
+        The result was sent. A private message is shown as the conversation's bot sees it, and
+        a supergroup message as the account sees it.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: ../components/schemas/SentMessage.yaml
+              - $ref: ../components/schemas/SentSupergroupMessage.yaml
+    '400':
+      description: The request is invalid, or the answer has no result with the given ID.
+    '403':
+      description: The account is no longer a member of the supergroup.
+    '404':
+      description: The session does not exist, or the account sent no such inline query.
+    '409':
+      description: >-
+        The bot has not answered the query yet, or the account blocks the bot of the private
+        chat and must unblock it before writing to it.

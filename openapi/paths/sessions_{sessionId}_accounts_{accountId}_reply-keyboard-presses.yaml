@@ -1,0 +1,41 @@
+description: Reply keyboard buttons an account pressed.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+post:
+  operationId: pressReplyKeyboardButton
+  summary: Press a button of the reply keyboard a private chat or a supergroup shows
+  description: >-
+    Sends the button's text as the account's message, as a Telegram client does. In a
+    supergroup, as Telegram Desktop's `HistoryWidget::sendBotCommand` does outside private
+    chats, the message replies to the keyboard's message, so that the bot that sent it
+    receives it even in privacy mode. The keyboard stays shown afterward, even a one-time
+    keyboard, which Telegram clients only hide until the user shows it again.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/PressReplyKeyboardButtonRequest.yaml
+  responses:
+    '201':
+      description: >-
+        The button's text was sent as the account's message, and, unless the bot's
+        allowed_updates subscription excludes message updates, an update was enqueued for the
+        bot.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: ../components/schemas/SentMessage.yaml
+              - $ref: ../components/schemas/SentSupergroupMessage.yaml
+    '400':
+      description: >-
+        The request is invalid, or the chat shows no reply keyboard with a button of that
+        text.
+    '403':
+      description: The account is not a member of the supergroup.
+    '404':
+      description: The session, account, bot, or supergroup does not exist.
+    '409':
+      description: The account blocks the bot and must unblock it before writing to it.

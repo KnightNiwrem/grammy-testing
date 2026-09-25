@@ -1,0 +1,11 @@
+type: object
+additionalProperties: false
+required:
+  - update_id
+  - chosen_inline_result
+properties:
+  update_id:
+    type: integer
+    minimum: 1
+  chosen_inline_result:
+    $ref: ./BotApiChosenInlineResult.yaml

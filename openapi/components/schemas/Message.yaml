@@ -1,0 +1,4 @@
+description: A message of a private chat or a supergroup.
+oneOf:
+  - $ref: ./PrivateMessage.yaml
+  - $ref: ./SupergroupMessage.yaml

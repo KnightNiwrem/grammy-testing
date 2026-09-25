@@ -1,0 +1,10 @@
+description: >-
+  Where a forward, or a message of another chat that a message replies to, first appeared.
+oneOf:
+  - $ref: ./MessageOriginUser.yaml
+  - $ref: ./MessageOriginHiddenUser.yaml
+discriminator:
+  propertyName: type
+  mapping:
+    user: ./MessageOriginUser.yaml
+    hidden_user: ./MessageOriginHiddenUser.yaml

@@ -1,0 +1,96 @@
+description: >-
+  Telegram Bot API method for editing the text of a message the bot sent to a private chat or a
+  supergroup, or that an account sent there through the bot's inline mode. As on Telegram, the text is formatted and normalized as by `sendMessage`, the edited message
+  keeps only the inline keyboard given in `reply_markup`, and the bot receives no update for
+  its own edit. The edit date changes only when the text or its entities do. Without `chat_id`
+  and `message_id`, the method edits a message an account sent through the bot's inline mode,
+  which `inline_message_id` identifies, whether or not the bot is a member of its chat, and
+  answers `true` rather than the message. As an account's message, the edited inline message
+  reaches the chat's bots that received it as an edited_message update.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: editMessageText
+  summary: Edit the text of a message the authenticated virtual bot sent
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/EditMessageTextRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/EditMessageTextRequest.yaml
+        encoding:
+          entities:
+            contentType: application/json
+          link_preview_options:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/EditMessageTextRequest.yaml
+        encoding:
+          entities:
+            contentType: application/json
+          link_preview_options:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+  responses:
+    '200':
+      description: >-
+        The message was edited: the edited message for a message of a chat, or `true` for an
+        inline message.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/EditMessageResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: the text is empty (`Bad Request: message text is empty`);
+        the text or its formatting cannot be read, as for `sendMessage`; neither `chat_id` nor
+        a positive `message_id` is given, and no `inline_message_id` either (`Bad Request:
+        message identifier is not specified`); `inline_message_id` identifies no message sent
+        through the bot's inline mode, including a deleted one or another bot's (`Bad Request:
+        MESSAGE_ID_INVALID`); `chat_id` is missing (`Bad Request: chat_id is empty`); the chat
+        is not one the bot can
+        address, as for `sendMessage` (`Bad Request: chat not found`); the chat has no message
+        with that ID (`Bad Request: message to edit not found`); as in TDLib, the bot may not
+        edit the message, because another user wrote it and it was not sent through the bot's
+        inline mode, another bot's inline mode sent it, it is a forward, or it carries a reply
+        keyboard, a forced reply, or a keyboard removal (`Bad Request: message can't be
+        edited`); the message is a photo or document (`Bad
+        Request: there is no text in the message to edit`); the text and its entities
+        cannot be normalized, as for `sendMessage`; the normalized text is longer than 4096
+        characters (`Bad Request: message is too long`); a button's callback data exceeds 64
+        bytes (`Bad Request: BUTTON_DATA_INVALID`); or the text, entities, and keyboard are
+        unchanged (`Bad Request: message is not modified: specified new message content and
+        reply markup are exactly the same as a current content and reply markup of the
+        message`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The chat is a supergroup that the bot left the supergroup (`Forbidden: bot is not a
+        member of the supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+        the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

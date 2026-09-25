@@ -1,0 +1,53 @@
+type: object
+additionalProperties: false
+required:
+  - ok
+  - result
+properties:
+  ok:
+    type: boolean
+    const: true
+  result:
+    type: object
+    additionalProperties: false
+    description: >-
+      Every right that applies to the kind of chat, in the Bot API's order. Groups show
+      neither `can_post_messages`, `can_edit_messages` nor `can_manage_direct_messages`;
+      channels show neither `can_pin_messages`, `can_manage_topics` nor `can_manage_tags`.
+    properties:
+      can_manage_chat:
+        type: boolean
+      can_change_info:
+        type: boolean
+      can_post_messages:
+        type: boolean
+      can_edit_messages:
+        type: boolean
+      can_delete_messages:
+        type: boolean
+      can_invite_users:
+        type: boolean
+      can_restrict_members:
+        type: boolean
+      can_pin_messages:
+        type: boolean
+      can_manage_topics:
+        type: boolean
+      can_promote_members:
+        type: boolean
+      can_manage_video_chats:
+        type: boolean
+      can_post_stories:
+        type: boolean
+      can_edit_stories:
+        type: boolean
+      can_delete_stories:
+        type: boolean
+      can_manage_direct_messages:
+        type: boolean
+      can_manage_tags:
+        type: boolean
+      can_send_welcome_messages:
+        type: boolean
+      is_anonymous:
+        type: boolean

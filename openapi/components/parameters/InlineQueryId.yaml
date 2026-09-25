@@ -1,0 +1,6 @@
+name: inlineQueryId
+in: path
+required: true
+description: Identifier of an inline query sent by the addressed account.
+schema:
+  type: string

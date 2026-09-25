@@ -1,0 +1,11 @@
+type: object
+additionalProperties: false
+required:
+  - update_id
+  - inline_query
+properties:
+  update_id:
+    type: integer
+    minimum: 1
+  inline_query:
+    $ref: ./BotApiInlineQuery.yaml

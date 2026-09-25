@@ -1,0 +1,14 @@
+type: object
+additionalProperties: false
+required:
+  - id
+  - botApiRoot
+properties:
+  id:
+    type: string
+    format: uuid
+    description: Server-assigned identifier of the test session.
+  botApiRoot:
+    type: string
+    format: uri
+    description: Absolute API root for bots operating in this test session.

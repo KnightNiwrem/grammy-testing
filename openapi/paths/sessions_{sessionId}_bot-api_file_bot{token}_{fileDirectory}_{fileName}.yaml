@@ -1,0 +1,29 @@
+description: >-
+  Where a bot downloads a file whose `file_path`, `<fileDirectory>/<fileName>`, getFile
+  returned, as Telegram serves files at `https://api.telegram.org/file/bot<token>/<file_path>`.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+  - $ref: ../components/parameters/FileDirectory.yaml
+  - $ref: ../components/parameters/FileName.yaml
+get:
+  operationId: downloadBotFile
+  summary: Download a file the authenticated virtual bot prepared with getFile
+  responses:
+    '200':
+      description: >-
+        The file's content, as it was sent, with its document's MIME type or its photo's
+        image type.
+      content:
+        application/octet-stream:
+          schema:
+            type: string
+            contentMediaType: application/octet-stream
+    '404':
+      description: >-
+        No active test session has the supplied identifier, or no bot of the session owns the
+        token or has the file path (`Not Found`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml

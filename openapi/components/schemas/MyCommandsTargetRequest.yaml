@@ -1,0 +1,11 @@
+type: object
+additionalProperties: false
+properties:
+  scope:
+    $ref: ./BotCommandScope.yaml
+  language_code:
+    type: string
+    pattern: '^([a-z]{2})?$'
+    description: >-
+      Two-letter ISO 639-1 language code of the list, or empty for users whose language has
+      no dedicated list.

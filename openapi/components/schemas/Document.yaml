@@ -1,0 +1,38 @@
+type: object
+additionalProperties: false
+required:
+  - file_name
+  - mime_type
+  - file_id
+  - file_unique_id
+  - file_size
+properties:
+  file_name:
+    type: string
+    minLength: 1
+    description: >-
+      The file's name. The Bot API server cleans the name of a file a bot uploads, as TDLib's
+      `clean_filename` does, and names a file whose name cleans to nothing `file`.
+  mime_type:
+    type: string
+    minLength: 1
+    description: >-
+      The MIME type Telegram derives from the file name's extension, matched
+      case-insensitively; `application/octet-stream` for an extension the emulator does not
+      recognize.
+  thumbnail:
+    $ref: ./PhotoSize.yaml
+    description: >-
+      The preview image a bot uploaded with the document, kept as it was sent; omitted for
+      none. It has a `file_id` and `file_unique_id` of its own.
+  thumb:
+    $ref: ./PhotoSize.yaml
+    description: Legacy copy of `thumbnail`, which the Bot API still shows.
+  file_id:
+    $ref: ./FileId.yaml
+  file_unique_id:
+    $ref: ./FileUniqueId.yaml
+  file_size:
+    type: integer
+    minimum: 1
+    description: Size of the file in bytes.

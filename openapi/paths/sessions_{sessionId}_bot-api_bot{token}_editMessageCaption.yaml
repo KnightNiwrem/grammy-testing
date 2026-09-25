@@ -1,0 +1,76 @@
+description: >-
+  Telegram Bot API method for editing the caption of a photo or document the bot sent to a
+  private chat or a supergroup; an empty caption removes it. The caption is formatted and
+  normalized as by `sendPhoto`, `show_caption_above_media` applies only to photos, and, as on
+  Telegram, the edited message keeps only the inline keyboard given in `reply_markup` and the
+  bot receives no update for its own edit. The edit date changes only when the caption, its
+  entities, or where it shows do. Without `chat_id` and `message_id`, the method edits a
+  message an account sent through the bot's inline mode, which `inline_message_id` identifies,
+  as `editMessageText` does.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: editMessageCaption
+  summary: Edit the caption of a message the authenticated virtual bot sent
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/EditMessageCaptionRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/EditMessageCaptionRequest.yaml
+        encoding:
+          caption_entities:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/EditMessageCaptionRequest.yaml
+        encoding:
+          caption_entities:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+  responses:
+    '200':
+      description: >-
+        The message was edited: the edited message for a message of a chat, or `true` for an
+        inline message.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/EditMessageResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it for the reasons `editMessageText` gives, with the caption in place of the text: the
+        caption or its formatting cannot be read or normalized, the message is a text message
+        (`Bad Request: there is no caption in the message to edit`), or the caption is longer
+        than 1024 characters (`Bad Request: message caption is too long`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The chat is a supergroup that the bot left the supergroup (`Forbidden: bot is not a
+        member of the supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+        the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

@@ -1,0 +1,53 @@
+description: Messages sent by one virtual account.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+post:
+  operationId: sendAccountMessage
+  summary: Send a message as a virtual account
+  description: >-
+    Sends text, a photo, or a document to the account's private chat with a bot, or to a
+    supergroup the account is a member of; or forwards a message of such a chat there, as the
+    account's message that shows who first sent it. Messages protected from forwarding and
+    service messages cannot be forwarded, and, as on Telegram, a forward cannot be edited. In
+    a supergroup, the supergroup's bots receive the message unless it is not addressed to a
+    bot in privacy mode. As on Telegram, a message reaches only the one bot in privacy mode it
+    is meant for, if any, and replies take precedence: the bot a replied message was meant
+    for (its author, the bot it was sent through, or the bot it was meant for in turn), then
+    the bot the message is sent through, then the bot its leading command names. Only a
+    message meant for no bot in particular reaches bots in privacy mode that it mentions, or
+    all of them when its text or caption starts with a command without a bot's username. As
+    on Telegram, a bot that is an administrator of the supergroup receives every message,
+    privacy mode notwithstanding. Telegram documents that a command without a bot's username
+    reaches only the bot that last wrote to the group; the emulator delivers it to every bot
+    in privacy mode.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/SendAccountMessageRequest.yaml
+  responses:
+    '201':
+      description: >-
+        The message was stored and, unless a receiving bot's allowed_updates subscription
+        excludes message updates, an update was enqueued for each bot that receives it.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: ../components/schemas/SentMessage.yaml
+              - $ref: ../components/schemas/SentSupergroupMessage.yaml
+    '400':
+      description: >-
+        The request, message text, or caption is invalid, the photo is not an image Telegram
+        accepts, the file is empty, the replied message is not a message of the chat, or the
+        forwarded message cannot be forwarded.
+    '403':
+      description: The account is not a member of a supergroup of the request.
+    '404':
+      description: >-
+        The session, sending account, a bot or supergroup of the request, or the forwarded
+        message does not exist.
+    '409':
+      description: The account blocks the target bot and must unblock it before writing to it.

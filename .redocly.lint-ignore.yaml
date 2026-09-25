@@ -1,17 +1,16 @@
 # This file instructs Redocly's linter to ignore the rules contained for specific parts of your API.
 # See https://redocly.com/docs/cli/ for more information.
-openapi.yaml:
+openapi/paths/sessions.yaml:
   # Creating a session reads no request input, so no client error can occur.
   operation-4xx-response:
-    - '#/paths/~1sessions/post/responses'
+    - '#/post/responses'
+openapi/paths/sessions_{sessionId}_bot-api_bot{token}_setChatAdministratorCustomTitle.yaml:
   # Bots may set only the titles of administrators they promoted, and bots promote none here, so
   # the method has no success response.
   operation-2xx-response:
-    - '#/paths/~1sessions~1{sessionId}~1bot-api~1bot{token}~1setChatAdministratorCustomTitle/post/responses'
+    - '#/post/responses'
+openapi/components/schemas/MyChatMemberUpdate.yaml:
   # Private-chat and supergroup alternatives differ in the constant `type` of their nested `chat`,
   # which the rule does not inspect, so they are mutually exclusive.
   no-illogical-composition-keywords:
-    - >-
-        #/paths/~1sessions~1{sessionId}~1accounts~1{accountId}~1messages/post/responses/201/content/application~1json/schema/oneOf
-    - '#/components/schemas/TextMessage/oneOf'
-    - '#/components/schemas/MyChatMemberUpdate/properties/my_chat_member/oneOf'
+    - '#/properties/my_chat_member/oneOf'

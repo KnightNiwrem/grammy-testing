@@ -1,0 +1,5 @@
+description: An article, or a photo or document the bot knows by `file_id`.
+oneOf:
+  - $ref: ./InlineQueryResultArticle.yaml
+  - $ref: ./InlineQueryResultCachedPhoto.yaml
+  - $ref: ./InlineQueryResultCachedDocument.yaml

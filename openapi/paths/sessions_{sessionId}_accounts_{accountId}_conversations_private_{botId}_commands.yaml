@@ -1,0 +1,24 @@
+description: The bot commands an account's client suggests in its private chat with a bot.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/BotId.yaml
+get:
+  operationId: getPrivateChatBotCommands
+  summary: Return the commands the account sees in its private chat with the bot
+  description: >-
+    Resolves the bot's command lists as Telegram documents for private chats: the list for
+    the chat, then for all private chats, then the default list, each preferring the list in
+    the account's language, taken from the primary subtag of its `language_code`, over the
+    list without a language. The account need not have written to the bot.
+  responses:
+    '200':
+      description: The commands, which are empty if the bot set none that apply.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/AccountBotCommands.yaml
+    '400':
+      description: A path identifier is invalid.
+    '404':
+      description: The session, account, or bot does not exist.

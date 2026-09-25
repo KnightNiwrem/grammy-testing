@@ -1,0 +1,11 @@
+type: object
+additionalProperties: false
+required:
+  - update_id
+  - message
+properties:
+  update_id:
+    type: integer
+    minimum: 1
+  message:
+    $ref: ./Message.yaml

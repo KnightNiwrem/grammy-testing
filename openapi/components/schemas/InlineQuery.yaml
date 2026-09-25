@@ -1,0 +1,62 @@
+type: object
+additionalProperties: false
+required:
+  - id
+  - bot_id
+  - chat
+  - query
+  - offset
+  - status
+  - answer
+properties:
+  id:
+    type: string
+    description: Identifier the bot receives in its inline_query update.
+  bot_id:
+    $ref: ./TelegramUserId.yaml
+  chat:
+    $ref: ./MessageTarget.yaml
+  query:
+    type: string
+  offset:
+    type: string
+  location:
+    $ref: ./Location.yaml
+    description: The location the account shared with the bot; omitted for none.
+  status:
+    type: string
+    enum:
+      - awaiting_answer
+      - answered
+    description: Whether the bot has answered the query; the bot answers a query once.
+  answer:
+    description: The bot's answer when the status is `answered`, and null otherwise.
+    oneOf:
+      - type: 'null'
+      - type: object
+        additionalProperties: false
+        required:
+          - results
+          - cache_time
+          - is_personal
+          - next_offset
+        properties:
+          results:
+            type: array
+            maxItems: 50
+            description: >-
+              The results as the account's client lists them. What sending one writes shows
+              in the sent message.
+            items:
+              $ref: ./AccountInlineQueryResult.yaml
+          cache_time:
+            type: integer
+            minimum: 0
+            maximum: 86400
+          is_personal:
+            type: boolean
+          next_offset:
+            type: string
+            description: The offset that requests more results; empty when there are no more.
+          button:
+            $ref: ./InlineQueryResultsButton.yaml

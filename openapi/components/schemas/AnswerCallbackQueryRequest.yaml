@@ -1,0 +1,30 @@
+type: object
+additionalProperties: false
+required:
+  - callback_query_id
+properties:
+  callback_query_id:
+    type: string
+  text:
+    type: string
+    maxLength: 200
+    description: Notification text; omitted or empty text shows no notification.
+  show_alert:
+    type: boolean
+    default: false
+    description: Shows the text as an alert instead of a transient notification.
+  url:
+    type: string
+    description: >-
+      A link for the account's client to open; empty for none. The Bot API allows a game's
+      URL for a game button, and links like `t.me/<bot_username>?start=<parameter>` that
+      start the bot. The emulator has no game buttons, so it accepts only a link that starts
+      the answering bot: `t.me`, `telegram.me`, or `telegram.dog` links, with or without a
+      scheme, and `tg://resolve?domain=<bot_username>&start=<parameter>`, where the start
+      parameter has at most 64 letters, digits, underscores, and hyphens.
+  cache_time:
+    type: integer
+    minimum: 0
+    maximum: 2592000
+    default: 0
+    description: Seconds for which the account's client may reuse the answer.

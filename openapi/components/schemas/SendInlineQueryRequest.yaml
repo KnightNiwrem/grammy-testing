@@ -1,0 +1,29 @@
+type: object
+additionalProperties: false
+required:
+  - bot_id
+  - chat
+properties:
+  bot_id:
+    $ref: ./TelegramUserId.yaml
+    description: The inline bot, whose username the account types before the query.
+  chat:
+    $ref: ./MessageTarget.yaml
+    description: The chat where the account types the query, to which a chosen result is sent.
+  query:
+    type: string
+    maxLength: 256
+    default: ''
+    description: >-
+      The query text, of at most 256 characters counted as Unicode code points; empty when
+      the account typed only the bot's username.
+  offset:
+    type: string
+    default: ''
+    description: >-
+      The `next_offset` of an earlier answer, requesting more results; empty for the first.
+  location:
+    $ref: ./Location.yaml
+    description: >-
+      Where the account is, shared only with a bot created with `requests_inline_location`;
+      omitted to share no location.

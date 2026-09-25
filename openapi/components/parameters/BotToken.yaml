@@ -1,0 +1,6 @@
+name: token
+in: path
+required: true
+description: Token of a virtual bot owned by the addressed test session.
+schema:
+  type: string

@@ -1,0 +1,18 @@
+description: Collection of isolated Telegram test sessions.
+post:
+  operationId: createSession
+  summary: Create an isolated test session
+  responses:
+    '201':
+      description: The test session was created.
+      headers:
+        Location:
+          description: Relative URL of the created test session.
+          required: true
+          schema:
+            type: string
+            format: uri-reference
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Session.yaml

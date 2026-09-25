@@ -1,0 +1,35 @@
+description: >-
+  The button the account's client shows above the results: it opens the bot's private chat
+  with a start parameter, or a Web App at an HTTPS URL.
+oneOf:
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - start_parameter
+    properties:
+      text:
+        type: string
+      start_parameter:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: '^[A-Za-z0-9_-]+$'
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - web_app
+    properties:
+      text:
+        type: string
+      web_app:
+        type: object
+        additionalProperties: false
+        required:
+          - url
+        properties:
+          url:
+            type: string
+            format: uri
+            pattern: '^https://'

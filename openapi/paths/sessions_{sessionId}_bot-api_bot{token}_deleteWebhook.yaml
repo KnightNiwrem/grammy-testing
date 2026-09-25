@@ -1,0 +1,45 @@
+description: >-
+  Telegram Bot API method for removing the bot's webhook, as setWebhook does with an empty
+  URL. Undelivered updates stay pending unless dropped, and a waiting getUpdates request is not
+  interrupted.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: deleteWebhook
+  summary: Remove the authenticated virtual bot's webhook
+  requestBody:
+    required: false
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/DeleteWebhookRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/DeleteWebhookRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/DeleteWebhookRequest.yaml
+  responses:
+    '200':
+      description: The bot has no webhook, and pending updates were discarded if requested.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/DeleteWebhookResponse.yaml
+    '400':
+      description: The request body cannot be decoded, or the deleteWebhook parameters are invalid.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

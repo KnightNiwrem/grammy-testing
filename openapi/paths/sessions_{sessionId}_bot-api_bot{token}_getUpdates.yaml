@@ -1,0 +1,58 @@
+description: Telegram Bot API long-polling method for receiving pending bot updates.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getUpdates
+  summary: Return pending updates for the authenticated virtual bot
+  requestBody:
+    required: false
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/GetUpdatesRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/GetUpdatesRequest.yaml
+        encoding:
+          allowed_updates:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/GetUpdatesRequest.yaml
+        encoding:
+          allowed_updates:
+            contentType: application/json
+  responses:
+    '200':
+      description: Pending updates, limited and confirmed according to the supplied offset.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/GetUpdatesResponse.yaml
+    '400':
+      description: The request body cannot be decoded, or the getUpdates parameters are invalid.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '409':
+      description: >-
+        The bot has a webhook, so it cannot poll; or, while this request was waiting for
+        updates, another getUpdates request for the same bot began waiting and replaced it, or
+        the bot set a webhook. A bot has at most one waiting request; requests answered
+        immediately do not replace it.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

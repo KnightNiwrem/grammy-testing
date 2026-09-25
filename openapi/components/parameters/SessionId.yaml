@@ -1,0 +1,6 @@
+name: sessionId
+in: path
+required: true
+description: Identifier of the test session that owns the addressed state.
+schema:
+  type: string

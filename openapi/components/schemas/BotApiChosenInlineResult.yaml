@@ -1,0 +1,24 @@
+type: object
+additionalProperties: false
+description: >-
+  An inline query result the account sent, in the field order Telegram uses. Only a bot
+  created with `receives_chosen_inline_results` receives it.
+required:
+  - from
+  - query
+  - result_id
+properties:
+  from:
+    $ref: ./Account.yaml
+    description: The account that sent the result.
+  location:
+    $ref: ./Location.yaml
+    description: The location the account shared with the query, if any.
+  inline_message_id:
+    type: string
+    description: Identifier of the sent message, present only when it has an inline keyboard.
+  query:
+    type: string
+    description: The query of the answer that held the result.
+  result_id:
+    type: string

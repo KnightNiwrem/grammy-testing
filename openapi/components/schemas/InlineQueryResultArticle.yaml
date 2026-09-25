@@ -1,0 +1,34 @@
+type: object
+additionalProperties: false
+required:
+  - type
+  - id
+  - title
+  - input_message_content
+properties:
+  type:
+    type: string
+    const: article
+  id:
+    $ref: ./InlineQueryResultId.yaml
+  title:
+    type: string
+    minLength: 1
+  input_message_content:
+    $ref: ./InputTextMessageContent.yaml
+    description: The text message that sending the article writes, which must have text.
+  reply_markup:
+    $ref: ./InlineKeyboardMarkup.yaml
+  url:
+    type: string
+  hide_url:
+    type: boolean
+    description: The older way to omit `url`, which Telegram honors by not sending the URL.
+  description:
+    type: string
+  thumbnail_url:
+    type: string
+  thumbnail_width:
+    type: integer
+  thumbnail_height:
+    type: integer

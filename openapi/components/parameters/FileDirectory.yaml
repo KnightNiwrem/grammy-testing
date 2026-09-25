@@ -1,0 +1,9 @@
+name: fileDirectory
+in: path
+required: true
+description: The directory part of a `file_path` that getFile returned.
+schema:
+  type: string
+  enum:
+    - photos
+    - documents

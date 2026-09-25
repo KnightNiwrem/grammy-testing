@@ -1,0 +1,18 @@
+type: object
+additionalProperties: false
+required:
+  - to
+  - text
+properties:
+  to:
+    $ref: ./MessageTarget.yaml
+  text:
+    type: string
+    minLength: 1
+    maxLength: 4096
+    description: >-
+      Plain text, normalized as a Telegram client does: control characters become spaces,
+      carriage returns are removed, and leading and trailing whitespace is trimmed. Text with
+      no visible characters is rejected.
+  reply_to_message_id:
+    $ref: ./AccountReplyToMessageId.yaml

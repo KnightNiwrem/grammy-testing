@@ -1,0 +1,6 @@
+name: fileUniqueId
+in: path
+required: true
+description: The `file_unique_id` of a file of the session's messages.
+schema:
+  $ref: ../schemas/FileUniqueId.yaml

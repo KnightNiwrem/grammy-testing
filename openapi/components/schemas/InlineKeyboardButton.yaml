@@ -1,0 +1,156 @@
+description: >-
+  A button with exactly one action. Telegram also accepts login, Web App, game and payment
+  buttons, and buttons with several actions, using the first action it recognizes; the
+  emulator rejects them.
+oneOf:
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - callback_data
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      callback_data:
+        type: string
+        minLength: 1
+        description: >-
+          Data sent to the bot in a callback query, at most 64 bytes when UTF-8 encoded.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - url
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      url:
+        type: string
+        minLength: 1
+        description: >-
+          A link as Telegram reads it: an HTTP or HTTPS URL, whose scheme defaults to
+          `http`, or a `tg:`, `ton:` or `tonsite:` link. Responses show it normalized, as
+          `http://grammy.dev/` for `grammy.dev`; a `tg://user?id=` link opens the user's
+          profile. A link Telegram refuses fails with `Bad Request: inline keyboard button
+          URL '…' is invalid: …`.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - copy_text
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      copy_text:
+        type: object
+        additionalProperties: false
+        description: The text the button copies to the clipboard.
+        required:
+          - text
+        properties:
+          text:
+            type: string
+            minLength: 1
+            maxLength: 256
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - switch_inline_query
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      switch_inline_query:
+        type: string
+        description: >-
+          The query that pressing the button puts after the bot's username in a chat the
+          user chooses; empty for the username alone. Pressing the button involves only the
+          user's client, so tests send the inline query itself.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - switch_inline_query_current_chat
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      switch_inline_query_current_chat:
+        type: string
+        description: >-
+          The query that pressing the button puts after the bot's username in the message's
+          own chat.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - switch_inline_query_chosen_chat
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      switch_inline_query_chosen_chat:
+        type: object
+        additionalProperties: false
+        description: >-
+          A query for a chat the user chooses among the allowed kinds. As a request field,
+          omitted fields default to an empty query and to kinds that are not allowed; at
+          least one kind must be allowed (`Bad Request: At least one chat type must be
+          allowed`). As on Telegram, responses show a button that allows every kind as a
+          `switch_inline_query` button, and every field of any other.
+        properties:
+          query:
+            type: string
+          allow_user_chats:
+            type: boolean
+          allow_bot_chats:
+            type: boolean
+          allow_group_chats:
+            type: boolean
+          allow_channel_chats:
+            type: boolean
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - disabled
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      disabled:
+        type: object
+        additionalProperties: false
+        description: Marks a button that does nothing when pressed.

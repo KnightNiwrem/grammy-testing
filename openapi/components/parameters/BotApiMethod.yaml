@@ -1,0 +1,6 @@
+name: method
+in: path
+required: true
+description: Telegram Bot API method name.
+schema:
+  type: string

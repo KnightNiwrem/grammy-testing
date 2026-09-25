@@ -1,0 +1,73 @@
+description: >-
+  Telegram Bot API method for banning a user from a supergroup, which needs the
+  `can_restrict_members` administrator right. A member is removed, which a service message
+  from the bot records with `left_chat_member`; as on Telegram, every bot of the supergroup
+  receives it, as it does any service message. A removed bot receives a my_chat_member
+  update showing it as `kicked`. A user that is not a member is banned before it can join.
+  A ban shorter than 30 seconds or longer than 366 days lasts until it is lifted, as on
+  Telegram; the emulator never lifts a ban when its `until_date` passes. Banning a user as
+  it is already banned succeeds without rights. `revoke_messages` is accepted and ignored.
+  Telegram's older name, `kickChatMember`, is accepted too.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: banChatMember
+  summary: Ban a user from a supergroup as the authenticated virtual bot
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/BanChatMemberRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/BanChatMemberRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/BanChatMemberRequest.yaml
+  responses:
+    '200':
+      description: The user is banned.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/TrueResultResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram
+        would reject it, in this order: `user_id` is missing or not positive (`Bad
+        Request: invalid user_id specified`); `chat_id` is missing (`Bad Request:
+        chat_id is empty`); the chat is neither a private chat with an account that
+        has written to the bot nor a supergroup the bot is or was a member of (`Bad
+        Request: chat not found`); the chat is a private chat (`Bad Request: can't
+        ban members in private chats`); the user is the bot itself (`Bad Request:
+        can't restrict self`) or no user of the session (`Bad Request: member not
+        found`); the user is the owner (`Bad Request: can't remove chat owner`); the
+        bot lacks the right (`Bad Request: not enough rights to restrict/unrestrict
+        chat member`); or the user is an administrator, which Telegram lets a bot
+        ban only if it promoted it, and bots promote none here (`Bad Request: user
+        is an administrator of the chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The bot left the supergroup (`Forbidden: bot is not a member of the
+        supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+        the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

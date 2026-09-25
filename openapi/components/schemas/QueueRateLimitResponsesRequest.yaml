@@ -1,0 +1,19 @@
+type: object
+additionalProperties: false
+required:
+  - retry_after
+properties:
+  method:
+    type: string
+    description: >-
+      An implemented Bot API method, by any name Telegram accepts for it, matched
+      case-insensitively; omit it to limit calls of every method.
+  retry_after:
+    type: integer
+    minimum: 1
+    description: The `retry_after`, in seconds, of every answer.
+  count:
+    type: integer
+    minimum: 1
+    default: 1
+    description: How many of the bot's next matching calls receive an answer.

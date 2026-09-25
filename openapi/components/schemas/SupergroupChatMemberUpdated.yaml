@@ -1,0 +1,30 @@
+type: object
+additionalProperties: false
+description: >-
+  A change of the bot's standing in a supergroup: it becomes `member` from `left`, or from
+  `kicked` after a ban, when an account adds it; `administrator` when the owner promotes it
+  or changes its rights, and `member` again when the owner demotes it; `left` when it leaves
+  or a bot lifts its ban; and `kicked` when an account removes it or a bot bans it.
+required:
+  - chat
+  - from
+  - date
+  - old_chat_member
+  - new_chat_member
+properties:
+  chat:
+    $ref: ./SupergroupChat.yaml
+  from:
+    $ref: ./MessageUser.yaml
+    description: >-
+      The account or bot that changed the bot's standing, or the bot itself when it left.
+  date:
+    type: integer
+    minimum: 0
+    description: Unix timestamp of the change.
+  old_chat_member:
+    $ref: ./ChatMember.yaml
+    description: The bot's standing before the change; a bot never owns a supergroup.
+  new_chat_member:
+    $ref: ./ChatMember.yaml
+    description: The bot's standing after the change.

@@ -18,8 +18,9 @@ stands in for the ["Forwarded messages" privacy setting](messages.md#forwarding-
 `DELETE /sessions/{sessionId}` or `session.end()` discards the session and stops webhook delivery
 and waiting long polls. State lives in memory and is lost on process restart. There is no account
 login, Telegram connection, persistence, clock advancement API, or snapshot/restore facility.
-Individual bot/account resource paths marked unimplemented in [openapi.yaml](../../openapi.yaml)
-have no profile read, update or deletion operations; use the profiles returned at creation.
+Individual bot/account resource paths marked unimplemented in
+[the OpenAPI description](../../openapi/openapi.yaml) have no profile read, update or deletion
+operations; use the profiles returned at creation.
 
 Bot API requests support GET and POST, case-insensitive method names, query parameters, and JSON,
 URL-encoded or multipart bodies. The first value of a parameter wins, with the query string before

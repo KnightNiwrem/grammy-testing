@@ -1,0 +1,20 @@
+type: object
+additionalProperties: false
+description: A bot as a message sender, without the capabilities that only getMe reports.
+required:
+  - id
+  - is_bot
+  - first_name
+  - username
+properties:
+  id:
+    $ref: ./TelegramUserId.yaml
+  is_bot:
+    type: boolean
+    const: true
+  first_name:
+    type: string
+  last_name:
+    type: string
+  username:
+    type: string

@@ -1,0 +1,27 @@
+type: object
+additionalProperties: false
+description: >-
+  The message of another chat that a message replies to, present only for such a reply. As
+  TDLib's `RepliedMessageInfo` keeps it, it shows where the replied message first appeared,
+  its supergroup and ID when it is a supergroup message, and a photo or document without
+  its caption. The replied text or caption appears as the reply's `quote` instead.
+required:
+  - origin
+properties:
+  origin:
+    $ref: ./MessageOrigin.yaml
+  chat:
+    $ref: ./SupergroupChat.yaml
+  message_id:
+    type: integer
+    minimum: 1
+  photo:
+    type: array
+    minItems: 1
+    items:
+      $ref: ./PhotoSize.yaml
+  has_media_spoiler:
+    type: boolean
+    const: true
+  document:
+    $ref: ./Document.yaml

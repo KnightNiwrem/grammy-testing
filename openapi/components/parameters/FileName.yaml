@@ -1,0 +1,6 @@
+name: fileName
+in: path
+required: true
+description: The file name part of a `file_path` that getFile returned.
+schema:
+  type: string

@@ -1,0 +1,9 @@
+type: object
+additionalProperties: false
+required:
+  - commands
+properties:
+  commands:
+    type: array
+    items:
+      $ref: ./AccountBotCommand.yaml

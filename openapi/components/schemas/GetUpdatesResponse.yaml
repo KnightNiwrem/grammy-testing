@@ -1,0 +1,20 @@
+type: object
+additionalProperties: false
+required:
+  - ok
+  - result
+properties:
+  ok:
+    type: boolean
+    const: true
+  result:
+    type: array
+    items:
+      oneOf:
+        - $ref: ./MessageUpdate.yaml
+        - $ref: ./EditedMessageUpdate.yaml
+        - $ref: ./InlineQueryUpdate.yaml
+        - $ref: ./ChosenInlineResultUpdate.yaml
+        - $ref: ./CallbackQueryUpdate.yaml
+        - $ref: ./MyChatMemberUpdate.yaml
+        - $ref: ./ChatMemberUpdate.yaml

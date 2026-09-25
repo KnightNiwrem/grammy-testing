@@ -1,0 +1,19 @@
+description: One inline query sent by an account.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/InlineQueryId.yaml
+get:
+  operationId: getInlineQuery
+  summary: Return an inline query with the bot's answer once given
+  responses:
+    '200':
+      description: The inline query, answered or not.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/InlineQueryResponse.yaml
+    '400':
+      description: The account path identifier is invalid.
+    '404':
+      description: The session does not exist, or the account sent no such inline query.

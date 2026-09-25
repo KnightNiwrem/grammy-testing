@@ -1,0 +1,63 @@
+description: Inline queries an account typed for inline bots.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+post:
+  operationId: sendInlineQuery
+  summary: Type an inline query for a bot as a virtual account
+  description: >-
+    Sends an inline query, as typing the bot's username followed by the query does, from the
+    account's private chat with a bot, the inline bot or another, or from a supergroup the
+    account is a member of. The inline bot need not be a member of the chat, but must have been
+    created with `supports_inline_queries`. Unless the bot's allowed_updates subscription
+    excludes them, it receives an inline_query update whose `chat_type` is `sender` for the
+    account's private chat with the inline bot itself, `private` for its chat with another
+    bot, and `supergroup` for a supergroup. The bot answers asynchronously with
+    answerInlineQuery; read the answer from the created inline query, and send one of its
+    results to the chat with the query's chosen-results route. The emulator never expires
+    inline queries by time.
+
+    An account can share its location only with a bot created with
+    `requests_inline_location`, as Telegram's apps do; the bot receives it in the inline_query
+    update and in the chosen_inline_result update of a result sent from the query.
+
+    A query that repeats one answered within the answer's `cache_time` is created already
+    answered with the same answer, and the bot receives no update for it. A query repeats
+    another when it is sent to the same bot from the same kind of chat, with the same offset,
+    the same text apart from surrounding whitespace, and, as TDLib compares them, a location
+    with the same coordinates in whole ten-thousandths of a degree, or no location. A personal
+    answer is reused only for the account that received it.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/SendInlineQueryRequest.yaml
+  responses:
+    '201':
+      description: The inline query was sent.
+      headers:
+        Location:
+          description: Relative URL of the created inline query.
+          required: true
+          schema:
+            type: string
+            format: uri-reference
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/InlineQueryResponse.yaml
+    '400':
+      description: >-
+        The request is invalid, such as a query longer than 256 characters or a location
+        outside the valid coordinates.
+    '403':
+      description: The account is not a member of the supergroup.
+    '404':
+      description: >-
+        The session, account, inline bot, supergroup, or bot of the private chat does not
+        exist.
+    '409':
+      description: >-
+        The bot was not created with inline mode turned on, or the query shares a location
+        with a bot not created with `requests_inline_location`.

@@ -1,0 +1,42 @@
+type: object
+additionalProperties: false
+required:
+  - inline_query_id
+  - results
+properties:
+  inline_query_id:
+    type: string
+  results:
+    type: array
+    description: >-
+      The results, whose `type` Telegram matches case-insensitively. Telegram reads a missing
+      list as empty.
+    items:
+      $ref: ./InlineQueryResult.yaml
+  cache_time:
+    type: integer
+    default: 300
+    description: >-
+      Seconds for which the same query receives this answer again instead of reaching the
+      bot; Telegram clamps it to 0 through 86400.
+  is_personal:
+    type: boolean
+    default: false
+    description: >-
+      Whether the answer is reused only for the account that sent the query; otherwise the
+      same query from any account receives it.
+  next_offset:
+    type: string
+    default: ''
+    maxLength: 64
+    description: The offset the client sends to request more results; empty for no more.
+  button:
+    $ref: ./InlineQueryResultsButton.yaml
+  switch_pm_text:
+    type: string
+    description: >-
+      The older form of a `button` that opens the bot's private chat, used when `button` is
+      omitted.
+  switch_pm_parameter:
+    type: string
+    description: The start parameter of the button that `switch_pm_text` forms.

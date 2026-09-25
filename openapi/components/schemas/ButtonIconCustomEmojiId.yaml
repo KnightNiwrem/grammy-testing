@@ -1,0 +1,6 @@
+type: string
+pattern: '^-?\d+$'
+description: >-
+  The 64-bit identifier of the custom emoji that clients show before the button's text, as
+  decimal text; as a request field, `0` chooses none. Responses omit it for none. The
+  emulator keeps the identifier for inspection without checking that the emoji exists.

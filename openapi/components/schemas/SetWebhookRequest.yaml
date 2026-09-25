@@ -1,0 +1,35 @@
+type: object
+additionalProperties: false
+properties:
+  url:
+    type: string
+    default: ''
+    description: >-
+      Where to post updates: an HTTP or HTTPS URL, with a missing scheme meaning HTTPS.
+      Credentials in the URL are sent as a Basic `Authorization` header. An empty URL
+      removes the webhook.
+  max_connections:
+    type: integer
+    default: 40
+    description: >-
+      How many updates, each of a different queue, are sent at once; values outside 1 to 100
+      are clamped, as on Telegram. Reported by getWebhookInfo.
+  allowed_updates:
+    description: >-
+      Update types the bot subscribes to, as for getUpdates. Omitting it keeps the current
+      subscription.
+    type: array
+    items:
+      type: string
+  drop_pending_updates:
+    type: boolean
+    default: false
+    description: >-
+      Discards the bot's pending updates, as for deleteWebhook. A request that drops
+      updates always restarts delivery.
+  secret_token:
+    type: string
+    maxLength: 256
+    pattern: '^[A-Za-z0-9_-]*$'
+    default: ''
+    description: Sent in the `X-Telegram-Bot-Api-Secret-Token` header of every webhook request.

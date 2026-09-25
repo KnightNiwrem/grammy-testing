@@ -1,0 +1,28 @@
+oneOf:
+  - type: object
+    additionalProperties: false
+    required:
+      - user
+      - status
+    properties:
+      user:
+        $ref: ./MessageSenderBot.yaml
+      status:
+        type: string
+        const: member
+  - type: object
+    additionalProperties: false
+    description: The bot while the account blocks it, which Telegram shows as banned forever.
+    required:
+      - user
+      - status
+      - until_date
+    properties:
+      user:
+        $ref: ./MessageSenderBot.yaml
+      status:
+        type: string
+        const: kicked
+      until_date:
+        type: integer
+        const: 0

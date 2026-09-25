@@ -1,0 +1,16 @@
+type: object
+additionalProperties: false
+description: >-
+  Telegram's link preview options, validated and without effect, because the emulator
+  generates no link previews.
+properties:
+  is_disabled:
+    type: boolean
+  url:
+    type: string
+  prefer_small_media:
+    type: boolean
+  prefer_large_media:
+    type: boolean
+  show_above_text:
+    type: boolean

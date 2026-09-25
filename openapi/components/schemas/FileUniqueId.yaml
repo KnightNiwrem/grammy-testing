@@ -1,0 +1,5 @@
+type: string
+minLength: 1
+description: >-
+  Identifier of a file that is the same for every user; it can neither send nor, through the
+  Bot API, download the file.

@@ -1,0 +1,34 @@
+description: Virtual Telegram accounts owned by a test session.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+post:
+  operationId: createAccount
+  summary: Create a virtual Telegram account
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/CreateAccountRequest.yaml
+  responses:
+    '201':
+      description: The virtual account was created.
+      headers:
+        Location:
+          description: Relative URL of the created virtual account.
+          required: true
+          schema:
+            type: string
+            format: uri-reference
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/CreatedAccount.yaml
+    '400':
+      description: The request body is malformed or does not match the account creation schema.
+    '404':
+      description: No active test session has the supplied identifier.
+    '409':
+      description: The username is already assigned within the test session.
+    '507':
+      description: The test session cannot allocate another Telegram user identifier.

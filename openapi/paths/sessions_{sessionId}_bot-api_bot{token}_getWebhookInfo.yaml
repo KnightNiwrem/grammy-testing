@@ -1,0 +1,32 @@
+description: >-
+  Telegram Bot API method for reading the bot's webhook, its pending updates, and the latest
+  failure to deliver to it, which a test can read to find why a bot's webhook rejects updates.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getWebhookInfo
+  summary: Return the authenticated virtual bot's webhook status
+  responses:
+    '200':
+      description: The webhook status; a bot without a webhook has an empty URL.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/GetWebhookInfoResponse.yaml
+    '400':
+      description: The request body cannot be decoded, or getWebhookInfo received a parameter.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

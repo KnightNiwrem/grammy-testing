@@ -1,0 +1,46 @@
+description: >-
+  Telegram Bot API method for reading the bot's description for exactly one language, without
+  falling back to the description for users without a dedicated one.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getMyDescription
+  summary: Return the authenticated virtual bot's description for a language
+  requestBody:
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/MyDescriptionTargetRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/MyDescriptionTargetRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/MyDescriptionTargetRequest.yaml
+  responses:
+    '200':
+      description: The description, which is empty if none is set for the language.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotDescriptionResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or the language code is
+        neither empty nor two lowercase letters (`Bad Request: invalid language code
+        specified`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

@@ -1,0 +1,33 @@
+description: Supergroups an account creates, which it owns.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+post:
+  operationId: createSupergroup
+  summary: Create a supergroup owned by a virtual account
+  description: >-
+    Creates a supergroup whose only member is the account, as its owner. The owner adds
+    accounts and bots to it as members. With a `username`, the supergroup is public: bots see
+    the username in its chat and can address it as `@username` wherever a Bot API method
+    takes a chat.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/CreateSupergroupRequest.yaml
+  responses:
+    '201':
+      description: The supergroup was created.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/CreatedSupergroup.yaml
+    '400':
+      description: The request body is malformed or does not match the supergroup schema.
+    '404':
+      description: The session or account does not exist.
+    '409':
+      description: Another account, bot, or supergroup of the session has the username.
+    '507':
+      description: The test session cannot allocate another supergroup identifier.

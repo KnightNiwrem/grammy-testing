@@ -1,0 +1,6 @@
+name: userId
+in: path
+required: true
+description: Telegram user identifier of a virtual account or bot.
+schema:
+  $ref: ../schemas/TelegramUserId.yaml

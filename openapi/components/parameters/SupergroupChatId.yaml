@@ -1,0 +1,6 @@
+name: chatId
+in: path
+required: true
+description: Bot API chat identifier of a supergroup.
+schema:
+  $ref: ../schemas/SupergroupChatId.yaml

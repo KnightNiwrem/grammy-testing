@@ -1,0 +1,43 @@
+type: object
+additionalProperties: false
+description: >-
+  An entity a bot specifies, as a Bot API `MessageEntity`. Types that Telegram detects by
+  itself (`mention`, `hashtag`, `cashtag`, `bot_command`, `url`, `email`, `phone_number`,
+  and `bank_card_number`) are accepted and ignored, so entities of a received message can be
+  sent back. Telegram reads numbers written as strings; the emulator rejects them.
+required:
+  - type
+  - offset
+  - length
+properties:
+  type:
+    type: string
+  offset:
+    type: integer
+  length:
+    type: integer
+  language:
+    type: string
+  url:
+    type: string
+    description: For `text_link`; a `tg://user?id=` link makes a text mention.
+  user:
+    type: object
+    description: For `text_mention`; only its `id` is read, and it must be a session user.
+    required:
+      - id
+    properties:
+      id:
+        type: integer
+  custom_emoji_id:
+    type: string
+  unix_time:
+    type: integer
+    description: For `date_time`, a positive Unix time.
+  date_time_format:
+    type: string
+    description: >-
+      For `date_time`, how clients show it: `r` or `R` for relative time, or letters choosing
+      the parts shown, `t` or `T` for a short or long time, `d` or `D` for a short or long
+      date, and `w` or `W` for the day of the week. The last letter for a part decides its
+      precision. Empty or omitted, no format is chosen.

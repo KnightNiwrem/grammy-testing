@@ -1,0 +1,7 @@
+description: >-
+  A press of a callback button: on a message of the bot's chat, which it carries, or on a
+  message sent through the bot's inline mode, which the bot knows only by its
+  `inline_message_id`.
+oneOf:
+  - $ref: ./ChatMessageCallbackQuery.yaml
+  - $ref: ./InlineMessageCallbackQuery.yaml

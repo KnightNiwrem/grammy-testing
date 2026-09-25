@@ -1,0 +1,7 @@
+type: object
+additionalProperties: false
+properties:
+  chat_id:
+    $ref: ./TelegramUserId.yaml
+  menu_button:
+    $ref: ./MenuButton.yaml

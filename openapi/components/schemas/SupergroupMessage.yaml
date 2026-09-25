@@ -1,0 +1,134 @@
+type: object
+additionalProperties: false
+description: >-
+  A supergroup message as the requesting member sees it: one a member wrote, or a service
+  message recording that members joined (`new_chat_members`) or that a member left or was
+  removed (`left_chat_member`). As Telegram does, a service message also carries the legacy
+  fields `new_chat_participant` and `new_chat_member`, or `left_chat_participant`. Members see
+  the same message, apart from the `file_id` of its file and the legacy `new_chat_member`.
+  Its other fields mean what they mean for a private message.
+required:
+  - message_id
+  - from
+  - chat
+  - date
+oneOf:
+  - required:
+      - text
+  - required:
+      - photo
+  - required:
+      - document
+  - required:
+      - new_chat_participant
+      - new_chat_member
+      - new_chat_members
+  - required:
+      - left_chat_participant
+      - left_chat_member
+properties:
+  message_id:
+    type: integer
+    minimum: 1
+    description: Message ID in the supergroup's own message sequence.
+  from:
+    description: >-
+      The member, an account or a bot, that wrote the message, or that added, removed, or
+      left as a service message records.
+    oneOf:
+      - $ref: ./Account.yaml
+      - $ref: ./MessageSenderBot.yaml
+  chat:
+    $ref: ./SupergroupChat.yaml
+  date:
+    type: integer
+    minimum: 0
+  edit_date:
+    type: integer
+    minimum: 0
+  forward_origin:
+    $ref: ./MessageOrigin.yaml
+  forward_from:
+    $ref: ./MessageUser.yaml
+    description: >-
+      Legacy form of `forward_origin.sender_user`, present only for a forward whose origin is
+      a user.
+  forward_sender_name:
+    type: string
+    minLength: 1
+    description: >-
+      Legacy form of `forward_origin.sender_user_name`, present only for a forward whose
+      origin is a hidden user.
+  forward_date:
+    type: integer
+    minimum: 0
+    description: Legacy form of `forward_origin.date`, present only for a forward.
+  reply_to_message:
+    $ref: ./SupergroupMessage.yaml
+  external_reply:
+    $ref: ./ExternalReplyInfo.yaml
+  quote:
+    $ref: ./TextQuote.yaml
+  text:
+    type: string
+  entities:
+    type: array
+    minItems: 1
+    items:
+      $ref: ./MessageEntity.yaml
+  photo:
+    type: array
+    minItems: 1
+    description: >-
+      The sizes of a photo message's photo, smallest first. Telegram converts a photo to
+      JPEG and keeps it in several sizes; the emulator keeps the one size and the format it
+      was sent in.
+    items:
+      $ref: ./PhotoSize.yaml
+  document:
+    $ref: ./Document.yaml
+  caption:
+    type: string
+    minLength: 1
+    description: The caption of a photo or document, omitted when it has none.
+  caption_entities:
+    type: array
+    minItems: 1
+    description: Entities marked in the caption, as in text; omitted when there are none.
+    items:
+      $ref: ./MessageEntity.yaml
+  show_caption_above_media:
+    type: boolean
+    const: true
+    description: Present when clients show the photo's caption above the photo.
+  has_media_spoiler:
+    type: boolean
+    const: true
+    description: Present when clients cover the photo until the user reveals it.
+  new_chat_participant:
+    $ref: ./MessageUser.yaml
+    description: Legacy alias of `new_chat_member`.
+  new_chat_member:
+    $ref: ./MessageUser.yaml
+    description: >-
+      Legacy field: the requesting member if it is among the new members, otherwise the first
+      of them.
+  new_chat_members:
+    type: array
+    minItems: 1
+    description: The accounts and bots that joined.
+    items:
+      $ref: ./MessageUser.yaml
+  left_chat_participant:
+    $ref: ./MessageUser.yaml
+    description: Legacy alias of `left_chat_member`.
+  left_chat_member:
+    $ref: ./MessageUser.yaml
+    description: The account or bot that left or was removed.
+  reply_markup:
+    $ref: ./InlineKeyboardMarkup.yaml
+  via_bot:
+    $ref: ./MessageSenderBot.yaml
+  has_protected_content:
+    type: boolean
+    const: true

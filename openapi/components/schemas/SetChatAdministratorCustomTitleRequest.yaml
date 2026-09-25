@@ -1,0 +1,16 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+  - user_id
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
+      where the method is unavailable, the account's user ID.
+  user_id:
+    $ref: ./TelegramUserId.yaml
+  custom_title:
+    type: string
+    description: The new title, which the method never applies here.

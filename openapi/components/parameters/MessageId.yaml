@@ -1,0 +1,9 @@
+name: messageId
+in: path
+required: true
+description: >-
+  ID of a message of the private conversation, as the conversation's bot and message
+  history see it.
+schema:
+  type: integer
+  minimum: 1

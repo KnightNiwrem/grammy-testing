@@ -1,0 +1,5 @@
+type: object
+additionalProperties: false
+properties:
+  chat_id:
+    $ref: ./TelegramUserId.yaml

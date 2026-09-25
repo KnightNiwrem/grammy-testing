@@ -1,0 +1,7 @@
+type: object
+additionalProperties: false
+required:
+  - callback_query
+properties:
+  callback_query:
+    $ref: ./CallbackQuery.yaml

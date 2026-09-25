@@ -1,0 +1,47 @@
+description: >-
+  Telegram Bot API method for reading the menu button of all the bot's private chats, or with
+  `chat_id` the one its chat with an account shows: the button chosen for that chat, or else
+  the one for all chats.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getChatMenuButton
+  summary: Return the authenticated virtual bot's menu button
+  requestBody:
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/GetChatMenuButtonRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/GetChatMenuButtonRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/GetChatMenuButtonRequest.yaml
+  responses:
+    '200':
+      description: The menu button, `default` if none is chosen.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MenuButtonResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or `chat_id` is not positive
+        (`Bad Request: invalid chat_id specified`) or names no account (`Bad Request: user not
+        found`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

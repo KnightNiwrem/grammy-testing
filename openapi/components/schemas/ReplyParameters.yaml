@@ -1,0 +1,47 @@
+type: object
+additionalProperties: false
+description: >-
+  The message to reply to. An empty object, or a `message_id` that is not positive,
+  specifies no reply. Checklist tasks and poll options are not supported.
+properties:
+  message_id:
+    type: integer
+    description: Identifier of the replied message in the bot's chat.
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the replied message's chat, a private chat with an account that has
+      written to the bot or a supergroup the bot is a member of; omitted for the chat the
+      message is sent to. A reply to another chat's message shows it in `external_reply`
+      and quotes its text or caption. As TDLib does, a message that cannot be forwarded,
+      such as protected content or a service message, is silently not replied to.
+  allow_sending_without_reply:
+    type: boolean
+    default: false
+    description: >-
+      Sends the message as no reply, instead of failing, when the replied message is not
+      found.
+  quote:
+    type: string
+    description: >-
+      The part of the replied message to quote, formatted by `quote_parse_mode` or
+      `quote_entities`. As TDLib's `MessageQuote` does, it is normalized like message text,
+      and ignored when that fails or leaves it empty. It must then be an exact part of the
+      replied text or caption, including its bold, italic, underline, strikethrough,
+      spoiler, custom emoji, and date and time entities, and at most 1,024 characters long,
+      or the message is not sent (`Bad Request: QUOTE_TEXT_INVALID`). Other entities are
+      left out of the quote.
+  quote_parse_mode:
+    type: string
+    description: How to parse `quote`'s formatting, as `parse_mode` parses message text.
+  quote_entities:
+    type: array
+    description: The entities of `quote`, instead of `quote_parse_mode`.
+    items:
+      $ref: ./MessageEntity.yaml
+  quote_position:
+    type: integer
+    default: 0
+    description: >-
+      Where the quote starts in the replied text, in UTF-16 code units. The quote is placed
+      at its occurrence nearest to this position, searching as TDLib's `search_quote` does.

@@ -1,0 +1,30 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+  - from_chat_id
+  - message_id
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat to forward to, as for `sendMessage`: for a private chat, the
+      account's user ID; for a supergroup, its negative chat ID.
+  from_chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: Identifier of the chat of the forwarded message, as for `chat_id`.
+  message_id:
+    type: integer
+    description: The forwarded message's ID in the bot's chat.
+  disable_notification:
+    type: boolean
+    default: false
+    description: As for `sendMessage`.
+  protect_content:
+    type: boolean
+    default: false
+    description: As for `sendMessage`.
+  message_effect_id:
+    type: string
+    pattern: '^-?\d+$'
+    description: As for `sendMessage`.

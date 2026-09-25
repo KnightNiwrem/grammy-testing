@@ -1,0 +1,61 @@
+description: >-
+  Telegram Bot API method for showing a chat action, such as typing, in a private chat with an
+  account that has written to the bot or in a supergroup the bot is a member of. Accounts see
+  the action through their conversation's `chat-actions` for 5.5 seconds, until the bot
+  cancels it or sends a message to the chat. Topics and business connections are not
+  supported.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: sendChatAction
+  summary: Show a chat action from the authenticated virtual bot in one of its chats
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/SendChatActionRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/SendChatActionRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/SendChatActionRequest.yaml
+  responses:
+    '200':
+      description: The chat action was accepted.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/TrueResultResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: the action is missing or unknown (`Bad Request: wrong
+        parameter action in request`); `chat_id` is missing (`Bad Request: chat_id is empty`);
+        or the chat is not one the bot can address, as for `sendMessage` (`Bad Request: chat
+        not found`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The account blocks the bot (`Forbidden: bot was blocked by the user`), or the bot left
+        the supergroup (`Forbidden: bot is not a member of the supergroup chat`) or was removed
+        from it (`Forbidden: bot was kicked from the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

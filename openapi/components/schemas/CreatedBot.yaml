@@ -1,0 +1,11 @@
+type: object
+additionalProperties: false
+required:
+  - token
+  - bot
+properties:
+  token:
+    type: string
+    description: Emulator-issued token used to call the Bot API as this bot.
+  bot:
+    $ref: ./Bot.yaml

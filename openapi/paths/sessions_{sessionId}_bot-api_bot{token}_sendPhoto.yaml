@@ -1,0 +1,79 @@
+description: >-
+  Telegram Bot API method for sending a photo with an optional caption. The photo is a file
+  uploaded with the request, or a photo the bot knows by its `file_id`, which, as on Telegram,
+  is the bot's own. The emulator reads the dimensions of JPEG, PNG, GIF, WebP, and BMP images
+  and keeps the photo in the one size and format it was sent in, whereas Telegram converts a
+  photo to JPEG in several sizes and accepts other image formats too. Files sent by URL are not
+  supported. The caption is read, formatted, and normalized as `sendMessage` reads text, and
+  the other parameters work as for `sendMessage`.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: sendPhoto
+  summary: Send a photo from the authenticated virtual bot to an account or a supergroup
+  requestBody:
+    required: true
+    content:
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/SendPhotoRequest.yaml
+        encoding:
+          caption_entities:
+            contentType: application/json
+          reply_parameters:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+      application/json:
+        schema:
+          $ref: ../components/schemas/SendPhotoRequest.yaml
+  responses:
+    '200':
+      description: >-
+        The photo was stored in the private conversation or supergroup. No bot receives an
+        update for a bot's message.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MessageResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: the request names no uploaded file and no `file_id` (`Bad
+        Request: there is no photo in the request`); the caption or its formatting cannot be
+        read, as for `sendMessage`; `chat_id` is missing (`Bad Request: chat_id is empty`); the
+        uploaded file is empty (`Bad Request: file must be non-empty`), is larger than
+        10485760 bytes (`Bad Request: file of size <size> bytes is too big for a photo; the
+        maximum size is 10485760 bytes`), is not an image (`Bad Request:
+        IMAGE_PROCESS_FAILED`), or has dimensions Telegram refuses (`Bad
+        Request: PHOTO_INVALID_DIMENSIONS`); the `file_id` identifies no file the bot knows
+        (`Bad Request: wrong file identifier/HTTP URL specified`) or identifies a document
+        (`Bad Request: can't use file of type Document as Photo`); then the checks of
+        `sendMessage` from the chat on, with a caption longer than 1024 characters rejected
+        (`Bad Request: message caption is too long`). Telegram checks the chat before the file.
+        Files sent by URL are not supported (`Bad Request: sending files by URL is not
+        supported`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The account blocks the bot (`Forbidden: bot was blocked by the user`), or the bot left
+        the supergroup (`Forbidden: bot is not a member of the supergroup chat`) or was removed
+        from it (`Forbidden: bot was kicked from the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

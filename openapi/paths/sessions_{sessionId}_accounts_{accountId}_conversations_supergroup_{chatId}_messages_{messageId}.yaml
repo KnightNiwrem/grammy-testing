@@ -1,0 +1,55 @@
+description: One message of a supergroup, addressed by its ID in the supergroup.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/SupergroupChatId.yaml
+  - $ref: ../components/parameters/SupergroupMessageId.yaml
+patch:
+  operationId: editSupergroupAccountMessage
+  summary: Edit the text or caption of a message the account sent to a supergroup
+  description: >-
+    Replaces the text or caption of the account's message, as for a private message, and
+    dates the edit. The supergroup's bots receive an edited_message update as they would receive the
+    message with its new text, unless their allowed_updates subscription excludes it.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/EditAccountMessageRequest.yaml
+  responses:
+    '200':
+      description: The message was edited.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/SentSupergroupMessage.yaml
+    '400':
+      description: >-
+        The request, text, or caption is invalid, another member wrote the message, the request
+        gives text for a photo or document or a caption for a text message, or the normalized
+        text or caption is the message's current one.
+    '403':
+      description: The account is not a member of the supergroup.
+    '404':
+      description: The session, account, supergroup, or message of the supergroup does not exist.
+delete:
+  operationId: deleteSupergroupAccountMessage
+  summary: Delete a message of a supergroup for every member
+  description: >-
+    Deletes a message for every member, as TDLib's `can_delete_channel_message` allows: the
+    account deletes the messages it wrote, and the owner or an administrator with the
+    `can_delete_messages` right deletes any message, service messages included. As on
+    Telegram, no bot receives an update for the deletion.
+  responses:
+    '204':
+      description: The message was deleted.
+    '400':
+      description: A path identifier is invalid.
+    '403':
+      description: >-
+        The account is not a member of the supergroup, or may not delete the message.
+    '404':
+      description: >-
+        The session, account, supergroup, or message of the supergroup does not exist,
+        including a deleted message.

@@ -1,0 +1,38 @@
+description: >-
+  A bot on the account's block list. Telegram calls blocking a bot stopping it. While the
+  account blocks the bot, the bot's messages and chat actions to the account fail with `403
+  Forbidden: bot was blocked by the user`, and the account cannot write to the bot. Existing
+  messages stay editable and deletable.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/BotId.yaml
+put:
+  operationId: blockBot
+  summary: Block a bot as the account
+  description: >-
+    Unless the bot's allowed_updates subscription excludes my_chat_member updates, the bot
+    receives a my_chat_member update in which its membership in the account's private chat
+    changes from `member` to `kicked`. The account need not have written to the bot. Blocking
+    a blocked bot has no effect.
+  responses:
+    '204':
+      description: The account blocks the bot.
+    '400':
+      description: A path identifier is invalid.
+    '404':
+      description: The session, account, or bot does not exist.
+delete:
+  operationId: unblockBot
+  summary: Unblock a bot as the account
+  description: >-
+    Unless the bot's allowed_updates subscription excludes my_chat_member updates, the bot
+    receives a my_chat_member update in which its membership changes from `kicked` back to
+    `member`. Unblocking a bot that is not blocked has no effect.
+  responses:
+    '204':
+      description: The account does not block the bot.
+    '400':
+      description: A path identifier is invalid.
+    '404':
+      description: The session, account, or bot does not exist.

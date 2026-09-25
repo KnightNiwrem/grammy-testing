@@ -1,0 +1,4 @@
+description: An account or a bot as a message shows it.
+oneOf:
+  - $ref: ./Account.yaml
+  - $ref: ./MessageSenderBot.yaml

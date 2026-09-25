@@ -1,0 +1,74 @@
+description: >-
+  Telegram Bot API method for forwarding a message of one of the bot's chats, a private chat
+  with an account that has written to it or a supergroup it is a member of, to another such
+  chat. As TDLib does, the forward repeats the message's content and the bot through whose
+  inline mode it was sent, and shows who first sent it and when in `forward_origin` and the
+  legacy `forward_from` and `forward_date`; a forward of a forward shows the original's origin.
+  As TDLib's `hide_sender_if_needed` does, the origin of an account created with
+  `has_private_forwards` is a hidden user that shows only the account's name, also in the legacy
+  `forward_sender_name`. As TDLib's `dup_reply_markup` does, it keeps the inline keyboard only
+  when every button works away from the original message: URL, copy-text and disabled buttons,
+  and the switch-inline buttons of a message sent through an inline bot, which then let the user
+  choose any chat. As on Telegram, a forward cannot be edited and the bot receives no update for it. Topics, paid
+  broadcasts, suggested posts, and video start timestamps are not supported.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: forwardMessage
+  summary: Forward a message from one of the authenticated virtual bot's chats
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/ForwardMessageRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/ForwardMessageRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/ForwardMessageRequest.yaml
+  responses:
+    '200':
+      description: The forward was stored in the chat it was sent to.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MessageResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: `from_chat_id` is missing (`Bad Request: parameter
+        "from_chat_id" is required`); `chat_id` is missing (`Bad Request: chat_id is empty`),
+        which Telegram checks after the forwarded message; the chat of the forwarded message is
+        unknown to the bot (`Bad Request: chat not found`); `message_id` is missing or
+        identifies no message of that chat (`Bad Request: message to forward not found`); the
+        message's sender protected it, or it is a service message (`Bad Request: the message
+        can't be forwarded`), which Telegram checks after the chat the forward goes to; or that
+        chat is unknown to the bot (`Bad Request: chat not found`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The bot left a supergroup of the request (`Forbidden: bot is not a member of the
+        supergroup chat`) or was removed from it (`Forbidden: bot was kicked from the
+        supergroup chat`), which is checked in place of that chat; or the account the forward
+        goes to blocks the bot (`Forbidden: bot was blocked by the user`), which is checked
+        last.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

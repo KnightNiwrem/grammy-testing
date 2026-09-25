@@ -1,0 +1,16 @@
+type: object
+additionalProperties: false
+required:
+  - type
+  - message_id
+properties:
+  type:
+    type: string
+    const: force_reply
+  message_id:
+    type: integer
+    minimum: 1
+    description: >-
+      The ID of the bot message the client shows a reply interface to, as the bot sees it.
+  input_field_placeholder:
+    type: string

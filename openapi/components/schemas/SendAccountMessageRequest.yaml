@@ -1,0 +1,6 @@
+description: Text, a photo, or a document to send, or a message to forward.
+oneOf:
+  - $ref: ./SendAccountTextRequest.yaml
+  - $ref: ./SendAccountPhotoRequest.yaml
+  - $ref: ./SendAccountDocumentRequest.yaml
+  - $ref: ./ForwardAccountMessageRequest.yaml

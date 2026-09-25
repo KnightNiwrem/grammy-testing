@@ -1,0 +1,12 @@
+type: object
+additionalProperties: false
+required:
+  - text
+properties:
+  text:
+    type: string
+    minLength: 1
+  icon_custom_emoji_id:
+    $ref: ./ButtonIconCustomEmojiId.yaml
+  style:
+    $ref: ./ButtonStyle.yaml

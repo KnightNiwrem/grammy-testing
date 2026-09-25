@@ -1,0 +1,83 @@
+description: >-
+  Telegram Bot API method for copying a message of one of the bot's chats to a private chat
+  or a supergroup, as `forwardMessage` addresses them. The copy is the bot's own message: it
+  repeats the content but, unlike a forward, shows neither where it came from nor the bot the
+  original was sent through, and takes its reply and reply markup from the request. A
+  `caption`, even an empty one, replaces the caption of a photo or document, formatted and
+  normalized as by `sendPhoto`, with `show_caption_above_media` for a photo; text stays as it
+  is. As TDLib lets bots do, a bot may copy a message whose sender protected it. The bot
+  receives no update for the copy. Topics, paid broadcasts, suggested posts, and video start
+  timestamps are not supported.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: copyMessage
+  summary: Copy a message from one of the authenticated virtual bot's chats
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/CopyMessageRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/CopyMessageRequest.yaml
+        encoding:
+          caption_entities:
+            contentType: application/json
+          reply_parameters:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/CopyMessageRequest.yaml
+        encoding:
+          caption_entities:
+            contentType: application/json
+          reply_parameters:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+  responses:
+    '200':
+      description: >-
+        The copy was stored in the chat it was sent to. As on Telegram, the response holds only
+        the copy's message ID.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MessageIdResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: `from_chat_id` is missing (`Bad Request: parameter
+        "from_chat_id" is required`); the new caption or its formatting cannot be read, as for
+        `sendPhoto`; `chat_id` is missing (`Bad Request: chat_id is empty`), which Telegram
+        checks after the copied message; the chat of the copied message is unknown to the bot
+        (`Bad Request: chat not found`); `message_id` is missing or identifies no message of
+        that chat (`Bad Request: message to copy not found`); the message is a service message
+        (`Bad Request: the message can't be copied`), which Telegram checks after the rest of
+        the request; or the request fails as `sendPhoto` does for the chat the copy goes to,
+        its reply, the new caption, or the reply markup.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: As for `forwardMessage`.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

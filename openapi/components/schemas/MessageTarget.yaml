@@ -1,0 +1,9 @@
+description: The account's private chat with a bot, or a supergroup it is a member of.
+oneOf:
+  - $ref: ./PrivateMessageTarget.yaml
+  - $ref: ./SupergroupMessageTarget.yaml
+discriminator:
+  propertyName: type
+  mapping:
+    private: ./PrivateMessageTarget.yaml
+    supergroup: ./SupergroupMessageTarget.yaml

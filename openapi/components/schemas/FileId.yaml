@@ -1,0 +1,5 @@
+type: string
+minLength: 1
+description: >-
+  Identifier of a file for the user that sees it. As on Telegram, each user knows a file by a
+  `file_id` of its own, so a bot can send or download a file only by its own `file_id`.

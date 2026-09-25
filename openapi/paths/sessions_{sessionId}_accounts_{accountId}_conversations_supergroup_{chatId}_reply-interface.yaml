@@ -1,0 +1,28 @@
+description: The reply keyboard or forced reply a member's client shows in a supergroup.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/SupergroupChatId.yaml
+get:
+  operationId: getSupergroupReplyInterface
+  summary: Return the reply interface the member sees in the supergroup
+  description: >-
+    As TDLib tracks it for a received message, a bot's reply keyboard or forced reply applies
+    to every member, or, when selective, only to the members its message mentions and the
+    sender of the message it replies to; the chat then shows it. A keyboard removal that
+    applies to the member removes an interface the same bot set. The interface also
+    disappears when its message is deleted or its bot leaves or is removed from the
+    supergroup.
+  responses:
+    '200':
+      description: The reply interface, or `null` when the client shows its usual input.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/AccountReplyInterface.yaml
+    '400':
+      description: An account or supergroup path identifier is invalid.
+    '403':
+      description: The account is not a member of the supergroup.
+    '404':
+      description: The session, account, or supergroup does not exist.

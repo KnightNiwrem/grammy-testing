@@ -1,0 +1,25 @@
+description: >-
+  The reply keyboard or forced reply an account's client shows in its private chat with a bot.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/BotId.yaml
+get:
+  operationId: getPrivateChatReplyInterface
+  summary: Return the reply interface the account sees in its private chat with the bot
+  description: >-
+    As TDLib tracks it, the chat shows the reply interface of the latest bot message that sent
+    a reply keyboard or forced reply, until a later message removes the keyboard or that
+    message is deleted. Messages with an inline keyboard or no reply markup leave it
+    unchanged, and so do edits.
+  responses:
+    '200':
+      description: The reply interface, or `null` when the client shows its usual input.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/AccountReplyInterface.yaml
+    '400':
+      description: A path identifier is invalid.
+    '404':
+      description: The session, account, or bot does not exist.

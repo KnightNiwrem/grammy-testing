@@ -1,0 +1,7 @@
+name: messageId
+in: path
+required: true
+description: ID of a message of the supergroup, which every member sees alike.
+schema:
+  type: integer
+  minimum: 1

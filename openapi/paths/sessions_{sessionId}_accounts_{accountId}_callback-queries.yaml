@@ -1,0 +1,47 @@
+description: Callback queries an account created by pressing callback buttons.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+post:
+  operationId: pressCallbackButton
+  summary: Press a callback button on a bot message as a virtual account
+  description: >-
+    Presses the button with the given callback data on a bot message in the account's private
+    chat with the bot, or in a supergroup the account is a member of. Unless the bot that sent
+    the message has an allowed_updates subscription that excludes callback_query
+    updates, the bot receives a callback_query update carrying the message as it is now. A
+    button on a message sent through a bot's inline mode reaches that inline bot instead, with
+    the message's `inline_message_id` in place of the message, as on Telegram. The
+    bot answers asynchronously with answerCallbackQuery; read the answer from the created
+    callback query. The press can create the query already expired, so that the bot receives
+    it but cannot answer it, as when a bot that was offline catches up after the answer
+    deadline has passed. The emulator never expires callback queries by time.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/PressCallbackButtonRequest.yaml
+  responses:
+    '201':
+      description: The button was pressed and the callback query created.
+      headers:
+        Location:
+          description: Relative URL of the created callback query.
+          required: true
+          schema:
+            type: string
+            format: uri-reference
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/CallbackQueryResponse.yaml
+    '400':
+      description: >-
+        The request is invalid, or the message has no callback button with the given data.
+    '403':
+      description: The account is not a member of the supergroup.
+    '404':
+      description: >-
+        The session, account, bot, or supergroup does not exist, or the chat has no message
+        with the given ID.

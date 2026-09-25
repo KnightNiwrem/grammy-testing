@@ -1,0 +1,197 @@
+openapi: 3.1.1
+info:
+  title: tg-bot-api-emulator
+  version: 0.0.0
+  description: >-
+    HTTP interface for isolated Telegram Bot API test sessions. Objects marked with
+    `x-implementation-status: unimplemented` describe agreed API surface that is not available
+    from the server yet. Marked path items without operations record routing topology only.
+
+
+    Bot API paths follow Telegram's request conventions, so each listed POST operation also
+    accepts GET, and method names match case-insensitively. Parameters can be supplied in the
+    query string or in an `application/json`, `application/x-www-form-urlencoded`, or
+    `multipart/form-data` body; a query-string parameter takes precedence over a body parameter
+    of the same name. Any parameter value can be sent as text, with array parameters such as
+    `allowed_updates` as JSON text. Methods that send a file read it from a `multipart/form-data`
+    part with a file name: the part named after the file parameter, or the part that the
+    parameter names as `attach://<part name>`. Telegram tolerates unknown parameters, malformed values, and
+    bodies it cannot decode; the emulator rejects them with a `400` Bot API error so that tests
+    surface the mistake.
+
+
+    As on Telegram, a method the emulator does not implement is answered, after the token is
+    authenticated, with a `404` Bot API error described as `Not Found: method not found`. A path
+    under a session's Bot API root that does not name both a bot token and a method is answered
+    with a `404` Bot API error described as `Not Found`, before any token is checked.
+
+
+    The server is meant to run inside a test environment, such as CI, rather than as a public
+    service, so admin routes require no credentials; each test session isolates its own state. Bot
+    API routes authenticate the bot token in their path, as Telegram does, and answer a token that
+    no bot of the session owns with a `401` Bot API error. OpenAPI security schemes cannot describe
+    a credential in the path, so no operation declares one.
+  license:
+    name: CC0 1.0 Universal
+    identifier: CC0-1.0
+security: []
+servers:
+  - url: http://{domain}:{port}
+    variables:
+      domain:
+        default: localhost
+        description: Domain advertised to clients.
+      port:
+        default: '8081'
+        description: Port on which the standalone server listens.
+paths:
+  /sessions:
+    $ref: paths/sessions.yaml
+  /sessions/{sessionId}:
+    $ref: paths/sessions_{sessionId}.yaml
+  /sessions/{sessionId}/bots:
+    $ref: paths/sessions_{sessionId}_bots.yaml
+  /sessions/{sessionId}/bots/{botId}:
+    $ref: paths/sessions_{sessionId}_bots_{botId}.yaml
+  /sessions/{sessionId}/bots/{botId}/rate-limit-responses:
+    $ref: paths/sessions_{sessionId}_bots_{botId}_rate-limit-responses.yaml
+  /sessions/{sessionId}/accounts:
+    $ref: paths/sessions_{sessionId}_accounts.yaml
+  /sessions/{sessionId}/accounts/{accountId}:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}.yaml
+  /sessions/{sessionId}/accounts/{accountId}/messages:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_messages.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/messages:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_private_{botId}_messages.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/messages/{messageId}:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_private_{botId}_messages_{messageId}.yaml
+  /sessions/{sessionId}/accounts/{accountId}/supergroups:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_supergroups.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/members/{userId}:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_members_{userId}.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/administrators/{userId}:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_administrators_{userId}.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/administrators/{userId}/custom-title:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_administrators_{userId}_custom-title.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/content-protection:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_content-protection.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/messages:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_messages.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/commands:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_commands.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/chat-actions:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_chat-actions.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/reply-interface:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_reply-interface.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/notifications:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_notifications.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/messages/{messageId}:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_messages_{messageId}.yaml
+  /sessions/{sessionId}/accounts/{accountId}/blocked-bots/{botId}:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_blocked-bots_{botId}.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/commands:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_private_{botId}_commands.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/menu-button:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_private_{botId}_menu-button.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/chat-actions:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_private_{botId}_chat-actions.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/notifications:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_private_{botId}_notifications.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/private/{botId}/reply-interface:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_private_{botId}_reply-interface.yaml
+  /sessions/{sessionId}/accounts/{accountId}/reply-keyboard-presses:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_reply-keyboard-presses.yaml
+  /sessions/{sessionId}/accounts/{accountId}/callback-queries:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_callback-queries.yaml
+  /sessions/{sessionId}/accounts/{accountId}/callback-queries/{callbackQueryId}:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_callback-queries_{callbackQueryId}.yaml
+  /sessions/{sessionId}/accounts/{accountId}/inline-queries:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_inline-queries.yaml
+  /sessions/{sessionId}/accounts/{accountId}/inline-queries/{inlineQueryId}:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_inline-queries_{inlineQueryId}.yaml
+  /sessions/{sessionId}/accounts/{accountId}/inline-queries/{inlineQueryId}/chosen-results:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_inline-queries_{inlineQueryId}_chosen-results.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getMe:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getMe.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getUpdates:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getUpdates.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/setWebhook:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_setWebhook.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/deleteWebhook:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_deleteWebhook.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getWebhookInfo:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getWebhookInfo.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/sendMessage:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_sendMessage.yaml
+  /sessions/{sessionId}/files/{fileUniqueId}:
+    $ref: paths/sessions_{sessionId}_files_{fileUniqueId}.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/sendPhoto:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_sendPhoto.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/sendDocument:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_sendDocument.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/forwardMessage:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_forwardMessage.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/copyMessage:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_copyMessage.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/forwardMessages:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_forwardMessages.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/copyMessages:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_copyMessages.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/editMessageCaption:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_editMessageCaption.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getFile:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getFile.yaml
+  /sessions/{sessionId}/bot-api/file/bot{token}/{fileDirectory}/{fileName}:
+    $ref: paths/sessions_{sessionId}_bot-api_file_bot{token}_{fileDirectory}_{fileName}.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/editMessageText:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_editMessageText.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/editMessageReplyMarkup:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_editMessageReplyMarkup.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/deleteMessage:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_deleteMessage.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/deleteMessages:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_deleteMessages.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/answerCallbackQuery:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_answerCallbackQuery.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/answerInlineQuery:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_answerInlineQuery.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/sendChatAction:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_sendChatAction.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/leaveChat:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_leaveChat.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getChatMember:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getChatMember.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getChatAdministrators:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getChatAdministrators.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getChatMemberCount:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getChatMemberCount.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/banChatMember:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_banChatMember.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/setChatAdministratorCustomTitle:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_setChatAdministratorCustomTitle.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/unbanChatMember:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_unbanChatMember.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/setMyCommands:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_setMyCommands.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getMyCommands:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getMyCommands.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/deleteMyCommands:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_deleteMyCommands.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/setMyDescription:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_setMyDescription.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getMyDescription:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getMyDescription.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/setMyShortDescription:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_setMyShortDescription.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getMyShortDescription:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getMyShortDescription.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/setMyDefaultAdministratorRights:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_setMyDefaultAdministratorRights.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getMyDefaultAdministratorRights:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getMyDefaultAdministratorRights.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/setChatMenuButton:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_setChatMenuButton.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/getChatMenuButton:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getChatMenuButton.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/{method}:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_{method}.yaml

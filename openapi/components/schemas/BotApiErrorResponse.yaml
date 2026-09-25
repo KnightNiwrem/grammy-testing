@@ -1,0 +1,25 @@
+type: object
+additionalProperties: false
+required:
+  - ok
+  - error_code
+  - description
+properties:
+  ok:
+    type: boolean
+    const: false
+  error_code:
+    type: integer
+  description:
+    type: string
+  parameters:
+    type: object
+    additionalProperties: false
+    description: Present on a `429` rate limit answer.
+    required:
+      - retry_after
+    properties:
+      retry_after:
+        type: integer
+        minimum: 1
+        description: How many seconds the bot should wait before retrying.

@@ -1,0 +1,11 @@
+type: object
+additionalProperties: false
+required:
+  - type
+  - botId
+properties:
+  type:
+    type: string
+    const: private
+  botId:
+    $ref: ./TelegramUserId.yaml

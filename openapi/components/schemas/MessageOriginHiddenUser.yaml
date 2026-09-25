@@ -1,0 +1,19 @@
+type: object
+additionalProperties: false
+description: >-
+  The origin of a message of an account created with `has_private_forwards`: only the
+  account's name, and when it sent the original message.
+required:
+  - type
+  - sender_user_name
+  - date
+properties:
+  type:
+    type: string
+    const: hidden_user
+  sender_user_name:
+    type: string
+    minLength: 1
+  date:
+    type: integer
+    minimum: 0

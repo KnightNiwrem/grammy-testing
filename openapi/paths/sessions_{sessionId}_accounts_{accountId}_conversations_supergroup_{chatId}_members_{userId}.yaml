@@ -1,0 +1,51 @@
+description: >-
+  A member of a supergroup, as the supergroup's owner adds or removes it, or as the member
+  itself leaves.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/SupergroupChatId.yaml
+  - $ref: ../components/parameters/UserId.yaml
+put:
+  operationId: addSupergroupMember
+  summary: Add an account or a bot to a supergroup the account owns
+  description: >-
+    Adds the user as a member, which a service message from the account records with
+    `new_chat_members`. An added bot first receives a my_chat_member update, to `member` from
+    `left`, or from `kicked` for a bot removed before, whose ban adding it lifts. Every bot of
+    the supergroup, the added one included, then receives the service message, privacy mode
+    notwithstanding. Updates that a bot's allowed_updates subscription excludes are not sent.
+    Adding a member again changes nothing.
+  responses:
+    '204':
+      description: The user is a member of the supergroup.
+    '400':
+      description: A path identifier is invalid.
+    '403':
+      description: The account does not own the supergroup.
+    '404':
+      description: The session, account, supergroup, or user to add does not exist.
+delete:
+  operationId: removeSupergroupMember
+  summary: Leave a supergroup, or remove a member from a supergroup the account owns
+  description: >-
+    When the user is the account itself, the account leaves the supergroup; otherwise the
+    account, as the owner, removes the user, which, as in Telegram's apps, bans it until it is
+    added again. A service message from the account that left or removed the member records
+    the change with `left_chat_member`, and the supergroup's bots receive it, privacy mode
+    notwithstanding. A removed bot first receives a my_chat_member update, from `member` to
+    `kicked`, and still receives the service message about itself; its later Bot API requests
+    to the supergroup fail with `403 Forbidden: bot was kicked from the supergroup chat`. The
+    owner cannot leave: Telegram keeps a creator who left as the owner, which the emulator does
+    not support. Leaving or removing a user that is not a member changes nothing.
+  responses:
+    '204':
+      description: The user is not a member of the supergroup.
+    '400':
+      description: A path identifier is invalid.
+    '403':
+      description: The account removes another user from a supergroup it does not own.
+    '404':
+      description: The session, account, supergroup, or user to remove does not exist.
+    '409':
+      description: The account owns the supergroup and cannot leave it.

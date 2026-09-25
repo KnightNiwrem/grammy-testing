@@ -1,0 +1,18 @@
+type: object
+additionalProperties: false
+required:
+  - ok
+  - result
+properties:
+  ok:
+    type: boolean
+    const: true
+  result:
+    type: object
+    additionalProperties: false
+    required:
+      - short_description
+    properties:
+      short_description:
+        type: string
+        description: Empty if none is set for the language.

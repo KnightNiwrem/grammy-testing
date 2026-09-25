@@ -1,0 +1,7 @@
+type: object
+additionalProperties: false
+required:
+  - menu_button
+properties:
+  menu_button:
+    $ref: ./MenuButton.yaml

@@ -1,0 +1,24 @@
+type: object
+additionalProperties: false
+required:
+  - id
+  - from
+  - inline_message_id
+  - chat_instance
+  - data
+properties:
+  id:
+    type: string
+    description: Identifier to pass to answerCallbackQuery.
+  from:
+    $ref: ./Account.yaml
+    description: The account that pressed the button.
+  inline_message_id:
+    type: string
+    description: Identifier of the message carrying the button, by which the bot edits it.
+  chat_instance:
+    type: string
+    description: Opaque signed 64-bit decimal identifying the chat the message was sent to.
+  data:
+    type: string
+    description: The pressed button's callback data.

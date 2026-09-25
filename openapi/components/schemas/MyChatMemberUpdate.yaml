@@ -1,0 +1,13 @@
+type: object
+additionalProperties: false
+required:
+  - update_id
+  - my_chat_member
+properties:
+  update_id:
+    type: integer
+    minimum: 1
+  my_chat_member:
+    oneOf:
+      - $ref: ./PrivateChatMemberUpdated.yaml
+      - $ref: ./SupergroupChatMemberUpdated.yaml

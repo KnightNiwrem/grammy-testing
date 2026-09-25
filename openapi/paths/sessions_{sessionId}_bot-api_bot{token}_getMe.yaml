@@ -1,0 +1,30 @@
+description: Telegram Bot API method for retrieving the authenticated virtual bot's profile.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getMe
+  summary: Return the authenticated virtual bot's profile
+  responses:
+    '200':
+      description: The virtual bot was authenticated.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/GetMeResponse.yaml
+    '400':
+      description: The request body cannot be decoded, or getMe received a parameter.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

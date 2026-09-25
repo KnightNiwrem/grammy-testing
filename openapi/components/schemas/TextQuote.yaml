@@ -1,0 +1,27 @@
+type: object
+additionalProperties: false
+description: >-
+  The quoted part of the replied message's text or caption: the part the sender chose, or,
+  for a reply to another chat's message without one, up to its first 1,024 characters.
+  Quotes keep only bold, italic, underline, strikethrough, spoiler, custom emoji, and date
+  and time entities.
+required:
+  - text
+  - position
+properties:
+  text:
+    type: string
+    minLength: 1
+  entities:
+    type: array
+    minItems: 1
+    items:
+      $ref: ./MessageEntity.yaml
+  position:
+    type: integer
+    minimum: 0
+    description: Where the quote starts in the replied text, in UTF-16 code units.
+  is_manual:
+    type: boolean
+    const: true
+    description: Present when the sender chose the quote.

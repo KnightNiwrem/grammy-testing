@@ -1,0 +1,25 @@
+description: The notifications a member's client shows for the messages of a supergroup.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/SupergroupChatId.yaml
+get:
+  operationId: getSupergroupNotifications
+  summary: Return the notifications of other members' messages, and whether each is silent
+  description: >-
+    Returns a notification for each message another member sent to the supergroup, including
+    service messages, in order. As for a private chat, a notification is silent when a bot
+    sent its message with `disable_notification`.
+  responses:
+    '200':
+      description: The supergroup's notifications, which may be none.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/AccountNotifications.yaml
+    '400':
+      description: An account or supergroup path identifier is invalid.
+    '403':
+      description: The account is not a member of the supergroup.
+    '404':
+      description: The session, account, or supergroup does not exist.

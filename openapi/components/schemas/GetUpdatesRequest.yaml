@@ -1,0 +1,30 @@
+type: object
+additionalProperties: false
+properties:
+  offset:
+    type: integer
+    description: >-
+      Identifier of the first update to return; earlier updates are confirmed and
+      forgotten. A negative offset returns that many updates from the end of the queue and
+      forgets the rest. As on Telegram, an offset more than 10 beyond the identifier the next
+      update will receive is ignored, so a stale offset does not discard pending updates.
+  limit:
+    type: integer
+    minimum: 1
+    maximum: 100
+    default: 100
+  timeout:
+    type: integer
+    minimum: 0
+    maximum: 50
+    default: 0
+  allowed_updates:
+    description: >-
+      Update types the bot subscribes to, matched case-insensitively. The subscription
+      persists until a later request supplies this parameter and applies only to updates
+      created afterward. Unrecognized names are ignored; a list with no recognized name
+      selects Telegram's default, which excludes chat_member, message_reaction, and
+      message_reaction_count.
+    type: array
+    items:
+      type: string

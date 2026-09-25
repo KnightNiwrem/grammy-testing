@@ -1,0 +1,50 @@
+description: >-
+  Telegram Bot API method for replacing the bot's short description, shown on its profile page
+  and when it is shared, for a language. As on Telegram, the text is cleaned of control
+  characters but not trimmed, and an empty or missing `short_description` removes the short
+  description for the language.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: setMyShortDescription
+  summary: Replace the authenticated virtual bot's short description for a language
+  requestBody:
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/SetMyShortDescriptionRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/SetMyShortDescriptionRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/SetMyShortDescriptionRequest.yaml
+  responses:
+    '200':
+      description: The short description was replaced.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/TrueResultResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: the text is not well-formed Unicode (`Bad Request: strings
+        must be encoded in UTF-8`), or the language code is neither empty nor two lowercase
+        letters (`Bad Request: invalid language code specified`). Telegram's server limit on
+        the text's length is not enforced.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

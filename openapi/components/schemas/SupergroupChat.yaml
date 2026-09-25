@@ -1,0 +1,17 @@
+type: object
+additionalProperties: false
+required:
+  - id
+  - title
+  - type
+properties:
+  id:
+    $ref: ./SupergroupChatId.yaml
+  title:
+    type: string
+  username:
+    type: string
+    description: The username of a public supergroup; omitted for a private one.
+  type:
+    type: string
+    const: supergroup

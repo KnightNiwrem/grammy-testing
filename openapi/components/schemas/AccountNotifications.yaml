@@ -1,0 +1,21 @@
+type: object
+additionalProperties: false
+required:
+  - notifications
+properties:
+  notifications:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required:
+        - message_id
+        - is_silent
+      properties:
+        message_id:
+          type: integer
+          minimum: 1
+          description: The notifying message's ID, as the chat's bots see it.
+        is_silent:
+          type: boolean
+          description: Whether the sender asked for the notification to play no sound.

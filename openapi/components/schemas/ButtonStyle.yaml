@@ -1,0 +1,5 @@
+type: string
+description: >-
+  How clients color the button: `primary`, `danger` or `success`. As a request field, the
+  name is read in any ASCII letter case, and an empty name or `default` chooses the client's
+  default style, which responses omit.

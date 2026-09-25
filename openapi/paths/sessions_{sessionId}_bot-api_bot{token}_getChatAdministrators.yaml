@@ -1,0 +1,60 @@
+description: >-
+  Telegram Bot API method for listing a supergroup's owner, then its administrators in the
+  order they joined. As on Telegram, administrators that are other bots are left out
+  unless `return_bots` is set; the calling bot is listed when it is an administrator.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getChatAdministrators
+  summary: List the administrators of a supergroup the authenticated virtual bot is a member of
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/GetChatAdministratorsRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/GetChatAdministratorsRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/GetChatAdministratorsRequest.yaml
+  responses:
+    '200':
+      description: The owner and administrators of the supergroup.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/ChatMembersResultResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram
+        would reject it: `chat_id` is missing (`Bad Request: chat_id is empty`); the
+        chat is a private chat with an account that has written to the bot (`Bad
+        Request: there are no administrators in the private chat`); or the chat is
+        neither a private chat with an account that has written to the bot nor a
+        supergroup the bot is or was a member of (`Bad Request: chat not found`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The bot left the supergroup (`Forbidden: bot is not a member of the
+        supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+        the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

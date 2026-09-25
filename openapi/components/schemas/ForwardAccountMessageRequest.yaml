@@ -1,0 +1,23 @@
+type: object
+additionalProperties: false
+required:
+  - to
+  - forward
+properties:
+  to:
+    $ref: ./MessageTarget.yaml
+  forward:
+    type: object
+    additionalProperties: false
+    required:
+      - chat
+      - message_id
+    description: >-
+      The message to forward. As in Telegram's clients, a forward replies to no message.
+    properties:
+      chat:
+        $ref: ./MessageTarget.yaml
+      message_id:
+        type: integer
+        minimum: 1
+        description: The message's ID as the chat's message history shows it.

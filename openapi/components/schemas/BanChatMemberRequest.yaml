@@ -1,0 +1,21 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+  - user_id
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
+      whose members cannot be banned, the account's user ID.
+  user_id:
+    $ref: ./TelegramUserId.yaml
+  until_date:
+    type: integer
+    description: >-
+      Unix timestamp when the ban ends; a ban shorter than 30 seconds or longer than 366 days
+      lasts until it is lifted, as does one without an end.
+  revoke_messages:
+    type: boolean
+    description: Accepted and ignored; Telegram always revokes access in supergroups.

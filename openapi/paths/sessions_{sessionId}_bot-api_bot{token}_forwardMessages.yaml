@@ -1,0 +1,77 @@
+description: >-
+  Telegram Bot API method for forwarding up to 100 messages of one of the bot's chats at once,
+  each as `forwardMessage` forwards it, to a chat that `forwardMessage` can address. As TDLib
+  does, identifiers of no message are skipped, as are messages that cannot be forwarded, and a
+  message that replies to an earlier message of the request replies to that message's forward.
+  Topics, paid broadcasts, and suggested posts are not supported.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: forwardMessages
+  summary: Forward several messages from one of the authenticated virtual bot's chats
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/ForwardMessagesRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/ForwardMessagesRequest.yaml
+        encoding:
+          message_ids:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/ForwardMessagesRequest.yaml
+        encoding:
+          message_ids:
+            contentType: application/json
+  responses:
+    '200':
+      description: >-
+        The forwards were stored in the chat they were sent to. As on Telegram, the response
+        holds only their message IDs, in the order of the forwarded messages.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MessageIdsResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: `from_chat_id` is missing (`Bad Request: parameter
+        "from_chat_id" is required`); `message_ids` is missing or empty (`Bad Request: message
+        identifiers are not specified`); it has more than 100 identifiers (`Bad Request: too
+        many message identifiers specified`); an identifier is not positive (`Bad Request:
+        invalid message identifier specified`); `chat_id` is missing (`Bad Request: chat_id is
+        empty`); the chat of the forwarded messages is unknown to the bot (`Bad Request: chat
+        not found`); no identifier identifies a message of that chat (`Bad Request: there are
+        no messages to forward`); a message effect is requested for a supergroup (`Bad Request:
+        can't use message effects in the chat`) or for more than one found message (`Bad
+        Request: can't use message effects in the method`); the identifiers of its messages do
+        not increase (`Bad Request: message identifiers must be in a strictly increasing
+        order`); none of its messages can be forwarded (`Bad Request: messages can't be
+        forwarded`); or the chat the forwards go to is unknown to the bot (`Bad Request: chat
+        not found`). Telegram checks the chat the forwards go to before the forwarded
+        messages.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: As for `forwardMessage`.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

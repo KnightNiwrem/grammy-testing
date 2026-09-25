@@ -1,0 +1,64 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: Identifier of the chat, as for `sendMessage`.
+  document:
+    type: string
+    description: >-
+      The `file_id` of a document the bot knows, or `attach://<part name>` for a file
+      uploaded in that part. Without it, the document is the part named `document`.
+  thumbnail:
+    type: string
+    description: >-
+      `attach://<part name>` for a preview image uploaded in that part; without it, or with
+      other text, the part named `thumbnail`, if any. As in TDLib, a thumbnail must be
+      uploaded, and one that is empty or larger than 204799 bytes is left out rather than
+      failing the request, as is one whose image the emulator cannot read. The image is kept
+      as sent; Telegram asks for a JPEG of at most 320 pixels a side. A document sent by
+      `file_id` keeps its own thumbnail.
+  thumb:
+    type: string
+    description: >-
+      Legacy name of `thumbnail`, read as it is when `thumbnail` names no uploaded part.
+  caption:
+    $ref: ./Caption.yaml
+  parse_mode:
+    $ref: ./ParseMode.yaml
+  caption_entities:
+    $ref: ./CaptionEntitiesParameter.yaml
+  disable_content_type_detection:
+    type: boolean
+    description: >-
+      Validated and without effect, because the emulator always sends files as documents.
+  disable_notification:
+    type: boolean
+    default: false
+    description: As for `sendMessage`.
+  protect_content:
+    type: boolean
+    default: false
+    description: As for `sendMessage`.
+  message_effect_id:
+    type: string
+    pattern: '^-?\d+$'
+    description: As for `sendMessage`.
+  reply_parameters:
+    $ref: ./ReplyParameters.yaml
+  reply_to_message_id:
+    type: integer
+    description: As for `sendMessage`.
+  allow_sending_without_reply:
+    type: boolean
+    default: false
+    description: As for `sendMessage`.
+  reply_markup:
+    description: As for `sendMessage`.
+    oneOf:
+      - $ref: ./InlineKeyboardMarkup.yaml
+      - $ref: ./ReplyKeyboardMarkup.yaml
+      - $ref: ./ReplyKeyboardRemove.yaml
+      - $ref: ./ForceReply.yaml

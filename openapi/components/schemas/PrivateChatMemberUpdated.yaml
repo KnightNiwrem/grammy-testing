@@ -1,0 +1,25 @@
+type: object
+additionalProperties: false
+description: >-
+  A change of the bot's membership in an account's private chat: `member` becomes `kicked`
+  when the account blocks the bot, and `kicked` becomes `member` when it unblocks the bot.
+required:
+  - chat
+  - from
+  - date
+  - old_chat_member
+  - new_chat_member
+properties:
+  chat:
+    $ref: ./PrivateChat.yaml
+  from:
+    $ref: ./Account.yaml
+    description: The account that blocked or unblocked the bot.
+  date:
+    type: integer
+    minimum: 0
+    description: Unix timestamp of the change.
+  old_chat_member:
+    $ref: ./PrivateChatBotMember.yaml
+  new_chat_member:
+    $ref: ./PrivateChatBotMember.yaml

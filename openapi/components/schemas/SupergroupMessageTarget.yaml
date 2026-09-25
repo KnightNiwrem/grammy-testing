@@ -1,0 +1,11 @@
+type: object
+additionalProperties: false
+required:
+  - type
+  - chatId
+properties:
+  type:
+    type: string
+    const: supergroup
+  chatId:
+    $ref: ./SupergroupChatId.yaml

@@ -1,0 +1,65 @@
+description: >-
+  Telegram Bot API method for deleting a message of a private chat or a supergroup for every
+  member. As on Telegram, a bot can delete messages either participant of a private chat
+  wrote; in a supergroup, it deletes its own messages, and any message, service messages
+  included, as an administrator with the `can_delete_messages` right. It receives no update
+  for the deletion. The deleted message leaves the conversation history, and its buttons can no
+  longer be pressed; message IDs are never reused. The emulator does not age messages, so
+  Telegram's 48-hour deletion limit never applies.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: deleteMessage
+  summary: Delete a message of one of the authenticated virtual bot's chats
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/DeleteMessageRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/DeleteMessageRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/DeleteMessageRequest.yaml
+  responses:
+    '200':
+      description: The message was deleted.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MessageDeletionResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: `chat_id` is missing (`Bad Request: chat_id is empty`);
+        the chat is not one the bot can address, as for `sendMessage` (`Bad Request: chat not
+        found`); `message_id` identifies another member's message of a supergroup (`Bad
+        Request: message can't be deleted`); or `message_id` is missing, not positive, or
+        identifies no message of the chat, including a deleted one (`Bad Request: message to
+        delete not found`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The chat is a supergroup that the bot left the supergroup (`Forbidden: bot is not a
+        member of the supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+        the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

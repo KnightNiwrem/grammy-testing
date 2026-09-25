@@ -1,0 +1,25 @@
+type: object
+additionalProperties: false
+description: >-
+  The users and chats a command list applies to; a missing scope is the default scope.
+  Chat IDs must be numbers, and chat scopes can name only private chats.
+required:
+  - type
+properties:
+  type:
+    type: string
+    enum:
+      - default
+      - all_private_chats
+      - all_group_chats
+      - all_chat_administrators
+      - chat
+      - chat_administrators
+      - chat_member
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: Required for `chat`, `chat_administrators`, and `chat_member`.
+  user_id:
+    type: integer
+    minimum: 1
+    description: Required for `chat_member`.

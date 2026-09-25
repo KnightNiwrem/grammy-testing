@@ -1,0 +1,26 @@
+description: >-
+  The notifications an account's client shows for the messages of its private chat with a bot.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/BotId.yaml
+get:
+  operationId: getPrivateChatNotifications
+  summary: Return the notifications of the bot's messages, and whether each is silent
+  description: >-
+    Returns a notification for each message the bot sent to the chat, in order, as TDLib
+    notifies of new messages. A notification is silent when the bot sent its message with
+    `disable_notification`, as TDLib's `notification.is_silent` shows. Accounts have no
+    notification settings, such as muted chats, and reading a message keeps its notification;
+    a deleted message has none.
+  responses:
+    '200':
+      description: The chat's notifications, which may be none.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/AccountNotifications.yaml
+    '400':
+      description: A path identifier is invalid.
+    '404':
+      description: The session, account, or bot does not exist.

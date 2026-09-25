@@ -1,0 +1,5 @@
+type: string
+default: ''
+description: >-
+  Text shown with the media, read and normalized as `sendMessage` reads text, and at most
+  1024 characters after formatting. As on Telegram, a caption of only whitespace is none.

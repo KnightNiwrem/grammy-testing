@@ -1,0 +1,34 @@
+description: Virtual bots owned by a test session.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+post:
+  operationId: createBot
+  summary: Create a virtual bot
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/CreateBotRequest.yaml
+  responses:
+    '201':
+      description: The virtual bot was created.
+      headers:
+        Location:
+          description: Relative URL of the created virtual bot.
+          required: true
+          schema:
+            type: string
+            format: uri-reference
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/CreatedBot.yaml
+    '400':
+      description: The request body is malformed or does not match the bot creation schema.
+    '404':
+      description: No active test session has the supplied identifier.
+    '409':
+      description: The username is already assigned within the test session.
+    '507':
+      description: The test session cannot allocate another Telegram user identifier.

@@ -1,0 +1,70 @@
+description: >-
+  Telegram Bot API method for lifting a user's ban from a supergroup, so that it may be
+  added again, which needs the `can_restrict_members` administrator right. As on Telegram,
+  unless `only_if_banned` is set, this also removes a member: the bot bans it for a
+  minute, which a service message from the bot records, then lifts the ban, and a removed
+  bot receives a my_chat_member update for each step. A bot that names itself leaves the
+  supergroup. Lifting the ban of a user that is not banned and not a member succeeds
+  without rights, and with `only_if_banned`, so does any request about a user that is not
+  banned.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: unbanChatMember
+  summary: Lift a user's ban from a supergroup as the authenticated virtual bot
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/UnbanChatMemberRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/UnbanChatMemberRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/UnbanChatMemberRequest.yaml
+  responses:
+    '200':
+      description: The user is not banned and not a member, or, with `only_if_banned`, was not banned.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/TrueResultResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram
+        would reject it, in this order: `user_id` is missing or not positive (`Bad
+        Request: invalid user_id specified`); `chat_id` is missing (`Bad Request:
+        chat_id is empty`); the chat is neither a private chat with an account that
+        has written to the bot nor a supergroup the bot is or was a member of (`Bad
+        Request: chat not found`); the chat is a private chat (`Bad Request: method
+        is available only in supergroup and channel chats`); the user is no user of
+        the session (`Bad Request: member not found`); the user is the owner (`Bad
+        Request: can't remove chat owner`); the bot lacks the right (`Bad Request:
+        not enough rights to restrict/unrestrict chat member`); or the user is an
+        administrator (`Bad Request: user is an administrator of the chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The bot left the supergroup (`Forbidden: bot is not a member of the
+        supergroup chat`) or was removed from it (`Forbidden: bot was kicked from
+        the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

@@ -1,0 +1,67 @@
+description: >-
+  Telegram Bot API method for reading the bot's command list for exactly one scope and
+  language, without falling back to other scopes or languages.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getMyCommands
+  summary: Return one of the authenticated virtual bot's command lists
+  requestBody:
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/MyCommandsTargetRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/MyCommandsTargetRequest.yaml
+        encoding:
+          scope:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/MyCommandsTargetRequest.yaml
+        encoding:
+          scope:
+            contentType: application/json
+  responses:
+    '200':
+      description: The command list, which is empty if none is set.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotCommandsResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it, checking in this order: the scope is not a known type (`Bad Request: can't parse
+        BotCommandScope: Unsupported type specified`) or names a user ID that is not positive
+        (`Bad Request: can't parse BotCommandScope: Invalid user_id specified`); a chat scope
+        names a chat that is neither a private chat with an account that has written to the
+        bot nor a supergroup the bot is or was a member of (`Bad Request: chat not found`); an administrator or member scope names a private chat
+        (`Bad Request: can't use specified scope in private chats`); or the language code is
+        neither empty nor two lowercase letters (`Bad Request: invalid language code
+        specified`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        A chat scope names a supergroup the bot left (`Forbidden: bot is not a member of the
+        supergroup chat`) or was removed from (`Forbidden: bot was kicked from the supergroup
+        chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

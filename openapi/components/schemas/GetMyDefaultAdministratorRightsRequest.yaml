@@ -1,0 +1,6 @@
+type: object
+additionalProperties: false
+properties:
+  for_channels:
+    type: boolean
+    description: Whether to read the rights for channels rather than groups.

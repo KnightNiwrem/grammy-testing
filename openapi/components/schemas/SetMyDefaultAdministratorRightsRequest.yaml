@@ -1,0 +1,8 @@
+type: object
+additionalProperties: false
+properties:
+  rights:
+    $ref: ./ChatAdministratorRights.yaml
+  for_channels:
+    type: boolean
+    description: Whether the rights are for channels rather than groups.

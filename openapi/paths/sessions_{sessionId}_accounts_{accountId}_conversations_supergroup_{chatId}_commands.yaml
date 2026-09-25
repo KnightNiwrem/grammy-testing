@@ -1,0 +1,28 @@
+description: The bot commands an account's client suggests in a supergroup it is a member of.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/SupergroupChatId.yaml
+get:
+  operationId: getSupergroupBotCommands
+  summary: Return the commands the account sees in the supergroup, for each bot
+  description: >-
+    Resolves each bot member's command lists as Telegram documents for group chats: the list
+    for the account as a member of the supergroup, for the supergroup's administrators, for the
+    supergroup, for all groups' administrators, for all groups, then the default list, where
+    administrator lists apply only to the owner and administrators. Each scope prefers the list
+    in the account's language, taken from the primary subtag of its `language_code`, over the
+    list without a language. As in TDLib, bots without commands are left out.
+  responses:
+    '200':
+      description: The commands of each bot of the supergroup that has any.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/AccountSupergroupBotCommands.yaml
+    '400':
+      description: An account or supergroup path identifier is invalid.
+    '403':
+      description: The account is not a member of the supergroup.
+    '404':
+      description: The session, account, or supergroup does not exist.

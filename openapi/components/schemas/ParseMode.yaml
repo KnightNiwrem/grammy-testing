@@ -1,0 +1,4 @@
+type: string
+description: >-
+  Markup to read the text as, matched case-insensitively: `HTML`, `MarkdownV2`, or the
+  legacy `Markdown`, parsed as Telegram does. `none` or omitting it leaves the text as it is.

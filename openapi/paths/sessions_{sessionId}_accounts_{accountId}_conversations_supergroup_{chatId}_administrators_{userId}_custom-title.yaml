@@ -1,0 +1,36 @@
+description: >-
+  The custom title that clients show for the owner of a supergroup or an administrator in place
+  of its role.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/SupergroupChatId.yaml
+  - $ref: ../components/parameters/UserId.yaml
+put:
+  operationId: setSupergroupCustomTitle
+  summary: Set the custom title of the owner or an administrator of a supergroup the account owns
+  description: >-
+    Sets the owner's own custom title or an administrator's, as Telegram lets a supergroup's
+    owner do; an empty title removes it. Bots see the title as `custom_title` in getChatMember,
+    getChatAdministrators, and chat member updates, and a bot whose title changes receives a
+    my_chat_member update. An administrator keeps its title when its rights change, and loses
+    it when demoted. Setting the title a user has changes nothing.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/SetCustomTitleRequest.yaml
+  responses:
+    '204':
+      description: The user has the given title, or none for an empty title.
+    '400':
+      description: >-
+        A path identifier or the body is invalid, such as a title longer than 16 characters or
+        one with emoji.
+    '403':
+      description: The account does not own the supergroup.
+    '404':
+      description: The session, account, supergroup, or user does not exist.
+    '409':
+      description: The user is not the owner or an administrator of the supergroup.

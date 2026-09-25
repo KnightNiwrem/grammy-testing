@@ -1,0 +1,23 @@
+description: The chat action, such as typing, an account's client shows in its private chat with a bot.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/BotId.yaml
+get:
+  operationId: getPrivateChatActions
+  summary: Return the chat action the bot shows in its private chat with the account
+  description: >-
+    As TDLib's `DialogActionManager` shows them, a bot's action from `sendChatAction` lasts
+    5.5 seconds unless the bot sends it again, and ends when the bot cancels it or sends a
+    message to the chat.
+  responses:
+    '200':
+      description: The bot's action, or none.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/AccountChatActions.yaml
+    '400':
+      description: A path identifier is invalid.
+    '404':
+      description: The session, account, or bot does not exist.

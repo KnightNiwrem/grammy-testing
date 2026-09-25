@@ -1,0 +1,15 @@
+type: object
+additionalProperties: false
+required:
+  - ok
+  - result
+properties:
+  ok:
+    type: boolean
+    const: true
+  result:
+    description: The edited message of a chat, or `true` for an edited inline message.
+    oneOf:
+      - $ref: ./Message.yaml
+      - type: boolean
+        const: true

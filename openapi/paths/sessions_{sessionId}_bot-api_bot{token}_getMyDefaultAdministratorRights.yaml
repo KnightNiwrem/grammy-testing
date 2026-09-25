@@ -1,0 +1,45 @@
+description: >-
+  Telegram Bot API method for reading the rights the bot asks for by default as an administrator
+  of groups, or with `for_channels` of channels. Every right that applies to that kind of chat
+  is shown, all false if the bot set none.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: getMyDefaultAdministratorRights
+  summary: Return the rights the authenticated virtual bot asks for by default as an administrator
+  requestBody:
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/GetMyDefaultAdministratorRightsRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/GetMyDefaultAdministratorRightsRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/GetMyDefaultAdministratorRightsRequest.yaml
+  responses:
+    '200':
+      description: The default rights for the kind of chat.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/DefaultAdministratorRightsResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

@@ -1,0 +1,10 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat: for a supergroup, its negative chat ID; for a private chat,
+      which cannot be left, the account's user ID.
