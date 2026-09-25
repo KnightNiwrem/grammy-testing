@@ -123,9 +123,8 @@ production read permissions.
   events, such as title changes or pins, need corresponding messages as their features are
   supported.
 
-- **Reply interfaces and command menus.** Supergroup reply keyboards and forced replies are
-  [missing](keyboards-and-callbacks.md#real-gaps), as are
-  [group command scopes and menu inspection](command-menus.md#real-gaps).
+- **Reply interfaces.** Supergroup reply keyboards and forced replies are
+  [missing](keyboards-and-callbacks.md#real-gaps).
 
 - **Basic groups and channels.** Internal representations exist, but there is no usable HTTP
   messaging workflow for these chat kinds. See the

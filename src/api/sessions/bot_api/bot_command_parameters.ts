@@ -35,7 +35,7 @@ const chatlessScopeSchema = z.strictObject({
   type: z.enum(['default', 'all_private_chats', 'all_group_chats', 'all_chat_administrators']),
 });
 // Telegram also accepts an `@username` chat_id, which it resolves only for public supergroups and
-// channels; chat scopes here address only private chats, so they accept only numeric chat IDs.
+// channels; the emulator's supergroups have no usernames, so it accepts only numeric chat IDs.
 const chatScopeSchema = z.strictObject({
   type: z.enum(['chat', 'chat_administrators']),
   chat_id: z.int(),

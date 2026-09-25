@@ -7,6 +7,12 @@ import {
   MAX_BOT_COMMAND_DESCRIPTION_LENGTH,
   MAX_BOT_COMMAND_LENGTH,
 } from '../types/bot_command.ts';
+import {
+  resolveSupergroupBotMembership,
+  type SupergroupBotAccessFailureReason,
+  type SupergroupMembershipLookup,
+} from '../types/chat_membership.ts';
+import { isUserId } from '../types/telegram_identity.ts';
 import type { VirtualAccount } from '../types/virtual_account.ts';
 import type { VirtualBot } from '../types/virtual_bot.ts';
 import type { PrivateConversation, PrivateConversationKey } from '../types/virtual_chat.ts';
@@ -32,7 +38,7 @@ export interface SetBotCommandsInput extends BotCommandListTarget {
 /** Why a scope or language cannot address a command list, in the order Telegram checks them. */
 export type BotCommandListTargetFailureReason =
   | 'bot_not_found'
-  | 'chat_not_found'
+  | SupergroupBotAccessFailureReason
   | 'scope_not_allowed_in_private_chats'
   | 'language_code_invalid';
 
@@ -66,6 +72,25 @@ export type GetPrivateChatCommandsResult =
   | { readonly found: true; readonly commands: readonly BotCommand[] }
   | { readonly found: false; readonly reason: 'account_not_found' | 'bot_not_found' };
 
+/** The commands one bot of a supergroup suggests to a member. */
+export interface SupergroupBotCommands {
+  readonly botId: number;
+  readonly commands: readonly BotCommand[];
+}
+
+export type GetSupergroupCommandsResult =
+  | { readonly found: true; readonly botCommands: readonly SupergroupBotCommands[] }
+  | {
+    readonly found: false;
+    readonly reason: 'account_not_found' | 'chat_not_found' | 'not_a_member';
+  };
+
+/** Identifies a supergroup as one of its members sees it. */
+export interface SupergroupMemberKey {
+  readonly accountId: number;
+  readonly chatId: number;
+}
+
 interface AccountLookup {
   getById(accountId: number): VirtualAccount | undefined;
 }
@@ -78,6 +103,10 @@ interface PrivateConversationLookup {
   getPrivateConversation(key: PrivateConversationKey): PrivateConversation | undefined;
 }
 
+interface SupergroupMemberLookup extends SupergroupMembershipLookup {
+  getChatMemberIds(chatId: number): readonly number[];
+}
+
 interface BotCommandStore {
   setCommands(key: BotCommandListTarget, commands: readonly BotCommand[]): void;
   getCommands(key: BotCommandListTarget): readonly BotCommand[] | undefined;
@@ -87,6 +116,7 @@ interface BotCommandServiceDependencies {
   readonly accounts: AccountLookup;
   readonly bots: BotLookup;
   readonly privateConversations: PrivateConversationLookup;
+  readonly supergroupMembers: SupergroupMemberLookup;
   readonly botCommands: BotCommandStore;
 }
 
@@ -98,24 +128,27 @@ const LANGUAGE_CODE_PATTERN = /^(?:[a-z]{2})?$/;
 
 /**
  * Keeps each bot's command lists by scope and language, as `setMyCommands`, `getMyCommands`, and
- * `deleteMyCommands` manage them, and resolves the list an account's client shows in its private
- * chat with the bot.
+ * `deleteMyCommands` manage them, and resolves the lists an account's client shows in its private
+ * chat with the bot and in its supergroups.
  *
- * Chat scopes can address only private chats the account has started with the bot; they cannot
- * address supergroups yet.
+ * Chat scopes address private chats an account has started with the bot and supergroups the bot is
+ * a member of.
  */
 export class BotCommandService {
   readonly #accounts: AccountLookup;
   readonly #bots: BotLookup;
   readonly #privateConversations: PrivateConversationLookup;
+  readonly #supergroupMembers: SupergroupMemberLookup;
   readonly #botCommands: BotCommandStore;
 
   constructor(
-    { accounts, bots, privateConversations, botCommands }: BotCommandServiceDependencies,
+    { accounts, bots, privateConversations, supergroupMembers, botCommands }:
+      BotCommandServiceDependencies,
   ) {
     this.#accounts = accounts;
     this.#bots = bots;
     this.#privateConversations = privateConversations;
+    this.#supergroupMembers = supergroupMembers;
     this.#botCommands = botCommands;
   }
 
@@ -184,22 +217,75 @@ export class BotCommandService {
     if (this.#bots.getById(botId) === undefined) {
       return { found: false, reason: 'bot_not_found' };
     }
+    return {
+      found: true,
+      commands: this.#findFirstCommandList(botId, account, [
+        { type: 'chat', chatId: accountId },
+        { type: 'all_private_chats' },
+        { type: 'default' },
+      ]),
+    };
+  }
 
-    const accountLanguageCode = getCommandListLanguageCode(account.profile.language_code);
+  /**
+   * Returns the commands an account's client suggests in a supergroup it is a member of, for each
+   * bot of the supergroup that has any. Each bot's list is the first one found for the account as
+   * a member, for the supergroup's administrators if the account is one, for the supergroup, for
+   * all groups' administrators if the account is one, for all groups, and then the default scope,
+   * each preferring the account's language over the list without one, as the Bot API documents.
+   * As in TDLib's `BotCommands` lists, a bot without commands is left out.
+   */
+  getSupergroupCommands({ accountId, chatId }: SupergroupMemberKey): GetSupergroupCommandsResult {
+    const account = this.#accounts.getById(accountId);
+    if (account === undefined) {
+      return { found: false, reason: 'account_not_found' };
+    }
+    if (this.#supergroupMembers.getSharedChat(chatId)?.kind !== 'supergroup') {
+      return { found: false, reason: 'chat_not_found' };
+    }
+    const membership = this.#supergroupMembers.getChatMembership(chatId, accountId);
+    if (membership === undefined) {
+      return { found: false, reason: 'not_a_member' };
+    }
+
+    const isAdministrator = membership.status !== 'member';
     const scopes: readonly BotCommandScope[] = [
-      { type: 'chat', chatId: accountId },
-      { type: 'all_private_chats' },
+      { type: 'chat_member', chatId, userId: accountId },
+      ...(isAdministrator ? [{ type: 'chat_administrators', chatId } as const] : []),
+      { type: 'chat', chatId },
+      ...(isAdministrator ? [{ type: 'all_chat_administrators' } as const] : []),
+      { type: 'all_group_chats' },
       { type: 'default' },
     ];
+    const botCommands = this.#supergroupMembers.getChatMemberIds(chatId).flatMap((memberId) => {
+      if (this.#bots.getById(memberId) === undefined) {
+        return [];
+      }
+      const commands = this.#findFirstCommandList(memberId, account, scopes);
+      return commands.length === 0 ? [] : [{ botId: memberId, commands }];
+    });
+    return { found: true, botCommands };
+  }
+
+  /**
+   * Returns the first of the bot's lists for the scopes, in order, each preferring the account's
+   * language over the list without one; no commands if none of them has a list.
+   */
+  #findFirstCommandList(
+    botId: number,
+    account: VirtualAccount,
+    scopes: readonly BotCommandScope[],
+  ): readonly BotCommand[] {
+    const accountLanguageCode = getCommandListLanguageCode(account.profile.language_code);
     for (const scope of scopes) {
       for (const languageCode of new Set([accountLanguageCode, ''])) {
         const commands = this.#botCommands.getCommands({ botId, scope, languageCode });
         if (commands !== undefined) {
-          return { found: true, commands };
+          return commands;
         }
       }
     }
-    return { found: true, commands: [] };
+    return [];
   }
 
   /**
@@ -221,6 +307,17 @@ export class BotCommandService {
       case 'chat':
       case 'chat_administrators':
       case 'chat_member': {
+        if (!isUserId(scope.chatId)) {
+          const access = resolveSupergroupBotMembership(
+            this.#supergroupMembers,
+            botId,
+            scope.chatId,
+          );
+          if (!access.resolved) {
+            return access.reason;
+          }
+          break;
+        }
         const conversation = this.#privateConversations.getPrivateConversation({
           accountId: scope.chatId,
           botId,

@@ -314,11 +314,20 @@ const callbackQuerySchema: z.ZodType<CallbackQuery> = z.strictObject({
   }).nullable(),
 });
 
+const botCommandSchema = z.strictObject({
+  command: z.string().min(1),
+  description: z.string().min(1),
+  is_ephemeral: z.boolean(),
+});
+
 export const botCommandsResponseSchema = z.strictObject({
-  commands: z.array(z.strictObject({
-    command: z.string().min(1),
-    description: z.string().min(1),
-    is_ephemeral: z.boolean(),
+  commands: z.array(botCommandSchema),
+});
+
+export const supergroupBotCommandsResponseSchema = z.strictObject({
+  bot_commands: z.array(z.strictObject({
+    bot_id: z.number().int().positive(),
+    commands: z.array(botCommandSchema),
   })),
 });
 

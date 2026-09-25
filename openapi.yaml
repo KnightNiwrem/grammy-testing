@@ -437,6 +437,35 @@ paths:
           description: The account is not a member of the supergroup.
         '404':
           description: The session, account, or supergroup does not exist.
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/commands:
+    description: The bot commands an account's client suggests in a supergroup it is a member of.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/SupergroupChatId'
+    get:
+      operationId: getSupergroupBotCommands
+      summary: Return the commands the account sees in the supergroup, for each bot
+      description: >-
+        Resolves each bot member's command lists as Telegram documents for group chats: the list
+        for the account as a member of the supergroup, for the supergroup's administrators, for the
+        supergroup, for all groups' administrators, for all groups, then the default list, where
+        administrator lists apply only to the owner and administrators. Each scope prefers the list
+        in the account's language, taken from the primary subtag of its `language_code`, over the
+        list without a language. As in TDLib, bots without commands are left out.
+      responses:
+        '200':
+          description: The commands of each bot of the supergroup that has any.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountSupergroupBotCommands'
+        '400':
+          description: An account or supergroup path identifier is invalid.
+        '403':
+          description: The account is not a member of the supergroup.
+        '404':
+          description: The session, account, or supergroup does not exist.
   /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/messages/{messageId}:
     description: One message of a supergroup, addressed by its ID in the supergroup.
     parameters:
@@ -2590,9 +2619,8 @@ paths:
     description: >-
       Telegram Bot API method for replacing the bot's command list for a scope and language. As on
       Telegram, commands are cleaned of control characters, trimmed, and stripped of a leading
-      slash, and an empty or missing `commands` list deletes the list. Chat scopes can address only
-      private chats with accounts that have written to the bot; they cannot address supergroups
-      yet.
+      slash, and an empty or missing `commands` list deletes the list. Chat scopes address private
+      chats with accounts that have written to the bot and supergroups the bot is a member of.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -2633,8 +2661,8 @@ paths:
             it, checking in this order: the scope is not a known type (`Bad Request: can't parse
             BotCommandScope: Unsupported type specified`) or names a user ID that is not positive
             (`Bad Request: can't parse BotCommandScope: Invalid user_id specified`); a chat scope
-            names a chat that is not a private chat with an account that has written to the bot
-            (`Bad Request: chat not found`); an administrator or member scope names a private chat
+            names a chat that is neither a private chat with an account that has written to the
+            bot nor a supergroup the bot is or was a member of (`Bad Request: chat not found`); an administrator or member scope names a private chat
             (`Bad Request: can't use specified scope in private chats`); or the language code is
             neither empty nor two lowercase letters (`Bad Request: invalid language code
             specified`). Each command is then checked for UTF-8 text, a nonempty command of at most
@@ -2650,6 +2678,15 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '401':
           description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            A chat scope names a supergroup the bot left (`Forbidden: bot is not a member of the
+            supergroup chat`) or was removed from (`Forbidden: bot was kicked from the supergroup
+            chat`).
           content:
             application/json:
               schema:
@@ -2696,8 +2733,8 @@ paths:
             it, checking in this order: the scope is not a known type (`Bad Request: can't parse
             BotCommandScope: Unsupported type specified`) or names a user ID that is not positive
             (`Bad Request: can't parse BotCommandScope: Invalid user_id specified`); a chat scope
-            names a chat that is not a private chat with an account that has written to the bot
-            (`Bad Request: chat not found`); an administrator or member scope names a private chat
+            names a chat that is neither a private chat with an account that has written to the
+            bot nor a supergroup the bot is or was a member of (`Bad Request: chat not found`); an administrator or member scope names a private chat
             (`Bad Request: can't use specified scope in private chats`); or the language code is
             neither empty nor two lowercase letters (`Bad Request: invalid language code
             specified`).
@@ -2707,6 +2744,15 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '401':
           description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            A chat scope names a supergroup the bot left (`Forbidden: bot is not a member of the
+            supergroup chat`) or was removed from (`Forbidden: bot was kicked from the supergroup
+            chat`).
           content:
             application/json:
               schema:
@@ -2753,8 +2799,8 @@ paths:
             it, checking in this order: the scope is not a known type (`Bad Request: can't parse
             BotCommandScope: Unsupported type specified`) or names a user ID that is not positive
             (`Bad Request: can't parse BotCommandScope: Invalid user_id specified`); a chat scope
-            names a chat that is not a private chat with an account that has written to the bot
-            (`Bad Request: chat not found`); an administrator or member scope names a private chat
+            names a chat that is neither a private chat with an account that has written to the
+            bot nor a supergroup the bot is or was a member of (`Bad Request: chat not found`); an administrator or member scope names a private chat
             (`Bad Request: can't use specified scope in private chats`); or the language code is
             neither empty nor two lowercase letters (`Bad Request: invalid language code
             specified`).
@@ -2764,6 +2810,15 @@ paths:
                 $ref: '#/components/schemas/BotApiErrorResponse'
         '401':
           description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '403':
+          description: >-
+            A chat scope names a supergroup the bot left (`Forbidden: bot is not a member of the
+            supergroup chat`) or was removed from (`Forbidden: bot was kicked from the supergroup
+            chat`).
           content:
             application/json:
               schema:
@@ -5487,19 +5542,42 @@ components:
         commands:
           type: array
           items:
+            $ref: '#/components/schemas/AccountBotCommand'
+    AccountBotCommand:
+      type: object
+      additionalProperties: false
+      required:
+        - command
+        - description
+        - is_ephemeral
+      properties:
+        command:
+          type: string
+        description:
+          type: string
+        is_ephemeral:
+          type: boolean
+    AccountSupergroupBotCommands:
+      type: object
+      additionalProperties: false
+      required:
+        - bot_commands
+      properties:
+        bot_commands:
+          type: array
+          items:
             type: object
             additionalProperties: false
             required:
-              - command
-              - description
-              - is_ephemeral
+              - bot_id
+              - commands
             properties:
-              command:
-                type: string
-              description:
-                type: string
-              is_ephemeral:
-                type: boolean
+              bot_id:
+                type: integer
+              commands:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountBotCommand'
     PressCallbackButtonRequest:
       type: object
       additionalProperties: false

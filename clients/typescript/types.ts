@@ -525,6 +525,12 @@ export interface BotCommand {
   readonly is_ephemeral: boolean;
 }
 
+/** The commands one bot of a supergroup suggests to an account. */
+export interface SupergroupBotCommands {
+  readonly bot_id: number;
+  readonly commands: readonly BotCommand[];
+}
+
 export interface CallbackQueryAnswer {
   /** Omitted when the answer shows no notification. */
   readonly text?: string;
@@ -725,6 +731,16 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    */
   getBotCommands(input: AccountBotCommandsInput): Promise<readonly BotCommand[]>;
   /**
+   * Returns the commands this account's client suggests in a supergroup it is a member of, for
+   * each bot of the supergroup that has any: the bot's list for the account as a member, for the
+   * supergroup's administrators, for the supergroup, for all groups' administrators, for all
+   * groups, or by default, where administrator lists apply only to administrators, in the
+   * account's language if the bot has one.
+   */
+  getSupergroupBotCommands(
+    input: AccountSupergroupBotCommandsInput,
+  ): Promise<readonly SupergroupBotCommands[]>;
+  /**
    * Returns the reply keyboard or forced reply this account's client shows in its private chat
    * with a bot, or `null` when it shows its usual input.
    */
@@ -738,6 +754,10 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
 
 export interface AccountBotCommandsInput {
   readonly chat: PrivateMessageTarget;
+}
+
+export interface AccountSupergroupBotCommandsInput {
+  readonly chat: SupergroupMessageTarget;
 }
 
 export interface CreatedVirtualAccount {

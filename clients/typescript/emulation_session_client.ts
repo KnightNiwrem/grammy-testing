@@ -14,6 +14,7 @@ import {
   replyInterfaceResponseSchema,
   sentMessageResponseSchema,
   sentSupergroupMessageResponseSchema,
+  supergroupBotCommandsResponseSchema,
   supergroupMessageHistoryResponseSchema,
 } from './schemas.ts';
 import type {
@@ -26,6 +27,7 @@ import type {
   AccountSendDocumentInput,
   AccountSendMessageInput,
   AccountSendPhotoInput,
+  AccountSupergroupBotCommandsInput,
   AddChatMemberInput,
   BotBlockInput,
   BotCommand,
@@ -50,6 +52,7 @@ import type {
   ReplyInterface,
   SendInlineQueryInput,
   Supergroup,
+  SupergroupBotCommands,
   SupergroupMessage,
   VirtualAccountClient,
   VirtualAccountProfile,
@@ -379,6 +382,18 @@ function createVirtualAccountClient(
         responseSchema: botCommandsResponseSchema,
       });
       return response.commands;
+    },
+    async getSupergroupBotCommands(
+      input: AccountSupergroupBotCommandsInput,
+    ): Promise<readonly SupergroupBotCommands[]> {
+      const chatId = encodeURIComponent(input.chat.chatId);
+      const response = await requestJson(fetchImplementation, {
+        method: 'GET',
+        url: `${accountUrl}/conversations/supergroup/${chatId}/commands`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: supergroupBotCommandsResponseSchema,
+      });
+      return response.bot_commands;
     },
     async getReplyInterface(input: AccountReplyInterfaceInput): Promise<ReplyInterface | null> {
       const botId = encodeURIComponent(input.chat.botId);

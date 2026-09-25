@@ -21,6 +21,7 @@ import type { InlineKeyboard } from '../types/inline_keyboard.ts';
 import { createMessageForward, isForwardable } from '../types/message_forward.ts';
 import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
 import type { DocumentUpload, PhotoUpload, StoredFile } from '../types/stored_file.ts';
+import { isUserId } from '../types/telegram_identity.ts';
 import type { VirtualBot, VirtualBotProfile } from '../types/virtual_bot.ts';
 import type { ChatAction } from '../types/virtual_chat.ts';
 import {
@@ -942,6 +943,7 @@ export interface SetMyCommandsRequest extends MyCommandsTarget {
 /** Why a scope or language cannot address one of the bot's command lists. */
 export type MyCommandsTargetFailureReason =
   | 'chat_not_found'
+  | FormerSupergroupMemberFailureReason
   | 'scope_not_allowed_in_private_chats'
   | 'language_code_invalid';
 
@@ -2403,14 +2405,6 @@ function fileIdFailure(
   return file === undefined
     ? { reason: 'file_id_invalid' }
     : { reason: 'file_type_mismatch', expectedFileType, actualFileType: file.type };
-}
-
-/**
- * Whether a Bot API `chat_id` identifies a user, whose private chat it addresses. Telegram's user
- * IDs are positive, and the IDs of groups and channels negative.
- */
-function isUserId(chatId: number): boolean {
-  return chatId > 0;
 }
 
 /** Shows a command as the Bot API does, with `is_ephemeral` only when set. */

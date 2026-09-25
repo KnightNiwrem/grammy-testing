@@ -1957,6 +1957,8 @@ function handleSetMyCommands(
   }
   switch (result.reason) {
     case 'chat_not_found':
+    case 'bot_not_a_member':
+    case 'bot_kicked':
     case 'scope_not_allowed_in_private_chats':
     case 'language_code_invalid':
       return myCommandsTargetError(result.reason);
@@ -2031,6 +2033,10 @@ function myCommandsTargetError(reason: MyCommandsTargetFailureReason): BotApiMet
   switch (reason) {
     case 'chat_not_found':
       return botApiError(400, CHAT_NOT_FOUND_DESCRIPTION);
+    case 'bot_not_a_member':
+      return botApiError(403, BOT_NOT_SUPERGROUP_MEMBER_DESCRIPTION);
+    case 'bot_kicked':
+      return botApiError(403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'scope_not_allowed_in_private_chats':
       return botApiError(400, SCOPE_NOT_ALLOWED_IN_PRIVATE_CHATS_DESCRIPTION);
     case 'language_code_invalid':

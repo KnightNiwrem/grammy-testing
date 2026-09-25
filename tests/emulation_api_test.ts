@@ -3052,6 +3052,79 @@ Deno.test('an account creates a supergroup and adds a bot, which receives my_cha
   }
 });
 
+Deno.test('bots set supergroup command scopes that members see in their menus', async () => {
+  const { api, sessionPath, owner, member, bot, readerBot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const setCommands = (botApiPath: string, command: string, scope: Record<string, unknown>) =>
+    callBotApi(api, `${botApiPath}/setMyCommands`, {
+      commands: [{ command, description: command }],
+      scope,
+    });
+
+  for (
+    const [command, scope] of [
+      ['everyone', { type: 'chat', chat_id: supergroup.id }],
+      ['moderate', { type: 'chat_administrators', chat_id: supergroup.id }],
+      ['mine', { type: 'chat_member', chat_id: supergroup.id, user_id: member.id }],
+    ] as const
+  ) {
+    const { status, body } = await setCommands(bot.botApiPath, command, scope);
+    if (status !== 200) {
+      throw new Error(
+        `Expected ${scope.type} commands to be set, received ${JSON.stringify(body)}`,
+      );
+    }
+  }
+  const menuOf = async (accountId: number) => {
+    const response = await api.request(`${supergroupPath(accountId)}/commands`);
+    const body: unknown = response.status === 200 ? await response.json() : undefined;
+    return { status: response.status, body };
+  };
+  const expectedMenu = (command: string) => ({
+    bot_commands: [{
+      bot_id: bot.bot.id,
+      commands: [{ command, description: command, is_ephemeral: false }],
+    }],
+  });
+  const ownerMenu = await menuOf(owner.id);
+  const memberMenu = await menuOf(member.id);
+  if (
+    JSON.stringify(ownerMenu.body) !== JSON.stringify(expectedMenu('moderate')) ||
+    JSON.stringify(memberMenu.body) !== JSON.stringify(expectedMenu('mine'))
+  ) {
+    throw new Error(
+      `Expected each member to see its own menu, received ${
+        JSON.stringify([ownerMenu, memberMenu])
+      }`,
+    );
+  }
+
+  const leaveResult = await callBotApi(api, `${readerBot.botApiPath}/leaveChat`, {
+    chat_id: supergroup.id,
+  });
+  const leftBotResult = await setCommands(readerBot.botApiPath, 'read', {
+    type: 'chat',
+    chat_id: supergroup.id,
+  });
+  if (
+    leaveResult.status !== 200 || leftBotResult.status !== 403 ||
+    JSON.stringify(leftBotResult.body) !== JSON.stringify({
+        ok: false,
+        error_code: 403,
+        description: 'Forbidden: bot is not a member of the supergroup chat',
+      })
+  ) {
+    throw new Error(
+      `Expected a bot that left to be turned away, received ${JSON.stringify(leftBotResult)}`,
+    );
+  }
+
+  const stranger = await createAccount(api, sessionPath, 'Linus');
+  if ((await menuOf(stranger.id)).status !== 403) {
+    throw new Error('Expected a non-member to be forbidden from the supergroup menu');
+  }
+});
+
 Deno.test('bots in privacy mode receive only supergroup messages addressed to them', async () => {
   const { api, owner, member, bot, readerBot, supergroup, sendSupergroupText } =
     await createSupergroupFixture();

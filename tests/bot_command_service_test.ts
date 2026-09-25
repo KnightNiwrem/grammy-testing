@@ -2,6 +2,7 @@ import { AccountRepository } from '../src/repositories/account.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotCommandRepository } from '../src/repositories/bot_command.ts';
 import { PrivateConversationRepository } from '../src/repositories/private_conversation.ts';
+import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import {
   BotCommandService,
@@ -229,6 +230,148 @@ Deno.test('BotCommandService resolves the commands an account sees in its privat
   }
 });
 
+Deno.test('BotCommandService addresses supergroups the bot is a member of', () => {
+  const { botCommands, sharedChats, bot, account } = createBotCommandFixture();
+  const joinedChatId = registerSupergroup(sharedChats, -1_000_000_000_101, account.profile.id);
+  const leftChatId = registerSupergroup(sharedChats, -1_000_000_000_102, account.profile.id);
+  const bannedChatId = registerSupergroup(sharedChats, -1_000_000_000_103, account.profile.id);
+  const strangeChatId = registerSupergroup(sharedChats, -1_000_000_000_104, account.profile.id);
+  for (const chatId of [joinedChatId, leftChatId, bannedChatId]) {
+    sharedChats.addChatMember(chatId, bot.profile.id);
+  }
+  sharedChats.removeChatMember(leftChatId, bot.profile.id, { status: 'left' });
+  sharedChats.removeChatMember(bannedChatId, bot.profile.id, { status: 'kicked' });
+
+  const commands = [specifiedCommand('start', 'Start')];
+  const cases: ReadonlyArray<readonly [BotCommandScope, string | undefined]> = [
+    [{ type: 'chat', chatId: joinedChatId }, undefined],
+    [{ type: 'chat_administrators', chatId: joinedChatId }, undefined],
+    [{ type: 'chat_member', chatId: joinedChatId, userId: account.profile.id }, undefined],
+    [{ type: 'chat', chatId: leftChatId }, 'bot_not_a_member'],
+    [{ type: 'chat_administrators', chatId: bannedChatId }, 'bot_kicked'],
+    [{ type: 'chat_member', chatId: strangeChatId, userId: account.profile.id }, 'chat_not_found'],
+  ];
+  for (const [scope, expectedReason] of cases) {
+    const result = botCommands.setBotCommands({
+      botId: bot.profile.id,
+      scope,
+      languageCode: '',
+      commands,
+    });
+    const reason = result.set ? undefined : result.reason;
+    if (reason !== expectedReason) {
+      throw new Error(
+        `Expected ${JSON.stringify(scope)} to give ${expectedReason}, received ${reason}`,
+      );
+    }
+  }
+});
+
+Deno.test('BotCommandService resolves the commands a member sees in a supergroup', () => {
+  const { botCommands, virtualUsers, sharedChats, bot, account } = createBotCommandFixture();
+  const member = createAccount(virtualUsers, 'Grace', 'de');
+  const administrator = createAccount(virtualUsers, 'Linus');
+  const silentBot = virtualUsers.createBot({ first_name: 'Silent Bot', username: 'silent_bot' });
+  if (!silentBot.created) {
+    throw new Error(`Expected bot creation to succeed, received ${silentBot.reason}`);
+  }
+  const chatId = registerSupergroup(sharedChats, -1_000_000_000_201, account.profile.id);
+  for (const memberId of [member.profile.id, administrator.profile.id, bot.profile.id]) {
+    sharedChats.addChatMember(chatId, memberId);
+  }
+  sharedChats.addChatMember(chatId, silentBot.bot.profile.id);
+  sharedChats.updateChatMemberStatus(chatId, administrator.profile.id, {
+    status: 'administrator',
+    rights: new Set(['can_manage_chat']),
+  });
+  const set = (scope: BotCommandScope, languageCode: string, command: string) =>
+    assertSet(botCommands.setBotCommands({
+      botId: bot.profile.id,
+      scope,
+      languageCode,
+      commands: [specifiedCommand(command, command)],
+    }));
+  const seenBy = (accountId: number) => {
+    const result = botCommands.getSupergroupCommands({ accountId, chatId });
+    if (!result.found) {
+      throw new Error(`Expected the member to see commands, received ${result.reason}`);
+    }
+    return result.botCommands.map(({ botId, commands }) =>
+      `${botId === bot.profile.id ? 'bot' : botId}:${commands.map(({ command }) => command)}`
+    ).join();
+  };
+  const expectSeen = (expected: Record<string, string>, situation: string) => {
+    for (
+      const [name, accountId] of Object.entries({
+        owner: account.profile.id,
+        member: member.profile.id,
+        administrator: administrator.profile.id,
+      })
+    ) {
+      const seen = seenBy(accountId);
+      if (seen !== expected[name]) {
+        throw new Error(
+          `Expected the ${name} to see "${expected[name]}" ${situation}, got ${seen}`,
+        );
+      }
+    }
+  };
+
+  expectSeen({ owner: '', member: '', administrator: '' }, 'before any list, without bots');
+  set({ type: 'all_private_chats' }, '', 'private');
+  set({ type: 'default' }, '', 'default');
+  set({ type: 'default' }, 'de', 'default_de');
+  expectSeen(
+    { owner: 'bot:default', member: 'bot:default_de', administrator: 'bot:default' },
+    'from the default scope in their language',
+  );
+  set({ type: 'all_group_chats' }, '', 'groups');
+  set({ type: 'all_chat_administrators' }, '', 'admins');
+  expectSeen(
+    { owner: 'bot:admins', member: 'bot:groups', administrator: 'bot:admins' },
+    'with group-wide lists',
+  );
+  set({ type: 'chat', chatId }, '', 'chat');
+  expectSeen(
+    { owner: 'bot:chat', member: 'bot:chat', administrator: 'bot:chat' },
+    "with the chat's list",
+  );
+  set({ type: 'chat_administrators', chatId }, '', 'chat_admins');
+  set({ type: 'chat_member', chatId, userId: member.profile.id }, '', 'just_you');
+  expectSeen(
+    { owner: 'bot:chat_admins', member: 'bot:just_you', administrator: 'bot:chat_admins' },
+    "with the chat's administrator and member lists",
+  );
+
+  const stranger = createAccount(virtualUsers, 'Edsger');
+  const notMember = botCommands.getSupergroupCommands({ accountId: stranger.profile.id, chatId });
+  const missing = botCommands.getSupergroupCommands({
+    accountId: stranger.profile.id,
+    chatId: -1_000_000_000_999,
+  });
+  if (
+    notMember.found || notMember.reason !== 'not_a_member' || missing.found ||
+    missing.reason !== 'chat_not_found'
+  ) {
+    throw new Error('Expected non-members and unknown supergroups to be reported');
+  }
+});
+
+function registerSupergroup(
+  sharedChats: SharedChatRepository,
+  chatId: number,
+  ownerAccountId: number,
+): number {
+  const registration = sharedChats.registerSupergroup(
+    { kind: 'supergroup', id: chatId, title: 'Team', chatInstance: String(-chatId) },
+    ownerAccountId,
+  );
+  if (!registration.registered) {
+    throw new Error(`Expected the supergroup to be registered, received ${registration.reason}`);
+  }
+  return chatId;
+}
+
 function specifiedCommand(command: string, description: string): SpecifiedBotCommand {
   return { command, description, isEphemeral: false };
 }
@@ -254,10 +397,12 @@ function createBotCommandFixture() {
   const bots = new BotRepository();
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const privateConversations = new PrivateConversationRepository();
+  const sharedChats = new SharedChatRepository();
   const botCommands = new BotCommandService({
     accounts,
     bots,
     privateConversations,
+    supergroupMembers: sharedChats,
     botCommands: new BotCommandRepository(),
   });
   const botResult = virtualUsers.createBot({ first_name: 'Test Bot', username: 'test_bot' });
@@ -268,6 +413,7 @@ function createBotCommandFixture() {
     botCommands,
     virtualUsers,
     privateConversations,
+    sharedChats,
     bot: botResult.bot,
     account: createAccount(virtualUsers, 'Ada'),
   };

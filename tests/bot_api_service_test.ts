@@ -241,6 +241,7 @@ function createBotApiFixture() {
       accounts,
       bots,
       privateConversations,
+      supergroupMembers: sharedChats,
       botCommands: new BotCommandRepository(),
     }),
   });

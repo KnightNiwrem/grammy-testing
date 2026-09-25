@@ -131,6 +131,7 @@ export function createEmulationSession(id: string): EmulationSession {
     accounts,
     bots,
     privateConversations,
+    supergroupMembers: sharedChats,
     botCommands: new BotCommandRepository(),
   });
 

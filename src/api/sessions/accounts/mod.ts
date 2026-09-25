@@ -56,6 +56,7 @@ const CHAT_ID_PARAMETER = 'chatId';
 const SUPERGROUP_CONVERSATION_PATH =
   `/:${ACCOUNT_ID_PARAMETER}/conversations/supergroup/:${CHAT_ID_PARAMETER}` as const;
 const SUPERGROUP_MESSAGE_HISTORY_PATH = `${SUPERGROUP_CONVERSATION_PATH}/messages` as const;
+const SUPERGROUP_COMMANDS_PATH = `${SUPERGROUP_CONVERSATION_PATH}/commands` as const;
 const SUPERGROUP_MESSAGE_PATH =
   `${SUPERGROUP_MESSAGE_HISTORY_PATH}/:${MESSAGE_ID_PARAMETER}` as const;
 const USER_ID_PARAMETER = 'userId';
@@ -519,6 +520,32 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       messages: result.messages.map((message) =>
         botMessageViews.viewSupergroupMessage(message, accountId.data)
       ),
+    });
+  });
+
+  accountRoutes.get(SUPERGROUP_COMMANDS_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const chatId = supergroupChatIdPathParameterSchema.safeParse(
+      context.req.param(CHAT_ID_PARAMETER),
+    );
+    if (!accountId.success || !chatId.success) {
+      return context.body(null, 400);
+    }
+
+    const result = context.get('emulationSession').botCommands.getSupergroupCommands({
+      accountId: accountId.data,
+      chatId: chatId.data,
+    });
+    if (!result.found) {
+      return context.body(null, supergroupMemberFailureStatus(result.reason));
+    }
+    return context.json({
+      bot_commands: result.botCommands.map(({ botId, commands }) => ({
+        bot_id: botId,
+        commands: commands.map(presentBotCommandForAccount),
+      })),
     });
   });
 

@@ -15,29 +15,34 @@ A list holds at most 100 commands. `is_ephemeral` is stored and returned, but th
 ephemeral message workflow. Language codes are empty or two lowercase letters. These normalization
 checks follow TDLib's [`BotCommand` implementation][bot-command].
 
-| Scope                                        | Emulator support                                                                                  |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `default`                                    | Store/read/delete; participates in private menu fallback                                          |
-| `all_private_chats`                          | Store/read/delete; participates in private menu fallback                                          |
-| `all_group_chats`, `all_chat_administrators` | Store/read/delete; no group menu inspection or resolution                                         |
-| `chat`                                       | Only private conversations already started with this bot                                          |
-| `chat_administrators`, `chat_member`         | Parsed, but no supported target: rejected in private chats, and supergroup targets are unresolved |
+| Scope                                        | Emulator support                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `default`                                    | Store/read/delete; participates in private and group menu fallback                          |
+| `all_private_chats`                          | Store/read/delete; participates in private menu fallback                                    |
+| `all_group_chats`, `all_chat_administrators` | Store/read/delete; participate in group menu fallback                                       |
+| `chat`                                       | Private conversations already started with this bot, and supergroups the bot is a member of |
+| `chat_administrators`, `chat_member`         | Supergroups the bot is a member of; rejected in private chats with Telegram's scope error   |
+
+A chat scope naming a supergroup the bot left or was removed from is rejected with Telegram's `403`
+membership errors, as the official server's [chat access check][chat-access] does. A `chat_member`
+scope accepts any positive user ID, as TDLib does for bots.
 
 Tests read a private chat's effective menu through `account.getBotCommands`. Resolution prefers the
 chat scope, then all-private-chats, then default; within each scope, it prefers the account's
 language and then the language-neutral list. The account's primary language subtag is used, such as
-`en` from `en-US`. This implements the private-chat order in Telegram's
+`en` from `en-US`.
+
+Tests read a supergroup member's effective menus through `account.getSupergroupBotCommands`, which
+returns one list for each bot member that has commands, as TDLib's `BotCommands` lists do.
+Resolution prefers the member scope, then the chat administrators scope, the chat scope, the
+all-chat-administrators scope, all-group-chats and default. Administrator scopes apply only to the
+owner and administrators. Both orders implement Telegram's
 [command scope documentation][scope-order].
 
 Commands do not define message routing or restrict what users can type. Automatic `bot_command`
 entities are handled separately by [text formatting](text-formatting.md).
 
 ## Real gaps
-
-Supergroup chat scopes, administrator/member scopes with a usable target and group menu resolution
-are absent. Tests need to set these scopes and inspect effective group menus. Upstream accepts and
-validates those scopes through [`Client::get_bot_command_scope`][scope-parser] and
-[`BotCommandScope`][td-scope].
 
 Changing supported BotFather-style settings after bot creation is also a
 [real gap](sessions-and-requests.md#real-gaps).
@@ -54,5 +59,4 @@ descriptions and default administrator rights are also real gaps; these methods 
 
 [bot-command]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/BotCommand.cpp
 [scope-order]: https://core.telegram.org/bots/api#determining-list-of-commands
-[scope-parser]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L11301-L11367
-[td-scope]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/BotCommandScope.cpp
+[chat-access]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L8796-L8866
