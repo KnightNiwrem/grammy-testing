@@ -1,0 +1,142 @@
+# TypeScript client walkthrough
+
+[Project README](../README.md) · [Feature coverage](features/README.md)
+
+The client drives virtual accounts and inspects session state. Your bot uses the ordinary Bot API
+with its virtual token and `session.botApiRoot` configured as the API root.
+
+This walkthrough shows the available client operations. Run your bot alongside it and wait for the
+bot to finish handling an action before inspecting a reply, callback answer, or inline result. The
+client does not wait for bot processing. The photo example also needs a local `receipt.png` file.
+The import below assumes the example is saved directly in `docs/`.
+
+Tests can use the TypeScript client instead of constructing emulation server URLs directly:
+
+```ts
+import { TelegramEmulationClient } from '../clients/typescript/mod.ts';
+
+const emulator = new TelegramEmulationClient('http://localhost:8081');
+const session = await emulator.createSession();
+
+try {
+  const { token, bot } = await session.createBot({
+    first_name: 'Test Bot',
+    username: 'test_bot',
+    supports_inline_queries: true,
+  });
+  const { account } = await session.createAccount({ first_name: 'Ada' });
+
+  const incomingMessage = await account.sendMessage({
+    to: { type: 'private', botId: bot.id },
+    text: 'Hello!',
+  });
+
+  // Run a grammY bot with token and session.botApiRoot as its apiRoot. Its polling
+  // receives the message above, and its replies appear in the stored history.
+  const history = await account.getMessages({
+    chat: { type: 'private', botId: bot.id },
+  });
+
+  // Press a callback button on the bot's latest reply, then read the bot's answer.
+  const menu = history.at(-1);
+  if (menu?.reply_markup !== undefined) {
+    const callbackQuery = await account.pressCallbackButton({
+      chat: { type: 'private', botId: bot.id },
+      message_id: menu.message_id,
+      callback_data: 'yes',
+    });
+    const { answer } = await account.getCallbackQuery(callbackQuery.id);
+    console.log(answer?.text);
+  }
+
+  // Press a button of the reply keyboard the account's client shows, which sends its text.
+  const replyInterface = await account.getReplyInterface({
+    chat: { type: 'private', botId: bot.id },
+  });
+  if (replyInterface?.type === 'keyboard') {
+    await account.pressReplyKeyboardButton({
+      chat: { type: 'private', botId: bot.id },
+      text: replyInterface.keyboard[0][0].text,
+    });
+  }
+
+  // Send the bot a photo, then read the bytes of the file the bot's reply carries, if any.
+  const photo = await account.sendPhoto({
+    to: { type: 'private', botId: bot.id },
+    photo: await Deno.readFile('receipt.png'),
+    caption: 'My receipt',
+  });
+  const reply = (await account.getMessages({ chat: { type: 'private', botId: bot.id } })).at(-1);
+  const replyFile = reply?.document ?? reply?.photo?.at(-1);
+  if (replyFile !== undefined) {
+    const content = await session.downloadFile(replyFile.file_unique_id);
+    console.log(content.length, photo.photo?.[0].width);
+  }
+
+  // Edit the account's first message, which sends the bot an edited_message update.
+  await account.editMessage({
+    chat: { type: 'private', botId: bot.id },
+    message_id: incomingMessage.message_id,
+    text: 'Hello again!',
+  });
+
+  // Block the bot. It receives a my_chat_member update, and its messages to the account fail
+  // with 403 until the account unblocks it.
+  await account.blockBot({ botId: bot.id });
+  await account.unblockBot({ botId: bot.id });
+
+  // Read the command menu the account sees in its chat with the bot.
+  const commands = await account.getBotCommands({ chat: { type: 'private', botId: bot.id } });
+  console.log(commands.map(({ command }) => `/${command}`));
+
+  // Create a supergroup, add the bot, and send it a command there. The bot receives a
+  // my_chat_member update and a new_chat_members service message when it is added, and, in privacy
+  // mode, only messages addressed to it.
+  const supergroup = await account.createSupergroup({ title: 'Team' });
+  const groupChat = { type: 'supergroup', chatId: supergroup.id } as const;
+  await account.addChatMember({ chat: groupChat, userId: bot.id });
+  const groupCommand = await account.sendMessage({ to: groupChat, text: '/start@test_bot' });
+  const groupHistory = await account.getMessages({ chat: groupChat });
+  console.log(groupHistory.map(({ from, text }) => `${from.first_name}: ${text ?? '(service)'}`));
+
+  // Forward the command to the bot's private chat. The bot receives it with its forward_origin.
+  const forwardedCommand = await account.forwardMessage({
+    from: groupChat,
+    message_id: groupCommand.message_id,
+    to: { type: 'private', botId: bot.id },
+  });
+  console.log(forwardedCommand.forward_origin?.sender_user.first_name);
+
+  // Type an inline query for the bot in the supergroup, read the bot's answer once it has
+  // answered, and send a result, which appears in the supergroup with via_bot.
+  const inlineQuery = await account.sendInlineQuery({
+    bot_id: bot.id,
+    chat: groupChat,
+    query: 'cats',
+  });
+  const answeredQuery = await account.getInlineQuery(inlineQuery.id);
+  const firstResult = answeredQuery.answer?.results[0];
+  if (firstResult !== undefined) {
+    await account.chooseInlineQueryResult({
+      inline_query_id: inlineQuery.id,
+      result_id: firstResult.id,
+    });
+  }
+
+  // Promote the bot to administrator. It then receives every message of the supergroup, deletes
+  // any, and bans spammers with banChatMember; demoting it takes its rights away again.
+  await account.promoteChatMember({
+    chat: groupChat,
+    userId: bot.id,
+    rights: { can_delete_messages: true, can_restrict_members: true },
+  });
+  await account.demoteChatMember({ chat: groupChat, userId: bot.id });
+
+  // Remove the bot, which bans it: it receives a my_chat_member update showing it as kicked, and
+  // its requests to the supergroup fail with 403 until the owner adds it again.
+  await account.removeChatMember({ chat: groupChat, userId: bot.id });
+  console.log(token, session.botApiRoot, incomingMessage, history);
+} finally {
+  await session.end();
+}
+```
