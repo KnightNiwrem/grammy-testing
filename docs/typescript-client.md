@@ -73,11 +73,13 @@ try {
     console.log(content.length, photo.photo?.[0].width);
   }
 
-  // Edit the account's first message, which sends the bot an edited_message update.
+  // Edit the account's first message, which sends the bot an edited_message update. Accounts
+  // format text and captions with entities, as bots specify them.
   await account.editMessage({
     chat: { type: 'private', botId: bot.id },
     message_id: incomingMessage.message_id,
     text: 'Hello again!',
+    entities: [{ type: 'bold', offset: 0, length: 5 }],
   });
 
   // Block the bot. It receives a my_chat_member update, and its messages to the account fail

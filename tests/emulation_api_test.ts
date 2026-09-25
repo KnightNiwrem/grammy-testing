@@ -1414,6 +1414,133 @@ Deno.test('messages carry the entities Telegram detects in their text', async ()
   }
 });
 
+Deno.test('accounts send and edit text and captions with the formatting they choose', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount } =
+    await createPrivateConversationFixture();
+  const grace = await createAccount(api, sessionPath, 'Grace');
+  const accountPath = `${sessionPath}/accounts/${createdAccount.account.id}`;
+  const historyPath = `${accountPath}/conversations/private/${createdBot.bot.id}/messages`;
+  const to = { type: 'private', botId: createdBot.bot.id };
+  const sendAccountMessage = async (body: unknown) => {
+    const response = await api.request(`${accountPath}/messages`, jsonRequest('POST', body));
+    return { status: response.status, body: response.ok ? await response.json() : null };
+  };
+  const readEntities = (message: Record<string, unknown> | undefined) =>
+    ((message?.entities ?? message?.caption_entities) as
+      | Array<Record<string, unknown> & { user?: { id: number } }>
+      | undefined)
+      ?.map(({ user, ...entity }) => user === undefined ? entity : { ...entity, userId: user.id });
+
+  // Offsets count UTF-16 code units, and formatting splits around detected entities.
+  const sentText = await sendAccountMessage({
+    to,
+    text: '👋 Hi Grace, see docs and #news',
+    entities: [
+      { type: 'bold', offset: 3, length: 2 },
+      { type: 'text_mention', offset: 6, length: 5, user: { id: grace.id } },
+      { type: 'text_link', offset: 17, length: 4, url: 'https://grammy.dev' },
+      { type: 'italic', offset: 22, length: 9 },
+      { type: 'mention', offset: 0, length: 2 },
+    ],
+  });
+  const sentPhoto = await sendAccountMessage({
+    to,
+    photo: { content_base64: gifImage(1, 1).toBase64() },
+    caption: 'Look',
+    caption_entities: [{ type: 'spoiler', offset: 0, length: 4 }],
+  });
+  const expectedTextEntities = [
+    { type: 'bold', offset: 3, length: 2 },
+    { type: 'text_mention', offset: 6, length: 5, userId: grace.id },
+    { type: 'text_link', offset: 17, length: 4, url: 'https://grammy.dev/' },
+    { type: 'italic', offset: 22, length: 4 },
+    { type: 'hashtag', offset: 26, length: 5 },
+    { type: 'italic', offset: 26, length: 5 },
+  ];
+  const expectedCaptionEntities = [{ type: 'spoiler', offset: 0, length: 4 }];
+  const deliveredMessages = updateMessages(
+    (await callBotApi(api, `${botApiPath}/getUpdates`, {})).body,
+  );
+  const formattingSeen = [
+    readEntities(sentText.body?.message),
+    readEntities(deliveredMessages[0]),
+    readEntities(sentPhoto.body?.message),
+    readEntities(deliveredMessages[1]),
+  ];
+  if (
+    JSON.stringify(formattingSeen) !== JSON.stringify([
+      expectedTextEntities,
+      expectedTextEntities,
+      expectedCaptionEntities,
+      expectedCaptionEntities,
+    ])
+  ) {
+    throw new Error(`Expected the chosen formatting, received ${JSON.stringify(formattingSeen)}`);
+  }
+
+  const textEdit = await api.request(
+    `${historyPath}/${sentText.body?.message.message_id}`,
+    jsonRequest('PATCH', {
+      text: 'Hi again',
+      entities: [{ type: 'underline', offset: 3, length: 5 }],
+    }),
+  );
+  const captionEdit = await api.request(
+    `${historyPath}/${sentPhoto.body?.message.message_id}`,
+    jsonRequest('PATCH', {
+      caption: 'Look closer',
+      caption_entities: [{ type: 'code', offset: 5, length: 6 }],
+    }),
+  );
+  const editedMessages = updateMessages(
+    (await callBotApi(api, `${botApiPath}/getUpdates`, {})).body,
+  ).slice(-2);
+  const editedFormatting = [
+    readEntities((await textEdit.json()).message),
+    readEntities(editedMessages[0]),
+    readEntities((await captionEdit.json()).message),
+    readEntities(editedMessages[1]),
+  ];
+  const expectedEditedText = [{ type: 'underline', offset: 3, length: 5 }];
+  const expectedEditedCaption = [{ type: 'code', offset: 5, length: 6 }];
+  if (
+    JSON.stringify(editedFormatting) !== JSON.stringify([
+      expectedEditedText,
+      expectedEditedText,
+      expectedEditedCaption,
+      expectedEditedCaption,
+    ])
+  ) {
+    throw new Error(`Expected the edited formatting, received ${JSON.stringify(editedFormatting)}`);
+  }
+
+  // Formatting Telegram cannot parse or apply stores no message.
+  const rejectedStatuses = await Promise.all([
+    { to, text: 'Hi', entities: [{ type: 'text_mention', offset: 0, length: 2, user: { id: 9 } }] },
+    { to, text: 'Hi', entities: [{ type: 'bold', offset: '0', length: 2 }] },
+    { to, text: 'Hi', entities: [{ type: 'glow', offset: 0, length: 2 }] },
+    { to, text: 'Hi', entities: { type: 'bold', offset: 0, length: 2 } },
+    { to, text: 'Hi', caption_entities: [] },
+    {
+      to,
+      photo: { content_base64: gifImage(1, 1).toBase64() },
+      caption: 'Look',
+      entities: [{ type: 'bold', offset: 0, length: 4 }],
+    },
+  ].map(async (body) => (await sendAccountMessage(body)).status));
+  const history = await (await api.request(historyPath)).json() as { messages: unknown[] };
+  if (
+    JSON.stringify(rejectedStatuses) !== JSON.stringify([400, 400, 400, 400, 400, 400]) ||
+    history.messages.length !== 2
+  ) {
+    throw new Error(
+      `Expected rejected formatting to store nothing, received ${
+        JSON.stringify({ rejectedStatuses, stored: history.messages.length })
+      }`,
+    );
+  }
+});
+
 Deno.test('keyboard buttons keep their style and custom emoji icon', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
     await createPrivateConversationFixture();
@@ -3795,7 +3922,7 @@ Deno.test('PATCH on an account message edits it and sends the bot an edited_mess
   const invalidEdits = [
     [1, { text: 'Hello /help' }, 400],
     [1, { text: '' }, 400],
-    [1, { text: 'Hi', entities: [] }, 400],
+    [1, { text: 'Hi', entities: [{ type: 'bold', offset: 0, length: 'all' }] }, 400],
     [botMessageId as number, { text: 'Changed' }, 400],
     [99, { text: 'Changed' }, 404],
     [0, { text: 'Changed' }, 400],

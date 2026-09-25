@@ -23,5 +23,7 @@ properties:
         description: The file's name, whose extension decides the document's MIME type.
   caption:
     $ref: ./AccountCaption.yaml
+  caption_entities:
+    $ref: ./AccountMessageEntities.yaml
   reply_to_message_id:
     $ref: ./AccountReplyToMessageId.yaml

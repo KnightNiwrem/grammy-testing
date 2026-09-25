@@ -257,35 +257,39 @@ function normalizeCaption(
 
 /**
  * What an account sends: text, or media with a caption, which is a photo or a document as its
- * upload says.
+ * upload says, each with the formatting the account specified.
  */
 export type AccountMessageContent =
-  | { readonly kind: 'text'; readonly text: string }
   | {
+    readonly kind: 'text';
+    readonly text: string;
+    /** Formatting the account specified; omitted for none. */
+    readonly entities?: readonly TextEntity[];
+  }
+  | (SpecifiedCaption & {
     readonly kind: 'media';
     readonly upload: FileUpload;
-    /** Empty for no caption. */
-    readonly caption: string;
-  };
+  });
 
 /**
- * Turns what an account sends into outgoing content. An account writes plain text, which its
- * client normalizes as Telegram does, and never covers a photo or moves its caption.
+ * Turns what an account sends into outgoing content, which its client normalizes as Telegram
+ * does. An account never covers a photo or moves its caption.
  */
 export function toOutgoingAccountContent(content: AccountMessageContent): OutgoingMessageContent {
   if (content.kind === 'text') {
     return content;
   }
-  const { upload, caption } = content;
+  const { upload, caption, captionEntities } = content;
   return upload.type === 'photo'
     ? {
       kind: 'photo',
       photo: { kind: 'upload', upload },
       caption,
+      captionEntities,
       hasSpoiler: false,
       showsCaptionAboveMedia: false,
     }
-    : { kind: 'document', document: { kind: 'upload', upload }, caption };
+    : { kind: 'document', document: { kind: 'upload', upload }, caption, captionEntities };
 }
 
 export type ContentReplacement<FailureReason extends string> =
@@ -359,18 +363,22 @@ function withCaption(
     : { ...content, caption };
 }
 
-/** An account's edit of its message: new text for a text message, or a new caption for media. */
+/**
+ * An account's edit of its message: new text for a text message, or a new caption for media, each
+ * with the formatting the account specified.
+ */
 export type AccountMessageEdit =
-  | { readonly kind: 'text'; readonly text: string }
   | {
-    readonly kind: 'caption';
-    /** Empty to remove the caption. */
-    readonly caption: string;
-  };
+    readonly kind: 'text';
+    readonly text: string;
+    /** Formatting the account specified; omitted for none. */
+    readonly entities?: readonly TextEntity[];
+  }
+  | (SpecifiedCaption & { readonly kind: 'caption' });
 
 /**
- * Applies an account's edit to its message's content: plain text, which its client normalizes as
- * when sending. New text must not be empty, while an empty caption removes the caption.
+ * Applies an account's edit to its message's content, which its client normalizes as when
+ * sending. New text must not be empty, while an empty caption removes the caption.
  */
 export function replaceAccountMessageContent(
   content: MessageContent,
@@ -384,7 +392,8 @@ export function replaceAccountMessageContent(
   | 'caption_too_long'
 > {
   if (edit.kind === 'caption') {
-    return replaceMessageCaption(content, { caption: edit.caption }, 'account', context);
+    const { caption, captionEntities } = edit;
+    return replaceMessageCaption(content, { caption, captionEntities }, 'account', context);
   }
   if (content.kind !== 'text') {
     return { replaced: false, failure: { reason: 'message_has_no_text' } };
@@ -392,7 +401,7 @@ export function replaceAccountMessageContent(
   if (edit.text.length === 0) {
     return { replaced: false, failure: { reason: 'message_text_empty' } };
   }
-  return replaceMessageText(content, { text: edit.text }, context);
+  return replaceMessageText(content, { text: edit.text, entities: edit.entities }, context);
 }
 
 /** Stores a file upload and returns the stored file's identity. */

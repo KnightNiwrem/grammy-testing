@@ -117,6 +117,8 @@ export type MessageIn<Target extends MessageTarget> = Target extends SupergroupM
 export interface AccountSendMessageInput<Target extends MessageTarget = MessageTarget> {
   readonly to: Target;
   readonly text: string;
+  /** Formatting of the text; entity types Telegram detects by itself are ignored. */
+  readonly entities?: readonly MessageEntityInput[];
   /** The ID of the chat's message to reply to, as message history shows it. */
   readonly reply_to_message_id?: number;
 }
@@ -127,6 +129,8 @@ export interface AccountSendPhotoInput<Target extends MessageTarget = MessageTar
   readonly photo: Uint8Array;
   /** Omitted or empty for no caption. */
   readonly caption?: string;
+  /** Formatting of the caption; entity types Telegram detects by itself are ignored. */
+  readonly caption_entities?: readonly MessageEntityInput[];
   /** The ID of the chat's message to reply to, as message history shows it. */
   readonly reply_to_message_id?: number;
 }
@@ -138,6 +142,8 @@ export interface AccountSendDocumentInput<Target extends MessageTarget = Message
   readonly file_name: string;
   /** Omitted or empty for no caption. */
   readonly caption?: string;
+  /** Formatting of the caption; entity types Telegram detects by itself are ignored. */
+  readonly caption_entities?: readonly MessageEntityInput[];
   /** The ID of the chat's message to reply to, as message history shows it. */
   readonly reply_to_message_id?: number;
 }
@@ -240,6 +246,8 @@ export interface AccountEditMessageInput<Target extends MessageTarget = MessageT
   readonly message_id: number;
   /** The new text, which must differ from the message's current text. */
   readonly text: string;
+  /** Formatting of the new text; entity types Telegram detects by itself are ignored. */
+  readonly entities?: readonly MessageEntityInput[];
 }
 
 export interface AccountDeleteMessageInput {
@@ -254,6 +262,8 @@ export interface AccountEditMessageCaptionInput<Target extends MessageTarget = M
   readonly message_id: number;
   /** The new caption, which must differ from the current one; empty removes the caption. */
   readonly caption: string;
+  /** Formatting of the new caption; entity types Telegram detects by itself are ignored. */
+  readonly caption_entities?: readonly MessageEntityInput[];
 }
 
 export interface BotBlockInput {
@@ -320,7 +330,7 @@ export type PlainMessageEntityType =
   | 'blockquote'
   | 'expandable_blockquote';
 
-/** A bot command the emulator detected, or formatting a bot applied to its message. */
+/** An entity Telegram detected in a message's text, or formatting its sender applied. */
 export type MessageEntity =
   | (MessageEntitySpan & { readonly type: PlainMessageEntityType })
   | (MessageEntitySpan & { readonly type: 'pre'; readonly language?: string })
@@ -339,6 +349,14 @@ export type MessageEntity =
      */
     readonly date_time_format: string;
   });
+
+/**
+ * Formatting an account applies to its text or caption, as bots specify it; a text mention names
+ * its user by ID alone. Entities of received messages can be sent back as they are.
+ */
+export type MessageEntityInput =
+  | Exclude<MessageEntity, { readonly type: 'text_mention' }>
+  | (MessageEntitySpan & { readonly type: 'text_mention'; readonly user: { readonly id: number } });
 
 /** A bot as a message sender, without the capabilities that only getMe reports. */
 export interface MessageSenderBot {

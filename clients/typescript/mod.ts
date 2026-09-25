@@ -58,6 +58,7 @@ export type {
   MenuButton,
   MessageContent,
   MessageEntity,
+  MessageEntityInput,
   MessageIn,
   MessageOrigin,
   MessageOriginHiddenUser,

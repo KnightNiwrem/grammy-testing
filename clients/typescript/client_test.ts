@@ -620,7 +620,36 @@ Deno.test('TypeScript client sends, edits, and downloads photos and documents', 
   const to = { type: 'private', botId: bot.id } as const;
   const image = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 2, 0, 1, 0, 0, 0, 0]);
 
-  const photo = await account.sendPhoto({ to, photo: image, caption: 'Receipt' });
+  const formattedMessage = await account.sendMessage({
+    to,
+    text: 'Hi me',
+    entities: [
+      { type: 'bold', offset: 0, length: 2 },
+      { type: 'text_mention', offset: 3, length: 2, user: { id: account.id } },
+    ],
+  });
+  const editedFormattedMessage = await account.editMessage({
+    chat: to,
+    message_id: formattedMessage.message_id,
+    text: 'Hi you',
+    entities: [{ type: 'italic', offset: 3, length: 3 }],
+  });
+  const [boldEntity, mentionEntity] = formattedMessage.entities ?? [];
+  if (
+    boldEntity?.type !== 'bold' || mentionEntity?.type !== 'text_mention' ||
+    mentionEntity.user.first_name !== account.first_name ||
+    JSON.stringify(editedFormattedMessage.entities) !==
+      JSON.stringify([{ type: 'italic', offset: 3, length: 3 }])
+  ) {
+    throw new Error('Expected the client to send and edit formatted text');
+  }
+
+  const photo = await account.sendPhoto({
+    to,
+    photo: image,
+    caption: 'Receipt',
+    caption_entities: [{ type: 'bold', offset: 0, length: 7 }],
+  });
   const document = await account.sendDocument({
     to,
     document: new TextEncoder().encode('notes'),
@@ -631,10 +660,12 @@ Deno.test('TypeScript client sends, edits, and downloads photos and documents', 
     chat: to,
     message_id: document.message_id,
     caption: 'My notes',
+    caption_entities: [{ type: 'underline', offset: 3, length: 5 }],
   });
   const downloadedPhoto = await session.downloadFile(photo.photo?.[0].file_unique_id ?? '');
   if (
-    photo.caption !== 'Receipt' || photo.photo?.[0].width !== 2 ||
+    photo.caption !== 'Receipt' || photo.caption_entities?.[0].type !== 'bold' ||
+    photo.photo?.[0].width !== 2 || editedDocument.caption_entities?.[0].type !== 'underline' ||
     document.document?.mime_type !== 'text/plain' ||
     document.reply_to_message?.photo?.[0].height !== 1 ||
     editedDocument.caption !== 'My notes' || editedDocument.edit_date === undefined ||

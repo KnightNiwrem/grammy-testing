@@ -16,11 +16,10 @@ make every service a dependency-free leaf. The composition root already supplies
 dependencies, and common message normalization and edit rules already have a shared implementation.
 [Sources: composition][composition], [message content rules][content], [message views][view].
 
-The highest-value work I identified is making ordinary incoming messages more representative:
-user-supplied formatting. There are also concrete robustness issues in recursive reply routing and
-the new webhook dispatcher's backlog handling. The architectural work should be focused: separate
-reusable Bot API method dispatch from Hono routing, rather than mechanically splitting every large
-class.
+The remaining capability gap I identified is `getChat` for the chat types already modeled. There are
+also concrete robustness issues in recursive reply routing and the new webhook dispatcher's backlog
+handling. The architectural work should be focused: separate reusable Bot API method dispatch from
+Hono routing, rather than mechanically splitting every large class.
 
 **No P0 or P1 defect was established by this review.** That is not a certification that the
 repository has no such defects. The findings below distinguish observed implementation defects,
@@ -57,7 +56,6 @@ recommendation is not a claim that an unsupported method is a severe implementat
 
 | Rank | Priority | Finding or recommendation                                                | Classification                                            |
 | ---: | :------: | ------------------------------------------------------------------------ | --------------------------------------------------------- |
-|    2 |    P2    | Support account-supplied entities and correct the documentation contract | Confirmed contract mismatch / coverage gap                |
 |    5 |    P2    | Add `getChat` for the chat types already modeled                         | Targeted capability recommendation                        |
 |    6 |    P2    | Replace recursive reply-address resolution with a stack-safe traversal   | Source-verified robustness defect; reduced probe executed |
 |    7 |    P2    | Separate method dispatch from HTTP routing; constrain facade growth      | Architecture / SRP recommendation                         |
@@ -66,52 +64,6 @@ recommendation is not a claim that an unsupported method is a severe implementat
 |   13 |    P3    | Make the development and CI dependency baseline reproducible             | Build reproducibility risk                                |
 
 ## Findings, in priority order
-
-### 2. P2 — Account-supplied entities are documented as supported but cannot pass through the public workflow
-
-**Context and evidence.** The text-formatting guide says accounts can supply entities through the
-emulation API. However, `sendMessageRequestSchema` in the account routes accepts a strict text
-object with no `entities`, and the photo/document objects have no `caption_entities`.
-`editMessageRequestSchema` likewise accepts only text or caption. The service-level
-`AccountMessageContent` and `AccountMessageEdit` types have no formatting-entity fields, and
-`toOutgoingAccountContent` therefore cannot forward them. The TypeScript client's edit methods
-serialize only the text or caption. [Documentation][format-doc] ·
-[account schemas and handlers][account-routes] · [service inputs and conversion][content] ·
-[client serialization][client].
-
-**Concrete reproduction.** With an existing account and bot, submit the following body to that
-account's message collection:
-
-```javascript
-const body = {
-  to: { type: 'private', botId },
-  text: 'bold',
-  entities: [{ type: 'bold', offset: 0, length: 4 }],
-};
-```
-
-The text-message branch's strict schema rejects the extra `entities` property; the route returns
-HTTP 400. This conclusion follows directly from the schema and handler. It was not exercised over
-HTTP in this environment.
-
-**Impact.** Tests cannot create an ordinary user-authored formatted message, explicit text link, or
-text mention through the advertised account workflow. A bot can generate formatted messages, and
-forwarding/inline workflows offer partial alternatives, but those change message provenance and are
-not an equivalent substitute for the user directly sending the message under test.
-
-**Recommendation.** Implement explicit formatting on account text, media captions and edits using
-the existing normalization machinery. Preserve the distinction between client-supplied formatting
-and automatically detected entities; do not simply accept arbitrary raw Bot API output as canonical
-domain state. Update the account API contract, client types/serialization and documentation in the
-same focused change. Until that lands, correct the support statement so developers do not debug an
-unavailable feature as though they were using it incorrectly.
-
-**Acceptance tests.** Cover plain text without entities, formatting with an astral character before
-the span, text mentions of a known user, invalid/surrogate-splitting spans, caption formatting and
-edited-message delivery. Verify that failed entity validation leaves no new message or media
-artifact. Read the response through the public TypeScript client as well as asserting raw JSON.
-
-**Scope/cost.** Small to medium because the bot-side normalizer already exists.
 
 ### 5. P2 — Add `getChat` for already-supported private chats and supergroups
 
@@ -260,10 +212,10 @@ Telegram's remote service.
    these outside the default offline test run and redact account-specific data while preserving
    identity relationships.
 
-Start with the small corpus needed for finding 2, then expand through generated boundary cases and
-state-machine sequences. Normalize volatile values carefully: renumber IDs within the correct
-identity namespace rather than erasing all IDs, and retain field presence, ordering guarantees and
-relationships that are part of the behavior under test.
+Start with a small corpus of the entity and routing cases already ported, then expand through
+generated boundary cases and state-machine sequences. Normalize volatile values carefully: renumber
+IDs within the correct identity namespace rather than erasing all IDs, and retain field presence,
+ordering guarantees and relationships that are part of the behavior under test.
 
 **Acceptance criteria.** A checked-in case records its request/scenario, oracle commit or capture
 provenance, expected response/update shape and normalization policy. Updating the oracle must show
@@ -457,8 +409,6 @@ references; the C++ references are pinned to the stated comparison baseline.
 [composition]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/composition/emulation_session.ts
 [bot-api]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/services/bot_api.ts
 [routes]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/api/sessions/bot_api/mod.ts
-[account-routes]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/api/sessions/accounts/mod.ts
-[client]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/clients/typescript/emulation_session_client.ts
 [content]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/services/message_content.ts
 [private]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/services/private_messaging.ts
 [supergroup]: https://github.com/KnightNiwrem/tg-bot-api-emulator/blob/4c793b46a13c7aaacb32d4014f5a3a8973f4cacf/src/services/supergroup_messaging.ts

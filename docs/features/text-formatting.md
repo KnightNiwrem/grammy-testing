@@ -6,8 +6,10 @@
 
 Bots format text and captions with `parse_mode` (`HTML`, `MarkdownV2`, legacy `Markdown`) or
 explicit `entities`/`caption_entities`. Parse mode names are case-insensitive; `none` disables
-markup parsing. A real parse mode takes precedence over supplied entities. Accounts can supply
-entities through the emulation API.
+markup parsing. A real parse mode takes precedence over supplied entities. Accounts format the text
+and captions they send or edit through the emulation API with `entities`/`caption_entities`, in the
+Bot API's `MessageEntity` form, which are validated and normalized as bots' are. Telegram clients
+turn markup into entities themselves, so accounts have no parse mode.
 
 The parser and normalizer implement the relevant TDLib rules: markup error descriptions, cleaning
 control characters, trimming whitespace, shifting entity offsets, sorting entities, removing invalid

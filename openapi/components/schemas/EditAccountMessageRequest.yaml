@@ -10,8 +10,10 @@ oneOf:
         minLength: 1
         maxLength: 4096
         description: >-
-          The new plain text, normalized as when sending a message. It must differ from the
-          message's current text after normalization.
+          The new text, normalized as when sending a message. It must differ from the
+          message's current text and entities after normalization.
+      entities:
+        $ref: ./AccountMessageEntities.yaml
   - type: object
     additionalProperties: false
     required:
@@ -20,6 +22,8 @@ oneOf:
       caption:
         type: string
         description: >-
-          The new plain caption, normalized as when sending media; empty removes the
-          caption. It must differ from the message's current caption after
+          The new caption, normalized as when sending media; empty removes the
+          caption. It must differ from the message's current caption and entities after
           normalization.
+      caption_entities:
+        $ref: ./AccountMessageEntities.yaml

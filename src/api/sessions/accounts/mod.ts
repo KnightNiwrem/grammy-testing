@@ -33,6 +33,7 @@ import {
   getMessageNotification,
   MAX_TEXT_MESSAGE_LENGTH,
 } from '../../../types/virtual_message.ts';
+import { readMessageEntitiesParameter } from '../bot_api/message_entities_parameter.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 
 const ACCOUNT_ID_PARAMETER = 'accountId';
@@ -133,6 +134,19 @@ const sentMessageTargetShape = {
 /** A caption, which Telegram's service limits, so its length is checked when sending. */
 const captionSchema = z.string().default('');
 
+/**
+ * Formatting an account specifies for its text or caption, as the Bot API's `MessageEntity`
+ * objects, which are read as for bots: entity types Telegram detects by itself are ignored.
+ */
+const messageEntitiesSchema = z.array(z.unknown()).transform((entityValues, context) => {
+  const reading = readMessageEntitiesParameter(entityValues, 'Invalid message entities');
+  if (!reading.read) {
+    context.issues.push({ code: 'custom', message: reading.description, input: entityValues });
+    return z.NEVER;
+  }
+  return reading.entities;
+}).optional();
+
 /** Message text, whose length counts characters as Telegram's limit does, not UTF-16 code units. */
 const messageTextSchema = z.string().min(1).refine(
   (text) => countTextCharacters(text) <= MAX_TEXT_MESSAGE_LENGTH,
@@ -155,11 +169,13 @@ const sendMessageRequestSchema = z.union([
   z.strictObject({
     ...sentMessageTargetShape,
     text: messageTextSchema,
+    entities: messageEntitiesSchema,
   }),
   z.strictObject({
     ...sentMessageTargetShape,
     photo: z.strictObject({ content_base64: base64ContentSchema }),
     caption: captionSchema,
+    caption_entities: messageEntitiesSchema,
   }),
   z.strictObject({
     ...sentMessageTargetShape,
@@ -168,6 +184,7 @@ const sendMessageRequestSchema = z.union([
       file_name: z.string().min(1),
     }),
     caption: captionSchema,
+    caption_entities: messageEntitiesSchema,
   }),
 ]);
 
@@ -196,8 +213,8 @@ const createSupergroupRequestSchema = z.strictObject({
 
 /** New text for a text message, or a new caption for a photo or document; empty removes it. */
 const editMessageRequestSchema = z.union([
-  z.strictObject({ text: messageTextSchema }),
-  z.strictObject({ caption: z.string() }),
+  z.strictObject({ text: messageTextSchema, entities: messageEntitiesSchema }),
+  z.strictObject({ caption: z.string(), caption_entities: messageEntitiesSchema }),
 ]);
 
 const pressReplyKeyboardButtonRequestSchema = z.strictObject({
@@ -1256,7 +1273,7 @@ function readAccountMessageContent(
   mediaFiles: EmulationSession['mediaFiles'],
 ): AccountMessageContent | undefined {
   if ('text' in request) {
-    return { kind: 'text', text: request.text };
+    return { kind: 'text', text: request.text, entities: request.entities };
   }
   const preparation = 'photo' in request
     ? mediaFiles.preparePhotoUpload(request.photo.content_base64)
@@ -1265,7 +1282,12 @@ function readAccountMessageContent(
       request.document.file_name,
     );
   return preparation.prepared
-    ? { kind: 'media', upload: preparation.upload, caption: request.caption }
+    ? {
+      kind: 'media',
+      upload: preparation.upload,
+      caption: request.caption,
+      captionEntities: request.caption_entities,
+    }
     : undefined;
 }
 
@@ -1277,8 +1299,8 @@ function readAccountMessageEdit(
   request: z.infer<typeof editMessageRequestSchema>,
 ): AccountMessageEdit {
   return 'text' in request
-    ? { kind: 'text', text: request.text }
-    : { kind: 'caption', caption: request.caption };
+    ? { kind: 'text', text: request.text, entities: request.entities }
+    : { kind: 'caption', caption: request.caption, captionEntities: request.caption_entities };
 }
 
 /** Why an account's message, sent directly or by pressing a reply keyboard button, failed. */

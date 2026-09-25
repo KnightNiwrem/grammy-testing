@@ -222,19 +222,32 @@ function createVirtualAccountClient(
       return response.message;
     },
     async sendPhoto<Target extends MessageTarget>(
-      { to, photo, caption, reply_to_message_id }: AccountSendPhotoInput<Target>,
+      { to, photo, caption, caption_entities, reply_to_message_id }: AccountSendPhotoInput<Target>,
     ): Promise<MessageIn<Target>> {
       const response = await requestJson(fetchImplementation, {
         method: 'POST',
         url: `${accountUrl}/messages`,
         expectedStatus: HTTP_STATUS_CREATED,
         responseSchema: messageResponseSchemasFor(to).sent,
-        body: { to, photo: { content_base64: photo.toBase64() }, caption, reply_to_message_id },
+        body: {
+          to,
+          photo: { content_base64: photo.toBase64() },
+          caption,
+          caption_entities,
+          reply_to_message_id,
+        },
       });
       return response.message;
     },
     async sendDocument<Target extends MessageTarget>(
-      { to, document, file_name, caption, reply_to_message_id }: AccountSendDocumentInput<Target>,
+      {
+        to,
+        document,
+        file_name,
+        caption,
+        caption_entities,
+        reply_to_message_id,
+      }: AccountSendDocumentInput<Target>,
     ): Promise<MessageIn<Target>> {
       const response = await requestJson(fetchImplementation, {
         method: 'POST',
@@ -245,6 +258,7 @@ function createVirtualAccountClient(
           to,
           document: { content_base64: document.toBase64(), file_name },
           caption,
+          caption_entities,
           reply_to_message_id,
         },
       });
@@ -271,7 +285,7 @@ function createVirtualAccountClient(
         url: `${conversationUrl(accountUrl, input.chat)}/messages/${messageId}`,
         expectedStatus: HTTP_STATUS_OK,
         responseSchema: messageResponseSchemasFor(input.chat).sent,
-        body: { text: input.text },
+        body: { text: input.text, entities: input.entities },
       });
       return response.message;
     },
@@ -284,7 +298,7 @@ function createVirtualAccountClient(
         url: `${conversationUrl(accountUrl, input.chat)}/messages/${messageId}`,
         expectedStatus: HTTP_STATUS_OK,
         responseSchema: messageResponseSchemasFor(input.chat).sent,
-        body: { caption: input.caption },
+        body: { caption: input.caption, caption_entities: input.caption_entities },
       });
       return response.message;
     },

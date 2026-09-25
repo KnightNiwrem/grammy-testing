@@ -1,0 +1,7 @@
+type: array
+description: >-
+  Formatting the account applies, which is validated and normalized as for bots: offsets and
+  lengths count UTF-16 code units of the text as specified, and entities Telegram detects are
+  added. A text mention must name a user of the session.
+items:
+  $ref: ./MessageEntityParameter.yaml

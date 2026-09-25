@@ -1,7 +1,7 @@
 type: object
 additionalProperties: false
 description: >-
-  An entity a bot specifies, as a Bot API `MessageEntity`. Types that Telegram detects by
+  An entity a bot or account specifies, as a Bot API `MessageEntity`. Types that Telegram detects by
   itself (`mention`, `hashtag`, `cashtag`, `bot_command`, `url`, `email`, `phone_number`,
   and `bank_card_number`) are accepted and ignored, so entities of a received message can be
   sent back. Telegram reads numbers written as strings; the emulator rejects them.

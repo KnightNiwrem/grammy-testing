@@ -1,5 +1,5 @@
 type: string
 default: ''
 description: >-
-  Plain text shown with the media, normalized as message text is; a caption with no visible
+  Text shown with the media, normalized as message text is; a caption with no visible
   characters is none. At most 1024 characters are accepted.
