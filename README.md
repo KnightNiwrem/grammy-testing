@@ -1,8 +1,9 @@
 # tg-bot-api-emulator
 
 An HTTP server for emulating the Telegram Bot API in end-to-end tests. Create isolated sessions,
-register virtual bots and accounts, drive user actions, and inspect the resulting conversations.
-Bots connect through their usual Bot API clients using a session-specific API root.
+register virtual bots and accounts, drive user actions, wait for the bots' calls in the order they
+make them, and inspect the resulting conversations. Bots connect through their usual Bot API clients
+using a session-specific API root.
 
 The emulator supports private chats and supergroups, polling and webhooks, text, photos, documents,
 rich messages, keyboards, inline queries, and selected moderation methods. See the

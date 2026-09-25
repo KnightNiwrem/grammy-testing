@@ -1,0 +1,86 @@
+type: object
+additionalProperties: false
+description: >-
+  A bot's call of a Bot API method, recorded when the emulator decided its answer, whether the
+  method ran, failed, or is not implemented. Calls that arrive in a webhook's response are
+  recorded too. `getUpdates` calls are not recorded; the updates they deliver and confirm are.
+  Calls whose token authenticates no bot of the session are not recorded.
+required:
+  - position
+  - kind
+  - bot_id
+  - method
+  - requested_method
+  - via
+  - parameters
+  - uploaded_files
+  - answer
+properties:
+  position:
+    $ref: ./BotActivityPosition.yaml
+  kind:
+    type: string
+    const: bot_api_call
+  bot_id:
+    $ref: ./TelegramUserId.yaml
+  method:
+    type: string
+    description: >-
+      The method's current name, whichever name the bot called it by; the name as called for a
+      method the emulator does not implement.
+  requested_method:
+    type: string
+    description: The method name as the bot called it.
+  via:
+    type: string
+    enum:
+      - http
+      - webhook_reply
+    description: Whether the call was an HTTP request or a webhook's response to an update.
+  parameters:
+    type: object
+    additionalProperties:
+      type: string
+    description: >-
+      The parameters as the bot sent them, as text, as the Bot API reads them: `chat_id: 1` and
+      `chat_id: "1"` are both recorded as `"1"`. Empty when the request could not be decoded.
+  uploaded_files:
+    type: array
+    description: The files the call uploaded, described without their content.
+    items:
+      type: object
+      additionalProperties: false
+      required:
+        - field_name
+        - file_name
+        - size_bytes
+      properties:
+        field_name:
+          type: string
+          description: The multipart field that carried the file.
+        file_name:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 0
+  chat_id:
+    type: integer
+    description: >-
+      The chat `chat_id` names, with a public username resolved; omitted when it names none.
+  answer:
+    description: The Bot API answer the bot received.
+    oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+          - ok
+          - result
+        properties:
+          ok:
+            type: boolean
+            const: true
+          result:
+            description: The method's result.
+          description:
+            type: string
+      - $ref: ./BotApiErrorResponse.yaml

@@ -1,0 +1,33 @@
+type: object
+additionalProperties: false
+description: >-
+  An update handed to a bot, in a `getUpdates` answer or in a request to its webhook. An update
+  handed over again, because the bot did not confirm it or its webhook failed, is recorded each
+  time.
+required:
+  - position
+  - kind
+  - bot_id
+  - via
+  - update
+  - user_id
+properties:
+  position:
+    $ref: ./BotActivityPosition.yaml
+  kind:
+    type: string
+    const: update_delivered
+  bot_id:
+    $ref: ./TelegramUserId.yaml
+  via:
+    $ref: ./BotUpdateTransport.yaml
+  update:
+    $ref: ./BotApiUpdate.yaml
+  chat_id:
+    type: integer
+    description: >-
+      The chat the update happened in, as grammY's `ctx.chat` finds it; omitted for inline
+      queries, chosen inline results, and presses of buttons on messages sent through inline mode.
+  user_id:
+    type: integer
+    description: The user whose action caused the update, as grammY's `ctx.from` finds it.

@@ -37,7 +37,8 @@
           "src/types/bot_default_administrator_rights.ts",
           "src/types/bot_menu_button.ts",
           "src/types/bot_webhook.ts",
-          "src/types/bot_rate_limit.ts"
+          "src/types/bot_rate_limit.ts",
+          "src/types/bot_activity.ts"
         ]
       },
       {
@@ -143,6 +144,12 @@
         ]
       },
       {
+        "name": "bot-activity-log-repository",
+        "patterns": [
+          "src/repositories/bot_activity_log.ts"
+        ]
+      },
+      {
         "name": "blocked-user-repository",
         "patterns": [
           "src/repositories/blocked_user.ts"
@@ -240,6 +247,12 @@
         "name": "bot-api-service",
         "patterns": [
           "src/services/bot_api.ts"
+        ]
+      },
+      {
+        "name": "bot-activity",
+        "patterns": [
+          "src/services/bot_activity.ts"
         ]
       },
       {
@@ -372,6 +385,12 @@
         ]
       },
       {
+        "from": "bot-activity-log-repository",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "blocked-user-repository",
         "allow": [
           "domain"
@@ -395,7 +414,8 @@
         "allowTypeOnly": [
           "domain-services",
           "bot-api-service",
-          "bot-message-view"
+          "bot-message-view",
+          "bot-activity"
         ]
       },
       {
@@ -476,6 +496,12 @@
         ]
       },
       {
+        "from": "bot-activity",
+        "allow": [
+          "domain"
+        ]
+      },
+      {
         "from": "application-services",
         "allow": [],
         "allowTypeOnly": [
@@ -503,6 +529,7 @@
           "bot-default-administrator-rights-repository",
           "bot-menu-button-repository",
           "bot-rate-limit-repository",
+          "bot-activity-log-repository",
           "blocked-user-repository",
           "chat-action-repository",
           "identity-repository",
@@ -514,6 +541,7 @@
           "update-polling",
           "webhook-delivery",
           "bot-api-service",
+          "bot-activity",
           "application-services",
           "session",
           "transport"

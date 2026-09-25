@@ -3,6 +3,7 @@ import { basePath } from 'hono/route';
 
 import type { EmulationSession } from '../../types/emulation_session.ts';
 import { createAccountRoutes } from './accounts/mod.ts';
+import { createBotActivityRoutes } from './bot_activity/mod.ts';
 import { createBotApiRoutes } from './bot_api/mod.ts';
 import { createBotRoutes } from './bots/mod.ts';
 import { createFileRoutes } from './files/mod.ts';
@@ -14,6 +15,7 @@ const SESSION_SUBRESOURCE_PATH = `${SESSION_PATH}/*` as const;
 const ACCOUNT_COLLECTION_PATH = `${SESSION_PATH}/accounts` as const;
 const BOT_COLLECTION_PATH = `${SESSION_PATH}/bots` as const;
 const BOT_API_PATH = `${SESSION_PATH}/bot-api` as const;
+const BOT_ACTIVITY_PATH = `${SESSION_PATH}/bot-activity` as const;
 const FILE_COLLECTION_PATH = `${SESSION_PATH}/files` as const;
 
 export interface SessionLifecycle {
@@ -68,6 +70,7 @@ export function createSessionRoutes(
   sessionRoutes.route(ACCOUNT_COLLECTION_PATH, createAccountRoutes());
   sessionRoutes.route(BOT_COLLECTION_PATH, createBotRoutes());
   sessionRoutes.route(BOT_API_PATH, createBotApiRoutes());
+  sessionRoutes.route(BOT_ACTIVITY_PATH, createBotActivityRoutes());
   sessionRoutes.route(FILE_COLLECTION_PATH, createFileRoutes());
 
   return sessionRoutes;

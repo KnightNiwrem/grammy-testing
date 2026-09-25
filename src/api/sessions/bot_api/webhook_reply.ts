@@ -1,5 +1,5 @@
 import type { BotApiMethodContext } from './method_call.ts';
-import { callBotApiMethod, findBotApiMethod } from './mod.ts';
+import { callBotApiMethod, findBotApiMethod, rejectUnknownBotApiMethod } from './mod.ts';
 import { decodeBotApiBodyParameters } from './request_parameters.ts';
 
 /** The parameter naming the method that a webhook's response asks Telegram to run. */
@@ -20,9 +20,10 @@ const WEBHOOK_REPLY_EXCLUDED_METHODS: ReadonlySet<string> = new Set([
 /**
  * Runs the Bot API method that a webhook names in its successful response to an update, with the
  * other parameters of the response, as Telegram does. Nothing receives the method's answer, since
- * the response ends the webhook's exchange with Telegram, so a failing method changes nothing.
- * A response that names no method, names one that cannot run this way, or cannot be decoded, runs
- * nothing.
+ * the response ends the webhook's exchange with Telegram, so a failing method changes nothing;
+ * the call and its answer are recorded as bot activity, as a call of a method the emulator does
+ * not implement is. A response that names no method, names one that cannot run this way, or
+ * cannot be decoded, runs nothing.
  */
 export async function runWebhookReply(
   context: BotApiMethodContext,
@@ -35,13 +36,20 @@ export async function runWebhookReply(
   const { [METHOD_PARAMETER]: methodName = '', ...parameters } = decoding.parameters;
   const lowercaseMethodName = methodName.toLowerCase();
   if (
-    WEBHOOK_REPLY_EXCLUDED_METHODS.has(lowercaseMethodName) ||
+    methodName.length === 0 || WEBHOOK_REPLY_EXCLUDED_METHODS.has(lowercaseMethodName) ||
     lowercaseMethodName.startsWith('get')
   ) {
     return;
   }
-  const method = findBotApiMethod(lowercaseMethodName);
-  if (method !== undefined) {
-    await callBotApiMethod(context, method, parameters, decoding.uploadedFiles);
+  const method = findBotApiMethod(methodName);
+  if (method === undefined) {
+    rejectUnknownBotApiMethod(context, methodName, parameters, decoding.uploadedFiles);
+    return;
   }
+  await callBotApiMethod(context, {
+    method,
+    requestedMethodName: methodName,
+    parameters,
+    uploadedFiles: decoding.uploadedFiles,
+  });
 }

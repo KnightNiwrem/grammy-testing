@@ -7,6 +7,7 @@ import {
   MIN_TELEGRAM_USER_ID,
 } from './constants.ts';
 import type {
+  BotActivityEntry,
   CallbackQuery,
   CreatedVirtualBot,
   EmulationSession,
@@ -718,4 +719,68 @@ export const inlineQueryResponseSchema = z.strictObject({
 /** A message sent from an inline query's answer, to the private chat or supergroup of the query. */
 export const chosenInlineResultResponseSchema = z.strictObject({
   message: z.union([privateMessageSchema, supergroupMessageSchema]),
+});
+
+const botActivityPositionSchema = z.int().min(1);
+
+const botApiCallEntrySchema = z.strictObject({
+  position: botActivityPositionSchema,
+  kind: z.literal('bot_api_call'),
+  bot_id: telegramUserIdSchema,
+  method: z.string().min(1),
+  requested_method: z.string().min(1),
+  via: z.enum(['http', 'webhook_reply']),
+  parameters: z.record(z.string(), z.string()),
+  uploaded_files: z.array(z.strictObject({
+    field_name: z.string(),
+    file_name: z.string(),
+    size_bytes: z.int().nonnegative(),
+  })),
+  chat_id: z.int().optional(),
+  answer: z.union([
+    z.strictObject({
+      ok: z.literal(true),
+      result: z.unknown(),
+      description: z.string().optional(),
+    }),
+    z.strictObject({
+      ok: z.literal(false),
+      error_code: z.int(),
+      description: z.string(),
+      parameters: z.strictObject({ retry_after: z.int().positive() }).optional(),
+    }),
+  ]),
+});
+
+const botUpdateTransportSchema = z.enum(['polling', 'webhook']);
+
+const updateDeliveredEntrySchema = z.strictObject({
+  position: botActivityPositionSchema,
+  kind: z.literal('update_delivered'),
+  bot_id: telegramUserIdSchema,
+  via: botUpdateTransportSchema,
+  update: z.looseObject({ update_id: z.int() }),
+  chat_id: z.int().optional(),
+  user_id: z.int(),
+});
+
+const updateConfirmedEntrySchema = z.strictObject({
+  position: botActivityPositionSchema,
+  kind: z.literal('update_confirmed'),
+  bot_id: telegramUserIdSchema,
+  via: botUpdateTransportSchema,
+  update_id: z.int(),
+  chat_id: z.int().optional(),
+  user_id: z.int(),
+});
+
+const botActivityEntrySchema: z.ZodType<BotActivityEntry> = z.discriminatedUnion('kind', [
+  botApiCallEntrySchema,
+  updateDeliveredEntrySchema,
+  updateConfirmedEntrySchema,
+]);
+
+export const botActivityReadResponseSchema = z.strictObject({
+  entries: z.array(botActivityEntrySchema),
+  head_position: z.int().nonnegative(),
 });

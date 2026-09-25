@@ -1,3 +1,4 @@
+import type { BotActivityService } from '../services/bot_activity.ts';
 import type { BotApiService } from '../services/bot_api.ts';
 import type { BotBlockingService } from '../services/bot_blocking.ts';
 import type { BotCommandService } from '../services/bot_command.ts';
@@ -36,10 +37,11 @@ export interface EmulationSession {
   readonly mediaFiles: MediaFileService;
   readonly botRateLimits: BotRateLimitService;
   readonly botApi: BotApiService;
+  readonly botActivity: BotActivityService;
   /**
    * Stops the session from keeping requests waiting and from delivering updates: held long polls
-   * are answered, later ones are not held, and webhooks stop, including requests in flight.
-   * Requests that are already running complete against the session's state.
+   * and bot activity reads are answered, later ones do not wait, and webhooks stop, including
+   * requests in flight. Requests that are already running complete against the session's state.
    */
   end(): void;
 }

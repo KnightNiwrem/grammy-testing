@@ -1,5 +1,7 @@
+import { BotActivityLogRepository } from '../src/repositories/bot_activity_log.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
+import { BotActivityService } from '../src/services/bot_activity.ts';
 import {
   BotUpdatePollingService,
   type GetUpdatesResult,
@@ -188,11 +190,68 @@ Deno.test('BotUpdatePollingService answers held and later long polls at once whe
   }
 });
 
+Deno.test('BotUpdatePollingService records the updates each answer confirms and delivers', async () => {
+  const { botUpdates, botActivity, botUpdatePolling } = createPollingFixture();
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(2));
+
+  await botUpdatePolling.getUpdates(BOT_ID, { limit: 100, timeoutSeconds: 0 });
+  await botUpdatePolling.getUpdates(BOT_ID, { offset: 2, limit: 1, timeoutSeconds: 0 });
+  const heldResult = botUpdatePolling.getUpdates(BOT_ID, {
+    offset: 3,
+    limit: 100,
+    timeoutSeconds: 50,
+  });
+  botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(3));
+  await heldResult;
+
+  const recorded = await botActivity.readEntries({
+    after: 0,
+    filter: {},
+    limit: 100,
+    waitMilliseconds: 0,
+  });
+  if (!recorded.read) {
+    throw new Error('Expected the bot activity to be readable');
+  }
+  const summary = recorded.entries.map((entry) => {
+    switch (entry.kind) {
+      case 'update_delivered':
+        return ['delivered', entry.update.update_id, entry.via];
+      case 'update_confirmed':
+        return ['confirmed', entry.updateId, entry.via];
+      default:
+        return [entry.kind];
+    }
+  });
+  if (
+    JSON.stringify(summary) !== JSON.stringify([
+      ['delivered', 1, 'polling'],
+      ['delivered', 2, 'polling'],
+      ['confirmed', 1, 'polling'],
+      ['delivered', 2, 'polling'],
+      ['confirmed', 2, 'polling'],
+      ['delivered', 3, 'polling'],
+    ])
+  ) {
+    throw new Error(
+      `Expected confirmations before the deliveries of each answer, received ${
+        JSON.stringify(summary)
+      }`,
+    );
+  }
+});
+
 function createPollingFixture() {
   const botUpdates = new BotUpdateRepository();
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
-  const botUpdatePolling = new BotUpdatePollingService({ botUpdates, updateSubscriptions });
-  return { botUpdates, updateSubscriptions, botUpdatePolling };
+  const botActivity = new BotActivityService({ log: new BotActivityLogRepository() });
+  const botUpdatePolling = new BotUpdatePollingService({
+    botUpdates,
+    updateSubscriptions,
+    updateActivity: botActivity,
+  });
+  return { botUpdates, updateSubscriptions, botActivity, botUpdatePolling };
 }
 
 function createPrivateMessage(messageId: number): BotApiPrivateMessage {

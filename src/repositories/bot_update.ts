@@ -103,22 +103,33 @@ export class BotUpdateRepository {
     botId: number,
     { firstUnconfirmedUpdateId, limit }: ConfirmAndReadPendingUpdatesInput,
   ): readonly BotApiUpdate[] {
+    this.confirmUpdatesBefore(botId, firstUnconfirmedUpdateId);
+    return this.#getOrCreateMailbox(botId).updates.slice(0, limit);
+  }
+
+  /**
+   * Confirms and forgets the pending updates with a lower ID than `firstUnconfirmedUpdateId`, and
+   * returns them, oldest first. `undefined` confirms none; as on Telegram, so does an ID more than
+   * 10 beyond the ID the next update will receive.
+   */
+  confirmUpdatesBefore(
+    botId: number,
+    firstUnconfirmedUpdateId: number | undefined,
+  ): readonly BotApiUpdate[] {
     const mailbox = this.#getOrCreateMailbox(botId);
     if (
-      firstUnconfirmedUpdateId !== undefined &&
-      firstUnconfirmedUpdateId <= mailbox.nextUpdateId + MAX_OFFSET_BEYOND_NEXT_UPDATE_ID
+      firstUnconfirmedUpdateId === undefined ||
+      firstUnconfirmedUpdateId > mailbox.nextUpdateId + MAX_OFFSET_BEYOND_NEXT_UPDATE_ID
     ) {
-      const firstUnconfirmedUpdateIndex = mailbox.updates.findIndex((update) =>
-        update.update_id >= firstUnconfirmedUpdateId
-      );
-      if (firstUnconfirmedUpdateIndex === -1) {
-        mailbox.updates.splice(0);
-      } else if (firstUnconfirmedUpdateIndex > 0) {
-        mailbox.updates.splice(0, firstUnconfirmedUpdateIndex);
-      }
+      return [];
     }
-
-    return mailbox.updates.slice(0, limit);
+    const firstUnconfirmedUpdateIndex = mailbox.updates.findIndex((update) =>
+      update.update_id >= firstUnconfirmedUpdateId
+    );
+    return mailbox.updates.splice(
+      0,
+      firstUnconfirmedUpdateIndex === -1 ? mailbox.updates.length : firstUnconfirmedUpdateIndex,
+    );
   }
 
   /** Returns the bot's pending updates, oldest first, without confirming any. */

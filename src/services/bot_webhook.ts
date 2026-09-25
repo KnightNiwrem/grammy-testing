@@ -106,10 +106,17 @@ interface BotUpdateSubscriptionStore {
   setAllowedUpdateTypes(botId: number, allowedUpdateTypes: ReadonlySet<BotApiUpdateType>): void;
 }
 
+/** Records the updates sent to webhooks and accepted by them in the session's bot activity. */
+interface UpdateActivityRecorder {
+  recordUpdateDeliveries(botId: number, updates: readonly BotApiUpdate[], via: 'webhook'): void;
+  recordUpdateConfirmations(botId: number, updates: readonly BotApiUpdate[], via: 'webhook'): void;
+}
+
 interface BotWebhookServiceDependencies {
   readonly webhooks: BotWebhookStore;
   readonly pendingUpdates: PendingUpdateQueue;
   readonly updateSubscriptions: BotUpdateSubscriptionStore;
+  readonly updateActivity: UpdateActivityRecorder;
   /** Sends a webhook request over the network, as `fetch` does. */
   readonly sendWebhookRequest: (request: Request) => Promise<Response>;
   /**
@@ -172,6 +179,7 @@ export class BotWebhookService {
   readonly #webhooks: BotWebhookStore;
   readonly #pendingUpdates: PendingUpdateQueue;
   readonly #updateSubscriptions: BotUpdateSubscriptionStore;
+  readonly #updateActivity: UpdateActivityRecorder;
   readonly #sendWebhookRequest: (request: Request) => Promise<Response>;
   readonly #runWebhookReply: (botId: number, reply: Response, signal: AbortSignal) => Promise<void>;
   readonly #attemptTimeoutMilliseconds: number;
@@ -187,6 +195,7 @@ export class BotWebhookService {
       webhooks,
       pendingUpdates,
       updateSubscriptions,
+      updateActivity,
       sendWebhookRequest,
       runWebhookReply,
       attemptTimeoutMilliseconds,
@@ -197,6 +206,7 @@ export class BotWebhookService {
     this.#webhooks = webhooks;
     this.#pendingUpdates = pendingUpdates;
     this.#updateSubscriptions = updateSubscriptions;
+    this.#updateActivity = updateActivity;
     this.#sendWebhookRequest = sendWebhookRequest;
     this.#runWebhookReply = runWebhookReply;
     this.#attemptTimeoutMilliseconds = attemptTimeoutMilliseconds;
@@ -374,9 +384,10 @@ export class BotWebhookService {
 
   /**
    * Sends the pending updates of one queue to the webhook one at a time, each over a connection
-   * of `connections`, until the queue has none left or `signal` aborts. An update is confirmed once
-   * the webhook accepts it; a failed update is sent again after its retry delay, during which the
-   * queue uses no connection. Aborting leaves the update in flight pending.
+   * of `connections`, until the queue has none left or `signal` aborts. An update is confirmed, and
+   * its confirmation recorded as bot activity, once the webhook accepts it; a failed update is sent
+   * again after its retry delay, during which the queue uses no connection. Aborting leaves the
+   * update in flight pending.
    */
   async #deliverQueue(
     botId: number,
@@ -410,6 +421,7 @@ export class BotWebhookService {
       }
       if (outcome.accepted) {
         this.#pendingUpdates.confirmPendingUpdate(botId, update.update_id);
+        this.#updateActivity.recordUpdateConfirmations(botId, [update], 'webhook');
         continue;
       }
 
@@ -438,6 +450,8 @@ export class BotWebhookService {
    * whose body fails or does not arrive in time fails the attempt, whatever its status. A complete
    * successful response may name a Bot API method, which runs before the update's queue sends its
    * next update; the method's failure leaves the update delivered.
+   *
+   * Each attempt is recorded as a delivery of the update in the session's bot activity.
    */
   async #sendUpdate(
     botId: number,
@@ -450,6 +464,7 @@ export class BotWebhookService {
     const attemptSignal = AbortSignal.any([deliverySignal, timeout.signal]);
     try {
       const request = createWebhookRequest(webhook, update, attemptSignal);
+      this.#updateActivity.recordUpdateDeliveries(botId, [update], 'webhook');
       let response: Response;
       try {
         response = await settleUnlessAborted(this.#sendWebhookRequest(request), attemptSignal);

@@ -3,6 +3,7 @@ import type { EmulationSession } from '../types/emulation_session.ts';
 import { getPrivateForwardName } from '../types/virtual_account.ts';
 import { AccountRepository } from '../repositories/account.ts';
 import { BlockedUserRepository } from '../repositories/blocked_user.ts';
+import { BotActivityLogRepository } from '../repositories/bot_activity_log.ts';
 import { BotRepository } from '../repositories/bot.ts';
 import { BotCommandRepository } from '../repositories/bot_command.ts';
 import { BotDefaultAdministratorRightsRepository } from '../repositories/bot_default_administrator_rights.ts';
@@ -21,6 +22,7 @@ import { PrivateConversationRepository } from '../repositories/private_conversat
 import { SharedChatRepository } from '../repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../repositories/telegram_identity.ts';
 import { MessageBoxRepository } from '../repositories/message_box.ts';
+import { BotActivityService } from '../services/bot_activity.ts';
 import { BotApiService } from '../services/bot_api.ts';
 import { BotBlockingService } from '../services/bot_blocking.ts';
 import { BotCommandService } from '../services/bot_command.ts';
@@ -181,16 +183,22 @@ export function createEmulationSession(id: string): EmulationSession {
     rateLimitResponses: new BotRateLimitRepository(),
   });
 
-  const botUpdatePolling = new BotUpdatePollingService({ botUpdates, updateSubscriptions });
+  const botActivity = new BotActivityService({ log: new BotActivityLogRepository() });
+  const botUpdatePolling = new BotUpdatePollingService({
+    botUpdates,
+    updateSubscriptions,
+    updateActivity: botActivity,
+  });
   const botWebhooks = new BotWebhookService({
     webhooks: new BotWebhookRepository(),
     pendingUpdates: botUpdates,
     updateSubscriptions,
+    updateActivity: botActivity,
     sendWebhookRequest: (request) => fetch(request),
     runWebhookReply: async (botId, reply, signal) => {
       const bot = bots.getById(botId);
       if (bot !== undefined) {
-        await runWebhookReply({ session, bot: bot.profile, signal }, reply);
+        await runWebhookReply({ session, bot: bot.profile, signal, via: 'webhook_reply' }, reply);
       }
     },
     attemptTimeoutMilliseconds: WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,
@@ -235,9 +243,11 @@ export function createEmulationSession(id: string): EmulationSession {
     mediaFiles,
     botRateLimits,
     botApi,
+    botActivity,
     end: () => {
       botUpdatePolling.endLongPolling();
       botWebhooks.endDelivery();
+      botActivity.endReading();
     },
   };
   return session;

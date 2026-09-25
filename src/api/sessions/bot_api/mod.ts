@@ -41,6 +41,7 @@ import {
   inlineKeyboardMarkupParameter,
   messageReplyMarkupParameter,
 } from './reply_markup_parameter.ts';
+import { recordBotApiCall } from './call_recording.ts';
 import {
   botApiError,
   type BotApiMethodAnswer,
@@ -832,11 +833,78 @@ export function findBotApiMethod(methodName: string): BotApiMethod | undefined {
   return BOT_API_METHODS_BY_LOWERCASE_NAME.get(methodName.toLowerCase());
 }
 
+/** A bot's call of a method the emulator implements, as it arrived. */
+export interface BotApiMethodCall {
+  readonly method: BotApiMethod;
+  /** The method name as the bot called it, which may be an older name or differ in case. */
+  readonly requestedMethodName: string;
+  readonly parameters: BotApiRequestParameters;
+  readonly uploadedFiles: BotApiUploadedFiles;
+}
+
 /**
  * Runs a bot's call of a method, however the call arrived, unless a test queued a rate limit
- * answer for it, which the call receives instead.
+ * answer for it, which the call receives instead. The call and its answer are recorded as bot
+ * activity.
  */
 export async function callBotApiMethod(
+  context: BotApiMethodContext,
+  { method, requestedMethodName, parameters, uploadedFiles }: BotApiMethodCall,
+): Promise<BotApiMethodAnswer> {
+  const answer = await answerBotApiMethodCall(context, method, parameters, uploadedFiles);
+  recordBotApiCall(context, {
+    methodName: method.name,
+    requestedMethodName,
+    parameters,
+    uploadedFiles,
+    chatId: findNamedChatId(context, parameters),
+  }, answer);
+  return answer;
+}
+
+/**
+ * Answers a call that names no method the emulator implements, however the call arrived, and
+ * records it as bot activity.
+ */
+export function rejectUnknownBotApiMethod(
+  context: BotApiMethodContext,
+  requestedMethodName: string,
+  parameters: BotApiRequestParameters,
+  uploadedFiles: BotApiUploadedFiles,
+): BotApiMethodAnswer {
+  const answer = botApiError(404, 'Not Found: method not found');
+  recordBotApiCall(context, {
+    methodName: requestedMethodName,
+    requestedMethodName,
+    parameters,
+    uploadedFiles,
+    chatId: findNamedChatId(context, parameters),
+  }, answer);
+  return answer;
+}
+
+/**
+ * Answers a call of an implemented method whose request could not be decoded, and records it as
+ * bot activity without parameters.
+ */
+function rejectUndecodableBotApiCall(
+  context: BotApiMethodContext,
+  { name }: BotApiMethod,
+  requestedMethodName: string,
+  description: string,
+): BotApiMethodAnswer {
+  const answer = botApiError(400, description);
+  recordBotApiCall(context, {
+    methodName: name,
+    requestedMethodName,
+    parameters: {},
+    uploadedFiles: new Map(),
+    chatId: undefined,
+  }, answer);
+  return answer;
+}
+
+async function answerBotApiMethodCall(
   context: BotApiMethodContext,
   { name, handler }: BotApiMethod,
   parameters: BotApiRequestParameters,
@@ -853,6 +921,27 @@ export async function callBotApiMethod(
   return chatResolution.resolved
     ? await handler(context, chatResolution.parameters, uploadedFiles)
     : chatResolution.errorAnswer;
+}
+
+const namedChatIdSchema = integerParameter(z.int());
+
+/**
+ * Finds the chat a call's `chat_id` names, by its ID or by a public username, for the call's bot
+ * activity record; `undefined` when it names no chat.
+ */
+function findNamedChatId(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): number | undefined {
+  const chatIdentifier = parameters.chat_id;
+  if (chatIdentifier === undefined) {
+    return undefined;
+  }
+  if (chatIdentifier.startsWith(CHAT_USERNAME_PREFIX)) {
+    return resolveChatIdentifier(context, chatIdentifier);
+  }
+  const chatId = namedChatIdSchema.safeParse(chatIdentifier);
+  return chatId.success ? chatId.data : undefined;
 }
 
 /** The parameters that name a chat, which the official Bot API server reads with `check_chat`. */
@@ -938,30 +1027,46 @@ export function createBotApiRoutes(): Hono<BotApiRouteContextTypes> {
     await next();
   });
 
-  // Telegram accepts both HTTP methods for every Bot API method.
+  // Telegram accepts both HTTP methods for every Bot API method. It rejects an unknown method
+  // before it reads the parameters; the emulator reads them anyway to record the call.
   botApiRoutes.on(['GET', 'POST'], BOT_API_METHOD_PATH, async (context) => {
-    const method = findBotApiMethod(context.req.param(BOT_API_METHOD_NAME_PARAMETER));
-    if (method === undefined) {
-      return botApiResponse(context, botApiError(404, 'Not Found: method not found'));
-    }
-
+    const requestedMethodName = context.req.param(BOT_API_METHOD_NAME_PARAMETER);
+    const method = findBotApiMethod(requestedMethodName);
     const parametersDecoding = await decodeBotApiRequestParameters(context.req.raw);
-    if (!parametersDecoding.decoded) {
-      return botApiResponse(context, botApiError(400, parametersDecoding.description));
-    }
     const methodContext: BotApiMethodContext = {
       session: context.get('emulationSession'),
       bot: context.get('authenticatedBot'),
       signal: context.req.raw.signal,
+      via: 'http',
     };
+    if (method === undefined) {
+      const { parameters, uploadedFiles } = parametersDecoding.decoded
+        ? parametersDecoding
+        : { parameters: {}, uploadedFiles: new Map() };
+      return botApiResponse(
+        context,
+        rejectUnknownBotApiMethod(methodContext, requestedMethodName, parameters, uploadedFiles),
+      );
+    }
+    if (!parametersDecoding.decoded) {
+      return botApiResponse(
+        context,
+        rejectUndecodableBotApiCall(
+          methodContext,
+          method,
+          requestedMethodName,
+          parametersDecoding.description,
+        ),
+      );
+    }
     return botApiResponse(
       context,
-      await callBotApiMethod(
-        methodContext,
+      await callBotApiMethod(methodContext, {
         method,
-        parametersDecoding.parameters,
-        parametersDecoding.uploadedFiles,
-      ),
+        requestedMethodName,
+        parameters: parametersDecoding.parameters,
+        uploadedFiles: parametersDecoding.uploadedFiles,
+      }),
     );
   });
 

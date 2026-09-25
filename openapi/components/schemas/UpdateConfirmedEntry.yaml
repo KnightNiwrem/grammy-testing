@@ -1,0 +1,30 @@
+type: object
+additionalProperties: false
+description: >-
+  An update the bot confirmed: by a `getUpdates` offset beyond it, or by its webhook's successful
+  answer to it, recorded after any method the answer names has run.
+required:
+  - position
+  - kind
+  - bot_id
+  - via
+  - update_id
+  - user_id
+properties:
+  position:
+    $ref: ./BotActivityPosition.yaml
+  kind:
+    type: string
+    const: update_confirmed
+  bot_id:
+    $ref: ./TelegramUserId.yaml
+  via:
+    $ref: ./BotUpdateTransport.yaml
+  update_id:
+    type: integer
+  chat_id:
+    type: integer
+    description: The chat the update happened in; omitted for updates without one.
+  user_id:
+    type: integer
+    description: The user whose action caused the update.

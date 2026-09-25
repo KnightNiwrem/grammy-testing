@@ -1,0 +1,5 @@
+type: string
+enum:
+  - polling
+  - webhook
+description: Whether the bot receives updates through `getUpdates` or through its webhook.

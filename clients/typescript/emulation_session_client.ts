@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 
+import { createBotActivityLog } from './bot_activity_log.ts';
 import { HTTP_STATUS_CREATED, HTTP_STATUS_NO_CONTENT, HTTP_STATUS_OK } from './constants.ts';
 import {
   botCommandsResponseSchema,
@@ -38,6 +39,9 @@ import type {
   AccountSendPhotoInput,
   AccountSupergroupBotCommandsInput,
   AddChatMemberInput,
+  BotActivityFilter,
+  BotActivityLog,
+  BotActivityLogOptions,
   BotBlockInput,
   BotCommand,
   CallbackQuery,
@@ -95,6 +99,12 @@ export interface EmulationSessionClient extends EmulationSession {
    * `file_unique_id`, which, unlike `file_id`, is the same for every user.
    */
   downloadFile(fileUniqueId: string): Promise<Uint8Array>;
+  /**
+   * A view of the session's bot activity log: the Bot API calls its bots make, with their answers,
+   * and the updates delivered to and confirmed by them. `filter` applies to every read of the
+   * view, such as `{ bot_id }` for one bot's activity.
+   */
+  botActivity(filter?: BotActivityFilter, options?: BotActivityLogOptions): BotActivityLog;
 }
 
 export function createEmulationSessionClient(
@@ -199,6 +209,10 @@ class HttpEmulationSessionClient implements EmulationSessionClient {
       url: `${this.#sessionUrl}/files/${encodeURIComponent(fileUniqueId)}`,
       expectedStatus: HTTP_STATUS_OK,
     });
+  }
+
+  botActivity(filter: BotActivityFilter = {}, options: BotActivityLogOptions = {}): BotActivityLog {
+    return createBotActivityLog(`${this.#sessionUrl}/bot-activity`, this.#fetch, filter, options);
   }
 }
 

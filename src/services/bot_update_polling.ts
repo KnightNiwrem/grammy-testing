@@ -22,10 +22,11 @@ export type GetUpdatesResult =
 
 interface PendingUpdateQueue {
   resolveFirstUnconfirmedUpdateId(botId: number, offset: number | undefined): number | undefined;
-  confirmAndReadPendingUpdates(
+  confirmUpdatesBefore(
     botId: number,
-    input: { readonly firstUnconfirmedUpdateId?: number; readonly limit: number },
+    firstUnconfirmedUpdateId: number | undefined,
   ): readonly BotApiUpdate[];
+  readPendingUpdates(botId: number): readonly BotApiUpdate[];
   waitForUpdate(
     botId: number,
     input: { readonly timeoutSeconds: number; readonly signal?: AbortSignal },
@@ -42,9 +43,16 @@ interface HeldLongPoll {
   terminationReason?: LongPollTerminationReason;
 }
 
+/** Records the updates `getUpdates` answers deliver and confirm in the session's bot activity. */
+interface UpdateActivityRecorder {
+  recordUpdateDeliveries(botId: number, updates: readonly BotApiUpdate[], via: 'polling'): void;
+  recordUpdateConfirmations(botId: number, updates: readonly BotApiUpdate[], via: 'polling'): void;
+}
+
 interface BotUpdatePollingServiceDependencies {
   readonly botUpdates: PendingUpdateQueue;
   readonly updateSubscriptions: BotUpdateSubscriptionStore;
+  readonly updateActivity: UpdateActivityRecorder;
 }
 
 /**
@@ -54,6 +62,7 @@ interface BotUpdatePollingServiceDependencies {
 export class BotUpdatePollingService {
   readonly #botUpdates: PendingUpdateQueue;
   readonly #updateSubscriptions: BotUpdateSubscriptionStore;
+  readonly #updateActivity: UpdateActivityRecorder;
   readonly #heldLongPollsByBotId = new Map<number, HeldLongPoll>();
   /**
    * Aborted when long polling ends. Kept apart from the held long poll controllers so that the end
@@ -61,9 +70,12 @@ export class BotUpdatePollingService {
    */
   readonly #longPollingEnd = new AbortController();
 
-  constructor({ botUpdates, updateSubscriptions }: BotUpdatePollingServiceDependencies) {
+  constructor(
+    { botUpdates, updateSubscriptions, updateActivity }: BotUpdatePollingServiceDependencies,
+  ) {
     this.#botUpdates = botUpdates;
     this.#updateSubscriptions = updateSubscriptions;
+    this.#updateActivity = updateActivity;
   }
 
   /**
@@ -74,6 +86,9 @@ export class BotUpdatePollingService {
    * Telegram, a bot has at most one held request: holding a new one terminates the previous one.
    * Requests answered immediately never terminate a held one. Once long polling has ended, no
    * request is held.
+   *
+   * The updates the offset confirms and the updates the answer delivers are recorded as bot
+   * activity, confirmations first.
    */
   async getUpdates(
     botId: number,
@@ -92,15 +107,12 @@ export class BotUpdatePollingService {
       botId,
       offset,
     );
-    const updates = this.#botUpdates.confirmAndReadPendingUpdates(botId, {
-      firstUnconfirmedUpdateId,
-      limit,
-    });
+    const updates = this.#confirmAndReadPendingUpdates(botId, firstUnconfirmedUpdateId, limit);
     if (
       updates.length > 0 || timeoutSeconds === 0 || signal?.aborted === true ||
       this.#longPollingEnd.signal.aborted
     ) {
-      return { retrieved: true, updates };
+      return this.#deliverUpdates(botId, updates);
     }
 
     const heldLongPoll = this.#holdLongPoll(botId);
@@ -122,13 +134,10 @@ export class BotUpdatePollingService {
     if (heldLongPoll.terminationReason !== undefined) {
       return { retrieved: false, reason: heldLongPoll.terminationReason };
     }
-    return {
-      retrieved: true,
-      updates: this.#botUpdates.confirmAndReadPendingUpdates(botId, {
-        firstUnconfirmedUpdateId,
-        limit,
-      }),
-    };
+    return this.#deliverUpdates(
+      botId,
+      this.#confirmAndReadPendingUpdates(botId, firstUnconfirmedUpdateId, limit),
+    );
   }
 
   /**
@@ -142,6 +151,24 @@ export class BotUpdatePollingService {
   /** Terminates the bot's held long poll, as setting a webhook does on Telegram. */
   terminateLongPollForWebhook(botId: number): void {
     this.#terminateHeldLongPoll(botId, 'terminated_by_webhook');
+  }
+
+  #confirmAndReadPendingUpdates(
+    botId: number,
+    firstUnconfirmedUpdateId: number | undefined,
+    limit: number,
+  ): readonly BotApiUpdate[] {
+    this.#updateActivity.recordUpdateConfirmations(
+      botId,
+      this.#botUpdates.confirmUpdatesBefore(botId, firstUnconfirmedUpdateId),
+      'polling',
+    );
+    return this.#botUpdates.readPendingUpdates(botId).slice(0, limit);
+  }
+
+  #deliverUpdates(botId: number, updates: readonly BotApiUpdate[]): GetUpdatesResult {
+    this.#updateActivity.recordUpdateDeliveries(botId, updates, 'polling');
+    return { retrieved: true, updates };
   }
 
   /** Terminates the bot's previously held long poll and makes the returned one current. */

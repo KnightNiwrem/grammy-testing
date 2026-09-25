@@ -1,0 +1,5 @@
+type: integer
+minimum: 1
+description: >-
+  Where an entry stands in the session's bot activity log. The first entry has position 1, and
+  each later entry's position is 1 greater than the one before it.

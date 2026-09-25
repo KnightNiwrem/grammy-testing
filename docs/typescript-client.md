@@ -5,10 +5,10 @@
 The client drives virtual accounts and inspects session state. Your bot uses the ordinary Bot API
 with its virtual token and `session.botApiRoot` configured as the API root.
 
-This walkthrough shows the available client operations. Run your bot alongside it and wait for the
-bot to finish handling an action before inspecting a reply, callback answer, or inline result. The
-client does not wait for bot processing. The photo example also needs a local `receipt.png` file.
-The import below assumes the example is saved directly in `docs/`.
+This walkthrough shows the available client operations. Run your bot alongside it. The session's
+[bot activity log](features/bot-activity.md) records the bot's calls, so a test can wait for the bot
+to act before inspecting a reply, callback answer, or inline result. The photo example also needs a
+local `receipt.png` file. The import below assumes the example is saved directly in `docs/`.
 
 Tests can use the TypeScript client instead of constructing emulation server URLs directly:
 
@@ -25,14 +25,21 @@ try {
     supports_inline_queries: true,
   });
   const { account } = await session.createAccount({ first_name: 'Ada' });
+  const activity = session.botActivity({ bot_id: bot.id });
+  const start = await activity.position();
 
   const incomingMessage = await account.sendMessage({
     to: { type: 'private', botId: bot.id },
     text: 'Hello!',
   });
 
-  // Run a grammY bot with token and session.botApiRoot as its apiRoot. Its polling
-  // receives the message above, and its replies appear in the stored history.
+  // Run a grammY bot with token and session.botApiRoot as its apiRoot. Its polling receives the
+  // message above. Wait for its reply before reading the stored history; the entry also holds the
+  // parameters the bot sent and the answer it received.
+  const greeting = await activity.waitFor(
+    { method: 'sendMessage', chat_id: account.id },
+    { after: start },
+  );
   const history = await account.getMessages({
     chat: { type: 'private', botId: bot.id },
   });
@@ -45,6 +52,10 @@ try {
       message_id: menu.message_id,
       callback_data: 'yes',
     });
+    await activity.waitFor(
+      { method: 'answerCallbackQuery', parameters: { callback_query_id: callbackQuery.id } },
+      { after: greeting },
+    );
     const { answer } = await account.getCallbackQuery(callbackQuery.id);
     console.log(answer?.text);
   }
@@ -118,6 +129,10 @@ try {
     chat: groupChat,
     query: 'cats',
   });
+  await activity.waitFor(
+    { method: 'answerInlineQuery', parameters: { inline_query_id: inlineQuery.id } },
+    { after: start },
+  );
   const answeredQuery = await account.getInlineQuery(inlineQuery.id);
   const firstResult = answeredQuery.answer?.results[0];
   if (firstResult !== undefined) {

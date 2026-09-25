@@ -10,11 +10,4 @@ properties:
   result:
     type: array
     items:
-      oneOf:
-        - $ref: ./MessageUpdate.yaml
-        - $ref: ./EditedMessageUpdate.yaml
-        - $ref: ./InlineQueryUpdate.yaml
-        - $ref: ./ChosenInlineResultUpdate.yaml
-        - $ref: ./CallbackQueryUpdate.yaml
-        - $ref: ./MyChatMemberUpdate.yaml
-        - $ref: ./ChatMemberUpdate.yaml
+      $ref: ./BotApiUpdate.yaml

@@ -613,6 +613,53 @@ export type BotApiUpdate =
   | BotApiChatMemberUpdate;
 
 /**
+ * The ID of the chat an update happened in, as grammY's `ctx.chat` finds it; `undefined` for an
+ * inline query, a chosen inline result, or a press of a button on a message sent through inline
+ * mode, which the bot knows no chat of.
+ */
+export function getBotApiUpdateChatId(update: BotApiUpdate): number | undefined {
+  if ('message' in update) {
+    return update.message.chat.id;
+  }
+  if ('edited_message' in update) {
+    return update.edited_message.chat.id;
+  }
+  if ('callback_query' in update) {
+    return 'message' in update.callback_query ? update.callback_query.message.chat.id : undefined;
+  }
+  if ('my_chat_member' in update) {
+    return update.my_chat_member.chat.id;
+  }
+  if ('chat_member' in update) {
+    return update.chat_member.chat.id;
+  }
+  return undefined;
+}
+
+/** The ID of the user whose action caused an update, as grammY's `ctx.from` finds it. */
+export function getBotApiUpdateUserId(update: BotApiUpdate): number {
+  if ('message' in update) {
+    return update.message.from.id;
+  }
+  if ('edited_message' in update) {
+    return update.edited_message.from.id;
+  }
+  if ('callback_query' in update) {
+    return update.callback_query.from.id;
+  }
+  if ('inline_query' in update) {
+    return update.inline_query.from.id;
+  }
+  if ('chosen_inline_result' in update) {
+    return update.chosen_inline_result.from.id;
+  }
+  if ('my_chat_member' in update) {
+    return update.my_chat_member.from.id;
+  }
+  return update.chat_member.from.id;
+}
+
+/**
  * Every update type name the official Bot API server recognizes in `allowed_updates`, including
  * types the emulator never produces. Mirrors `get_update_type_name` in `telegram-bot-api/Client.cpp`
  * at commit e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1.

@@ -55,6 +55,8 @@ paths:
     $ref: paths/sessions_{sessionId}_bots_{botId}.yaml
   /sessions/{sessionId}/bots/{botId}/rate-limit-responses:
     $ref: paths/sessions_{sessionId}_bots_{botId}_rate-limit-responses.yaml
+  /sessions/{sessionId}/bot-activity:
+    $ref: paths/sessions_{sessionId}_bot-activity.yaml
   /sessions/{sessionId}/accounts:
     $ref: paths/sessions_{sessionId}_accounts.yaml
   /sessions/{sessionId}/accounts/{accountId}:

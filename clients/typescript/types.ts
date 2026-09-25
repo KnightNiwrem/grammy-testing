@@ -1259,6 +1259,187 @@ export interface CreatedVirtualAccount {
   readonly account: VirtualAccountClient;
 }
 
+export type BotActivityKind = BotActivityEntry['kind'];
+
+/** A file a call uploaded, described without its content. */
+export interface UploadedFileDescription {
+  /** The multipart field that carried the file. */
+  readonly field_name: string;
+  readonly file_name: string;
+  readonly size_bytes: number;
+}
+
+/** The Bot API answer a bot received to a call. */
+export type BotApiCallAnswer =
+  | { readonly ok: true; readonly result: unknown; readonly description?: string }
+  | {
+    readonly ok: false;
+    readonly error_code: number;
+    readonly description: string;
+    readonly parameters?: { readonly retry_after: number };
+  };
+
+/**
+ * A bot's call of a Bot API method, whether it ran, failed, or is not implemented. `getUpdates`
+ * calls are not recorded; the updates they deliver and confirm are.
+ */
+export interface BotApiCallEntry {
+  /** Where the entry stands in the session's log; each entry's is 1 greater than the last. */
+  readonly position: number;
+  readonly kind: 'bot_api_call';
+  readonly bot_id: number;
+  /**
+   * The method's current name, whichever name the bot called it by; the name as called for a
+   * method the emulator does not implement.
+   */
+  readonly method: string;
+  /** The method name as the bot called it. */
+  readonly requested_method: string;
+  /** Whether the call was an HTTP request or a webhook's response to an update. */
+  readonly via: 'http' | 'webhook_reply';
+  /**
+   * The parameters as the bot sent them, as text: `chat_id: 1` is recorded as `"1"`, and structured
+   * parameters such as `reply_markup` as JSON text. Empty when the request could not be decoded.
+   */
+  readonly parameters: Readonly<Record<string, string>>;
+  readonly uploaded_files: readonly UploadedFileDescription[];
+  /** The chat `chat_id` names, with a public username resolved; omitted when it names none. */
+  readonly chat_id?: number;
+  readonly answer: BotApiCallAnswer;
+}
+
+/** A Bot API update, such as grammY's `Update` describes. */
+export interface BotApiUpdate {
+  readonly update_id: number;
+  readonly [updateType: string]: unknown;
+}
+
+/**
+ * An update handed to a bot, in a `getUpdates` answer or in a request to its webhook; an update
+ * handed over again is recorded each time.
+ */
+export interface UpdateDeliveredEntry {
+  readonly position: number;
+  readonly kind: 'update_delivered';
+  readonly bot_id: number;
+  readonly via: 'polling' | 'webhook';
+  readonly update: BotApiUpdate;
+  /** The chat the update happened in, as grammY's `ctx.chat` finds it; omitted when it has none. */
+  readonly chat_id?: number;
+  /** The user whose action caused the update, as grammY's `ctx.from` finds it. */
+  readonly user_id: number;
+}
+
+/**
+ * An update the bot confirmed: by a `getUpdates` offset beyond it, or by its webhook's successful
+ * answer to it, after any method the answer names has run.
+ */
+export interface UpdateConfirmedEntry {
+  readonly position: number;
+  readonly kind: 'update_confirmed';
+  readonly bot_id: number;
+  readonly via: 'polling' | 'webhook';
+  readonly update_id: number;
+  readonly chat_id?: number;
+  readonly user_id: number;
+}
+
+/**
+ * An entry of a session's bot activity log. Entries are positioned in the order the emulator
+ * decided each outcome, which agrees with every order a bot enforces.
+ */
+export type BotActivityEntry = BotApiCallEntry | UpdateDeliveredEntry | UpdateConfirmedEntry;
+
+/** A position in the bot activity log, or an entry, which stands at its position. */
+export type BotActivityPosition = number | { readonly position: number };
+
+/**
+ * Which entries to look for; an entry must satisfy every criterion given. Criteria that only calls
+ * have, `method`, `ok` and `parameters`, match no update entry, and `user_id` matches no call.
+ * The server applies every criterion but `where`.
+ */
+export interface BotActivityFilter {
+  readonly bot_id?: number;
+  readonly kind?: BotActivityKind;
+  /** A method name, compared without regard to case; an older name finds its calls too. */
+  readonly method?: string;
+  readonly chat_id?: number;
+  readonly user_id?: number;
+  /** Whether the call's answer was successful. */
+  readonly ok?: boolean;
+  /** Parameter text the call must have sent, by parameter name, compared exactly. */
+  readonly parameters?: Readonly<Record<string, string>>;
+  /** Checked by the client on entries that satisfy every other criterion. */
+  readonly where?: (entry: BotActivityEntry) => boolean;
+}
+
+/** The entries a filter can match, judged from the criteria it gives. */
+export type BotActivityEntryMatching<Filter extends BotActivityFilter> = Filter extends
+  { readonly kind: infer Kind extends BotActivityKind } ? Extract<BotActivityEntry, { kind: Kind }>
+  : Filter extends
+    | { readonly method: string }
+    | { readonly ok: boolean }
+    | { readonly parameters: Readonly<Record<string, string>> } ? BotApiCallEntry
+  : Filter extends { readonly user_id: number } ? UpdateDeliveredEntry | UpdateConfirmedEntry
+  : BotActivityEntry;
+
+export interface BotActivityLogOptions {
+  /** How long `waitFor` and `next` wait for a matching entry by default. Defaults to 5000. */
+  readonly timeoutMs?: number;
+}
+
+export interface WaitForBotActivityOptions {
+  /** Only entries after this position match. */
+  readonly after: BotActivityPosition;
+  /** How long to wait for a matching entry; defaults to the log's timeout. */
+  readonly timeoutMs?: number;
+}
+
+export interface BotActivityRange {
+  /** Only entries after this position are checked. */
+  readonly after: BotActivityPosition;
+  /** Only entries before this position are checked; it must already be recorded. */
+  readonly before: BotActivityPosition;
+}
+
+/**
+ * A view of a session's bot activity log, whose base filter applies to every read in addition to
+ * the filter each read gives.
+ *
+ * Positions are values, so any number of waits can start from the same position: waiting for B
+ * after A and for C after A asserts that both follow A, whichever of them comes first.
+ */
+export interface BotActivityLog {
+  /** The position of the latest entry; 0 while the log is empty. */
+  position(): Promise<number>;
+  /**
+   * Returns the first matching entry after `after`, waiting for one to be recorded, and fails
+   * with `BotActivityTimeoutError` when none is recorded in time.
+   */
+  waitFor<const Filter extends BotActivityFilter>(
+    filter: Filter,
+    options: WaitForBotActivityOptions,
+  ): Promise<BotActivityEntryMatching<Filter>>;
+  /**
+   * Checks that no entry between the positions matches, without waiting, and fails with
+   * `UnexpectedBotActivityError` listing the entries that do.
+   */
+  assertNone(filter: BotActivityFilter, range: BotActivityRange): Promise<void>;
+  /** A cursor that starts after `after` and moves past each entry it finds. */
+  cursor(options: { readonly after: BotActivityPosition }): BotActivityCursor;
+}
+
+/** A position that moves forward past each entry it finds; other cursors are unaffected. */
+export interface BotActivityCursor {
+  /** The position the next search starts after. */
+  readonly position: number;
+  /** Waits for the first matching entry after the cursor, and moves the cursor to it. */
+  next<const Filter extends BotActivityFilter>(
+    filter: Filter,
+    options?: { readonly timeoutMs?: number },
+  ): Promise<BotActivityEntryMatching<Filter>>;
+}
+
 export type HttpMethod = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
 
 export interface RequestDetails {

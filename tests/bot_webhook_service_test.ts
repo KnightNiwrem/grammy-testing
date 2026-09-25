@@ -1,6 +1,8 @@
+import { BotActivityLogRepository } from '../src/repositories/bot_activity_log.ts';
 import { BotUpdateRepository } from '../src/repositories/bot_update.ts';
 import { BotUpdateSubscriptionRepository } from '../src/repositories/bot_update_subscription.ts';
 import { BotWebhookRepository } from '../src/repositories/bot_webhook.ts';
+import { BotActivityService } from '../src/services/bot_activity.ts';
 import {
   BotWebhookService,
   type SetWebhookRequest,
@@ -183,6 +185,45 @@ Deno.test('BotWebhookService retries a failed update and reports the latest fail
     botWebhooks.setWebhook(BOT_ID, { ...webhookRequest(), url: `${WEBHOOK_URL}/new` });
     if ('last_error_message' in botWebhooks.getWebhookInfo(BOT_ID)) {
       throw new Error('Expected a new webhook to forget the failure of the previous one');
+    }
+  } finally {
+    botWebhooks.endDelivery();
+  }
+});
+
+Deno.test('BotWebhookService records each attempt as a delivery and the acceptance as a confirmation', async () => {
+  const { botUpdates, botActivity, botWebhooks, waitForRequestCount } = createWebhookFixture(
+    (_request, requestIndex) =>
+      requestIndex === 0
+        ? new Response(null, { status: 500, statusText: 'Internal Server Error' })
+        : new Response(null),
+  );
+
+  try {
+    botUpdates.enqueueMessageUpdate(BOT_ID, createPrivateMessage(1));
+    botWebhooks.setWebhook(BOT_ID, webhookRequest());
+    await waitForRequestCount(2);
+    await waitUntil(() => botWebhooks.getWebhookInfo(BOT_ID).pending_update_count === 0);
+
+    const recorded = await botActivity.readEntries({
+      after: 0,
+      filter: {},
+      limit: 100,
+      waitMilliseconds: 0,
+    });
+    const summary = recorded.read
+      ? recorded.entries.map((entry) => [entry.kind, entry.botId, entry.chatId])
+      : [];
+    if (
+      JSON.stringify(summary) !== JSON.stringify([
+        ['update_delivered', BOT_ID, ADA_ID],
+        ['update_delivered', BOT_ID, ADA_ID],
+        ['update_confirmed', BOT_ID, ADA_ID],
+      ])
+    ) {
+      throw new Error(
+        `Expected two attempts and one confirmation, received ${JSON.stringify(summary)}`,
+      );
     }
   } finally {
     botWebhooks.endDelivery();
@@ -610,10 +651,12 @@ function createWebhookFixture(
   const receivedRequests: ReceivedWebhookRequest[] = [];
   const receivedSignals: AbortSignal[] = [];
   const requestListeners = new Set<() => void>();
+  const botActivity = new BotActivityService({ log: new BotActivityLogRepository() });
   const botWebhooks = new BotWebhookService({
     webhooks: new BotWebhookRepository(),
     pendingUpdates: botUpdates,
     updateSubscriptions: new BotUpdateSubscriptionRepository(),
+    updateActivity: botActivity,
     sendWebhookRequest: async (request) => {
       receivedSignals.push(request.signal);
       const { method, url, headers, redirect } = request;
@@ -657,6 +700,7 @@ function createWebhookFixture(
 
   return {
     botUpdates,
+    botActivity,
     botWebhooks,
     receivedRequests,
     receivedSignals,

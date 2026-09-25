@@ -1,0 +1,124 @@
+description: >-
+  The session's bot activity log: the Bot API calls its bots make, with their answers, and the
+  updates delivered to and confirmed by them. Entries are positioned in the order the emulator
+  decided each outcome, which agrees with every order a bot enforces: a bot that awaits one call's
+  answer before making another call cannot have the second recorded first, and a call made while
+  handling an update is recorded after the update's delivery. Calls a bot makes concurrently may
+  be recorded in either order.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+get:
+  operationId: readBotActivity
+  summary: Read, or wait for, entries of the session's bot activity log
+  description: >-
+    Answers with the earliest entries after `after`, and before `before` if given, that match
+    every filter given. Filters that only calls have, `method`, `ok`, and `parameters`, match no
+    update entry, and `user_id` matches no call. A read without `before` that finds no matching
+    entry is held until one is recorded, `wait_ms` elapses, or the session ends. A read with
+    `before` covers a range that is already complete and is answered at once.
+  parameters:
+    - name: after
+      in: query
+      description: Only entries after this position are read; 0 reads from the first entry.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    - name: before
+      in: query
+      description: >-
+        Only entries before this position are read. It must be greater than `after` and at most 1
+        greater than the head position.
+      schema:
+        type: integer
+        minimum: 1
+    - name: bot_id
+      in: query
+      schema:
+        $ref: ../components/schemas/TelegramUserId.yaml
+    - name: kind
+      in: query
+      schema:
+        type: string
+        enum:
+          - bot_api_call
+          - update_delivered
+          - update_confirmed
+    - name: method
+      in: query
+      description: >-
+        A method name, compared without regard to letter case; a method's older name finds its
+        calls too.
+      schema:
+        type: string
+        minLength: 1
+    - name: chat_id
+      in: query
+      schema:
+        type: integer
+    - name: user_id
+      in: query
+      schema:
+        type: integer
+    - name: ok
+      in: query
+      description: Whether the call's answer was successful.
+      schema:
+        type: boolean
+    - name: parameters
+      in: query
+      style: deepObject
+      explode: true
+      description: >-
+        Parameter text a call must have sent, by parameter name, compared exactly with the text
+        the call sent: `parameters[callback_query_id]=123`.
+      schema:
+        type: object
+        additionalProperties:
+          type: string
+    - name: limit
+      in: query
+      description: The most entries to answer with; 0 answers only with the head position.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 1000
+        default: 100
+    - name: wait_ms
+      in: query
+      description: >-
+        How long, in milliseconds, a read that finds no matching entry is held. Not allowed with
+        `before`.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 600000
+        default: 0
+  responses:
+    '200':
+      description: The matching entries, oldest first, and the latest position.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - entries
+              - head_position
+            properties:
+              entries:
+                type: array
+                items:
+                  $ref: ../components/schemas/BotActivityEntry.yaml
+              head_position:
+                type: integer
+                minimum: 0
+                description: >-
+                  The position of the latest entry when the read was answered; 0 while the log is
+                  empty.
+    '400':
+      description: >-
+        The query has an unknown, repeated, or malformed parameter, `before` is not greater than
+        `after`, `wait_ms` is given with `before`, or a position is beyond the head of the log.
+    '404':
+      description: No active test session has the supplied identifier.

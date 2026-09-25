@@ -1,0 +1,13 @@
+description: >-
+  An entry of a session's bot activity log. Entries are positioned in the order the emulator
+  decided each outcome, which agrees with every order a bot enforces.
+oneOf:
+  - $ref: ./BotApiCallEntry.yaml
+  - $ref: ./UpdateDeliveredEntry.yaml
+  - $ref: ./UpdateConfirmedEntry.yaml
+discriminator:
+  propertyName: kind
+  mapping:
+    bot_api_call: ./BotApiCallEntry.yaml
+    update_delivered: ./UpdateDeliveredEntry.yaml
+    update_confirmed: ./UpdateConfirmedEntry.yaml

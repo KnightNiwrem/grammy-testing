@@ -1,5 +1,6 @@
 import { AccountRepository } from '../src/repositories/account.ts';
 import { BlockedUserRepository } from '../src/repositories/blocked_user.ts';
+import { BotActivityLogRepository } from '../src/repositories/bot_activity_log.ts';
 import { BotRepository } from '../src/repositories/bot.ts';
 import { BotCommandRepository } from '../src/repositories/bot_command.ts';
 import { BotDefaultAdministratorRightsRepository } from '../src/repositories/bot_default_administrator_rights.ts';
@@ -17,6 +18,7 @@ import { PrivateConversationRepository } from '../src/repositories/private_conve
 import { SharedChatRepository } from '../src/repositories/shared_chat.ts';
 import { TelegramIdentityRepository } from '../src/repositories/telegram_identity.ts';
 import { MessageBoxRepository } from '../src/repositories/message_box.ts';
+import { BotActivityService } from '../src/services/bot_activity.ts';
 import { BotApiService } from '../src/services/bot_api.ts';
 import { BotCommandService } from '../src/services/bot_command.ts';
 import { BotDefaultAdministratorRightsService } from '../src/services/bot_default_administrator_rights.ts';
@@ -161,6 +163,7 @@ function createBotApiFixture() {
   const messages = new MessageRepository();
   const files = new FileRepository();
   const botUpdates = new BotUpdateRepository();
+  const botActivity = new BotActivityService({ log: new BotActivityLogRepository() });
   const updateSubscriptions = new BotUpdateSubscriptionRepository();
   const sharedChats = new SharedChatRepository();
   const botMessageViews = new BotMessageViewService({
@@ -223,11 +226,16 @@ function createBotApiFixture() {
   });
   const botApi = new BotApiService({
     bots,
-    updatePolling: new BotUpdatePollingService({ botUpdates, updateSubscriptions }),
+    updatePolling: new BotUpdatePollingService({
+      botUpdates,
+      updateSubscriptions,
+      updateActivity: botActivity,
+    }),
     webhooks: new BotWebhookService({
       webhooks: new BotWebhookRepository(),
       pendingUpdates: botUpdates,
       updateSubscriptions,
+      updateActivity: botActivity,
       sendWebhookRequest: () => Promise.reject(new Error('Unexpected webhook request')),
       runWebhookReply: () => Promise.reject(new Error('Unexpected webhook reply')),
       attemptTimeoutMilliseconds: WEBHOOK_ATTEMPT_TIMEOUT_MILLISECONDS,

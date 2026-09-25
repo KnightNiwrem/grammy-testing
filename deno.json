@@ -12,7 +12,9 @@
     "test": "deno test --allow-net=127.0.0.1 --allow-import=cdn.jsdelivr.net,cdn.skypack.dev,jsr.io"
   },
   "imports": {
+    "@grammyjs/runner/": "https://cdn.jsdelivr.net/gh/grammyjs/runner@^2.0.3/src/",
     "grammy/types": "https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/types.ts",
+    "https://lib.deno.dev/x/grammy@v1/": "https://cdn.jsdelivr.net/gh/grammyjs/grammY@^1.46.0/src/",
     "hono": "jsr:@hono/hono@^4.13.7",
     "hono/route": "jsr:@hono/hono@^4.13.7/route",
     "hono/utils/http-status": "jsr:@hono/hono@^4.13.7/utils/http-status",
