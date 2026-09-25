@@ -2681,6 +2681,118 @@ Deno.test('bots set and read their descriptions and short descriptions by langua
   }
 });
 
+Deno.test('bots set and read the administrator rights they ask for by default', async () => {
+  const { api, botApiPath } = await createPrivateConversationFixture();
+  const callBot = async (methodName: string, parameters: Record<string, unknown>) =>
+    await callBotApi(api, `${botApiPath}/${methodName}`, parameters);
+  const noGroupRights = {
+    can_manage_chat: false,
+    can_change_info: false,
+    can_delete_messages: false,
+    can_invite_users: false,
+    can_restrict_members: false,
+    can_pin_messages: false,
+    can_manage_topics: false,
+    can_promote_members: false,
+    can_manage_video_chats: false,
+    can_post_stories: false,
+    can_edit_stories: false,
+    can_delete_stories: false,
+    can_manage_tags: false,
+    can_send_welcome_messages: false,
+    is_anonymous: false,
+  };
+  const noChannelRights = {
+    can_manage_chat: false,
+    can_change_info: false,
+    can_post_messages: false,
+    can_edit_messages: false,
+    can_delete_messages: false,
+    can_invite_users: false,
+    can_restrict_members: false,
+    can_promote_members: false,
+    can_manage_video_chats: false,
+    can_post_stories: false,
+    can_edit_stories: false,
+    can_delete_stories: false,
+    can_manage_direct_messages: false,
+    can_send_welcome_messages: false,
+    is_anonymous: false,
+  };
+  const expectResult = async (
+    methodName: string,
+    parameters: Record<string, unknown>,
+    expectedResult: unknown,
+  ) => {
+    const { status, body } = await callBot(methodName, parameters);
+    if (
+      status !== 200 ||
+      JSON.stringify(body) !== JSON.stringify({ ok: true, result: expectedResult })
+    ) {
+      throw new Error(
+        `Expected ${methodName} ${JSON.stringify(parameters)} to return ${
+          JSON.stringify(expectedResult)
+        }, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  };
+
+  await expectResult('getMyDefaultAdministratorRights', {}, noGroupRights);
+  await expectResult('setMyDefaultAdministratorRights', {
+    rights: { can_delete_messages: true, can_post_messages: true, is_anonymous: true },
+  }, true);
+  await expectResult('setMyDefaultAdministratorRights', {
+    rights: { can_post_messages: true, is_anonymous: true },
+    for_channels: true,
+  }, true);
+  await expectResult('getMyDefaultAdministratorRights', {}, {
+    ...noGroupRights,
+    can_manage_chat: true,
+    can_delete_messages: true,
+    is_anonymous: true,
+  });
+  await expectResult('getMyDefaultAdministratorRights', { for_channels: true }, {
+    ...noChannelRights,
+    can_manage_chat: true,
+    can_post_messages: true,
+  });
+
+  // Missing rights remove the group defaults and leave the channel defaults.
+  await expectResult('setMyDefaultAdministratorRights', {}, true);
+  await expectResult('getMyDefaultAdministratorRights', { for_channels: false }, noGroupRights);
+  await expectResult('getMyDefaultAdministratorRights', { for_channels: true }, {
+    ...noChannelRights,
+    can_manage_chat: true,
+    can_post_messages: true,
+  });
+
+  const failures = [
+    [{ rights: 'not json' }, "Bad Request: can't parse ChatAdministratorRights JSON object"],
+    [
+      { rights: [] },
+      "Bad Request: can't parse ChatAdministratorRights: ChatAdministratorRights must be an Object",
+    ],
+    [
+      { rights: { can_manage_chat: true, can_invite_users: 'true' } },
+      'Bad Request: can\'t parse ChatAdministratorRights: Field "can_invite_users" must be of type Boolean',
+    ],
+    [
+      { rights: { can_fly: true } },
+      'Bad Request: invalid setMyDefaultAdministratorRights parameters',
+    ],
+  ] as const;
+  for (const [parameters, expectedDescription] of failures) {
+    const { status, body } = await callBot('setMyDefaultAdministratorRights', parameters);
+    if (status !== 400 || !isBadRequestResponse(body) || body.description !== expectedDescription) {
+      throw new Error(
+        `Expected ${
+          JSON.stringify(parameters)
+        } to fail with ${expectedDescription}, received ${status} ${JSON.stringify(body)}`,
+      );
+    }
+  }
+});
+
 Deno.test('accounts see the chat action a bot shows until its next message', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
     await createPrivateConversationFixture();

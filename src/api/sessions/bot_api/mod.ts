@@ -17,6 +17,7 @@ import {
   botCommandsParameter,
   readBotCommandScopeParameter,
 } from './bot_command_parameters.ts';
+import { readChatAdministratorRightsParameter } from './chat_administrator_rights_parameter.ts';
 import {
   messageEntitiesParameter,
   readMessageEntitiesParameter,
@@ -519,6 +520,15 @@ const myDescriptionTargetParametersSchema = z.strictObject({
   language_code: z.string().default(''),
 });
 
+const setMyDefaultAdministratorRightsParametersSchema = z.strictObject({
+  rights: z.string().optional(),
+  for_channels: booleanParameter().default(false),
+});
+
+const getMyDefaultAdministratorRightsParametersSchema = z.strictObject({
+  for_channels: booleanParameter().default(false),
+});
+
 const getChatMemberParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   user_id: integerParameter(z.int()).optional(),
@@ -705,6 +715,7 @@ const BOT_API_METHODS: readonly BotApiMethod[] = [
   { name: 'getFile', handler: handleGetFile },
   { name: 'getMe', handler: handleGetMe },
   { name: 'getMyCommands', handler: handleGetMyCommands },
+  { name: 'getMyDefaultAdministratorRights', handler: handleGetMyDefaultAdministratorRights },
   { name: 'getMyDescription', handler: handleGetMyDescription },
   { name: 'getMyShortDescription', handler: handleGetMyShortDescription },
   { name: 'getUpdates', handler: handleGetUpdates },
@@ -719,6 +730,7 @@ const BOT_API_METHODS: readonly BotApiMethod[] = [
     handler: handleSetChatAdministratorCustomTitle,
   },
   { name: 'setMyCommands', handler: handleSetMyCommands },
+  { name: 'setMyDefaultAdministratorRights', handler: handleSetMyDefaultAdministratorRights },
   { name: 'setMyDescription', handler: handleSetMyDescription },
   { name: 'setMyShortDescription', handler: handleSetMyShortDescription },
   { name: 'setWebhook', handler: handleSetWebhook },
@@ -2276,6 +2288,46 @@ function myCommandsTargetError(reason: MyCommandsTargetFailureReason): BotApiMet
       throw new Error(`Unhandled command list failure: ${unhandledReason}`);
     }
   }
+}
+
+function handleSetMyDefaultAdministratorRights(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const invalidParametersDescription =
+    'Bad Request: invalid setMyDefaultAdministratorRights parameters';
+  const parsedParameters = setMyDefaultAdministratorRightsParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, invalidParametersDescription);
+  }
+  const rightsReading = readChatAdministratorRightsParameter(
+    parsedParameters.data.rights,
+    invalidParametersDescription,
+  );
+  if (!rightsReading.read) {
+    return botApiError(400, rightsReading.description);
+  }
+  context.session.botApi.setMyDefaultAdministratorRights(context.bot, {
+    kind: parsedParameters.data.for_channels ? 'channel' : 'group',
+    requestedRights: rightsReading.requestedRights,
+  });
+  return botApiResult(true);
+}
+
+function handleGetMyDefaultAdministratorRights(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+): BotApiMethodAnswer {
+  const parsedParameters = getMyDefaultAdministratorRightsParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, 'Bad Request: invalid getMyDefaultAdministratorRights parameters');
+  }
+  return botApiResult(
+    context.session.botApi.getMyDefaultAdministratorRights(
+      context.bot,
+      parsedParameters.data.for_channels ? 'channel' : 'group',
+    ),
+  );
 }
 
 function handleSetMyDescription(

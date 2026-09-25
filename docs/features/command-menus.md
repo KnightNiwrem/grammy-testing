@@ -59,12 +59,27 @@ the source, so tests should not rely on a fallback. Telegram's server also limit
 512 characters and a short description to 120; the emulator does not enforce these limits, because
 the source does not show the server's error. Accounts do not see either text.
 
+## Default administrator rights
+
+Bots store and read the rights they ask for by default when added to groups, or with `for_channels`
+to channels, as an administrator with `setMyDefaultAdministratorRights` and
+`getMyDefaultAdministratorRights`. The `rights` object is read as the official server's
+[`get_chat_administrator_rights`][rights-parameter] reads it, with its errors for text that is not a
+JSON object and for rights that are not JSON booleans; missing or empty `rights` remove the
+defaults. As in TDLib's [`AdministratorRights`][administrator-rights], rights that do not apply to
+the kind of chat are dropped, as is anonymity in channels, and any right includes `can_manage_chat`.
+The getter shows every right that applies to the kind of chat, all false when none are set, as
+[`json_store_administrator_rights`][rights-json] does.
+
+The emulator has no workflow that adds a bot with these rights; supergroup owners still
+[promote bots](supergroups.md#administrator-operations) through the emulation API.
+
 ## Real gaps
 
 Changing supported BotFather-style settings after bot creation is also a
 [real gap](sessions-and-requests.md#real-gaps).
 
-Menu buttons and default administrator rights are also real gaps; these methods are not implemented.
+Menu buttons are also a real gap; their methods are not implemented.
 
 ## Local evidence
 
@@ -72,8 +87,10 @@ Menu buttons and default administrator rights are also real gaps; these methods 
 [scope/command parsing](../../src/api/sessions/bot_api/bot_command_parameters.ts),
 [command repository](../../src/repositories/bot_command.ts),
 [command tests](../../tests/bot_command_service_test.ts),
-[description service](../../src/services/bot_description.ts) and
-[description tests](../../tests/bot_description_service_test.ts).
+[description service](../../src/services/bot_description.ts),
+[description tests](../../tests/bot_description_service_test.ts),
+[default administrator rights service](../../src/services/bot_default_administrator_rights.ts) and
+[their tests](../../tests/bot_default_administrator_rights_service_test.ts).
 
 [bot-command]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/BotCommand.cpp
 [scope-order]: https://core.telegram.org/bots/api#determining-list-of-commands
@@ -81,3 +98,6 @@ Menu buttons and default administrator rights are also real gaps; these methods 
 [bot-language]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/misc.cpp#L395-L404
 [description-request]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/Requests.cpp#L7042-L7065
 [description-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L5743-L5767
+[rights-parameter]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L11438-L11489
+[administrator-rights]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogParticipant.cpp#L44-L115
+[rights-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L18010-L18042

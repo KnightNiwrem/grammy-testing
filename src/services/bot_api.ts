@@ -4,6 +4,7 @@ import { checkLink, getLinkUserId } from '../text_entities/telegram_link.ts';
 import type {
   BotApiBotCommand,
   BotApiChatMember,
+  BotApiDefaultAdministratorRights,
   BotApiDownloadableFile,
   BotApiMessage,
   BotApiPrivateMessage,
@@ -11,6 +12,12 @@ import type {
   BotApiWebhookInfo,
 } from '../types/bot_api.ts';
 import type { BotCommand, BotCommandScope } from '../types/bot_command.ts';
+import {
+  APPLICABLE_ADMINISTRATOR_RIGHT_NAMES,
+  type ChatAdministratorRightName,
+  type DefaultAdministratorRights,
+  type DefaultAdministratorRightsChatKind,
+} from '../types/bot_default_administrator_rights.ts';
 import type { BotDescriptionKind } from '../types/bot_description.ts';
 import type { BotLanguageCode } from '../types/bot_language_code.ts';
 import type { CallbackQueryId } from '../types/callback_query.ts';
@@ -1116,6 +1123,20 @@ interface BotDescriptions {
     | { readonly found: false; readonly reason: 'bot_not_found' | 'language_code_invalid' };
 }
 
+interface BotDefaultAdministratorRightsSettings {
+  setDefaultAdministratorRights(input: {
+    readonly botId: number;
+    readonly kind: DefaultAdministratorRightsChatKind;
+    readonly requestedRights: Iterable<ChatAdministratorRightName>;
+  }): { readonly set: true } | { readonly set: false; readonly reason: 'bot_not_found' };
+  getDefaultAdministratorRights(target: {
+    readonly botId: number;
+    readonly kind: DefaultAdministratorRightsChatKind;
+  }):
+    | { readonly found: true; readonly rights: DefaultAdministratorRights }
+    | { readonly found: false; readonly reason: 'bot_not_found' };
+}
+
 interface CallbackQueryAnswering {
   answerCallbackQuery(input: {
     readonly fromBotId: number;
@@ -1169,6 +1190,7 @@ interface BotApiServiceDependencies {
   readonly inlineMessages: InlineMessageLookup;
   readonly botCommands: BotCommandLists;
   readonly botDescriptions: BotDescriptions;
+  readonly defaultAdministratorRights: BotDefaultAdministratorRightsSettings;
   readonly chatActions: ChatActions;
   readonly publicChats: PublicChatDirectory;
   /** Hides the accounts whose privacy settings keep forwards from linking to them. */
@@ -1201,6 +1223,7 @@ export class BotApiService {
   readonly #inlineMessages: InlineMessageLookup;
   readonly #botCommands: BotCommandLists;
   readonly #botDescriptions: BotDescriptions;
+  readonly #defaultAdministratorRights: BotDefaultAdministratorRightsSettings;
   readonly #chatActions: ChatActions;
   readonly #publicChats: PublicChatDirectory;
   readonly #getPrivateForwardName: PrivateForwardNameLookup;
@@ -1220,6 +1243,7 @@ export class BotApiService {
       inlineMessages,
       botCommands,
       botDescriptions,
+      defaultAdministratorRights,
       chatActions,
       publicChats,
       getPrivateForwardName,
@@ -1238,6 +1262,7 @@ export class BotApiService {
     this.#inlineMessages = inlineMessages;
     this.#botCommands = botCommands;
     this.#botDescriptions = botDescriptions;
+    this.#defaultAdministratorRights = defaultAdministratorRights;
     this.#chatActions = chatActions;
     this.#publicChats = publicChats;
     this.#getPrivateForwardName = getPrivateForwardName;
@@ -2579,6 +2604,46 @@ export class BotApiService {
       throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
     }
     return { found: false, reason: result.reason };
+  }
+
+  /**
+   * Replaces the rights the bot asks for by default as an administrator of groups or channels;
+   * none removes them.
+   */
+  setMyDefaultAdministratorRights(
+    authenticatedBot: VirtualBotProfile,
+    request: {
+      readonly kind: DefaultAdministratorRightsChatKind;
+      readonly requestedRights: Iterable<ChatAdministratorRightName>;
+    },
+  ): void {
+    const result = this.#defaultAdministratorRights.setDefaultAdministratorRights({
+      botId: authenticatedBot.id,
+      ...request,
+    });
+    if (!result.set) {
+      throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+    }
+  }
+
+  /**
+   * Returns the rights the bot asks for by default as an administrator of groups or channels,
+   * showing each right that applies to that kind of chat.
+   */
+  getMyDefaultAdministratorRights(
+    authenticatedBot: VirtualBotProfile,
+    kind: DefaultAdministratorRightsChatKind,
+  ): BotApiDefaultAdministratorRights {
+    const result = this.#defaultAdministratorRights.getDefaultAdministratorRights({
+      botId: authenticatedBot.id,
+      kind,
+    });
+    if (!result.found) {
+      throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
+    }
+    return Object.fromEntries(
+      APPLICABLE_ADMINISTRATOR_RIGHT_NAMES[kind].map((right) => [right, result.rights.has(right)]),
+    );
   }
 
   /**

@@ -32,7 +32,7 @@ thresholds, which tests replace with
 | [Media and files](media-and-files.md)                 | Photos, documents, uploads, file identifiers and downloads                 |
 | [Inline mode](inline-mode.md)                         | Queries, results, feedback and inline message editing                      |
 | [Supergroups](supergroups.md)                         | Privacy mode, membership, service messages and administration              |
-| [Command menus](command-menus.md)                     | Command storage, scopes, languages, menu resolution and bot descriptions   |
+| [Command menus](command-menus.md)                     | Commands, bot descriptions and default administrator rights                |
 
 ## Implemented Bot API methods
 
@@ -52,6 +52,7 @@ The two legacy aliases below are also accepted.
 | Interaction      | `answerCallbackQuery`, `answerInlineQuery`                                                                                                         |
 | Commands         | `setMyCommands`, `getMyCommands`, `deleteMyCommands`                                                                                               |
 | Bot profile      | `setMyDescription`, `getMyDescription`, `setMyShortDescription`, `getMyShortDescription`                                                           |
+| Bot settings     | `setMyDefaultAdministratorRights`, `getMyDefaultAdministratorRights`                                                                               |
 | Membership       | `leaveChat`, `getChatMember`, `getChatAdministrators`, `getChatMemberCount`, `banChatMember`, `unbanChatMember`, `setChatAdministratorCustomTitle` |
 | Legacy aliases   | `getChatMembersCount` → `getChatMemberCount`, `kickChatMember` → `banChatMember`                                                                   |
 
@@ -76,8 +77,7 @@ above determines whether an individual method is available.
   emulation API.
 - Payments, invoices, shipping, Telegram Stars, gifts, paid broadcasts and paid media.
 - Business connections, managed bots, Mini Apps, login authorization, Passport and boosts.
-- Most bot profile/settings methods, including menu buttons and default administrator rights, plus
-  `getUserProfilePhotos`.
+- Most bot profile/settings methods, including menu buttons, plus `getUserProfilePhotos`.
 
 ### Intentional exclusions
 

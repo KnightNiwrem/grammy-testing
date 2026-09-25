@@ -1,3 +1,4 @@
+import type { ChatAdministratorRightName } from './bot_default_administrator_rights.ts';
 import type { ButtonStyle } from './button_appearance.ts';
 import type { SupergroupAdministratorRight } from './chat_membership.ts';
 import type { GeoLocation } from './geo_location.ts';
@@ -324,6 +325,14 @@ export type BotApiRepliedSupergroupMessage = BotApiRepliedMessageInChat<
 >;
 
 /** A bot command as the Bot API shows it. */
+/**
+ * The rights a bot asks for by default as an administrator of a kind of chat: every right that
+ * applies to the kind, held or not, in the order the Bot API shows them.
+ */
+export type BotApiDefaultAdministratorRights = {
+  readonly [Right in ChatAdministratorRightName]?: boolean;
+};
+
 export interface BotApiBotCommand {
   readonly command: string;
   readonly description: string;

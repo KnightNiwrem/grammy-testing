@@ -3483,6 +3483,111 @@ paths:
           description: No active test session has the supplied identifier.
         '429':
           $ref: '#/components/responses/BotApiRateLimited'
+  /sessions/{sessionId}/bot-api/bot{token}/setMyDefaultAdministratorRights:
+    description: >-
+      Telegram Bot API method for replacing the rights the bot asks for by default when it is added
+      to groups, or with `for_channels` to channels, as an administrator. As in TDLib, rights that
+      do not apply to the kind of chat are dropped, as is anonymity in channels, and any right
+      includes `can_manage_chat`. Missing or empty `rights` remove the defaults. The emulator has
+      no workflow that grants these rights.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: setMyDefaultAdministratorRights
+      summary: Replace the rights the authenticated virtual bot asks for by default as an administrator
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMyDefaultAdministratorRightsRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SetMyDefaultAdministratorRightsRequest'
+            encoding:
+              rights:
+                contentType: application/json
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SetMyDefaultAdministratorRightsRequest'
+            encoding:
+              rights:
+                contentType: application/json
+      responses:
+        '200':
+          description: The default rights were replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrueResultResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters, including a right Telegram
+            does not know, or `rights` is not JSON (`Bad Request: can't parse
+            ChatAdministratorRights JSON object`), not a JSON object (`Bad Request: can't parse
+            ChatAdministratorRights: ChatAdministratorRights must be an Object`), or has a right
+            that is not a JSON boolean (`Bad Request: can't parse ChatAdministratorRights: Field
+            "<right>" must be of type Boolean`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
+  /sessions/{sessionId}/bot-api/bot{token}/getMyDefaultAdministratorRights:
+    description: >-
+      Telegram Bot API method for reading the rights the bot asks for by default as an administrator
+      of groups, or with `for_channels` of channels. Every right that applies to that kind of chat
+      is shown, all false if the bot set none.
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/BotToken'
+    post:
+      operationId: getMyDefaultAdministratorRights
+      summary: Return the rights the authenticated virtual bot asks for by default as an administrator
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetMyDefaultAdministratorRightsRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GetMyDefaultAdministratorRightsRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GetMyDefaultAdministratorRightsRequest'
+      responses:
+        '200':
+          description: The default rights for the kind of chat.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DefaultAdministratorRightsResponse'
+        '400':
+          description: >-
+            The request cannot be decoded or has unsupported parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '401':
+          description: The token does not belong to a virtual bot in the addressed session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApiErrorResponse'
+        '404':
+          description: No active test session has the supplied identifier.
+        '429':
+          $ref: '#/components/responses/BotApiRateLimited'
   /sessions/{sessionId}/bot-api/bot{token}/{method}:
     description: Telegram Bot API methods invoked for a virtual bot within a test session.
     x-implementation-status: unimplemented
@@ -6682,6 +6787,118 @@ components:
             short_description:
               type: string
               description: Empty if none is set for the language.
+    ChatAdministratorRights:
+      type: object
+      additionalProperties: false
+      description: >-
+        Rights of an administrator; a missing right is false.
+      properties:
+        can_manage_chat:
+          type: boolean
+        can_change_info:
+          type: boolean
+        can_post_messages:
+          type: boolean
+        can_edit_messages:
+          type: boolean
+        can_delete_messages:
+          type: boolean
+        can_invite_users:
+          type: boolean
+        can_restrict_members:
+          type: boolean
+        can_pin_messages:
+          type: boolean
+        can_manage_topics:
+          type: boolean
+        can_promote_members:
+          type: boolean
+        can_manage_video_chats:
+          type: boolean
+        can_post_stories:
+          type: boolean
+        can_edit_stories:
+          type: boolean
+        can_delete_stories:
+          type: boolean
+        can_manage_direct_messages:
+          type: boolean
+        can_manage_tags:
+          type: boolean
+        can_send_welcome_messages:
+          type: boolean
+        is_anonymous:
+          type: boolean
+    SetMyDefaultAdministratorRightsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        rights:
+          $ref: '#/components/schemas/ChatAdministratorRights'
+        for_channels:
+          type: boolean
+          description: Whether the rights are for channels rather than groups.
+    GetMyDefaultAdministratorRightsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        for_channels:
+          type: boolean
+          description: Whether to read the rights for channels rather than groups.
+    DefaultAdministratorRightsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          const: true
+        result:
+          type: object
+          additionalProperties: false
+          description: >-
+            Every right that applies to the kind of chat, in the Bot API's order. Groups show
+            neither `can_post_messages`, `can_edit_messages` nor `can_manage_direct_messages`;
+            channels show neither `can_pin_messages`, `can_manage_topics` nor `can_manage_tags`.
+          properties:
+            can_manage_chat:
+              type: boolean
+            can_change_info:
+              type: boolean
+            can_post_messages:
+              type: boolean
+            can_edit_messages:
+              type: boolean
+            can_delete_messages:
+              type: boolean
+            can_invite_users:
+              type: boolean
+            can_restrict_members:
+              type: boolean
+            can_pin_messages:
+              type: boolean
+            can_manage_topics:
+              type: boolean
+            can_promote_members:
+              type: boolean
+            can_manage_video_chats:
+              type: boolean
+            can_post_stories:
+              type: boolean
+            can_edit_stories:
+              type: boolean
+            can_delete_stories:
+              type: boolean
+            can_manage_direct_messages:
+              type: boolean
+            can_manage_tags:
+              type: boolean
+            can_send_welcome_messages:
+              type: boolean
+            is_anonymous:
+              type: boolean
     TrueResultResponse:
       type: object
       additionalProperties: false
