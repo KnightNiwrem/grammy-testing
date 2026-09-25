@@ -374,9 +374,11 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
     body: JSON.stringify({ chat_id: supergroup.id, action: 'typing' }),
   });
   const chatActions = await member.getChatActions({ chat });
+  const notifications = await member.getNotifications({ chat });
   if (
     chatActionResponse.status !== 200 ||
-    JSON.stringify(chatActions) !== JSON.stringify([{ bot_id: bot.id, action: 'typing' }])
+    JSON.stringify(chatActions) !== JSON.stringify([{ bot_id: bot.id, action: 'typing' }]) ||
+    JSON.stringify(notifications.at(-1)) !== JSON.stringify({ message_id: 4, is_silent: false })
   ) {
     throw new Error(`Expected the client to see the bot typing, received ${chatActions}`);
   }

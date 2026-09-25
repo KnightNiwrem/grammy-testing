@@ -81,7 +81,6 @@ accepted upstream; low-level HTTP errors and size limits can still fail there.
 
 | Option or method                                   | Emulator behavior                             | Classification and details                                         |
 | -------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------ |
-| `disable_notification`                             | Validated; no notification state              | [Real gap](#real-gaps)                                             |
 | `link_preview_options`, `disable_web_page_preview` | Validated; no preview or returned options     | [Intentional](#intentional-deviations)                             |
 | `disable_content_type_detection`                   | Documents always remain documents             | [Real gap](media-and-files.md#real-gaps)                           |
 | Webhook `max_connections`                          | Clamped and reported; delivery remains serial | [Real gap](webhooks.md#real-gaps)                                  |
@@ -109,10 +108,6 @@ chosen at creation. Tests need to change these settings during a session.
 **Individual profile management.** The emulation API has no individual bot/account profile read,
 update or deletion operations. Tests currently rely on creation responses and session teardown;
 managing individual profiles is missing.
-
-**Observable notification behavior.** `disable_notification` is accepted and validated, but tests
-cannot inspect its effect on notification state. The emulator needs to make that behavior
-observable.
 
 **Configurable rate-limit responses.** There is no test configuration that makes selected Bot API
 calls return `429` with `parameters.retry_after`. Bot developers need this control to test

@@ -23,6 +23,7 @@ function accountMessage(overrides: Partial<PrivateMessage> = {}): PrivateMessage
     sentAtUnixSeconds: 1_700_000_000,
     content: { kind: 'text', text: 'Hello', entities: [] },
     isContentProtected: false,
+    isSilent: false,
     ...overrides,
   };
 }
@@ -127,6 +128,7 @@ Deno.test('isForwardable refuses protected content and service messages', () => 
     sentAtUnixSeconds: 1_700_000_000,
     content: { kind: 'members_joined', memberIds: [BOT_ID] },
     isContentProtected: false,
+    isSilent: false,
   };
 
   const forwardability = [

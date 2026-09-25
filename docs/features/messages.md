@@ -52,8 +52,7 @@ chosen, searching in the order of TDLib's `MessageQuote::search_quote`. A chosen
 automatic quote of a reply to another chat.
 
 Replies to checklist tasks or poll options are [real gaps](#real-gaps). Text and captions follow the
-[formatting limits](text-formatting.md). Observable notification behavior is also
-[missing](sessions-and-requests.md#real-gaps); link-preview metadata is
+[formatting limits](text-formatting.md); link-preview metadata is
 [intentionally absent](text-formatting.md#intentional-deviations).
 
 Bots show chat actions, such as typing, with `sendChatAction`. Tests read the actions an account's
@@ -66,6 +65,20 @@ Private message IDs come from each observer's message box; a supergroup has one 
 all members. Private conversation history in the emulation API uses the **bot's** message IDs, so a
 test can pass them to Bot API calls. History contains the currently stored messages, without
 pagination or deleted entries; it is a test inspection API, not a Telegram history endpoint.
+
+## Notifications
+
+Tests read the notifications an account's client shows through `account.getNotifications` for a
+private chat or a supergroup. Every message another participant sent to the chat notifies, in order,
+and the account's own messages do not. `disable_notification` on `sendMessage`, `sendPhoto`,
+`sendDocument`, `forwardMessage(s)` and `copyMessage(s)` makes the notification silent. The official
+server passes the option to TDLib's send options. As TDLib's
+[`Message::disable_notification`][silent-message] carries it to the recipient, the notification
+reports it as `is_silent`, as TDLib's [`notification`][notification-object] object does. Bot API
+messages do not show it.
+
+Accounts have no notification settings, so no chat is muted, and reading a message keeps its
+notification; a deleted message has none.
 
 ## Editing and deleting
 
@@ -198,6 +211,8 @@ Other origins are users. Channel and chat origins, video start timestamps and me
 [delete-permissions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8405-L8520
 [forward-permissions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8270-L8330
 [forward-markup]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/ReplyMarkup.cpp
+[silent-message]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L11842
+[notification-object]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/generate/scheme/td_api.tl#L8864-L8868
 [forward-origin]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageForwardInfo.cpp
 [hide-sender]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageOrigin.cpp#L123-L131
 [copy-forward-info]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageForwardInfo.cpp#L182-L192

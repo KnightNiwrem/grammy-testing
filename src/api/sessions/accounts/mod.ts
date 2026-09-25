@@ -26,6 +26,7 @@ import type { Supergroup, VisibleChatAction } from '../../../types/virtual_chat.
 import {
   type ChatMessage,
   countTextCharacters,
+  getMessageNotification,
   MAX_TEXT_MESSAGE_LENGTH,
 } from '../../../types/virtual_message.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
@@ -42,6 +43,7 @@ const BLOCKED_BOT_PATH = `/:${ACCOUNT_ID_PARAMETER}/blocked-bots/:${BOT_ID_PARAM
 const PRIVATE_CHAT_COMMANDS_PATH = `${PRIVATE_CONVERSATION_PATH}/commands` as const;
 const PRIVATE_CHAT_REPLY_INTERFACE_PATH = `${PRIVATE_CONVERSATION_PATH}/reply-interface` as const;
 const PRIVATE_CHAT_ACTIONS_PATH = `${PRIVATE_CONVERSATION_PATH}/chat-actions` as const;
+const PRIVATE_CHAT_NOTIFICATIONS_PATH = `${PRIVATE_CONVERSATION_PATH}/notifications` as const;
 const REPLY_KEYBOARD_PRESS_COLLECTION_PATH =
   `/:${ACCOUNT_ID_PARAMETER}/reply-keyboard-presses` as const;
 const CALLBACK_QUERY_ID_PARAMETER = 'callbackQueryId';
@@ -59,6 +61,7 @@ const SUPERGROUP_CONVERSATION_PATH =
 const SUPERGROUP_MESSAGE_HISTORY_PATH = `${SUPERGROUP_CONVERSATION_PATH}/messages` as const;
 const SUPERGROUP_COMMANDS_PATH = `${SUPERGROUP_CONVERSATION_PATH}/commands` as const;
 const SUPERGROUP_CHAT_ACTIONS_PATH = `${SUPERGROUP_CONVERSATION_PATH}/chat-actions` as const;
+const SUPERGROUP_NOTIFICATIONS_PATH = `${SUPERGROUP_CONVERSATION_PATH}/notifications` as const;
 const SUPERGROUP_MESSAGE_PATH =
   `${SUPERGROUP_MESSAGE_HISTORY_PATH}/:${MESSAGE_ID_PARAMETER}` as const;
 const USER_ID_PARAMETER = 'userId';
@@ -574,6 +577,34 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     return context.json({ chat_actions: result.chatActions.map(presentChatActionForAccount) });
   });
 
+  accountRoutes.get(SUPERGROUP_NOTIFICATIONS_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const chatId = supergroupChatIdPathParameterSchema.safeParse(
+      context.req.param(CHAT_ID_PARAMETER),
+    );
+    if (!accountId.success || !chatId.success) {
+      return context.body(null, 400);
+    }
+
+    const { supergroupMessaging, botMessageViews } = context.get('emulationSession');
+    const result = supergroupMessaging.getMessageHistory({
+      accountId: accountId.data,
+      chatId: chatId.data,
+    });
+    if (!result.found) {
+      return context.body(null, supergroupMemberFailureStatus(result.reason));
+    }
+    return context.json({
+      notifications: presentNotificationsForAccount(
+        result.messages,
+        accountId.data,
+        (message) => botMessageViews.viewSupergroupMessage(message, accountId.data).message_id,
+      ),
+    });
+  });
+
   accountRoutes.patch(SUPERGROUP_MESSAGE_PATH, async (context) => {
     const accountId = telegramUserIdPathParameterSchema.safeParse(
       context.req.param(ACCOUNT_ID_PARAMETER),
@@ -743,6 +774,32 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       return context.body(null, 404);
     }
     return context.json({ chat_actions: result.chatActions.map(presentChatActionForAccount) });
+  });
+
+  accountRoutes.get(PRIVATE_CHAT_NOTIFICATIONS_PATH, (context) => {
+    const accountId = telegramUserIdPathParameterSchema.safeParse(
+      context.req.param(ACCOUNT_ID_PARAMETER),
+    );
+    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
+    if (!accountId.success || !botId.success) {
+      return context.body(null, 400);
+    }
+
+    const { privateMessaging, botMessageViews } = context.get('emulationSession');
+    const result = privateMessaging.getPrivateMessageHistory({
+      accountId: accountId.data,
+      botId: botId.data,
+    });
+    if (!result.found) {
+      return context.body(null, 404);
+    }
+    return context.json({
+      notifications: presentNotificationsForAccount(
+        result.messages,
+        accountId.data,
+        (message) => botMessageViews.viewPrivateMessageForBot(message).message_id,
+      ),
+    });
   });
 
   accountRoutes.get(PRIVATE_CHAT_REPLY_INTERFACE_PATH, (context) => {
@@ -1124,6 +1181,23 @@ function presentSupergroup({ id, title, description }: Supergroup) {
 /** Shows a chat action as the account's client shows it: the bot and what it is doing. */
 function presentChatActionForAccount({ botId, action }: VisibleChatAction) {
   return { bot_id: botId, action };
+}
+
+/**
+ * Shows the notifications an account's client shows for the messages of a chat, in the order of
+ * the messages, each with the ID by which the chat's bots see its message.
+ */
+function presentNotificationsForAccount<Message extends ChatMessage>(
+  messages: readonly Message[],
+  accountId: number,
+  getBotMessageId: (message: Message) => number,
+) {
+  return messages.flatMap((message) => {
+    const notification = getMessageNotification(message, accountId);
+    return notification === undefined
+      ? []
+      : [{ message_id: getBotMessageId(message), is_silent: notification.isSilent }];
+  });
 }
 
 /** Shows a command as the account's client lists it. */

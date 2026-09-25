@@ -2229,6 +2229,83 @@ Deno.test('accounts see the chat action a bot shows until its next message', asy
   }
 });
 
+Deno.test('accounts see which bot messages notify them silently', async () => {
+  const { api, sessionPath, owner, member, bot, supergroup, supergroupPath, sendSupergroupText } =
+    await createSupergroupFixture();
+  await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: '/start' }),
+  );
+  const call = async (method: string, parameters: Record<string, unknown>) =>
+    await callBotApi(api, `${bot.botApiPath}/${method}`, parameters);
+  const loud = botApiResult((await call('sendMessage', { chat_id: owner.id, text: 'Loud' })).body);
+  const quiet = botApiResult(
+    (await call('sendMessage', {
+      chat_id: owner.id,
+      text: 'Quiet',
+      disable_notification: true,
+    })).body,
+  );
+  const quietCopies = botApiResult(
+    (await call('copyMessages', {
+      chat_id: owner.id,
+      from_chat_id: owner.id,
+      message_ids: [loud?.message_id],
+      disable_notification: true,
+    })).body,
+  ) as unknown as Array<{ message_id: number }> | undefined;
+  const memberMessage = await sendSupergroupText(member.id, 'Hi');
+  const quietForward = botApiResult(
+    (await call('forwardMessage', {
+      chat_id: supergroup.id,
+      from_chat_id: supergroup.id,
+      message_id: memberMessage.message_id,
+      disable_notification: 'true',
+    })).body,
+  );
+  const invalid = await call('sendMessage', {
+    chat_id: owner.id,
+    text: 'Maybe',
+    disable_notification: 'maybe',
+  });
+
+  const privateNotifications = await (await api.request(
+    `${sessionPath}/accounts/${owner.id}/conversations/private/${bot.bot.id}/notifications`,
+  )).json();
+  const memberNotifications = await (await api.request(
+    `${supergroupPath(member.id)}/notifications`,
+  )).json() as { notifications: Array<{ message_id: number; is_silent: boolean }> };
+  const outsider = await createAccount(api, sessionPath, 'Linus');
+  const outsiderResponse = await api.request(`${supergroupPath(outsider.id)}/notifications`);
+  if (
+    invalid.status !== 400 || outsiderResponse.status !== 403 ||
+    JSON.stringify(privateNotifications) !== JSON.stringify({
+        notifications: [
+          { message_id: loud?.message_id, is_silent: false },
+          { message_id: quiet?.message_id, is_silent: true },
+          { message_id: quietCopies?.[0]?.message_id, is_silent: true },
+        ],
+      }) ||
+    // The member's own message gives it no notification.
+    JSON.stringify(memberNotifications.notifications.slice(-1)) !==
+      JSON.stringify([{ message_id: quietForward?.message_id, is_silent: true }]) ||
+    memberNotifications.notifications.some(({ message_id }) =>
+      message_id === memberMessage.message_id
+    )
+  ) {
+    throw new Error(
+      `Expected silent notifications for silent messages only, received ${
+        JSON.stringify({
+          invalidStatus: invalid.status,
+          outsiderStatus: outsiderResponse.status,
+          privateNotifications,
+          memberNotifications,
+        })
+      }`,
+    );
+  }
+});
+
 Deno.test('sendChatAction accepts Telegram actions in started private chats', async () => {
   const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
   const accountId = createdAccount.account.id;

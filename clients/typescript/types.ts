@@ -585,6 +585,14 @@ export interface BotCommand {
   readonly is_ephemeral: boolean;
 }
 
+/** The notification an account's client shows for another participant's message. */
+export interface Notification {
+  /** The notifying message's ID, as the chat's bots see it. */
+  readonly message_id: number;
+  /** Whether the sender asked for the notification to play no sound, as `disable_notification`. */
+  readonly is_silent: boolean;
+}
+
 /** What a bot shows it is doing in a chat, by the Bot API's lowercase action name. */
 export interface ChatAction {
   readonly bot_id: number;
@@ -785,6 +793,12 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    */
   getChatActions(input: AccountChatActionsInput): Promise<readonly ChatAction[]>;
   /**
+   * Returns the notifications this account's client shows for the messages other participants
+   * sent to its private chat with a bot or to a supergroup it is a member of, oldest first. A
+   * notification is silent when a bot sent its message with `disable_notification`.
+   */
+  getNotifications(input: AccountNotificationsInput): Promise<readonly Notification[]>;
+  /**
    * Presses a callback button on a bot's message, in a private chat or a supergroup, which sends
    * the bot a callback query. The bot answers asynchronously; read the answer with
    * `getCallbackQuery`.
@@ -838,6 +852,10 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
 }
 
 export interface AccountChatActionsInput {
+  readonly chat: MessageTarget;
+}
+
+export interface AccountNotificationsInput {
   readonly chat: MessageTarget;
 }
 

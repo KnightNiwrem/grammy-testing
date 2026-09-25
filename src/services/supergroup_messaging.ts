@@ -130,6 +130,8 @@ export interface SendSupergroupBotMessageInput {
   readonly quote?: SpecifiedQuote;
   /** Protects the message from forwarding and saving; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
+  /** Notifies the members without sound; omitted for a message that notifies with sound. */
+  readonly isSilent?: boolean;
   /** Where the content first appeared, for a forward; omitted for other messages. */
   readonly forwardInfo?: MessageForwardInfo;
   /**
@@ -347,6 +349,7 @@ interface NewSupergroupMessage {
   readonly viaBotId?: number;
   readonly forwardInfo?: MessageForwardInfo;
   readonly isContentProtected?: boolean;
+  readonly isSilent?: boolean;
 }
 
 interface SupergroupMessageStore {
@@ -564,6 +567,7 @@ export class SupergroupMessagingService {
         inlineKeyboard: input.inlineKeyboard,
         forwardInfo: input.forwardInfo,
         isContentProtected: input.isContentProtected,
+        isSilent: input.isSilent,
       }),
     };
   }

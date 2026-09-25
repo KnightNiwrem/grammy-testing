@@ -336,11 +336,10 @@ const linkPreviewParametersShape = {
 // Telegram also accepts an `@username` chat_id, which it resolves only for bots and public
 // supergroups and channels; the emulator's supergroups have no usernames, so it accepts only
 // numeric chat IDs. `reply_to_message_id` and `allow_sending_without_reply` are the older form of
-// `reply_parameters`, which Telegram still accepts. The account's client does not model
-// notifications, so `disable_notification` is validated and ignored.
+// `reply_parameters`, which Telegram still accepts.
 const sendOptionsParametersShape = {
   chat_id: integerParameter(z.int()).optional(),
-  disable_notification: booleanParameter().optional(),
+  disable_notification: booleanParameter().default(false),
   protect_content: booleanParameter().default(false),
   message_effect_id: messageEffectIdParameter().optional(),
   reply_parameters: replyParametersParameter().optional(),
@@ -388,7 +387,7 @@ const forwardMessageParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   from_chat_id: integerParameter(z.int()).optional(),
   message_id: integerParameter(z.int()).optional(),
-  disable_notification: booleanParameter().optional(),
+  disable_notification: booleanParameter().default(false),
   protect_content: booleanParameter().default(false),
   message_effect_id: messageEffectIdParameter().optional(),
 });
@@ -411,7 +410,7 @@ const repeatMessagesParametersShape = {
   chat_id: integerParameter(z.int()).optional(),
   from_chat_id: integerParameter(z.int()).optional(),
   message_ids: jsonParameter(z.array(z.int())).optional(),
-  disable_notification: booleanParameter().optional(),
+  disable_notification: booleanParameter().default(false),
   protect_content: booleanParameter().default(false),
   message_effect_id: messageEffectIdParameter().optional(),
 };
@@ -998,6 +997,7 @@ function handleForwardMessage(
     chat_id: chatId,
     from_chat_id: fromChatId,
     message_id: messageId,
+    disable_notification: isSilent,
     protect_content: isContentProtected,
     message_effect_id: messageEffectId,
   } = parsedParameters.data;
@@ -1016,6 +1016,7 @@ function handleForwardMessage(
       chatId,
       forwardedMessage: { chatId: fromChatId, messageId: messageIdOrNone(messageId) },
       isContentProtected,
+      isSilent,
       messageEffectId,
     },
   );
@@ -1129,6 +1130,7 @@ function readRepeatMessagesRequest(
     chat_id: chatId,
     from_chat_id: fromChatId,
     message_ids: messageIds,
+    disable_notification: isSilent,
     protect_content: isContentProtected,
     message_effect_id: messageEffectId,
   } = parameters;
@@ -1152,7 +1154,7 @@ function readRepeatMessagesRequest(
   }
   return {
     read: true,
-    request: { chatId, fromChatId, messageIds, isContentProtected, messageEffectId },
+    request: { chatId, fromChatId, messageIds, isContentProtected, isSilent, messageEffectId },
   };
 }
 
@@ -1189,6 +1191,7 @@ function readSendOptions(
   | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
   const {
     chat_id: chatId,
+    disable_notification: isSilent,
     protect_content: isContentProtected,
     message_effect_id: messageEffectId,
     reply_markup: replyMarkup,
@@ -1222,6 +1225,7 @@ function readSendOptions(
         }),
       },
       isContentProtected,
+      isSilent,
       messageEffectId,
     },
   };

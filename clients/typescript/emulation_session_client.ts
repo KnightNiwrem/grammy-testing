@@ -12,6 +12,7 @@ import {
   getMeResponseSchema,
   inlineQueryResponseSchema,
   messageHistoryResponseSchema,
+  notificationsResponseSchema,
   replyInterfaceResponseSchema,
   sentMessageResponseSchema,
   sentSupergroupMessageResponseSchema,
@@ -25,6 +26,7 @@ import type {
   AccountEditMessageInput,
   AccountForwardMessageInput,
   AccountMessageHistoryInput,
+  AccountNotificationsInput,
   AccountReplyInterfaceInput,
   AccountSendDocumentInput,
   AccountSendMessageInput,
@@ -47,6 +49,7 @@ import type {
   LeaveChatInput,
   MessageIn,
   MessageTarget,
+  Notification,
   PressCallbackButtonInput,
   PressReplyKeyboardButtonInput,
   PrivateMessage,
@@ -333,6 +336,15 @@ function createVirtualAccountClient(
         responseSchema: chatActionsResponseSchema,
       });
       return response.chat_actions;
+    },
+    async getNotifications(input: AccountNotificationsInput): Promise<readonly Notification[]> {
+      const response = await requestJson(fetchImplementation, {
+        method: 'GET',
+        url: `${conversationUrl(accountUrl, input.chat)}/notifications`,
+        expectedStatus: HTTP_STATUS_OK,
+        responseSchema: notificationsResponseSchema,
+      });
+      return response.notifications;
     },
     async pressCallbackButton(input: PressCallbackButtonInput): Promise<CallbackQuery> {
       const response = await requestJson(fetchImplementation, {

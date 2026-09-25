@@ -137,6 +137,8 @@ type SendDestinationOptions = BotMessageReplyMarkup & {
   readonly chatId: number;
   /** The Bot API `protect_content`; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
+  /** The Bot API `disable_notification`; omitted for a message that notifies with sound. */
+  readonly isSilent?: boolean;
   /**
    * The Bot API `message_effect_id`, as the decimal text of a nonzero 64-bit identifier; omitted
    * for none. The emulator has no catalogue of Telegram's effects, so any identifier is accepted.
@@ -246,6 +248,8 @@ export interface ForwardMessageRequest {
   /** The Bot API `protect_content`; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
   /** As `SendRequestOptions` describes it. */
+  readonly isSilent?: boolean;
+  /** As `SendRequestOptions` describes it. */
   readonly messageEffectId?: string;
 }
 
@@ -291,6 +295,8 @@ export interface RepeatMessagesRequest {
   readonly messageIds: readonly number[];
   /** The Bot API `protect_content`; omitted for unprotected messages. */
   readonly isContentProtected?: boolean;
+  /** As `SendRequestOptions` describes it. */
+  readonly isSilent?: boolean;
   /**
    * As `SendRequestOptions` describes it. As TDLib's `forward_messages` allows, only a request
    * that finds a single message may add an effect to it.
@@ -761,6 +767,7 @@ interface BotMessaging {
       readonly externalReply?: ExternalReplyTarget;
       readonly quote?: SpecifiedQuote;
       readonly isContentProtected?: boolean;
+      readonly isSilent?: boolean;
       readonly forwardInfo?: MessageForwardInfo;
       readonly messageEffectId?: string;
     },
@@ -851,6 +858,7 @@ interface SupergroupBotMessaging {
     readonly externalReply?: ExternalReplyTarget;
     readonly quote?: SpecifiedQuote;
     readonly isContentProtected?: boolean;
+    readonly isSilent?: boolean;
     readonly forwardInfo?: MessageForwardInfo;
     readonly messageEffectId?: string;
   }):
@@ -1296,7 +1304,8 @@ export class BotApiService {
    */
   forwardMessage(
     authenticatedBot: VirtualBotProfile,
-    { chatId, forwardedMessage, isContentProtected, messageEffectId }: ForwardMessageRequest,
+    { chatId, forwardedMessage, isContentProtected, isSilent, messageEffectId }:
+      ForwardMessageRequest,
   ): ForwardMessageResult {
     const lookup = this.#findRepeatedMessage(authenticatedBot, forwardedMessage);
     if (!lookup.found) {
@@ -1315,6 +1324,7 @@ export class BotApiService {
       {
         chatId,
         isContentProtected,
+        isSilent,
         messageEffectId,
         ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }),
       },
@@ -1430,7 +1440,8 @@ export class BotApiService {
    */
   #repeatMessages(
     authenticatedBot: VirtualBotProfile,
-    { chatId, fromChatId, messageIds, isContentProtected, messageEffectId }: RepeatMessagesRequest,
+    { chatId, fromChatId, messageIds, isContentProtected, isSilent, messageEffectId }:
+      RepeatMessagesRequest,
     repeat: (message: ChatMessage) => MessageRepetition | undefined,
   ): RepeatMessagesResult {
     const repeatedMessages: Array<{ readonly messageId: number; readonly message: ChatMessage }> =
@@ -1481,6 +1492,7 @@ export class BotApiService {
         {
           chatId,
           isContentProtected,
+          isSilent,
           messageEffectId,
           ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }),
           ...(repliedMessageId === undefined
@@ -1624,7 +1636,8 @@ export class BotApiService {
   #sendPrivateMessage(
     authenticatedBot: VirtualBotProfile,
     content: OutgoingMessageContent,
-    { chatId, isContentProtected, messageEffectId, ...replyMarkup }: SendDestinationOptions,
+    { chatId, isContentProtected, isSilent, messageEffectId, ...replyMarkup }:
+      SendDestinationOptions,
     { replyTo, externalReply, quote }: OutgoingReply,
     forwardInfo: MessageForwardInfo | undefined,
   ): SendResult {
@@ -1640,6 +1653,7 @@ export class BotApiService {
       externalReply,
       quote,
       isContentProtected,
+      isSilent,
       forwardInfo,
       messageEffectId,
     });
@@ -1681,6 +1695,7 @@ export class BotApiService {
     {
       chatId,
       isContentProtected,
+      isSilent,
       messageEffectId,
       inlineKeyboard,
       replyInterfaceMarkup,
@@ -1700,6 +1715,7 @@ export class BotApiService {
       externalReply,
       quote,
       isContentProtected,
+      isSilent,
       forwardInfo,
       messageEffectId,
     });

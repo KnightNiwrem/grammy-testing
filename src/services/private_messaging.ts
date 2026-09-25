@@ -162,6 +162,8 @@ export type SendBotMessageInput = BotMessageReplyMarkup & {
   readonly quote?: SpecifiedQuote;
   /** Protects the message from forwarding and saving; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
+  /** Notifies the account without sound; omitted for a message that notifies with sound. */
+  readonly isSilent?: boolean;
   /** Where the content first appeared, for a forward; omitted for other messages. */
   readonly forwardInfo?: MessageForwardInfo;
   /** The message effect clients play with the message; omitted for none. */
@@ -441,6 +443,7 @@ interface PrivateMessageStore {
     readonly viaBotId?: number;
     readonly forwardInfo?: MessageForwardInfo;
     readonly isContentProtected?: boolean;
+    readonly isSilent?: boolean;
     readonly messageEffectId?: string;
   }): PrivateMessage;
   getPrivateMessage(messageId: CanonicalMessageId): PrivateMessage | undefined;
@@ -691,6 +694,7 @@ export class PrivateMessagingService {
         replyInterfaceMarkup: input.replyInterfaceMarkup,
         forwardInfo: input.forwardInfo,
         isContentProtected: input.isContentProtected,
+        isSilent: input.isSilent,
         messageEffectId: input.messageEffectId,
       }),
     };
@@ -1233,6 +1237,7 @@ export class PrivateMessagingService {
       viaBotId,
       forwardInfo,
       isContentProtected,
+      isSilent,
       messageEffectId,
     }: {
       readonly account: VirtualAccount;
@@ -1247,6 +1252,7 @@ export class PrivateMessagingService {
       readonly viaBotId?: number;
       readonly forwardInfo?: MessageForwardInfo;
       readonly isContentProtected?: boolean;
+      readonly isSilent?: boolean;
       readonly messageEffectId?: string;
     },
   ): PrivateMessage {
@@ -1267,6 +1273,7 @@ export class PrivateMessagingService {
       viaBotId,
       forwardInfo,
       isContentProtected,
+      isSilent,
       messageEffectId,
     });
     // Telegram numbers a private message in each participant's message box. Only the bot's

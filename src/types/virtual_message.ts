@@ -296,6 +296,8 @@ export interface PrivateMessage {
   readonly contentEditedAtUnixSeconds?: number;
   /** Whether the sender protected the message from forwarding and saving. Only bots protect. */
   readonly isContentProtected: boolean;
+  /** As `SupergroupMessage` describes it. */
+  readonly isSilent: boolean;
   /**
    * The decimal text of the 64-bit identifier of the message effect clients play with the
    * message; omitted for none. Only bots add effects, which Telegram allows only in private chats.
@@ -344,6 +346,11 @@ export interface SupergroupMessage {
   readonly contentEditedAtUnixSeconds?: number;
   /** Whether the sender protected the message from forwarding and saving. Only bots protect. */
   readonly isContentProtected: boolean;
+  /**
+   * Whether the sender asked for the message to notify its recipients without sound, as the Bot
+   * API's `disable_notification` does. Only bots send silently.
+   */
+  readonly isSilent: boolean;
 }
 
 /** A canonical message of any chat the emulator supports. */
@@ -413,6 +420,25 @@ export function getMessageAuthorId(message: ChatMessage): number {
       throw new Error(`Unhandled message: ${JSON.stringify(unhandledMessage)}`);
     }
   }
+}
+
+/** The notification an account's client shows for a message, as TDLib's `notification` does. */
+export interface MessageNotification {
+  /** Whether the notification plays no sound, which the message's sender asked for. */
+  readonly isSilent: boolean;
+}
+
+/**
+ * The notification a message of its chat gives an account, as TDLib notifies of new messages:
+ * every message another participant sent notifies, silently when its sender asked for that.
+ * Returns `undefined` for the account's own message. Accounts have no notification settings, such
+ * as muted chats, and read messages keep their notifications.
+ */
+export function getMessageNotification(
+  message: ChatMessage,
+  accountId: number,
+): MessageNotification | undefined {
+  return getMessageAuthorId(message) === accountId ? undefined : { isSilent: message.isSilent };
 }
 
 /** A supergroup message that shows content its author wrote, rather than a membership change. */

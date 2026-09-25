@@ -366,6 +366,13 @@ export const botCommandsResponseSchema = z.strictObject({
   commands: z.array(botCommandSchema),
 });
 
+export const notificationsResponseSchema = z.strictObject({
+  notifications: z.array(z.strictObject({
+    message_id: z.number().int().positive(),
+    is_silent: z.boolean(),
+  })),
+});
+
 export const chatActionsResponseSchema = z.strictObject({
   chat_actions: z.array(z.strictObject({
     bot_id: z.number().int().positive(),
