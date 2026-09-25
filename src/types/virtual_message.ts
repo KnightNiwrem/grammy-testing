@@ -246,6 +246,11 @@ export interface PrivateMessage {
   readonly contentEditedAtUnixSeconds?: number;
   /** Whether the sender protected the message from forwarding and saving. Only bots protect. */
   readonly isContentProtected: boolean;
+  /**
+   * The decimal text of the 64-bit identifier of the message effect clients play with the
+   * message; omitted for none. Only bots add effects, which Telegram allows only in private chats.
+   */
+  readonly messageEffectId?: string;
 }
 
 /**

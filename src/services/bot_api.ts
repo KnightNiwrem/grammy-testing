@@ -125,6 +125,11 @@ export type SendRequestOptions = BotMessageReplyMarkup & {
   readonly replyTo?: ReplyTarget;
   /** The Bot API `protect_content`; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
+  /**
+   * The Bot API `message_effect_id`, as the decimal text of a nonzero 64-bit identifier; omitted
+   * for none. The emulator has no catalogue of Telegram's effects, so any identifier is accepted.
+   */
+  readonly messageEffectId?: string;
 };
 
 export type SendMessageRequest = SpecifiedFormattedText & SendRequestOptions;
@@ -162,6 +167,7 @@ export type SendFailureReason =
   | 'chat_not_found'
   | FormerSupergroupMemberFailureReason
   | 'reply_message_not_found'
+  | 'message_effect_not_allowed_in_chat'
   | 'message_text_too_long'
   | 'caption_too_long'
   | 'callback_data_invalid'
@@ -205,6 +211,8 @@ export interface ForwardMessageRequest {
   readonly forwardedMessage: MessageTarget;
   /** The Bot API `protect_content`; omitted for an unprotected message. */
   readonly isContentProtected?: boolean;
+  /** As `SendRequestOptions` describes it. */
+  readonly messageEffectId?: string;
 }
 
 /**
@@ -249,6 +257,11 @@ export interface RepeatMessagesRequest {
   readonly messageIds: readonly number[];
   /** The Bot API `protect_content`; omitted for unprotected messages. */
   readonly isContentProtected?: boolean;
+  /**
+   * As `SendRequestOptions` describes it. As TDLib's `forward_messages` allows, only a request
+   * that finds a single message may add an effect to it.
+   */
+  readonly messageEffectId?: string;
 }
 
 export type CopyMessagesRequest = RepeatMessagesRequest & {
@@ -268,6 +281,7 @@ export type RepeatMessagesResult =
     readonly sent: false;
     readonly reason:
       | 'repeated_messages_not_found'
+      | 'message_effect_not_allowed_for_several_messages'
       | 'repeated_message_ids_not_increasing'
       | 'messages_not_repeatable';
   };
@@ -709,6 +723,7 @@ interface BotMessaging {
       };
       readonly isContentProtected?: boolean;
       readonly forwardInfo?: MessageForwardInfo;
+      readonly messageEffectId?: string;
     },
   ): BotMessageSendingResult;
   editBotMessageText(
@@ -796,6 +811,7 @@ interface SupergroupBotMessaging {
     readonly replyTo?: { readonly messageId: number; readonly allowSendingWithoutReply: boolean };
     readonly isContentProtected?: boolean;
     readonly forwardInfo?: MessageForwardInfo;
+    readonly messageEffectId?: string;
   }):
     | { readonly sent: true; readonly message: SupergroupMessage }
     | {
@@ -806,6 +822,7 @@ interface SupergroupBotMessaging {
         | 'chat_not_found'
         | FormerSupergroupMemberFailureReason
         | 'reply_message_not_found'
+        | 'message_effect_not_allowed_in_chat'
         | 'callback_data_invalid';
     }
     | ({ readonly sent: false } & ContentNormalizationFailure);
@@ -1212,7 +1229,7 @@ export class BotApiService {
    */
   forwardMessage(
     authenticatedBot: VirtualBotProfile,
-    { chatId, forwardedMessage, isContentProtected }: ForwardMessageRequest,
+    { chatId, forwardedMessage, isContentProtected, messageEffectId }: ForwardMessageRequest,
   ): ForwardMessageResult {
     const lookup = this.#findRepeatedMessage(authenticatedBot, forwardedMessage);
     if (!lookup.found) {
@@ -1225,7 +1242,12 @@ export class BotApiService {
     return this.#send(
       authenticatedBot,
       { kind: 'existing', content },
-      { chatId, isContentProtected, ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }) },
+      {
+        chatId,
+        isContentProtected,
+        messageEffectId,
+        ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }),
+      },
       forwardInfo,
     );
   }
@@ -1335,7 +1357,7 @@ export class BotApiService {
    */
   #repeatMessages(
     authenticatedBot: VirtualBotProfile,
-    { chatId, fromChatId, messageIds, isContentProtected }: RepeatMessagesRequest,
+    { chatId, fromChatId, messageIds, isContentProtected, messageEffectId }: RepeatMessagesRequest,
     repeat: (message: ChatMessage) => MessageRepetition | undefined,
   ): RepeatMessagesResult {
     const repeatedMessages: Array<{ readonly messageId: number; readonly message: ChatMessage }> =
@@ -1350,6 +1372,14 @@ export class BotApiService {
     }
     if (repeatedMessages.length === 0) {
       return { sent: false, reason: 'repeated_messages_not_found' };
+    }
+    if (messageEffectId !== undefined) {
+      if (!isUserId(chatId)) {
+        return { sent: false, reason: 'message_effect_not_allowed_in_chat' };
+      }
+      if (repeatedMessages.length > 1) {
+        return { sent: false, reason: 'message_effect_not_allowed_for_several_messages' };
+      }
     }
     if (
       repeatedMessages.some(({ messageId }, index) =>
@@ -1378,6 +1408,7 @@ export class BotApiService {
         {
           chatId,
           isContentProtected,
+          messageEffectId,
           ...(inlineKeyboard === undefined ? {} : { inlineKeyboard }),
           ...(repliedMessageId === undefined
             ? {}
@@ -1453,7 +1484,7 @@ export class BotApiService {
   #sendPrivateMessage(
     authenticatedBot: VirtualBotProfile,
     content: OutgoingMessageContent,
-    { chatId, replyTo, isContentProtected, ...replyMarkup }: SendRequestOptions,
+    { chatId, replyTo, isContentProtected, messageEffectId, ...replyMarkup }: SendRequestOptions,
     forwardInfo: MessageForwardInfo | undefined,
   ): SendResult {
     const result = this.#botMessages.sendBotMessage({
@@ -1467,6 +1498,7 @@ export class BotApiService {
       },
       isContentProtected,
       forwardInfo,
+      messageEffectId,
     });
     if (result.sent) {
       return {
@@ -1502,8 +1534,14 @@ export class BotApiService {
   #sendSupergroupMessage(
     authenticatedBot: VirtualBotProfile,
     content: OutgoingMessageContent,
-    { chatId, replyTo, isContentProtected, inlineKeyboard, replyInterfaceMarkup }:
-      SendRequestOptions,
+    {
+      chatId,
+      replyTo,
+      isContentProtected,
+      messageEffectId,
+      inlineKeyboard,
+      replyInterfaceMarkup,
+    }: SendRequestOptions,
     forwardInfo: MessageForwardInfo | undefined,
   ): SendResult {
     if (replyInterfaceMarkup !== undefined) {
@@ -1517,6 +1555,7 @@ export class BotApiService {
       replyTo,
       isContentProtected,
       forwardInfo,
+      messageEffectId,
     });
     if (result.sent) {
       return {
@@ -1533,6 +1572,7 @@ export class BotApiService {
       case 'bot_not_a_member':
       case 'bot_kicked':
       case 'reply_message_not_found':
+      case 'message_effect_not_allowed_in_chat':
       case 'message_text_too_long':
       case 'caption_too_long':
       case 'callback_data_invalid':

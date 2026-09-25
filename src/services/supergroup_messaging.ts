@@ -119,6 +119,11 @@ export interface SendSupergroupBotMessageInput {
   readonly isContentProtected?: boolean;
   /** Where the content first appeared, for a forward; omitted for other messages. */
   readonly forwardInfo?: MessageForwardInfo;
+  /**
+   * The message effect the bot asks for; omitted for none. Telegram allows message effects only in
+   * private chats, so a message with one is not sent.
+   */
+  readonly messageEffectId?: string;
 }
 
 export type SendSupergroupBotMessageFailureReason =
@@ -126,6 +131,7 @@ export type SendSupergroupBotMessageFailureReason =
   | 'message_text_empty'
   | SupergroupBotAccessFailureReason
   | 'reply_message_not_found'
+  | 'message_effect_not_allowed_in_chat'
   | 'callback_data_invalid';
 
 export type SendSupergroupBotMessageResult =
@@ -486,8 +492,10 @@ export class SupergroupMessagingService {
    * unknown to it, as on Telegram.
    *
    * Checks follow Telegram's order: text is checked for emptiness before the chat is resolved, and
-   * the replied message is looked up after it; the text or caption is then normalized with its
-   * entities, and the result is checked for length. Callback data is checked last.
+   * the replied message is looked up after it; a message effect is then refused, as TDLib's
+   * `MessageSendOptions::get_message_send_options` refuses it outside private chats. The text or
+   * caption is normalized with its entities next, and the result is checked for length. Callback
+   * data is checked last.
    */
   sendBotMessage(input: SendSupergroupBotMessageInput): SendSupergroupBotMessageResult {
     if (this.#bots.getById(input.fromBotId) === undefined) {
@@ -508,6 +516,9 @@ export class SupergroupMessagingService {
       !input.replyTo.allowSendingWithoutReply
     ) {
       return { sent: false, reason: 'reply_message_not_found' };
+    }
+    if (input.messageEffectId !== undefined) {
+      return { sent: false, reason: 'message_effect_not_allowed_in_chat' };
     }
     const contentNormalization = this.#normalizeContent(input.content, 'bot');
     if (!contentNormalization.normalized) {

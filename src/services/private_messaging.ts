@@ -151,6 +151,8 @@ export type SendBotMessageInput = BotMessageReplyMarkup & {
   readonly isContentProtected?: boolean;
   /** Where the content first appeared, for a forward; omitted for other messages. */
   readonly forwardInfo?: MessageForwardInfo;
+  /** The message effect clients play with the message; omitted for none. */
+  readonly messageEffectId?: string;
 };
 
 export type SendBotMessageFailureReason =
@@ -423,6 +425,7 @@ interface PrivateMessageStore {
     readonly viaBotId?: number;
     readonly forwardInfo?: MessageForwardInfo;
     readonly isContentProtected?: boolean;
+    readonly messageEffectId?: string;
   }): PrivateMessage;
   getPrivateMessage(messageId: CanonicalMessageId): PrivateMessage | undefined;
   getMessageByInlineMessageId(inlineMessageId: InlineMessageId): ChatMessage | undefined;
@@ -662,6 +665,7 @@ export class PrivateMessagingService {
         replyInterfaceMarkup: input.replyInterfaceMarkup,
         forwardInfo: input.forwardInfo,
         isContentProtected: input.isContentProtected,
+        messageEffectId: input.messageEffectId,
       }),
     };
   }
@@ -1201,6 +1205,7 @@ export class PrivateMessagingService {
       viaBotId,
       forwardInfo,
       isContentProtected,
+      messageEffectId,
     }: {
       readonly account: VirtualAccount;
       readonly bot: VirtualBot;
@@ -1212,6 +1217,7 @@ export class PrivateMessagingService {
       readonly viaBotId?: number;
       readonly forwardInfo?: MessageForwardInfo;
       readonly isContentProtected?: boolean;
+      readonly messageEffectId?: string;
     },
   ): PrivateMessage {
     const conversation: PrivateConversationKey = {
@@ -1229,6 +1235,7 @@ export class PrivateMessagingService {
       viaBotId,
       forwardInfo,
       isContentProtected,
+      messageEffectId,
     });
     // Telegram numbers a private message in each participant's message box. Only the bot's
     // numbering is projected today; the account's keeps the stored model faithful to Telegram.

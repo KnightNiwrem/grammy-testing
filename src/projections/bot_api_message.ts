@@ -176,6 +176,9 @@ function projectMessageBody<Content extends BotApiSupergroupMessageContent, Repl
       : { reply_markup: projectInlineKeyboardMarkup(message.inlineKeyboard) }),
     ...(viaBot === undefined ? {} : { via_bot: viaBot }),
     ...(message.isContentProtected ? { has_protected_content: true as const } : {}),
+    ...(message.kind === 'private_message' && message.messageEffectId !== undefined
+      ? { effect_id: message.messageEffectId }
+      : {}),
   };
 }
 

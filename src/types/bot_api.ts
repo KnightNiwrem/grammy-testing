@@ -177,6 +177,8 @@ interface BotApiMessageTrailer {
   readonly via_bot?: BotApiBotUser;
   /** Present only for a message its sender protected from forwarding and saving. */
   readonly has_protected_content?: true;
+  /** The message effect a bot sent a private message with; omitted for other messages. */
+  readonly effect_id?: string;
 }
 
 /** A message as a reply shows it: Telegram never nests the replied message's own reply. */

@@ -220,6 +220,7 @@ const messageTrailerShape = {
   reply_markup: inlineKeyboardMarkupSchema.optional(),
   via_bot: messageSenderBotSchema.optional(),
   has_protected_content: z.literal(true).optional(),
+  effect_id: z.string().regex(/^-?\d+$/).optional(),
 };
 
 const messageUserSchema = z.union([virtualAccountProfileSchema, messageSenderBotSchema]);

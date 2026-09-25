@@ -35,6 +35,8 @@ export interface AddPrivateMessageInput {
   readonly forwardInfo?: MessageForwardInfo;
   /** Omitted for a message its sender did not protect. */
   readonly isContentProtected?: boolean;
+  /** Omitted for a message without a message effect. */
+  readonly messageEffectId?: string;
 }
 
 export interface AddSupergroupMessageInput {
@@ -89,6 +91,7 @@ export class MessageRepository {
         ? {}
         : { replyInterfaceMarkup: copyReplyInterfaceMarkup(input.replyInterfaceMarkup) }),
       isContentProtected: input.isContentProtected ?? false,
+      ...(input.messageEffectId === undefined ? {} : { messageEffectId: input.messageEffectId }),
     };
     this.#privateMessagesById.set(message.id, message);
     this.#indexInlineMessage(message);
@@ -129,6 +132,7 @@ export class MessageRepository {
       forwardInfo,
       replyInterfaceMarkup,
       isContentProtected,
+      messageEffectId,
     } = storedMessage;
     const editedMessage: PrivateMessage = {
       kind,
@@ -148,6 +152,7 @@ export class MessageRepository {
         ? {}
         : { contentEditedAtUnixSeconds: edit.contentEditedAtUnixSeconds }),
       isContentProtected,
+      ...(messageEffectId === undefined ? {} : { messageEffectId }),
     };
     this.#privateMessagesById.set(messageId, editedMessage);
     return editedMessage;

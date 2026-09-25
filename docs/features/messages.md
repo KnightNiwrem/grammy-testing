@@ -17,6 +17,15 @@ precedence, and a missing/non-positive message ID means no reply. If a target is
 `allow_sending_without_reply` permits a normal send. Returned messages include `reply_to_message`
 without recursively nesting the replied message's own reply.
 
+Bots can add a message effect with `message_effect_id` to `sendMessage`, `sendPhoto`,
+`sendDocument`, `forwardMessage` and `copyMessage`. The message then reports it as `effect_id`,
+including in account history. `0` means no effect. As in TDLib's
+[`MessageSendOptions::get_message_send_options`][effect-rules], effects are refused in supergroups,
+and `forwardMessages` or `copyMessages` accept one only when a single message is found. Telegram's
+servers decide which effect identifiers exist; that check is not in the open-source code, and the
+emulator accepts any 64-bit identifier. The [official send path][message-effects] shows how the
+option is read.
+
 Cross-chat replies, quotes and replies to checklist tasks or poll options are
 [real gaps](#real-gaps). Text and captions follow the [formatting limits](text-formatting.md).
 Observable notification behavior and simulated link-preview metadata are also
@@ -127,9 +136,6 @@ albums are [real gaps](#real-gaps).
   [forward origin model][forward-origin] supports.
 - **Video start timestamps.** Forwarding and copying cannot specify a video start timestamp. This
   option is missing along with video message support.
-- **Message-effect metadata.** The emulator rejects `message_effect_id` and exposes no effect
-  metadata. Tests need to submit and inspect it. The [official send path][message-effects] reads
-  this option and passes it into the message send options.
 - **Additional content and albums.** Media albums and the other message kinds listed in the
   [feature inventory](README.md#unimplemented-areas) are not implemented.
 
@@ -150,4 +156,5 @@ albums are [real gaps](#real-gaps).
 [forward-origin]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageForwardInfo.cpp
 [forward-messages]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L24816-L24965
 [forward-buttons]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L42-L81
+[effect-rules]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageSendOptions.cpp#L161-L170
 [message-effects]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17343-L17375

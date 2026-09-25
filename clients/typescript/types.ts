@@ -434,6 +434,8 @@ interface MessageTrailer {
   readonly via_bot?: MessageSenderBot;
   /** Present when the bot protected its message from forwarding and saving. */
   readonly has_protected_content?: true;
+  /** The message effect a bot sent a private message with. */
+  readonly effect_id?: string;
 }
 
 /** A message as a reply shows it, without its own reply. */

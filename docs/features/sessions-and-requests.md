@@ -97,8 +97,7 @@ usernames and username targets are missing. The official server resolves usernam
 **Additional feature parameters.** Options for unimplemented features, including
 `business_connection_id`, `message_thread_id`, `direct_messages_topic_id`, ephemeral parameters and
 `allow_paid_broadcast`, are rejected. These belong to the
-[broader feature gaps](README.md#unimplemented-areas). [`message_effect_id`](messages.md#real-gaps)
-is also missing.
+[broader feature gaps](README.md#unimplemented-areas).
 
 **Mutable bot settings.** Supported BotFather-style settings can only be chosen at bot creation.
 Tests need to change these settings during a session.

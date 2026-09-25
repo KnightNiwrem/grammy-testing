@@ -935,7 +935,7 @@ Deno.test('sendMessage replies only in private chats the account has started', a
     'Bad Request: message is too long',
   );
   await expectBadRequest({ chat_id: '@ada', text: 'Hello' });
-  await expectBadRequest({ chat_id: accountId, text: 'Hello', message_effect_id: '1' });
+  await expectBadRequest({ chat_id: accountId, text: 'Hello', message_thread_id: '1' });
 
   const updatesResponse = await api.request(`${botApiPath}/getUpdates`);
   const updatesBody: unknown = await updatesResponse.json();
@@ -5422,6 +5422,141 @@ Deno.test('forwardMessages and copyMessages repeat messages that can be repeated
     { chat_id: owner.id, from_chat_id: supergroup.id, message_ids: [serviceMessageId] },
     "Bad Request: messages can't be forwarded",
   );
+});
+
+Deno.test('bots add message effects to private messages only, as TDLib allows', async () => {
+  const { api, sessionPath, owner, bot, supergroup } = await createSupergroupFixture();
+  const effectId = '5104841245755180586';
+  const questionResponse = await api.request(
+    `${sessionPath}/accounts/${owner.id}/messages`,
+    jsonRequest('POST', { to: { type: 'private', botId: bot.bot.id }, text: 'Hi' }),
+  );
+  const { message: question } = await questionResponse.json() as {
+    message: { message_id: number };
+  };
+  const callMethod = (method: string, parameters: Record<string, unknown>) =>
+    callBotApi(api, `${bot.botApiPath}/${method}`, parameters);
+
+  const celebration = botApiResult(
+    (await callMethod('sendMessage', {
+      chat_id: owner.id,
+      text: 'Congratulations!',
+      message_effect_id: effectId,
+    })).body,
+  );
+  const edited = botApiResult(
+    (await callMethod('editMessageText', {
+      chat_id: owner.id,
+      message_id: celebration?.message_id,
+      text: 'Congratulations again!',
+    })).body,
+  );
+  const forward = botApiResult(
+    (await callMethod('forwardMessage', {
+      chat_id: owner.id,
+      from_chat_id: owner.id,
+      message_id: question.message_id,
+      message_effect_id: effectId,
+    })).body,
+  );
+  const withoutEffect = botApiResult(
+    (await callMethod('sendMessage', { chat_id: owner.id, text: 'Hi', message_effect_id: '0' }))
+      .body,
+  );
+  const history = await (await api.request(
+    `${sessionPath}/accounts/${owner.id}/conversations/private/${bot.bot.id}/messages`,
+  )).json() as { messages: Array<Record<string, unknown>> };
+  const storedCelebration = history.messages.find(({ message_id }) =>
+    message_id === celebration?.message_id
+  );
+  if (
+    celebration?.effect_id !== effectId || edited?.effect_id !== effectId ||
+    forward?.effect_id !== effectId || withoutEffect === undefined ||
+    'effect_id' in withoutEffect || storedCelebration?.effect_id !== effectId
+  ) {
+    throw new Error(
+      `Expected messages to keep their effects, received ${
+        JSON.stringify({ celebration, edited, forward, withoutEffect, storedCelebration })
+      }`,
+    );
+  }
+
+  // A batch may add an effect only to a single found message.
+  const batch = await callMethod('copyMessages', {
+    chat_id: owner.id,
+    from_chat_id: owner.id,
+    message_ids: [question.message_id, 1_000],
+    message_effect_id: effectId,
+  });
+  const [batchCopy] = (batch.body as { result?: Array<{ message_id: number }> }).result ?? [];
+  const storedBatchCopy = (await (await api.request(
+    `${sessionPath}/accounts/${owner.id}/conversations/private/${bot.bot.id}/messages`,
+  )).json() as { messages: Array<Record<string, unknown>> }).messages.find(({ message_id }) =>
+    message_id === batchCopy?.message_id
+  );
+  if (storedBatchCopy?.effect_id !== effectId) {
+    throw new Error(
+      `Expected the single copy to show the effect, received ${JSON.stringify(batch.body)}`,
+    );
+  }
+
+  const failures = [
+    [
+      'sendMessage',
+      { chat_id: supergroup.id, text: 'Hi', message_effect_id: effectId },
+      "Bad Request: can't use message effects in the chat",
+    ],
+    // Telegram looks at the chat and the reply before the effect.
+    [
+      'sendMessage',
+      { chat_id: supergroup.id - 1_000, text: 'Hi', message_effect_id: effectId },
+      'Bad Request: chat not found',
+    ],
+    [
+      'sendMessage',
+      {
+        chat_id: supergroup.id,
+        text: 'Hi',
+        message_effect_id: effectId,
+        reply_parameters: { message_id: 1_000 },
+      },
+      'Bad Request: message to be replied not found',
+    ],
+    [
+      'copyMessages',
+      {
+        chat_id: supergroup.id,
+        from_chat_id: owner.id,
+        message_ids: [question.message_id],
+        message_effect_id: effectId,
+      },
+      "Bad Request: can't use message effects in the chat",
+    ],
+    [
+      'forwardMessages',
+      {
+        chat_id: owner.id,
+        from_chat_id: owner.id,
+        message_ids: [question.message_id, celebration?.message_id],
+        message_effect_id: effectId,
+      },
+      "Bad Request: can't use message effects in the method",
+    ],
+    [
+      'sendMessage',
+      { chat_id: owner.id, text: 'Hi', message_effect_id: 'fireworks' },
+      'Bad Request: invalid sendMessage parameters',
+    ],
+  ] as const;
+  for (const [method, parameters, expectedDescription] of failures) {
+    const { status, body } = await callMethod(method, parameters);
+    if (status !== 400 || (body as { description?: unknown }).description !== expectedDescription) {
+      throw new Error(
+        `Expected ${method} ${JSON.stringify(parameters)} to fail with ${expectedDescription}, ` +
+          `received ${JSON.stringify(body)}`,
+      );
+    }
+  }
 });
 
 Deno.test('copyMessage copies messages without their origin and follows Telegram checks', async () => {

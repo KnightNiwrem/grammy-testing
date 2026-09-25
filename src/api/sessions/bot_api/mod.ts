@@ -107,6 +107,12 @@ const REPLY_MESSAGE_NOT_FOUND_DESCRIPTION = 'Bad Request: message to be replied 
 const MESSAGE_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: message is too long';
 const BUTTON_DATA_INVALID_DESCRIPTION = 'Bad Request: BUTTON_DATA_INVALID';
 
+/** TDLib's descriptions for message effects in chats or requests that cannot use them. */
+const MESSAGE_EFFECT_NOT_ALLOWED_IN_CHAT_DESCRIPTION =
+  "Bad Request: can't use message effects in the chat";
+const MESSAGE_EFFECT_NOT_ALLOWED_IN_METHOD_DESCRIPTION =
+  "Bad Request: can't use message effects in the method";
+
 /** Telegram's description for a message or chat action to a user who blocked the bot. */
 const BOT_BLOCKED_DESCRIPTION = 'Forbidden: bot was blocked by the user';
 
@@ -305,6 +311,21 @@ const setWebhookParametersSchema = z.strictObject({
 
 const getWebhookInfoParametersSchema = z.strictObject({});
 
+/** The range of Telegram's 64-bit message effect identifiers. */
+const MIN_MESSAGE_EFFECT_ID = -(2n ** 63n);
+const MAX_MESSAGE_EFFECT_ID = 2n ** 63n - 1n;
+
+/**
+ * A `message_effect_id`: the 64-bit identifier of a message effect, read as its decimal text, where
+ * 0 chooses none, as Telegram reads it. Telegram reads any leading digits and ignores the rest;
+ * rejecting other text instead surfaces the bot's mistake in tests.
+ */
+function messageEffectIdParameter() {
+  return z.string().regex(/^-?\d+$/).transform(BigInt).refine((effectId) =>
+    effectId >= MIN_MESSAGE_EFFECT_ID && effectId <= MAX_MESSAGE_EFFECT_ID
+  ).transform((effectId) => effectId === 0n ? undefined : effectId.toString());
+}
+
 /**
  * Link preview parameters, which the emulator validates and ignores because it generates no link
  * previews. `disable_web_page_preview` is the older form that Telegram still accepts.
@@ -323,6 +344,7 @@ const sendOptionsParametersShape = {
   chat_id: integerParameter(z.int()).optional(),
   disable_notification: booleanParameter().optional(),
   protect_content: booleanParameter().default(false),
+  message_effect_id: messageEffectIdParameter().optional(),
   reply_parameters: replyParametersParameter().optional(),
   reply_to_message_id: integerParameter(z.int()).optional(),
   allow_sending_without_reply: booleanParameter().default(false),
@@ -362,14 +384,15 @@ const sendDocumentParametersSchema = z.strictObject({
   disable_content_type_detection: booleanParameter().optional(),
 });
 
-// As for sending, Telegram accepts only numeric chat IDs of the emulator's chats. Topics, message
-// effects, paid broadcasts, suggested posts, and video start timestamps are not supported.
+// As for sending, Telegram accepts only numeric chat IDs of the emulator's chats. Topics, paid
+// broadcasts, suggested posts, and video start timestamps are not supported.
 const forwardMessageParametersSchema = z.strictObject({
   chat_id: integerParameter(z.int()).optional(),
   from_chat_id: integerParameter(z.int()).optional(),
   message_id: integerParameter(z.int()).optional(),
   disable_notification: booleanParameter().optional(),
   protect_content: booleanParameter().default(false),
+  message_effect_id: messageEffectIdParameter().optional(),
 });
 
 // A caption, even an empty one, replaces the caption of copied media; without one, its parse mode
@@ -384,14 +407,15 @@ const copyMessageParametersSchema = z.strictObject({
   show_caption_above_media: booleanParameter().default(false),
 });
 
-// As for forwardMessage, topics, message effects, paid broadcasts, and suggested posts are not
-// supported. Telegram also accepts message identifiers written as strings, as for deleteMessages.
+// As for forwardMessage, topics, paid broadcasts, and suggested posts are not supported. Telegram
+// also accepts message identifiers written as strings, as for deleteMessages.
 const repeatMessagesParametersShape = {
   chat_id: integerParameter(z.int()).optional(),
   from_chat_id: integerParameter(z.int()).optional(),
   message_ids: jsonParameter(z.array(z.int())).optional(),
   disable_notification: booleanParameter().optional(),
   protect_content: booleanParameter().default(false),
+  message_effect_id: messageEffectIdParameter().optional(),
 };
 
 const forwardMessagesParametersSchema = z.strictObject(repeatMessagesParametersShape);
@@ -972,6 +996,7 @@ function handleForwardMessage(
     from_chat_id: fromChatId,
     message_id: messageId,
     protect_content: isContentProtected,
+    message_effect_id: messageEffectId,
   } = parsedParameters.data;
   if (fromChatId === undefined) {
     return botApiError(400, FROM_CHAT_ID_REQUIRED_DESCRIPTION);
@@ -988,6 +1013,7 @@ function handleForwardMessage(
       chatId,
       forwardedMessage: { chatId: fromChatId, messageId: messageIdOrNone(messageId) },
       isContentProtected,
+      messageEffectId,
     },
   );
   if (result.sent) {
@@ -1101,6 +1127,7 @@ function readRepeatMessagesRequest(
     from_chat_id: fromChatId,
     message_ids: messageIds,
     protect_content: isContentProtected,
+    message_effect_id: messageEffectId,
   } = parameters;
   if (fromChatId === undefined) {
     return { read: false, errorAnswer: botApiError(400, FROM_CHAT_ID_REQUIRED_DESCRIPTION) };
@@ -1120,7 +1147,10 @@ function readRepeatMessagesRequest(
   if (chatId === undefined) {
     return { read: false, errorAnswer: botApiError(400, CHAT_ID_EMPTY_DESCRIPTION) };
   }
-  return { read: true, request: { chatId, fromChatId, messageIds, isContentProtected } };
+  return {
+    read: true,
+    request: { chatId, fromChatId, messageIds, isContentProtected, messageEffectId },
+  };
 }
 
 function repeatMessagesAnswer(result: RepeatMessagesResult): BotApiMethodAnswer {
@@ -1130,6 +1160,8 @@ function repeatMessagesAnswer(result: RepeatMessagesResult): BotApiMethodAnswer 
   switch (result.reason) {
     case 'repeated_messages_not_found':
       return botApiError(400, NO_MESSAGES_TO_FORWARD_DESCRIPTION);
+    case 'message_effect_not_allowed_for_several_messages':
+      return botApiError(400, MESSAGE_EFFECT_NOT_ALLOWED_IN_METHOD_DESCRIPTION);
     case 'repeated_message_ids_not_increasing':
       return botApiError(400, MESSAGE_IDS_NOT_INCREASING_DESCRIPTION);
     case 'messages_not_repeatable':
@@ -1146,8 +1178,12 @@ function repeatMessagesAnswer(result: RepeatMessagesResult): BotApiMethodAnswer 
 function readSendOptions(parameters: SendOptionsParameters):
   | { readonly read: true; readonly options: SendRequestOptions }
   | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
-  const { chat_id: chatId, protect_content: isContentProtected, reply_markup: replyMarkup } =
-    parameters;
+  const {
+    chat_id: chatId,
+    protect_content: isContentProtected,
+    message_effect_id: messageEffectId,
+    reply_markup: replyMarkup,
+  } = parameters;
   if (chatId === undefined) {
     return { read: false, errorAnswer: botApiError(400, CHAT_ID_EMPTY_DESCRIPTION) };
   }
@@ -1168,6 +1204,7 @@ function readSendOptions(parameters: SendOptionsParameters):
         allowSendingWithoutReply: replyTarget.allowSendingWithoutReply,
       },
       isContentProtected,
+      messageEffectId,
     },
   };
 }
@@ -1199,6 +1236,8 @@ function sendMethodAnswer(result: SendResult | SendFailure): BotApiMethodAnswer 
       return botApiError(403, BOT_KICKED_FROM_SUPERGROUP_DESCRIPTION);
     case 'reply_message_not_found':
       return botApiError(400, REPLY_MESSAGE_NOT_FOUND_DESCRIPTION);
+    case 'message_effect_not_allowed_in_chat':
+      return botApiError(400, MESSAGE_EFFECT_NOT_ALLOWED_IN_CHAT_DESCRIPTION);
     case 'message_text_too_long':
       return botApiError(400, MESSAGE_TEXT_TOO_LONG_DESCRIPTION);
     case 'caption_too_long':

@@ -1078,15 +1078,18 @@ paths:
             parse_mode`, `Bad Request: can't parse entities: …`, or `Bad Request: can't parse
             MessageEntity: …`); `chat_id` is missing (`Bad Request: chat_id is empty`); the chat is
             neither a private chat with an account that has written to the bot nor a supergroup the
-            bot is or was a member of (`Bad Request: chat not found`); the replied message is not a message of the chat, for example because it was
-            deleted, and sending without a reply is not allowed (`Bad Request: message to be
-            replied not found`); the text and its entities cannot be normalized (for example `Bad
-            Request: text must be non-empty`, `Bad Request: entity URL '…' is invalid: …`, or `Bad
-            Request: user not found`); the normalized text is longer than 4096 characters (`Bad
-            Request: message is too long`); or a button's callback data exceeds 64 bytes (`Bad
-            Request: BUTTON_DATA_INVALID`). Replies to messages of other chats are not supported (`Bad Request: replies to messages of other chats are not supported`) or reply
-            keyboards, keyboard removals, and forced replies in supergroups (`Bad Request: reply
-            keyboards, keyboard removals, and forced replies are not supported in groups`).
+            bot is or was a member of (`Bad Request: chat not found`); the replied message is not a
+            message of the chat, for example because it was deleted, and sending without a reply is
+            not allowed (`Bad Request: message to be replied not found`); a message effect is
+            requested for a supergroup (`Bad Request: can't use message effects in the chat`); the
+            text and its entities cannot be normalized (for example `Bad Request: text must be
+            non-empty`, `Bad Request: entity URL '…' is invalid: …`, or `Bad Request: user not
+            found`); the normalized text is longer than 4096 characters (`Bad Request: message is
+            too long`); or a button's callback data exceeds 64 bytes (`Bad Request:
+            BUTTON_DATA_INVALID`). Replies to messages of other chats (`Bad Request: replies to
+            messages of other chats are not supported`) and reply keyboards, keyboard removals, and
+            forced replies in supergroups (`Bad Request: reply keyboards, keyboard removals, and
+            forced replies are not supported in groups`) are not supported.
           content:
             application/json:
               schema:
@@ -1283,8 +1286,8 @@ paths:
       legacy `forward_from` and `forward_date`; a forward of a forward shows the original's origin.
       It keeps the inline keyboard only when every button opens a URL. As on Telegram, a forward
       cannot be edited and the bot receives no update for it. Accounts never hide their name from
-      forwards here, so the origin is always a user. Topics, message effects, paid broadcasts,
-      suggested posts, and video start timestamps are not supported.
+      forwards here, so the origin is always a user. Topics, paid broadcasts, suggested posts, and
+      video start timestamps are not supported.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -1353,8 +1356,8 @@ paths:
       `caption`, even an empty one, replaces the caption of a photo or document, formatted and
       normalized as by `sendPhoto`, with `show_caption_above_media` for a photo; text stays as it
       is. As TDLib lets bots do, a bot may copy a message whose sender protected it. The bot
-      receives no update for the copy. Topics, message effects, paid broadcasts, suggested posts,
-      and video start timestamps are not supported.
+      receives no update for the copy. Topics, paid broadcasts, suggested posts, and video start
+      timestamps are not supported.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -1432,7 +1435,7 @@ paths:
       each as `forwardMessage` forwards it, to a chat that `forwardMessage` can address. As TDLib
       does, identifiers of no message are skipped, as are messages that cannot be forwarded, and a
       message that replies to an earlier message of the request replies to that message's forward.
-      Topics, message effects, paid broadcasts, and suggested posts are not supported.
+      Topics, paid broadcasts, and suggested posts are not supported.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -1476,11 +1479,14 @@ paths:
             invalid message identifier specified`); `chat_id` is missing (`Bad Request: chat_id is
             empty`); the chat of the forwarded messages is unknown to the bot (`Bad Request: chat
             not found`); no identifier identifies a message of that chat (`Bad Request: there are
-            no messages to forward`); the identifiers of its messages do not increase (`Bad
-            Request: message identifiers must be in a strictly increasing order`); none of its
-            messages can be forwarded (`Bad Request: messages can't be forwarded`); or the chat the
-            forwards go to is unknown to the bot (`Bad Request: chat not found`). Telegram checks
-            the chat the forwards go to before the forwarded messages.
+            no messages to forward`); a message effect is requested for a supergroup (`Bad Request:
+            can't use message effects in the chat`) or for more than one found message (`Bad
+            Request: can't use message effects in the method`); the identifiers of its messages do
+            not increase (`Bad Request: message identifiers must be in a strictly increasing
+            order`); none of its messages can be forwarded (`Bad Request: messages can't be
+            forwarded`); or the chat the forwards go to is unknown to the bot (`Bad Request: chat
+            not found`). Telegram checks the chat the forwards go to before the forwarded
+            messages.
           content:
             application/json:
               schema:
@@ -1505,8 +1511,8 @@ paths:
       `forwardMessages` forwards them. Each copy repeats its message's content as `copyMessage`
       does; as TDLib does for copies of several messages, the copies keep no reply markup, and
       `remove_caption` sends photos and documents without their captions. As TDLib lets bots do,
-      a bot may copy messages whose sender protected them. Topics, message effects, paid
-      broadcasts, and suggested posts are not supported.
+      a bot may copy messages whose sender protected them. Topics, paid broadcasts, and suggested
+      posts are not supported.
     parameters:
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/BotToken'
@@ -3412,6 +3418,12 @@ components:
           description: >-
             Present when the bot protected the message from forwarding and saving with
             `protect_content`.
+        effect_id:
+          type: string
+          pattern: '^-?\d+$'
+          description: >-
+            The message effect the bot chose with `message_effect_id`, as the decimal text of its
+            64-bit identifier; omitted for none.
     PhotoSize:
       type: object
       additionalProperties: false
@@ -4343,6 +4355,14 @@ components:
           description: >-
             Protects the message from forwarding and saving, which its `has_protected_content`
             shows.
+        message_effect_id:
+          type: string
+          pattern: '^-?\d+$'
+          description: >-
+            Identifier of a message effect for a private chat, which the message's `effect_id`
+            shows; `0` chooses none. Telegram refuses effects in supergroups (`Bad Request: can't
+            use message effects in the chat`). The emulator has no catalogue of Telegram's
+            effects, so any 64-bit identifier is accepted.
         reply_parameters:
           $ref: '#/components/schemas/ReplyParameters'
         reply_to_message_id:
@@ -4658,6 +4678,10 @@ components:
           type: boolean
           default: false
           description: As for `sendMessage`.
+        message_effect_id:
+          type: string
+          pattern: '^-?\d+$'
+          description: As for `sendMessage`.
         reply_parameters:
           $ref: '#/components/schemas/ReplyParameters'
         reply_to_message_id:
@@ -4700,6 +4724,10 @@ components:
           type: boolean
           default: false
           description: As for `sendMessage`.
+        message_effect_id:
+          type: string
+          pattern: '^-?\d+$'
+          description: As for `sendMessage`.
     ForwardMessagesRequest:
       type: object
       additionalProperties: false
@@ -4723,6 +4751,13 @@ components:
           type: boolean
           default: false
           description: As for `sendMessage`.
+        message_effect_id:
+          type: string
+          pattern: '^-?\d+$'
+          description: >-
+            As for `sendMessage`. As on Telegram, only a request whose identifiers find a
+            single message may use one (`Bad Request: can't use message effects in the
+            method`).
     CopyMessagesRequest:
       type: object
       additionalProperties: false
@@ -4746,6 +4781,13 @@ components:
           type: boolean
           default: false
           description: As for `sendMessage`.
+        message_effect_id:
+          type: string
+          pattern: '^-?\d+$'
+          description: >-
+            As for `sendMessage`. As on Telegram, only a request whose identifiers find a
+            single message may use one (`Bad Request: can't use message effects in the
+            method`).
         remove_caption:
           type: boolean
           default: false
@@ -4798,6 +4840,10 @@ components:
           type: boolean
           default: false
           description: As for `sendMessage`.
+        message_effect_id:
+          type: string
+          pattern: '^-?\d+$'
+          description: As for `sendMessage`.
         reply_parameters:
           $ref: '#/components/schemas/ReplyParameters'
         reply_to_message_id:
@@ -4844,6 +4890,10 @@ components:
         protect_content:
           type: boolean
           default: false
+          description: As for `sendMessage`.
+        message_effect_id:
+          type: string
+          pattern: '^-?\d+$'
           description: As for `sendMessage`.
         reply_parameters:
           $ref: '#/components/schemas/ReplyParameters'
