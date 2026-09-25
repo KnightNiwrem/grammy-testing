@@ -10,6 +10,7 @@ import { MessageBoxRepository } from '../src/repositories/message_box.ts';
 import { BotMessageViewService } from '../src/services/bot_message_view.ts';
 import { BotUpdateDeliveryService } from '../src/services/bot_update_delivery.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
+import { findDetectedEntities } from '../src/text_entities/detected_entities.ts';
 import type { BotApiMessage, BotApiUpdate } from '../src/types/bot_api.ts';
 import { grantSupergroupAdministratorRights } from '../src/types/chat_membership.ts';
 
@@ -791,7 +792,6 @@ Deno.test('BotUpdateDeliveryService lets a message reach only the privacy-mode b
     text: string,
     options: { readonly replyToMessageId?: string; readonly viaBotId?: number } = {},
   ) => {
-    const command = /^\/[a-z]+(@[a-z_]+)?/.exec(text)?.[0];
     const message = messages.addSupergroupMessage({
       chatId: supergroup.id,
       author,
@@ -799,9 +799,7 @@ Deno.test('BotUpdateDeliveryService lets a message reach only the privacy-mode b
       content: {
         kind: 'text',
         text,
-        entities: command === undefined
-          ? []
-          : [{ type: 'bot_command', offset: 0, length: command.length }],
+        entities: findDetectedEntities(text),
       },
       ...options,
     });
@@ -859,6 +857,15 @@ Deno.test('BotUpdateDeliveryService lets a message reach only the privacy-mode b
   // Only a message meant for no bot in particular reaches bots through mentions and commands.
   send(byAccount, 'Hello @a_bot and @b_bot');
   expectRecipients('Hello @a_bot and @b_bot', ['a', 'b', 'admin']);
+  // Mentions are those Telegram detects, whose usernames match ignoring ASCII letter case.
+  send(byAccount, 'Hello @A_BOT.');
+  expectRecipients('Hello @A_BOT.', ['a', 'admin']);
+  for (const text of ['Hello @a_boté', 'Hello @a_bot中', 'Hello @a_bot٣', 'Hello @a_ſbot']) {
+    send(byAccount, text);
+    expectRecipients(text, ['admin']);
+  }
+  send(byAccount, 'See example.com/@a_bot');
+  expectRecipients('See example.com/@a_bot', ['admin']);
   // A bot wrote to the group last, so only that bot in privacy mode receives a general command.
   send(byAccount, '/start');
   expectRecipients('/start', ['a', 'admin']);
@@ -908,9 +915,7 @@ Deno.test('BotUpdateDeliveryService sends general commands to the bot that last 
       content: {
         kind: 'text',
         text,
-        entities: text.startsWith('/')
-          ? [{ type: 'bot_command', offset: 0, length: text.split(' ')[0].length }]
-          : [],
+        entities: findDetectedEntities(text),
       },
       viaBotId,
     });

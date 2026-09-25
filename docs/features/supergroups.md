@@ -29,7 +29,10 @@ For an account message, the emulator first resolves an explicit recipient: repli
 message or to a message meant for it, then `via_bot`, then a leading command naming a bot. Such a
 message goes only to that recipient among privacy-enabled bots. A reply to bot A's message that
 commands bot B therefore goes to A. Without an explicit recipient, a mention or an unqualified
-leading command can cause delivery.
+leading command can cause delivery. A message mentions a bot through a text mention of it, or a
+[detected](text-formatting.md#detected-entities) `mention` entity of its username, ignoring letter
+case. As TDLib's [`match_mentions`][mention-matching] decides, an `@username` that runs into further
+letters or digits of any script is no mention, nor is one inside code, a link or a URL.
 
 As Telegram's [Bot FAQ][privacy-faq] describes, an unqualified command such as `/start` reaches only
 the bot that last sent a message to the group. Only bots' own messages count: not an account's
@@ -165,6 +168,7 @@ production read permissions.
 [supergroup messaging tests](../../tests/supergroup_messaging_service_test.ts).
 
 [privacy-faq]: https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
+[mention-matching]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L267-L310
 [protected-content]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8145-L8148
 [protection-toggle]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogManager.cpp#L2721-L2745
 [chat-member-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L5802-L5872

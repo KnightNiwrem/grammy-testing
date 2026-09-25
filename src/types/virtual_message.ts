@@ -232,24 +232,29 @@ export function getContentText(content: SupergroupMessageContent): FormattedText
 }
 
 /**
- * Whether a message's text or caption mentions a user: by a text mention of the user, or by the
- * user's username after an `@`, which is matched as Telegram clients mark mentions, ignoring
- * letter case.
+ * Whether a message's text or caption mentions a user: by a text mention of the user, or by a
+ * mention of the user's username, ignoring letter case. Mentions are the entities Telegram detects
+ * in stored text, so an `@username` that runs into further letters or digits, or lies in code, a
+ * link, or a URL, is none.
  */
 export function mentionsUser(
   content: SupergroupMessageContent,
   user: { readonly id: number; readonly username?: string },
 ): boolean {
   const { text, entities } = getContentText(content);
-  if (entities.some((entity) => entity.type === 'text_mention' && entity.userId === user.id)) {
-    return true;
-  }
-  if (user.username === undefined) {
-    return false;
-  }
-  // Usernames consist of letters, digits, and underscores, which need no escaping.
-  const usernameMention = new RegExp(`(?<![\\p{L}\\p{N}_])@${user.username}(?![A-Za-z0-9_])`, 'iu');
-  return usernameMention.test(text);
+  // Usernames and the mentions Telegram detects consist of ASCII letters, digits and underscores.
+  const username = user.username?.toLowerCase();
+  return entities.some((entity) => {
+    switch (entity.type) {
+      case 'text_mention':
+        return entity.userId === user.id;
+      case 'mention':
+        return username !== undefined &&
+          text.slice(entity.offset + 1, entity.offset + entity.length).toLowerCase() === username;
+      default:
+        return false;
+    }
+  });
 }
 
 /**

@@ -17,10 +17,10 @@ dependencies, and common message normalization and edit rules already have a sha
 [Sources: composition][composition], [message content rules][content], [message views][view].
 
 The highest-value work I identified is making ordinary incoming messages more representative:
-user-supplied formatting and accurate group mention routing. There are also concrete robustness
-issues in recursive reply routing and the new webhook dispatcher's backlog handling. The
-architectural work should be focused: separate reusable Bot API method dispatch from Hono routing,
-rather than mechanically splitting every large class.
+user-supplied formatting. There are also concrete robustness issues in recursive reply routing and
+the new webhook dispatcher's backlog handling. The architectural work should be focused: separate
+reusable Bot API method dispatch from Hono routing, rather than mechanically splitting every large
+class.
 
 **No P0 or P1 defect was established by this review.** That is not a certification that the
 repository has no such defects. The findings below distinguish observed implementation defects,
@@ -35,10 +35,10 @@ be obtained in this environment, and Deno was unavailable. Consequently, I did *
 repository's Deno tests, type checker, formatter, linter, OpenAPI lint or Fallow checks. I also did
 not run Telegram's C++ code or send experimental requests to live Telegram accounts.
 
-I did execute reduced, source-derived JavaScript probes under Node `v22.16.0` for the
-mention-boundary matcher and mutually recursive reply traversal. They establish the behavior of
-those extracted algorithms, not that a repository integration test has been run. The webhook
-operation counts below are analytical counts, not measured Deno benchmark results.
+I did execute reduced, source-derived JavaScript probes under Node `v22.16.0` for the mutually
+recursive reply traversal. They establish the behavior of that extracted algorithm, not that a
+repository integration test has been run. The webhook operation counts below are analytical counts,
+not measured Deno benchmark results.
 
 The C++ comparison uses the project's documented baseline: Bot API
 `e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1` and TDLib `bc9c263e2bfee06aaab41e82db51a103376030bc`.
@@ -58,7 +58,6 @@ recommendation is not a claim that an unsupported method is a severe implementat
 | Rank | Priority | Finding or recommendation                                                | Classification                                            |
 | ---: | :------: | ------------------------------------------------------------------------ | --------------------------------------------------------- |
 |    2 |    P2    | Support account-supplied entities and correct the documentation contract | Confirmed contract mismatch / coverage gap                |
-|    4 |    P2    | Fix Unicode boundaries and case folding in mention matching              | Source-verified defect; reduced probe executed            |
 |    5 |    P2    | Add `getChat` for the chat types already modeled                         | Targeted capability recommendation                        |
 |    6 |    P2    | Replace recursive reply-address resolution with a stack-safe traversal   | Source-verified robustness defect; reduced probe executed |
 |    7 |    P2    | Separate method dispatch from HTTP routing; constrain facade growth      | Architecture / SRP recommendation                         |
@@ -114,55 +113,6 @@ edited-message delivery. Verify that failed entity validation leaves no new mess
 artifact. Read the response through the public TypeScript client as well as asserting raw JSON.
 
 **Scope/cost.** Small to medium because the bot-side normalizer already exists.
-
-### 4. P2 — `mentionsUser` has a demonstrable Unicode mismatch with the pinned TDLib scanner
-
-**Context and evidence.** The username branch of `mentionsUser` constructs:
-
-```javascript
-new RegExp(`(?<![\\p{L}\\p{N}_])@${user.username}(?![A-Za-z0-9_])`, 'iu');
-```
-
-Its left boundary is Unicode-aware, but its right boundary only excludes ASCII username characters.
-Unicode case-insensitive matching also recognizes characters that TDLib's ASCII username scan would
-not consume. This helper is used by privacy routing and by selective reply-interface decisions.
-[Matcher][message-types] · [delivery consumer][delivery] · [supergroup consumer][supergroup].
-
-**Reduced probe results.** With username `test_bot`, the extracted expression returned true for all
-of these:
-
-| Input         | Current expression |  Pinned TDLib lexical rule  |
-| ------------- | :----------------: | :-------------------------: |
-| `@test_boté`  |        true        | not a mention of `test_bot` |
-| `@test_bot中` |        true        | not a mention of `test_bot` |
-| `@test_bot٣`  |        true        | not a mention of `test_bot` |
-| `@teſt_bot`   |        true        | not a mention of `test_bot` |
-
-The first three pass the emulator's ASCII-only right boundary. In the fourth, Unicode case folding
-makes `ſ` match `s`. TDLib's `match_mentions` consumes ASCII username characters, then rejects a
-following Unicode word character; its `is_word_character` includes letters and numbers. These are
-source-grounded lexical differences, not a claim that a live Telegram privacy experiment was run.
-[TDLib `match_mentions` and `is_word_character`][cpp-entities].
-
-**Impact.** Within the emulator, these strings can incorrectly count as mentioning a user. That can
-make a privacy-enabled bot receive a message or apply a selective keyboard to an unintended account.
-The repository's own intended lexical baseline is sufficient to identify the mismatch, even though
-all remote recipient-selection rules are not public.
-
-**Recommendation.** Derive mentions from the `mention` entities that `findDetectedEntities` already
-finds with the pinned upstream boundaries and ASCII username character set, then compare the
-mentioned username case-insensitively in the ASCII domain. On the current code, the detector finds
-no mention in any of the four cases above. Merely changing the right lookahead is not a complete fix
-because it leaves Unicode case folding. Avoid deriving mention behavior from a raw per-user regular
-expression.
-
-**Acceptance tests.** Add the four cases above, normal mixed-ASCII case, punctuation-separated
-mentions, a longer ASCII username sharing the prefix, and captions. Check both routing and selective
-reply-interface behavior, and mentions inside code or explicit links. This finding does not by
-itself establish every server-side rule for mentions inside formatted text.
-
-**Scope/cost.** Small. Confidence is high for the lexical mismatch; live-server privacy behavior was
-not measured.
 
 ### 5. P2 — Add `getChat` for already-supported private chats and supergroups
 
@@ -311,10 +261,10 @@ Telegram's remote service.
    these outside the default offline test run and redact account-specific data while preserving
    identity relationships.
 
-Start with the small corpus needed for findings 2 and 4, then expand through generated boundary
-cases and state-machine sequences. Normalize volatile values carefully: renumber IDs within the
-correct identity namespace rather than erasing all IDs, and retain field presence, ordering
-guarantees and relationships that are part of the behavior under test.
+Start with the small corpus needed for finding 2, then expand through generated boundary cases and
+state-machine sequences. Normalize volatile values carefully: renumber IDs within the correct
+identity namespace rather than erasing all IDs, and retain field presence, ordering guarantees and
+relationships that are part of the behavior under test.
 
 **Acceptance criteria.** A checked-in case records its request/scenario, oracle commit or capture
 provenance, expected response/update shape and normalization policy. Updating the oracle must show
@@ -479,20 +429,12 @@ it is not listed as a missing parameter. [Update deviations][updates-doc] ·
 
 ## Reproducing the reduced probes
 
-The following is a standalone JavaScript reduction, **not a repository test**. It reproduces the two
-algorithmic observations without Deno or repository imports. It does not prove HTTP responses, a
+The following is a standalone JavaScript reduction, **not a repository test**. It reproduces the
+reply traversal observation without Deno or repository imports. It does not prove HTTP responses, a
 precise Deno stack threshold, or live Telegram behavior.
 
 ```javascript
 // Run with Node; the review used v22.16.0.
-const matcher = new RegExp(
-  '(?<![\\p{L}\\p{N}_])@test_bot(?![A-Za-z0-9_])',
-  'iu',
-);
-for (const text of ['@test_boté', '@test_bot中', '@test_bot٣', '@teſt_bot']) {
-  console.log(text, matcher.test(text)); // current matcher: true for each
-}
-
 // Reduced traversal: every message is account-authored plain text and has
 // no leading command or via_bot. Terminal command lookup thus returns undefined.
 const messages = new Map();
