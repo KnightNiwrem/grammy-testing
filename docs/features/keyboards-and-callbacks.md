@@ -27,35 +27,57 @@ without such markup leave it alone. Deleting its message clears the interface. R
 removal follow the corresponding private-chat logic in TDLib's
 [`MessagesManager` reply markup handling][reply-state].
 
-The emulator does not model the client UI's hidden/shown state. In particular, pressing a
-`one_time_keyboard` button leaves the keyboard available through the inspection API. Persistent and
-resize flags are recorded without rendering a keyboard. `selective` has no effect in private chats.
-Messages sent with any non-inline reply markup remain uneditable, even after the interface clears.
-Sending a reply does not dismiss a forced reply, and there is no explicit dismissal operation. TDLib
-exposes [`delete_dialog_reply_markup`][dismiss-reply] for that client action.
+`selective` has no effect in private chats. Messages sent with any non-inline reply markup remain
+uneditable, even after the interface clears. Forced-reply dismissal is a [real gap](#real-gaps).
 
-## Gaps and deviations
+## Intentional deviations
 
-- Reply keyboards and forced replies in supergroups are rejected. Telegram's
-  [`Client::get_reply_markup`][reply-markup] and TDLib support them in groups.
-- Inline button types for login, Mini Apps, games, payments, inline switching, copying text and
-  disabled buttons are absent, as are button styles/icons. Reply keyboard requests for contacts,
-  locations, polls, users, chats and web apps are also absent. Compare upstream's
-  [keyboard button parsing][button-parsing]. URL buttons are stored but cannot be opened through the
-  test client.
-- Ambiguous markup and buttons with multiple actions fail strict schema validation. Upstream's
-  parser selects actions according to its field-reading order. URL validation uses JavaScript's
-  `URL` parser rather than Telegram's full link rules, so acceptance is not identical.
-- Callback queries do not expire with elapsed time. Set `expired: true` when pressing a button to
-  create an already expired query and exercise the query-too-old error. Missing queries, queries
-  belonging to another bot and already answered queries also fail.
-- Callback `cache_time` is recorded but never avoids a subsequent callback update. `url` in an
-  answer is unsupported. The official [Bot API handler][answer-callback] accepts both, and TDLib's
-  [`answer_callback_query`][td-callback] passes them to Telegram. The remote query lifetime and all
-  re-answer rules cannot be established from that forwarding code; the emulator's single-answer
-  state machine should not be read as proof of exact server behavior.
-- Callback presses require a currently stored matching button. Stale or arbitrary callback data and
-  callbacks with inaccessible message payloads are not modeled.
+- **Inspectable keyboard data without a client UI.** Tests inspect keyboard data without reproducing
+  Telegram's rendering or hidden/shown state. Pressing a `one_time_keyboard` button leaves the
+  keyboard available through the inspection API. Persistent and resize flags are recorded without
+  rendering a keyboard.
+- **URL inspection without navigation.** URL buttons are stored but cannot be opened through the
+  test client. Tests can inspect the target without opening it.
+- **Rejecting ambiguous buttons.** Markup and buttons with multiple actions fail strict validation
+  to expose ambiguous definitions in tests. Upstream's [parser][button-parsing] selects an action
+  according to its field-reading order.
+- **Explicit callback expiry.** Queries do not expire with elapsed time; tests control expiry
+  explicitly. Set `expired: true` when pressing a button to create an already expired query and
+  exercise the query-too-old error. Missing queries, queries belonging to another bot and already
+  answered queries also fail.
+- **Current button presses only.** Callback presses require a currently stored matching button
+  because the intended tests only need those presses. Stale or arbitrary callback data and callbacks
+  with inaccessible message payloads are not modeled.
+
+## Real gaps
+
+- **Forced-reply dismissal.** Sending a reply does not dismiss a forced reply, and the account API
+  has no explicit dismissal operation. Tests need to simulate that transition. TDLib exposes
+  [`delete_dialog_reply_markup`][dismiss-reply] for the client action.
+- **Supergroup reply interfaces.** Reply keyboards and forced replies in supergroups are rejected.
+  Telegram's [`Client::get_reply_markup`][reply-markup] and TDLib support them in groups.
+- **Inline button types.** Login, Mini Apps, games, payments, inline switching, copy-text and
+  disabled buttons are absent. Tests cannot exercise those button definitions or actions.
+- **Button styles and icons.** Tests cannot submit or inspect button appearance metadata. Supporting
+  that data is required even though rendering a client UI is intentionally out of scope.
+- **Reply keyboard request buttons.** Requests for contacts, locations, polls, users, chats and web
+  apps are absent. Compare these missing types and fields with upstream's
+  [keyboard button parsing][button-parsing].
+- **URL acceptance rules.** Validation uses JavaScript's `URL` parser rather than Telegram's full
+  link rules, so acceptance is not identical. Matching those rules is needed for button validation
+  tests.
+
+- **Callback answer caching.** `cache_time` is recorded but never avoids a subsequent callback
+  update. Tests need simulated reuse of cached answers.
+- **Callback answer URLs.** `url` in an answer is unsupported. Tests need to submit and inspect it.
+  The official [Bot API handler][answer-callback] accepts both URL and cache options, and TDLib's
+  [`answer_callback_query`][td-callback] passes them to Telegram.
+
+## Comparison limits
+
+The remote callback query lifetime and all re-answer rules cannot be established from TDLib's
+forwarding code. The emulator's single-answer state machine should not be read as proof of exact
+server behavior.
 
 ## Local evidence
 

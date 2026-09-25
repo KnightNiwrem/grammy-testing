@@ -17,11 +17,10 @@ precedence, and a missing/non-positive message ID means no reply. If a target is
 `allow_sending_without_reply` permits a normal send. Returned messages include `reply_to_message`
 without recursively nesting the replied message's own reply.
 
-The emulator supports only same-chat replies. Cross-chat replies, quotes and quote entities,
-checklist tasks, and poll-option reply targets are absent, although upstream
-[`Client::get_reply_parameters`][reply-parameters] reads them. Text and captions follow the
-[formatting limits](text-formatting.md). Notification flags and link previews have
-[no visible effects](sessions-and-requests.md#accepted-options-without-their-telegram-effects).
+Cross-chat replies, quotes and replies to checklist tasks or poll options are
+[real gaps](#real-gaps). Text and captions follow the [formatting limits](text-formatting.md).
+Observable notification behavior and simulated link-preview metadata are also
+[missing](sessions-and-requests.md#real-gaps).
 
 Private message IDs come from each observer's message box; a supergroup has one sequence shared by
 all members. Private conversation history in the emulation API uses the **bot's** message IDs, so a
@@ -46,15 +45,12 @@ and skips missing messages. In private chats, the bot may delete either particip
 supergroups, it may delete its own content; `can_delete_messages` allows deleting other members'
 messages and membership service messages.
 
-**Age limits are absent.** The emulator checks ownership and rights without considering message age.
-TDLib's [`can_delete_channel_message` and `can_revoke_message`][delete-permissions] impose a two-day
-bot deletion limit in normal production operation. Account edits also lack TDLib's configurable edit
-time limit; bot edits of their own outgoing messages are exempt upstream, so a blanket "all edits
-expire after 48 hours" rule would be incorrect. The emulator has no scheduled messages or automatic
-deletion timers.
+Message deletion does not consider message age; the missing age limits are a [real gap](#real-gaps).
+Account edits have no age limit. Scheduled messages and automatic deletion timers are absent. These
+timing simplifications are [intentional](#intentional-deviations).
 
-`editMessageMedia` and account-side deletion operations are not exposed. Media edits are limited to
-captions and inline keyboards.
+Media edits are limited to captions and inline keyboards. Replacing media and deleting messages as
+an account are [real gaps](#real-gaps).
 
 ## Blocking
 
@@ -84,9 +80,53 @@ URL/callback button types follows [`dup_reply_markup`][forward-markup] and
 [`InlineKeyboardButton::clone`][forward-buttons]. Upstream can also retain some button kinds that
 the emulator cannot create, such as copy-text and login buttons.
 
-Origins are always users: the emulator has no hidden-sender privacy setting, channel origins or chat
-origins. TDLib's [forward origin model][forward-origin] covers those additional cases.
-`forwardMessages`, `copyMessages`, media albums and video start timestamps are not implemented.
+Origins are always users. Other origin types, sender privacy, `forwardMessages` and `copyMessages`
+are [real gaps](#real-gaps), as are video start timestamps and media albums.
+
+## Intentional deviations
+
+- **Account-to-bot private chats only.** Private chat tests only need conversations between an
+  account and a bot. Private conversations between two accounts are intentionally unsupported,
+  including [inline-result use](inline-mode.md#intentional-deviations) in those chats.
+- **Account edits regardless of age.** Tests should be able to edit account messages regardless of
+  their age, so the emulator does not apply TDLib's configurable account edit time limit. Upstream
+  already exempts bots editing their own outgoing messages; a blanket "all edits expire after 48
+  hours" rule would be incorrect. See [`MessagesManager::can_edit_message`][edit-permissions].
+- **Immediate sends only.** The account emulation API does not expose scheduled messages. Tests only
+  need immediately sent messages, so scheduling is outside the intended account simulation.
+- **No automatic message deletion.** Message fixtures remain available until explicitly deleted or
+  the session ends. Automatic deletion timers are intentionally absent to preserve those fixtures.
+
+## Real gaps
+
+- **Cross-chat replies.** Replies can only reference messages in the same chat. Tests cannot
+  exercise replies to messages in another chat, although upstream
+  [`Client::get_reply_parameters`][reply-parameters] accepts a separate chat target.
+- **Reply quotes.** Replies cannot carry quoted text, quote entities or a quote position. These
+  fields are needed to test quote handling and are read by the same upstream reply parser.
+- **Checklist and poll reply targets.** Replies cannot target an individual checklist task or poll
+  option. These targets are also supported by the upstream reply parser and are missing from the
+  emulator.
+- **Deletion age limits.** Bot deletion checks ownership and rights without considering message age.
+  Tests therefore cannot exercise Telegram's age-based rejection. TDLib's
+  [`can_delete_channel_message` and `can_revoke_message`][delete-permissions] impose a two-day bot
+  deletion limit in normal production operation.
+- **Replacing media.** `editMessageMedia` is not implemented, preventing tests from exercising bots
+  that replace message media.
+- **Account-side deletion.** The account emulation API has no message deletion operation. Tests
+  cannot simulate an account deleting its messages; only Bot API deletion is available.
+- **Forward origins and sender privacy.** Forward origins are always visible users. Tests cannot
+  exercise hidden-sender, channel or chat origins, which TDLib's
+  [forward origin model][forward-origin] supports.
+- **Batched forwarding and copying.** `forwardMessages` and `copyMessages` are not implemented. Only
+  the corresponding single-message methods are available.
+- **Video start timestamps.** Forwarding and copying cannot specify a video start timestamp. This
+  option is missing along with video message support.
+- **Message-effect metadata.** The emulator rejects `message_effect_id` and exposes no effect
+  metadata. Tests need to submit and inspect it. The [official send path][message-effects] reads
+  this option and passes it into the message send options.
+- **Additional content and albums.** Media albums and the other message kinds listed in the
+  [feature inventory](README.md#unimplemented-areas) are not implemented.
 
 ## Local evidence
 
@@ -104,3 +144,4 @@ origins. TDLib's [forward origin model][forward-origin] covers those additional 
 [forward-markup]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/ReplyMarkup.cpp
 [forward-origin]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageForwardInfo.cpp
 [forward-buttons]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L42-L81
+[message-effects]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L17343-L17375

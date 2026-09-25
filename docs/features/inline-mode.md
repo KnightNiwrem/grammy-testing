@@ -30,31 +30,60 @@ access the chat, it can also edit via `chat_id`/`message_id`; another bot cannot
 message. TDLib makes the originating bot check in
 [`MessagesManager::can_edit_message`][edit-inline].
 
-## Gaps and deviations
+## Intentional deviations
 
-- URL-backed photo/document results and all other result kinds are unsupported. Only text
-  `input_message_content` works; locations, venues, contacts, invoices and other content types do
-  not. Compare the result dispatch in
+**Account-to-bot private chats only.** Private chat tests only need conversations between an account
+and a bot. Private conversations between two accounts, including inline-result use there, are
+intentionally outside the emulator's scope.
+
+**No timed query expiry.** Test timing should not invalidate unanswered inline queries, so queries
+never expire with elapsed time. Unknown, wrong-bot and already answered query IDs still fail.
+
+**Deterministic chosen-result feedback.** Feedback is an on/off switch: every choice generates
+feedback when enabled. BotFather sampling percentages are not modeled, so tests can rely on
+deterministic feedback.
+
+**Result-header button metadata only.** The button above results can be recorded as a start-bot or
+web-app button, including legacy `switch_pm_text`/`switch_pm_parameter`. Inspecting that metadata is
+sufficient for the intended tests; pressing the button, launching an app and following the start
+flow are intentionally unsupported. TDLib's [answer validation][answer] handles these button
+variants.
+
+**Metadata without rendering or media processing.** Thumbnail metadata is accepted where supported
+by the result schema, but thumbnails are not downloaded or rendered. Optional photo dimensions are
+validated without changing the stored photo. Tests inspect the metadata without fetching thumbnails
+or reproducing a client UI.
+
+**Opaque inline message identifiers.** Inline message IDs are emulator handles, without
+TDLib-compatible encoding. Tests should treat them as opaque values.
+
+## Real gaps
+
+- **Additional results and input content.** URL-backed photo/document results and all other result
+  kinds are unsupported. Only text `input_message_content` works; locations, venues, contacts,
+  invoices and other content types do not. Compare the result dispatch in
   [`InlineQueriesManager::get_input_bot_inline_result`][results].
-- User locations, inline use in channels/basic groups and private chats between two accounts are not
-  modeled.
-- Queries never expire with time. Unknown, wrong-bot and already answered query IDs fail, but
-  waiting does not make an unanswered query invalid. TDLib passes query answers to Telegram's remote
-  server in [`answer_inline_query`][answer]; the exact remote expiry and repeated-answer rules were
-  not verified through live calls.
-- `cache_time` and `is_personal` are stored but no cache is consulted. Every emulated query reaches
-  the bot if subscribed. TDLib actually caches results using `cache_expire_time` in
-  [`send_inline_query`][cache] and records the server's cache duration on receipt.
-- Inline feedback is an on/off switch with feedback for every choice when enabled. There is no
-  BotFather feedback sampling percentage.
-- The button above results can be recorded as a start-bot or web-app button, including legacy
-  `switch_pm_text`/`switch_pm_parameter`. Tests cannot press it, launch an app, or follow its start
-  flow. TDLib's [answer validation][answer] handles these button variants.
-- Thumbnail metadata is accepted where supported by the result schema, but thumbnails are not
-  downloaded or rendered. Optional photo dimensions are likewise validated without changing the
-  stored photo.
-- Inline message IDs are opaque emulator identifiers, not TDLib-compatible encodings. Prepared
-  inline messages, result sharing and business/ephemeral message variants are absent.
+
+- **User locations.** Inline queries cannot carry a simulated user location, preventing tests of
+  location-dependent inline behavior.
+- **Result caching.** `cache_time` and `is_personal` are stored but no cache is consulted. Every
+  emulated query reaches the bot if subscribed. Tests need simulated result caching that honors
+  these options. TDLib caches results using `cache_expire_time` in [`send_inline_query`][cache] and
+  records the server's cache duration on receipt.
+
+- **Prepared messages and sharing.** Prepared inline messages and result-sharing flows are not
+  implemented. Tests currently have to use the supported query-and-choice workflow.
+
+- **Basic groups and channels.** Inline use in these chats is missing along with their
+  [HTTP messaging workflows](supergroups.md#real-gaps).
+
+- **Business and ephemeral messages.** These variants are absent, along with their broader
+  [feature workflows](README.md#unimplemented-areas).
+
+## Comparison limits
+
+TDLib passes query answers to Telegram's remote server in [`answer_inline_query`][answer]. The exact
+remote expiry and repeated-answer rules were not verified through live calls.
 
 ## Local evidence
 

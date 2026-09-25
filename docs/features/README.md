@@ -6,6 +6,18 @@ These pages describe the standalone HTTP server. A supported method implements t
 parameters described on its feature page; it does not imply support for every Telegram option.
 Internal types for additional chat kinds do not make those kinds available through HTTP.
 
+## Intentional deviations and real gaps
+
+**Intentional deviations** are differences retained for the emulator's testing purpose. Their
+documented reasons explain which behavior tests should expect instead of Telegram's behavior.
+
+**Real gaps** are missing or incorrect behavior the emulator should support. Listing a gap does not
+make the behavior available or establish an implementation schedule.
+
+An area can contain both. For example, tests should configure rate-limit errors instead of
+reproducing Telegram's production traffic thresholds, but that configuration is
+[not yet implemented](sessions-and-requests.md#real-gaps).
+
 ## Feature guide
 
 | Feature                                               | Coverage                                                                   |
@@ -47,24 +59,35 @@ the emulator has not implemented.
 
 ## Unimplemented areas
 
+### Real gaps
+
 The official [method registry][upstream-methods] includes these broader areas absent from the
-emulator. This list groups the gaps; the inventory above determines whether an individual method is
-available.
+emulator. They are real gaps in the intended testing coverage. This list groups them; the inventory
+above determines whether an individual method is available.
 
 - Basic groups, channels, public chat usernames, forum topics, direct messages of channels, and chat
   migration. Supergroups are the only shared chat kind exposed by the HTTP server.
 - Media other than photos and documents, albums, stickers and sticker sets, polls, dice, locations,
   venues, contacts, games, checklists, rich messages, ephemeral messages, drafts and stories.
-- Reactions, pins, chat metadata and photos, invite links, join requests, member restrictions, and
-  promotion through the Bot API. Tests can promote supergroup members through the emulation API.
+- Reactions, pins, chat metadata and photos, `getChat`, invite links, join requests, member
+  restrictions, and promotion through the Bot API. Tests can promote supergroup members through the
+  emulation API.
 - Payments, invoices, shipping, Telegram Stars, gifts, paid broadcasts and paid media.
 - Business connections, managed bots, Mini Apps, login authorization, Passport and boosts.
 - Most bot profile/settings methods, including descriptions, menu buttons and default administrator
-  rights; `getChat`, `getUserProfilePhotos`, `close` and `logOut` are also absent.
+  rights, plus `getUserProfilePhotos`.
 
-Cross-cutting differences include in-memory state, no automatic update expiry or flood limits, and
-stricter request parsing. Consult the individual pages before relying on production timing, upload
-limits, access rules, or exact error precedence.
+### Intentional exclusions
+
+`close` and `logOut` are intentionally unsupported:
+[session teardown](sessions-and-requests.md#intentional-deviations) is sufficient for emulator
+lifecycle control.
+
+Other intentional choices include
+[in-memory sessions and strict request validation](sessions-and-requests.md#intentional-deviations),
+[retaining unconfirmed updates](updates.md#intentional-deviations), and omitting production rate
+thresholds. The feature pages explain their testing rationale and distinguish them from missing
+functionality such as [configurable rate-limit responses](sessions-and-requests.md#real-gaps).
 
 ## Comparison baseline and evidence
 

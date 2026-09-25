@@ -21,32 +21,65 @@ following [`WebhookActor::handle`][webhook-response]. A failed or unimplemented 
 the delivered update pending again. This supports framework webhook replies, including those used by
 grammY and Telegraf.
 
-## Gaps and deviations
+## Intentional deviations
 
-| Concern                           | Emulator                                                                | Official C++ server                                                                                                                    |
-| --------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| URL/network restrictions          | HTTP or HTTPS on any port, including localhost                          | Cloud mode requires HTTPS on ports 80, 88, 443 or 8443 and disallows reserved/non-IPv4 addresses; `--local` relaxes these restrictions |
-| Parallel delivery                 | One update at a time per bot; one failing update blocks later updates   | Multiple connections and separate queues allow unrelated updates to progress                                                           |
-| `max_connections`                 | Default 40; clamped to 1–100 and reported, without changing concurrency | Governs concurrency; local mode allows up to 100,000                                                                                   |
-| Retry delays                      | Immediately, then 2, 4, 8, … seconds, capped at 60                      | Similar doubling, with a randomized cap between 60 and 120 seconds and support for `Retry-After`                                       |
-| Persistent delivery failure       | Retries until deletion, replacement or session end                      | Updates expire; sustained HTTP 410 responses can cause the webhook to be dropped                                                       |
-| Timeout                           | 60 seconds for the whole attempt                                        | 60-second connection read inactivity timeout                                                                                           |
-| Registration                      | Validates URL/token syntax and returns without verifying connectivity   | Resolves and verifies the webhook connection during setup                                                                              |
-| Invalid replacement               | Leaves the existing webhook and queue intact                            | Some URL/token validation happens after removing the previous webhook and dropping updates                                             |
-| 2xx with unfinished response body | Confirms even if reading the reply body later fails or times out        | HTTP response parsing completes before the response is delivered to the webhook actor                                                  |
+- **Local webhook servers.** HTTP and HTTPS are accepted on arbitrary ports, including localhost, so
+  tests can use local servers. The official cloud service requires HTTPS on ports 80, 88, 443 or
+  8443 and disallows reserved/non-IPv4 addresses; its `--local` mode relaxes these restrictions. See
+  [upstream setup and address checks][webhook-network].
+- **Total attempt deadline.** Each delivery attempt has a 60-second total deadline. Telegram uses a
+  60-second connection read inactivity timeout, which can allow a longer attempt while data keeps
+  arriving. The simpler deadline is retained because matching that distinction has no demonstrated
+  testing value yet. See [TDLib's HTTP connection implementation][http-connection].
+- **Disposable configuration and retained updates.** Webhook configuration ends with the session and
+  is not persisted across process restarts, keeping tests isolated. Unconfirmed updates do not
+  expire, preserving events for test assertions. See
+  [sessions](sessions-and-requests.md#intentional-deviations) and
+  [update queues](updates.md#intentional-deviations).
+- **No production rate thresholds.** Repeated `setWebhook` calls are not automatically throttled.
+  Tests should control rate-limit scenarios explicitly; configurable 429 responses remain a
+  [real gap](sessions-and-requests.md#real-gaps). Upstream throttles registration in
+  [`Client::process_set_webhook_query`][webhook-throttle].
+- **Registration before server startup.** `setWebhook` validates URL/token syntax and returns
+  without verifying DNS or connectivity, allowing tests to register before starting their webhook
+  server. Upstream [resolves and verifies the connection during setup][webhook-network]. A
+  successful emulated registration therefore does not establish that Telegram's cloud service could
+  connect to the URL.
+- **Atomic rejection of invalid replacements.** A rejected webhook configuration leaves the existing
+  registration and queued updates intact, preventing invalid test setup from discarding state. In
+  [`Client::do_set_webhook`][set-webhook], some URL/token validation happens after removing the
+  previous webhook and dropping updates.
+- **No custom certificate uploads.** Local HTTP or trusted TLS is sufficient for webhook tests, so
+  `setWebhook` does not accept custom certificates and `getWebhookInfo` always reports
+  `has_custom_certificate: false`. Upstream accepts certificate uploads in
+  [`Client::do_set_webhook`][set-webhook].
 
-These comparisons follow [`WebhookActor` setup and address checks][webhook-network],
-[queue selection][webhook-queues], [retry calculation][webhook-retry],
-[response handling][webhook-response], [`Client::get_webhook_max_connections`][max-connections],
-[`Client::do_set_webhook`][set-webhook], and TDLib's
-[HTTP connection implementation][http-connection]. Thus a successful emulated `setWebhook` does not
-establish that Telegram's cloud service could connect to the URL.
+There is no Telegram synchronization error state because sessions have no Telegram connection.
 
-`ip_address` and custom certificate uploads are unsupported. `getWebhookInfo` consequently omits
-`ip_address`, always reports `has_custom_certificate: false`, and has no Telegram synchronization
-error state. Configuration is not persisted across process restarts. Rate limiting of repeated
-`setWebhook` calls is also absent; upstream applies it in
-[`Client::process_set_webhook_query`][webhook-throttle].
+## Real gaps
+
+- **Concurrent delivery.** Only one update is delivered at a time per bot, so a failing update
+  blocks unrelated chats. `max_connections` defaults to 40, is clamped to 1–100 and is reported, but
+  has no effect on concurrency. Tests need concurrent delivery across chats that honors this
+  setting. Upstream uses [multiple connections and separate queues][webhook-queues]; its
+  [`max_connections` limit][max-connections] rises to 100,000 in local mode.
+- **Retry jitter and `Retry-After`.** Retries happen immediately, then after 2, 4, 8, … seconds,
+  capped at a fixed 60 seconds. The emulator neither randomizes the cap nor honors `Retry-After`
+  response headers. Both behaviors are missing for webhook retry tests: upstream uses a randomized
+  cap between 60 and 120 seconds and supports the header. See [retry calculation][webhook-retry] and
+  [response handling][webhook-response].
+- **Removal after persistent HTTP 410.** Failed deliveries keep retrying until deletion, replacement
+  or session end. Sustained HTTP 410 responses should be able to remove the webhook registration, as
+  in [upstream response handling][webhook-response]. This is separate from the intentional retention
+  of unconfirmed updates.
+- **Complete response before confirmation.** A 2xx response confirms delivery even if reading its
+  body later fails or times out. Confirmation should require a complete response so tests can
+  exercise incomplete deliveries. Upstream completes HTTP response parsing before delivering the
+  response to the webhook actor. See TDLib's [HTTP connection implementation][http-connection].
+- **Fixed IP addresses and address reporting.** `setWebhook` does not accept `ip_address`, and
+  `getWebhookInfo` omits the resolved address. Tests cannot configure a fixed webhook IP or inspect
+  address resolution. Upstream accepts the option in [`Client::do_set_webhook`][set-webhook] and
+  uses it during [connection setup][webhook-network].
 
 ## Local evidence
 

@@ -30,28 +30,36 @@ poll with a conflict, and polling while a webhook is active also fails with `409
 releases waiting polls without updates. Together with `getMe` and `deleteWebhook`, these methods
 support grammY's `bot.start()` and `bot.stop()` lifecycle.
 
-## Gaps and deviations
+## Intentional deviations
 
-- **No update expiry.** Updates remain pending until confirmed, dropped, or the session ends.
-  Upstream gives message updates a remaining lifetime based on their message/edit date plus one day;
-  `TQueue` removes expired events. Some other update types have shorter lifetimes, so "all updates
-  live for 24 hours" would also be inaccurate. See [`Client::add_message_update`][message-expiry]
-  and [`TQueue` expiry handling][queue-expiry].
+- **No update expiry.** Updates remain pending until confirmed, dropped, or the session ends. Tests
+  retain every unconfirmed event for inspection, without elapsed time removing evidence. Upstream
+  gives message updates a remaining lifetime based on their message/edit date plus one day; `TQueue`
+  removes expired events. Some other update types have shorter lifetimes, so "all updates live for
+  24 hours" would also be inaccurate. See [`Client::add_message_update`][message-expiry] and
+  [`TQueue` expiry handling][queue-expiry].
 - **Predictable IDs.** Each bot starts at `update_id: 1` and increments. Upstream's
   [`TQueue::push`][queue-push] can initialize a queue with a randomized ID. Do not hard-code the
-  emulator's starting value in production bot logic.
+  emulator's starting value in production bot logic. Predictable sequences simplify test fixtures
+  and assertions.
 - **No polling throttling.** The emulator honors an immediate poll as immediate. Upstream's
   [`process_get_updates_query`][poll-throttle] can increase repeated short polls to a three-second
   wait and reduce the limit to one for rapid requests with the same offset. Its conflict responses
-  also have [timing controls][poll-conflict].
-- **No additional update families.** Channel posts, reactions, polls, join requests, business,
-  payment, boost and other unsupported features cannot be exercised by subscribing to their names.
+  also have [timing controls][poll-conflict]. Omitting this production pacing keeps tests fast.
 - **No durable delivery queue.** Process restarts lose pending updates and settings. Upstream uses
   `TQueue` with persistence; the emulator has no recovery or replay facility across sessions.
+  Disposable sessions intentionally prevent state from leaking between tests.
 
-[Supergroup privacy filtering](supergroups.md) and [query expiration](keyboards-and-callbacks.md)
-have separate limitations. [Request validation](sessions-and-requests.md) is stricter for malformed
-subscriptions and out-of-range polling parameters.
+## Real gaps
+
+Channel posts, reactions, polls, join requests, business, payment, boost and other unsupported
+features cannot be exercised by subscribing to their names. Their coverage follows the corresponding
+[feature gaps](README.md#unimplemented-areas).
+
+[Supergroup privacy filtering](supergroups.md#real-gaps) has separate gaps.
+[Callback expiry](keyboards-and-callbacks.md#intentional-deviations) and
+[strict request validation](sessions-and-requests.md#strict-request-validation) are intentional
+differences.
 
 ## Local evidence
 

@@ -29,16 +29,21 @@ language and then the language-neutral list. The account's primary language subt
 `en` from `en-US`. This implements the private-chat order in Telegram's
 [command scope documentation][scope-order].
 
-## Gaps and deviations
-
-Supergroup chat scopes, administrator/member scopes with a usable target, username chat targets and
-group menu resolution are absent. Upstream accepts and validates those scopes through
-[`Client::get_bot_command_scope`][scope-parser] and [`BotCommandScope`][td-scope].
-
 Commands do not define message routing or restrict what users can type. Automatic `bot_command`
-entities are handled separately by [text formatting](text-formatting.md). Menu buttons, bot
-descriptions and default administrator rights are not implemented. BotFather settings can only be
-chosen from the supported options at bot creation.
+entities are handled separately by [text formatting](text-formatting.md).
+
+## Real gaps
+
+Supergroup chat scopes, administrator/member scopes with a usable target and group menu resolution
+are absent. Tests need to set these scopes and inspect effective group menus. Upstream accepts and
+validates those scopes through [`Client::get_bot_command_scope`][scope-parser] and
+[`BotCommandScope`][td-scope].
+
+Changing supported BotFather-style settings after bot creation is also a
+[real gap](sessions-and-requests.md#real-gaps).
+
+Username chat targets are [missing](sessions-and-requests.md#real-gaps). Menu buttons, bot
+descriptions and default administrator rights are also real gaps; these methods are not implemented.
 
 ## Local evidence
 

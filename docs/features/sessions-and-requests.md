@@ -30,10 +30,32 @@ virtual token gives `401 Unauthorized`; an unimplemented method gives
 `404 Not Found: method not found`. Requests under an absent session use the emulation API's plain
 `404`, not a Bot API envelope.
 
-## Validation deviations
+## Intentional deviations
 
-The emulator deliberately rejects several requests the C++ implementation reads leniently. This
-helps expose accidental input in tests but can also reject valid Telegram requests.
+- **Virtual identities and no Telegram connection.** Accounts and bot tokens belong to the test
+  session. Tests must run independently of Telegram, without real account login or remote service
+  availability.
+- **Disposable in-memory state.** Session data is not persisted across restarts. Fresh, disposable
+  sessions keep tests isolated and prevent state from leaking between runs.
+- **Ordinary time and fresh fixtures.** The emulation API intentionally has no clock-advance or
+  snapshot/restore facility. Ordinary time and fresh fixtures are sufficient for the intended tests.
+- **Session lifecycle control.** `close` and `logOut` are intentionally unsupported. Session
+  teardown is sufficient for emulator lifecycle control.
+- **Strict request fields and types.** Unknown parameters and nested fields, integer parameters with
+  trailing text, unrecognized boolean spellings, and wrongly typed nested JSON fields are rejected.
+  These checks expose accidental or unsupported input and malformed values in tests, even when
+  Telegram would ignore or coerce them. The comparison below describes the parsing differences.
+- **No production rate thresholds.** Telegram's traffic limits are not reproduced automatically.
+  Rate-limit scenarios should be controlled by the test, so bot developers can exercise error
+  handling without generating production-scale traffic or depending on Telegram's limit figures.
+- **No external link-preview fetching.** Tests should not depend on fetching third-party websites to
+  generate previews. Simulating the returned preview metadata is a separate requirement.
+
+### Strict request validation
+
+The emulator deliberately rejects several requests the C++ implementation reads leniently. Rejecting
+malformed bodies, subscriptions and out-of-range polling options exposes mistakes that Telegram's
+fallbacks or clamping could hide. This strictness can also reject requests Telegram accepts.
 
 | Input                                                        | Emulator                                                                       | Official implementation                                                                  |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
@@ -51,30 +73,57 @@ The corresponding upstream paths are [`HttpReader::read_next`][http-reader],
 [`Client::process_get_updates_query`][polling]. This does not imply that all malformed requests are
 accepted upstream; low-level HTTP errors and size limits can still fail there.
 
-Only numeric chat IDs work. The official server also resolves username targets in
-[`Client::check_chat`][check-chat]; the emulator exposes no public supergroup/channel usernames.
-Unsupported options such as `business_connection_id`, `message_thread_id`,
-`direct_messages_topic_id`, message effects, ephemeral parameters and `allow_paid_broadcast` are
-rejected rather than simulated.
-
 ## Accepted options without their Telegram effects
 
-| Option or method                                          | Emulator behavior                                                                 |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `disable_notification`                                    | Validated; notifications are not modeled                                          |
-| `link_preview_options`, `disable_web_page_preview`        | Validated; no preview is fetched or returned                                      |
-| `sendChatAction`                                          | Checks the action and chat access, returns true; no typing/upload state is stored |
-| `disable_content_type_detection`                          | Validated; documents always remain documents                                      |
-| Webhook `max_connections`                                 | Clamped and reported; delivery remains serial                                     |
-| Inline `cache_time`, `is_personal`; callback `cache_time` | Recorded for inspection; answers are not reused from a cache                      |
-| Ban `until_date`                                          | Normalized and reported; no automatic unban                                       |
-| Ban `revoke_messages`                                     | Validated; no separate effect in the supported supergroups                        |
+| Option or method                                          | Emulator behavior                               | Classification and details                                                                      |
+| --------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `disable_notification`                                    | Validated; no notification state                | [Real gap](#real-gaps)                                                                          |
+| `link_preview_options`, `disable_web_page_preview`        | Validated; no preview or returned options       | Fetching intentionally omitted; [metadata gap](#real-gaps)                                      |
+| `sendChatAction`                                          | Validates action/access; no typing/upload state | [Real gap](#real-gaps)                                                                          |
+| `disable_content_type_detection`                          | Documents always remain documents               | [Real gap](media-and-files.md#real-gaps)                                                        |
+| Webhook `max_connections`                                 | Clamped and reported; delivery remains serial   | [Real gap](webhooks.md#real-gaps)                                                               |
+| Inline `cache_time`, `is_personal`; callback `cache_time` | Recorded; no cache reuse                        | Real gaps: [inline](inline-mode.md#real-gaps), [callback](keyboards-and-callbacks.md#real-gaps) |
+| Ban `until_date`                                          | Normalized and reported; no automatic unban     | [Intentional](supergroups.md#intentional-deviations)                                            |
+| Ban `revoke_messages`                                     | Validated; no separate effect in supergroups    | [Upstream evidence limit](supergroups.md#administrator-operations)                              |
 
-The linked feature pages describe these differences in context. Telegram's flood control, `429`
-responses and `parameters.retry_after` are not simulated. The official server has explicit flood
-control and retry error handling in [`Client::fail_query_with_error`][api-errors] and
-[`Client::fail_query_flood_limit_exceeded`][flood-control]. Tests that pass here therefore do not
-establish production throughput limits.
+The linked feature pages describe these differences in context.
+
+## Real gaps
+
+**Public usernames and chat targets.** Only numeric chat IDs work; public supergroup/channel
+usernames and username targets are missing. The official server resolves username targets in
+[`Client::check_chat`][check-chat].
+
+**Additional feature parameters.** Options for unimplemented features, including
+`business_connection_id`, `message_thread_id`, `direct_messages_topic_id`, ephemeral parameters and
+`allow_paid_broadcast`, are rejected. These belong to the
+[broader feature gaps](README.md#unimplemented-areas). [`message_effect_id`](messages.md#real-gaps)
+is also missing.
+
+**Mutable bot settings.** Supported BotFather-style settings can only be chosen at bot creation.
+Tests need to change these settings during a session.
+
+**Individual profile management.** The emulation API has no individual bot/account profile read,
+update or deletion operations. Tests currently rely on creation responses and session teardown;
+managing individual profiles is missing.
+
+**Observable chat actions.** `sendChatAction` validates the action and chat access but stores no
+typing or upload state. Tests need to inspect that state.
+
+**Observable notification behavior.** `disable_notification` is accepted and validated, but tests
+cannot inspect its effect on notification state. The emulator needs to make that behavior
+observable.
+
+**Simulated link-preview metadata.** Returned messages omit `link_preview_options`. Tests need a
+simulated representation of that object while preview fetching remains intentionally disabled.
+
+**Configurable rate-limit responses.** There is no test configuration that makes selected Bot API
+calls return `429` with `parameters.retry_after`. Bot developers need this control to test
+rate-limit handling. The intended mechanism is explicit test configuration; reproducing Telegram's
+production rate thresholds is intentionally out of scope.
+
+The official server's error handling is in [`Client::fail_query_with_error`][api-errors] and
+[`Client::fail_query_flood_limit_exceeded`][flood-control].
 
 ## Local evidence
 

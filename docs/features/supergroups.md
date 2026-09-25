@@ -31,14 +31,9 @@ message goes only to that recipient among privacy-enabled bots. A reply to bot A
 commands bot B therefore goes to A. Without an explicit recipient, a mention or an unqualified
 leading command can cause delivery.
 
-Two limits matter when testing multiple bots:
-
-- The emulator sends unqualified commands to every privacy-enabled bot. Telegram's
-  [Bot FAQ][privacy-faq] limits them to the bot that last sent a message to the group.
-- Mention matching may deliver a message to several bots. The FAQ describes at most one
-  privacy-enabled recipient and gives replies highest priority, but does not specify every
-  tie-break. Ranking `via_bot` before an addressed command is an emulator rule; source inspection of
-  the public Bot API/TDLib clients does not prove the remote server uses that ordering.
+Unqualified command routing and multiple-recipient mention routing are [real gaps](#real-gaps).
+Ranking `via_bot` before an addressed command is an
+[intentional routing rule](#intentional-deviations).
 
 Changing subscriptions does not change which bot a message is addressed to. This prevents an
 unsubscribed recipient from redirecting a reply to another privacy-enabled bot.
@@ -71,26 +66,75 @@ the pinned official [response callback][administrator-list] does. Administrator 
 `chat_member` receive changes to other members, including additions, removals, promotions,
 demotions, bans and unbans.
 
-## Gaps and deviations
+## Intentional deviations
 
-- **Bans never expire automatically.** `until_date` is normalized using the less-than-30-seconds /
-  more-than-366-days permanent-ban rule, but remains in effect after its date passes. TDLib also
-  normalizes the date and later clears elapsed restrictions in
-  [`DialogParticipantStatus::update_restrictions`][ban-expiry].
-- **The owner cannot leave.** TDLib's [creator status transitions][owner-leave] support an owner who
-  is no longer a member; the emulator requires the owner to remain a member.
-- Other stored rights have no corresponding enforcement. There is no `restrictChatMember`,
-  `promoteChatMember` through the Bot API, default chat permissions, anonymous administration,
-  custom administrator titles or delegated administrator hierarchy.
-- No invite links, join requests, self-joining, public usernames, topics, slow mode, protected-chat
-  setting, automatic message deletion or chat migration. Only membership service messages are
-  produced; other Telegram service message kinds are absent.
-- Reply keyboards/forced replies and supergroup command-menu resolution are unsupported. Basic
-  groups and channels have internal representations but no usable HTTP messaging workflow.
+**No automatic message deletion.** Message fixtures remain available until explicitly deleted or the
+session ends, as described under [messages](messages.md#intentional-deviations).
 
-The emulator's complete in-memory membership view also does not model Telegram's hidden member lists
-or remote access/cache restrictions. Passing a membership query here does not establish all
+**Documented routing precedence.** The emulator intentionally prioritizes `via_bot` over a command
+addressed to another bot, giving tests a deterministic rule. Public Bot API/TDLib source inspection
+does not establish Telegram's ordering, so this is a deliberate emulator contract rather than a
+confirmed difference from Telegram.
+
+**Explicit ban removal.** Membership changes remain under explicit test control. `until_date` is
+normalized using the less-than-30-seconds / more-than-366-days permanent-ban rule, but a ban remains
+in effect after its date passes. TDLib also normalizes the date and later clears elapsed
+restrictions in [`DialogParticipantStatus::update_restrictions`][ban-expiry].
+
+**An owner remains in the chat.** The owner cannot leave, retaining a member who can administer test
+fixtures. TDLib's [creator status transitions][owner-leave] support an owner who is no longer a
+member.
+
+**No slow-mode pacing.** Slow mode is unsupported because tests should not wait for production
+message pacing.
+
+**Complete membership view.** Within the supported chat-access checks, membership queries use the
+complete session state so tests have a complete membership view. Hidden member lists and Telegram's
+remote access/cache restrictions are not modeled. A successful emulated query does not establish all
 production read permissions.
+
+## Real gaps
+
+- **Unqualified command routing.** The emulator sends unqualified commands to every privacy-enabled
+  bot. Telegram's [Bot FAQ][privacy-faq] limits them to the bot that last sent a message to the
+  group. Tests of multiple bots need that recipient selection.
+- **Single recipient for mentions.** Mention matching can deliver one message to several
+  privacy-enabled bots. Telegram's [Bot FAQ][privacy-faq] describes at most one such recipient and
+  gives replies highest priority. Tests need single-recipient routing; the FAQ does not specify
+  every tie-break, so the exact selection among competing mentions requires further verification.
+
+- **Administrator rights enforcement.** Rights other than `can_delete_messages` and
+  `can_restrict_members` are stored without corresponding enforcement. Tests need their behavioral
+  effects as the associated features are supported.
+
+- **Member restrictions and default permissions.** `restrictChatMember` and default chat permissions
+  are absent. Tests cannot apply partial restrictions to members.
+- **Bot-driven promotion and demotion.** `promoteChatMember` is not implemented. Only the owner can
+  change administrators through the emulation API.
+- **Anonymous administrators.** Anonymous administration and its message attribution are absent.
+- **Administrator titles.** Custom titles cannot be set or inspected.
+- **Administrator delegation.** The emulator has no delegated administrator hierarchy for deciding
+  who can edit another administrator's status.
+- **Invitation and joining workflows.** Invite links, join requests and account self-joining are
+  absent; additions require the owner.
+- **Chat-wide content protection.** Only individual messages can be protected. A chat-wide setting
+  and its effects are missing.
+- **Additional service messages.** Only membership service messages are produced. Other service
+  events, such as title changes or pins, need corresponding messages as their features are
+  supported.
+
+- **Reply interfaces and command menus.** Supergroup reply keyboards and forced replies are
+  [missing](keyboards-and-callbacks.md#real-gaps), as are
+  [group command scopes and menu inspection](command-menus.md#real-gaps).
+
+- **Basic groups and channels.** Internal representations exist, but there is no usable HTTP
+  messaging workflow for these chat kinds. See the
+  [feature inventory](README.md#unimplemented-areas).
+
+- **Public usernames.** Public chat usernames and username targets are
+  [missing](sessions-and-requests.md#real-gaps).
+- **Topics.** Forum topics and channel direct-message topics are unsupported.
+- **Chat migration.** Basic-group-to-supergroup migration and its API effects are unsupported.
 
 ## Local evidence
 

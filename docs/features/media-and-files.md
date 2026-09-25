@@ -22,7 +22,9 @@ photo, fails. `getFile` returns a `file_path`; download the bytes at
 remains valid for the session. Tests can bypass bot downloads with
 `session.downloadFile(file_unique_id)`; that is an emulation API convenience, not a Telegram API.
 
-## Photo and document processing differences
+## Intentional deviations
+
+### Lightweight photo validation and unchanged fixture bytes
 
 The emulator reads image headers for JPEG, PNG, GIF, WebP and BMP. It checks that width plus height
 does not exceed 10,000 and that the aspect ratio does not exceed 20. Unrecognized image content
@@ -30,18 +32,52 @@ produces `IMAGE_PROCESS_FAILED`; rejected dimensions produce `PHOTO_INVALID_DIME
 
 It keeps the original bytes, format and one photo size. It does not fully decode the image,
 recompress it to JPEG, generate thumbnails or produce multiple sizes. A header-valid but damaged
-image may therefore pass. TDLib's [`Photo` implementation][photos] consumes server-provided sizes
-and sends uploads to Telegram; the actual server image processor is outside these open-source
-repositories. The comparison establishes the missing processing pipeline, not an exhaustive list of
-formats or exact transformations Telegram will apply.
+image may therefore pass. Lightweight validation is sufficient for the intended tests, and keeping
+fixture bytes unchanged avoids a media-processing pipeline.
+
+TDLib's [`Photo` implementation][photos] consumes server-provided sizes and sends uploads to
+Telegram; the actual server image processor is outside these open-source repositories. The
+comparison establishes the missing processing pipeline, not an exhaustive list of formats or exact
+transformations Telegram will apply.
+
+### No generated document previews
+
+Document fixtures are kept without a preview-generation pipeline. Automatically generating previews
+is intentionally omitted; accepting [uploaded thumbnails](#file-limits-and-sources) is a separate
+real gap.
+
+### Opaque session file identifiers
+
+`file_id` and `file_unique_id` are opaque emulator identifiers. Tests should treat them as session
+values; they do not use TDLib's file-ID encoding or provide durable Telegram identity across
+sessions. This also follows the intentional use of
+[disposable session state](sessions-and-requests.md#intentional-deviations).
+
+### Independent uploads
+
+Each explicit upload creates an independent test fixture with a new stored file and unique ID, even
+when its bytes match an earlier upload. Only reuse, forwarding and copying preserve the stored
+identity. Upload deduplication is intentionally absent.
+
+### Stable file references
+
+File references and download paths remain valid throughout a session without expiry or refresh.
+Stable references keep fixtures reusable throughout each test session. File-reference expiry and
+long-lived Telegram storage are outside this model.
+
+## Real gaps
+
+### Document classification
 
 Documents always remain documents, including GIFs, audio and video uploads.
 `disable_content_type_detection` is accepted but has no effect. Upstream chooses between document
 file types based on that flag in [`get_input_message_content`][document-input], and
 [`DocumentsManager`][documents] classifies returned media using its attributes. The emulator does
-not inspect document content, generate previews, or reproduce that classification.
+not inspect document content or reproduce that classification.
 
-## Limits and missing file sources
+Tests need to exercise media classification and the flag's effect.
+
+### File limits and sources
 
 | Concern                            | Emulator                                         | Upstream comparison                                                                            |
 | ---------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
@@ -50,7 +86,6 @@ not inspect document content, generate previews, or reproduce that classificatio
 | HTTP URL file sources              | Rejected                                         | `get_input_file` and TDLib support remote sources                                              |
 | Local filesystem paths / `file://` | Unsupported                                      | Official `--local` mode can use local paths                                                    |
 | Thumbnails                         | Unsupported                                      | Official document input reads thumbnail uploads                                                |
-| File identity and lifetime         | Random opaque IDs, held in memory per session    | No compatible TDLib file-ID encoding or durable Telegram identity                              |
 
 Download limits are explicit in [`Client` file handling][download-limit]; upload/path handling is in
 [`Client::get_input_file`][file-input]. The public [photo][send-photo] and [document][send-document]
@@ -58,12 +93,15 @@ method references document cloud upload ceilings, and the official
 [local-mode description][local-mode] explains its relaxed limits. Passing a large upload to the
 emulator does not test those ceilings.
 
-A fresh upload always creates a fresh stored file and unique ID, even for identical bytes; only
-reuse/forward/copy preserves the stored identity. File references never expire or require refresh
-inside a session. Do not use this to test Telegram file-ID parsing, deduplication or long-lived
-storage.
+Tests need the local-mode download exemption, upload size validation, URL and filesystem inputs, and
+inspectable uploaded thumbnails. Uploaded thumbnail support is separate from the intentionally
+absent photo transformation pipeline.
 
-Other media types and `sendMediaGroup`/`editMessageMedia` are not implemented.
+### Additional media types and methods
+
+Media types other than photos/documents, albums, stickers and sticker sets are missing, including
+`sendMediaGroup`. Replacing media with `editMessageMedia` is also a
+[real gap](messages.md#real-gaps).
 
 ## Local evidence
 

@@ -22,9 +22,16 @@ such as `/start` are detected automatically, allowing bot framework command hand
 
 Normalized message text is limited to 4,096 Unicode code points; captions to 1,024. Bot API
 formatted input has an additional 32,768-byte UTF-8 limit before markup parsing, following
-[`Client::get_formatted_text`][formatted-input]. The emulator does not model Premium account limits.
+[`Client::get_formatted_text`][formatted-input].
 
-## Gaps and deviations
+## Intentional deviations
+
+- **One set of account limits.** Premium account differences are not modeled. Tests use the same
+  text and caption limits for every account.
+- **No external link-preview fetching.** Tests should not depend on third-party websites, so the
+  emulator does not fetch preview content. Simulated preview metadata remains a real gap.
+
+## Real gaps
 
 - **Automatic entity detection is partial.** The Bot API ignores explicitly supplied detected entity
   types such as `url`, `mention`, `hashtag`, `cashtag`, `email`, `phone_number`, `bank_card_number`
@@ -34,18 +41,25 @@ formatted input has an additional 32,768-byte UTF-8 limit before markup parsing,
   [`Client::get_text_entity_type`][entity-input] and [`TDLib::find_entities`][entity-detection].
 - **Date/time entities are unsupported.** Explicit `date_time` entities and markup that produces
   them are rejected. Upstream reads these entities in [the same entity parser][entity-input].
-- **No link previews.** Preview options are validated without fetching anything, and output messages
-  omit `link_preview_options`. Upstream passes these options into the message content via
+- **Simulated link-preview metadata.** Returned messages omit `link_preview_options`; tests need a
+  simulated representation of that object. Upstream passes these options into message content via
   [`Client::get_input_message_text`][input-text].
-- **Identity and emoji checks are limited.** A text mention may reference any known account or bot
-  in the session; the emulator does not model Telegram's access hashes or user privacy. Custom emoji
-  IDs are syntactically validated without fetching emoji or verifying the bot's eligibility to use
-  them. TDLib resolves mentioned users in [`get_message_entities`][message-entities]; remote
-  authorization and emoji availability are not established by the local parser.
-- **Parsing is reimplemented.** TDLib is not linked into the emulator. The
-  [markup fixtures](../../tests/fixtures/tdlib_markup_cases.ts) and normalization tests provide
-  regression coverage, not proof that every input has the same output upstream. Nested JSON fields
-  also follow the emulator's [stricter validation](sessions-and-requests.md#validation-deviations).
+
+- **Mention access and privacy.** A text mention may reference any known account or bot in the
+  session. Simulated access and privacy restrictions are missing, so tests cannot exercise them.
+  TDLib resolves mentioned users in [`get_message_entities`][message-entities]; the exact remote
+  authorization rules are not established by that local parser.
+- **Custom emoji availability and eligibility.** Emoji IDs are only checked for valid syntax. Tests
+  need simulated emoji availability and bot eligibility checks. These checks must work within the
+  isolated session; the local upstream parser does not establish remote emoji availability.
+
+## Comparison limits
+
+TDLib is not linked into the emulator. The
+[markup fixtures](../../tests/fixtures/tdlib_markup_cases.ts) and normalization tests provide
+regression coverage, not proof that every input has the same output upstream. Nested JSON fields
+also follow the emulator's intentional
+[stricter validation](sessions-and-requests.md#strict-request-validation).
 
 ## Local evidence
 
