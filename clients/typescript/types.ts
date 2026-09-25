@@ -123,7 +123,7 @@ export interface AccountSendMessageInput<Target extends MessageTarget = MessageT
 
 export interface AccountSendPhotoInput<Target extends MessageTarget = MessageTarget> {
   readonly to: Target;
-  /** A JPEG, PNG, GIF, WebP, or BMP image. */
+  /** A JPEG, PNG, GIF, WebP, or BMP image of at most 10 × 1024 × 1024 bytes. */
   readonly photo: Uint8Array;
   /** Omitted or empty for no caption. */
   readonly caption?: string;

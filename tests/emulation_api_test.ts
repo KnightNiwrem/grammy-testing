@@ -5838,6 +5838,13 @@ Deno.test('sendPhoto and sendDocument upload files, reuse file IDs, and follow T
     { method: 'sendPhoto', parameters: { chat_id: chatId }, files: { photo: new File([], 'a') } },
     {
       method: 'sendPhoto',
+      parameters: { chat_id: chatId },
+      files: {
+        photo: new File([gifImage(1_280, 720), new Uint8Array(10 * 1024 * 1024)], 'big.gif'),
+      },
+    },
+    {
+      method: 'sendPhoto',
       parameters: { chat_id: chatId, photo: 'AgACAgIAAxkBAAIBdGZ' },
       files: {},
     },
@@ -5882,6 +5889,9 @@ Deno.test('sendPhoto and sendDocument upload files, reuse file IDs, and follow T
     'Bad Request: IMAGE_PROCESS_FAILED',
     'Bad Request: PHOTO_INVALID_DIMENSIONS',
     'Bad Request: file must be non-empty',
+    `Bad Request: file of size ${
+      gifImage(1_280, 720).length + 10 * 1024 * 1024
+    } bytes is too big for a photo; the maximum size is 10485760 bytes`,
     'Bad Request: wrong file identifier/HTTP URL specified',
     "Bad Request: can't use file of type Document as Photo",
     "Bad Request: can't use file of type Photo as Document",

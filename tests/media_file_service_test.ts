@@ -1,6 +1,6 @@
 import { FileRepository } from '../src/repositories/file.ts';
 import { MediaFileService } from '../src/services/media_file.ts';
-import { MAX_BOT_DOWNLOAD_FILE_BYTES } from '../src/types/stored_file.ts';
+import { MAX_BOT_DOWNLOAD_FILE_BYTES, MAX_PHOTO_UPLOAD_BYTES } from '../src/types/stored_file.ts';
 
 const FIRST_BOT_ID = 1;
 const SECOND_BOT_ID = 2;
@@ -32,6 +32,29 @@ Deno.test('MediaFileService checks photos as Telegram does', () => {
   }
   if (!mediaFiles.preparePhotoUpload(gifImage(2_000, 100)).prepared) {
     throw new Error('Expected a photo exactly 20 times as wide as it is tall to be accepted');
+  }
+});
+
+Deno.test('MediaFileService refuses photos larger than 10 MB before reading them', () => {
+  const { mediaFiles } = createMediaFileFixture();
+  const imageOfSize = (sizeBytes: number) => {
+    const content = new Uint8Array(sizeBytes);
+    content.set(gifImage(1280, 720));
+    return content;
+  };
+
+  if (!mediaFiles.preparePhotoUpload(imageOfSize(MAX_PHOTO_UPLOAD_BYTES)).prepared) {
+    throw new Error('Expected a photo of exactly 10 MB to be accepted');
+  }
+  // The size is checked before the content, so even an unreadable file is too big.
+  for (const content of [imageOfSize(MAX_PHOTO_UPLOAD_BYTES + 1), new Uint8Array(11_000_000)]) {
+    const preparation = mediaFiles.preparePhotoUpload(content);
+    if (
+      preparation.prepared || preparation.reason !== 'photo_too_big' ||
+      preparation.fileSizeBytes !== content.length
+    ) {
+      throw new Error(`Expected photo_too_big, received ${JSON.stringify(preparation)}`);
+    }
   }
 });
 

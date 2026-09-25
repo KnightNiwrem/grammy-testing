@@ -13,6 +13,10 @@ caption entities.
 Photos expose dimensions, `has_media_spoiler` when requested and `show_caption_above_media` for a
 caption above the photo. Documents expose their cleaned filename and a MIME type derived from its
 extension, falling back to `application/octet-stream` for unknown extensions. Empty uploads fail.
+Photo uploads larger than 10 × 1024 × 1024 bytes fail before the image is read, from bots and
+accounts alike, as TDLib's [`check_full_local_location`][photo-size-limit] refuses them; bots
+receive
+`Bad Request: file of size <size> bytes is too big for a photo; the maximum size is 10485760 bytes`.
 Captions can be edited with `editMessageCaption` or the account client.
 
 Each observer receives a different `file_id` for the same stored file. `file_unique_id` identifies
@@ -79,22 +83,21 @@ Tests need to exercise media classification and the flag's effect.
 
 ### File limits and sources
 
-| Concern                            | Emulator                                         | Upstream comparison                                                                            |
-| ---------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| Bot downloads                      | Rejects files larger than 20 × 1024 × 1024 bytes | C++ server enforces this cap outside local mode; local mode bypasses it                        |
-| Photo/document upload sizes        | No method-specific byte cap                      | Cloud API documents 10 MB photos and 50 MB documents; local mode permits uploads up to 2000 MB |
-| HTTP URL file sources              | Rejected                                         | `get_input_file` and TDLib support remote sources                                              |
-| Local filesystem paths / `file://` | Unsupported                                      | Official `--local` mode can use local paths                                                    |
-| Thumbnails                         | Unsupported                                      | Official document input reads thumbnail uploads                                                |
+| Concern                            | Emulator                                         | Upstream comparison                                                          |
+| ---------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Bot downloads                      | Rejects files larger than 20 × 1024 × 1024 bytes | C++ server enforces this cap outside local mode; local mode bypasses it      |
+| Document upload sizes              | No byte cap                                      | Server-side 50 MB cap, 2000 MB in local mode; its error is not in the source |
+| HTTP URL file sources              | Rejected                                         | `get_input_file` and TDLib support remote sources                            |
+| Local filesystem paths / `file://` | Unsupported                                      | Official `--local` mode can use local paths                                  |
+| Thumbnails                         | Unsupported                                      | Official document input reads thumbnail uploads                              |
 
 Download limits are explicit in [`Client` file handling][download-limit]; upload/path handling is in
-[`Client::get_input_file`][file-input]. The public [photo][send-photo] and [document][send-document]
-method references document cloud upload ceilings, and the official
-[local-mode description][local-mode] explains its relaxed limits. Passing a large upload to the
-emulator does not test those ceilings.
+[`Client::get_input_file`][file-input]. The public [document][send-document] method reference
+documents the cloud upload ceiling, and the official [local-mode description][local-mode] explains
+its relaxed limits. Passing a large document to the emulator does not test those ceilings.
 
-Tests need the local-mode download exemption, upload size validation, URL and filesystem inputs, and
-inspectable uploaded thumbnails. Uploaded thumbnail support is separate from the intentionally
+Tests need the local-mode download exemption, document size validation, URL and filesystem inputs,
+and inspectable uploaded thumbnails. Uploaded thumbnail support is separate from the intentionally
 absent photo transformation pipeline.
 
 ### Additional media types and methods
@@ -111,11 +114,11 @@ Media types other than photos/documents, albums, stickers and sticker sets are m
 [media tests](../../tests/media_file_service_test.ts) and
 [image tests](../../tests/image_dimensions_test.ts).
 
+[photo-size-limit]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/files/FileLoaderUtils.cpp#L273-L340
 [photos]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/Photo.cpp#L45-L210
 [document-input]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageContent.cpp#L5201-L5213
 [documents]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DocumentsManager.cpp#L329-L605
 [download-limit]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L9365-L9390
 [file-input]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10758-L10839
-[send-photo]: https://core.telegram.org/bots/api#sendphoto
 [send-document]: https://core.telegram.org/bots/api#senddocument
 [local-mode]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/README.md#usage

@@ -3,6 +3,7 @@ import { readImageDimensions } from '../media/image_dimensions.ts';
 import {
   type DocumentUpload,
   MAX_BOT_DOWNLOAD_FILE_BYTES,
+  MAX_PHOTO_UPLOAD_BYTES,
   type PhotoImageFormat,
   type PhotoUpload,
   type StoredFile,
@@ -29,12 +30,19 @@ const PHOTO_FILE_EXTENSIONS: Readonly<Record<PhotoImageFormat, string>> = {
   bmp: 'bmp',
 };
 
+/** An uploaded file is too large for a photo. */
+export interface PhotoTooBigFailure {
+  readonly reason: 'photo_too_big';
+  readonly fileSizeBytes: number;
+}
+
 export type PhotoUploadPreparation =
   | { readonly prepared: true; readonly upload: PhotoUpload }
   | {
     readonly prepared: false;
     readonly reason: 'file_empty' | 'image_invalid' | 'photo_dimensions_invalid';
-  };
+  }
+  | ({ readonly prepared: false } & PhotoTooBigFailure);
 
 export type DocumentUploadPreparation =
   | { readonly prepared: true; readonly upload: DocumentUpload }
@@ -81,11 +89,15 @@ export class MediaFileService {
   /**
    * Reads an uploaded image, which must be a JPEG, PNG, GIF, WebP, or BMP image, and checks its
    * dimensions as Telegram does for photos. Telegram also accepts other image formats, such as
-   * TIFF, which the emulator does not read.
+   * TIFF, which the emulator does not read. As TDLib's `check_full_local_location` does, the size
+   * is checked first, before Telegram's server reads the image.
    */
   preparePhotoUpload(content: Uint8Array<ArrayBuffer>): PhotoUploadPreparation {
     if (content.length === 0) {
       return { prepared: false, reason: 'file_empty' };
+    }
+    if (content.length > MAX_PHOTO_UPLOAD_BYTES) {
+      return { prepared: false, reason: 'photo_too_big', fileSizeBytes: content.length };
     }
     const dimensions = readImageDimensions(content);
     if (dimensions === undefined) {

@@ -8,6 +8,7 @@ import {
 import { MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH } from '../../../types/callback_query.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { InlineKeyboard } from '../../../types/inline_keyboard.ts';
+import { MAX_PHOTO_UPLOAD_BYTES } from '../../../types/stored_file.ts';
 import type { VirtualBotProfile } from '../../../types/virtual_bot.ts';
 import type { ChatAction } from '../../../types/virtual_chat.ts';
 import { fileDownloadResponse } from '../file_download.ts';
@@ -1450,6 +1451,12 @@ function sendMethodAnswer(result: SendResult | SendFailure): BotApiMethodAnswer 
       return botApiError(400, IMAGE_INVALID_DESCRIPTION);
     case 'photo_dimensions_invalid':
       return botApiError(400, PHOTO_DIMENSIONS_INVALID_DESCRIPTION);
+    case 'photo_too_big':
+      return botApiError(
+        400,
+        `Bad Request: file of size ${result.fileSizeBytes} bytes is too big for a photo; ` +
+          `the maximum size is ${MAX_PHOTO_UPLOAD_BYTES} bytes`,
+      );
     case 'file_id_invalid':
       return botApiError(400, FILE_ID_INVALID_DESCRIPTION);
     case 'file_type_mismatch':

@@ -9,6 +9,9 @@ export type StoredFileId = string;
 /** Telegram lets bots download files of at most this size with `getFile`. */
 export const MAX_BOT_DOWNLOAD_FILE_BYTES = 20 * 1024 * 1024;
 
+/** TDLib refuses to upload a larger file as a photo, for bots and user accounts alike. */
+export const MAX_PHOTO_UPLOAD_BYTES = 10 * 1024 * 1024;
+
 /** Image formats whose dimensions the emulator reads, which it accepts as photos. */
 export type PhotoImageFormat = 'jpeg' | 'png' | 'gif' | 'webp' | 'bmp';
 

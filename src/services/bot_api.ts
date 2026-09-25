@@ -57,6 +57,7 @@ import {
   type TextEntity,
 } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
+import type { PhotoTooBigFailure } from './media_file.ts';
 import type {
   DeleteWebhookOutcome,
   DeleteWebhookRequest,
@@ -252,6 +253,7 @@ export type SendResult =
       | { readonly reason: SendFailureReason }
       | TextInvalidFailure
       | FileTypeMismatchFailure
+      | PhotoTooBigFailure
     )
   );
 
@@ -1006,7 +1008,8 @@ interface MediaFiles {
     | {
       readonly prepared: false;
       readonly reason: 'file_empty' | 'image_invalid' | 'photo_dimensions_invalid';
-    };
+    }
+    | ({ readonly prepared: false } & PhotoTooBigFailure);
   prepareDocumentUpload(content: Uint8Array<ArrayBuffer>, fileName: string):
     | { readonly prepared: true; readonly upload: DocumentUpload }
     | { readonly prepared: false; readonly reason: 'file_empty' };
@@ -1969,9 +1972,15 @@ export class BotApiService {
       return { resolved: false, failure: fileIdFailure(file, 'photo') };
     }
     const preparation = this.#mediaFiles.preparePhotoUpload(input.content);
-    return preparation.prepared
-      ? { resolved: true, file: { kind: 'upload', upload: preparation.upload } }
-      : { resolved: false, failure: { reason: preparation.reason } };
+    if (preparation.prepared) {
+      return { resolved: true, file: { kind: 'upload', upload: preparation.upload } };
+    }
+    return {
+      resolved: false,
+      failure: preparation.reason === 'photo_too_big'
+        ? { reason: preparation.reason, fileSizeBytes: preparation.fileSizeBytes }
+        : { reason: preparation.reason },
+    };
   }
 
   /**
@@ -2925,6 +2934,7 @@ type FileResolution<File> =
     readonly resolved: false;
     readonly failure:
       | { readonly reason: 'file_empty' | 'image_invalid' | 'photo_dimensions_invalid' }
+      | PhotoTooBigFailure
       | { readonly reason: 'file_id_invalid' }
       | FileTypeMismatchFailure;
   };
