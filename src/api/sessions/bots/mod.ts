@@ -23,6 +23,8 @@ const createBotRequestSchema = z.strictObject({
   supports_inline_queries: z.boolean().optional(),
   /** Turns on inline feedback, so that the bot learns which inline query results are sent. */
   receives_chosen_inline_results: z.boolean().optional(),
+  /** Asks accounts to share their location with the bot's inline queries. */
+  requests_inline_location: z.boolean().optional(),
 });
 
 const queueRateLimitResponsesRequestSchema = z.strictObject({

@@ -5806,6 +5806,140 @@ Deno.test('repeated inline queries reuse the answer within its cache time', asyn
   }
 });
 
+Deno.test('accounts share their location with inline bots that request it', async () => {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const sessionPath = (await api.request('/sessions', { method: 'POST' })).headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const account = await createAccount(api, sessionPath, 'Ada');
+  const nearbyBot = await createBot(api, sessionPath, 'nearby_bot', {
+    supports_inline_queries: true,
+    receives_chosen_inline_results: true,
+    requests_inline_location: true,
+  });
+  const plainBot = await createBot(api, sessionPath, 'cats_bot', {
+    supports_inline_queries: true,
+  });
+  const readUpdates = createUpdateReader(api);
+  const sendQuery = (botId: number, location?: unknown) =>
+    api.request(
+      `${sessionPath}/accounts/${account.id}/inline-queries`,
+      jsonRequest('POST', {
+        bot_id: botId,
+        chat: { type: 'private', botId },
+        query: 'cafes',
+        ...(location === undefined ? {} : { location }),
+      }),
+    );
+
+  const queryResponse = await sendQuery(nearbyBot.bot.id, {
+    latitude: 51.50073,
+    longitude: -0.12463,
+    horizontal_accuracy: 12.3,
+  });
+  const { inline_query: inlineQuery } = await queryResponse.json() as {
+    inline_query: { id: string; location?: unknown };
+  };
+  const expectedLocation = { latitude: 51.50073, longitude: -0.12463, horizontal_accuracy: 13 };
+  const [queryUpdate] = await readUpdates(nearbyBot.botApiPath);
+  if (
+    queryResponse.status !== 201 ||
+    JSON.stringify(inlineQuery.location) !== JSON.stringify(expectedLocation) ||
+    JSON.stringify(queryUpdate?.inline_query) !== JSON.stringify({
+        id: inlineQuery.id,
+        from: account,
+        location: expectedLocation,
+        chat_type: 'sender',
+        query: 'cafes',
+        offset: '',
+      })
+  ) {
+    throw new Error(
+      `Expected the bot to receive the account's location, received ${JSON.stringify(queryUpdate)}`,
+    );
+  }
+
+  await callBotApi(api, `${nearbyBot.botApiPath}/answerInlineQuery`, {
+    inline_query_id: inlineQuery.id,
+    results: [{
+      type: 'article',
+      id: 'cafe-1',
+      title: 'Corner cafe',
+      input_message_content: { message_text: 'Corner cafe' },
+    }],
+  });
+  await api.request(
+    `${sessionPath}/accounts/${account.id}/inline-queries/${inlineQuery.id}/chosen-results`,
+    jsonRequest('POST', { result_id: 'cafe-1' }),
+  );
+  const [, chosenResultUpdate] = await readUpdates(nearbyBot.botApiPath);
+  if (
+    JSON.stringify(chosenResultUpdate?.chosen_inline_result) !== JSON.stringify({
+      from: account,
+      location: expectedLocation,
+      query: 'cafes',
+      result_id: 'cafe-1',
+    })
+  ) {
+    throw new Error(
+      `Expected the chosen result to carry the location, received ${
+        JSON.stringify(chosenResultUpdate)
+      }`,
+    );
+  }
+
+  // As TDLib keys a query's place in ten-thousandths of a degree, a nearby query reuses the
+  // answer, while one from elsewhere or without a location reaches the bot.
+  const statuses = [];
+  for (
+    const location of [
+      { latitude: 51.500739, longitude: -0.124631 },
+      { latitude: 51.5008, longitude: -0.12463 },
+      undefined,
+    ]
+  ) {
+    const response = await sendQuery(nearbyBot.bot.id, location);
+    statuses.push(
+      (await response.json() as { inline_query: { status: string } }).inline_query
+        .status,
+    );
+  }
+  if (
+    JSON.stringify(statuses) !==
+      JSON.stringify(['answered', 'awaiting_answer', 'awaiting_answer']) ||
+    (await readUpdates(nearbyBot.botApiPath)).length !== 2
+  ) {
+    throw new Error(`Expected the answer reused only at the same place, received ${statuses}`);
+  }
+
+  const unrequestedLocation = await sendQuery(plainBot.bot.id, { latitude: 0, longitude: 0 });
+  const invalidLocations: unknown[] = [
+    { latitude: 91, longitude: 0 },
+    { latitude: 0, longitude: -181 },
+    { latitude: 0, longitude: 0, horizontal_accuracy: 1501 },
+    { latitude: '51.5', longitude: 0 },
+    { latitude: 0 },
+  ];
+  const invalidStatuses = [];
+  for (const location of invalidLocations) {
+    invalidStatuses.push((await sendQuery(nearbyBot.bot.id, location)).status);
+  }
+  if (
+    unrequestedLocation.status !== 409 ||
+    invalidStatuses.some((status) => status !== 400)
+  ) {
+    throw new Error(
+      `Expected unrequested and invalid locations to be refused, received ${
+        JSON.stringify([unrequestedLocation.status, invalidStatuses])
+      }`,
+    );
+  }
+});
+
 Deno.test('answerInlineQuery and the inline query routes follow Telegram checks', async () => {
   const { api, sessionPath, createdBot: plainBot, createdAccount, sendText } =
     await createPrivateConversationFixture();
@@ -7229,6 +7363,7 @@ async function createBot(
     can_read_all_group_messages?: boolean;
     supports_inline_queries?: boolean;
     receives_chosen_inline_results?: boolean;
+    requests_inline_location?: boolean;
   } = {},
 ) {
   const response = await api.request(

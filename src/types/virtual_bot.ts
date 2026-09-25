@@ -11,4 +11,9 @@ export interface VirtualBot {
    * supports inline queries.
    */
   readonly receivesChosenInlineResults: boolean;
+  /**
+   * Whether accounts share their location with the bot's inline queries, as BotFather's inline
+   * location setting asks them to. It matters only for a bot that supports inline queries.
+   */
+  readonly requestsInlineLocation: boolean;
 }

@@ -9,6 +9,17 @@ Create a bot with `supports_inline_queries: true`. An account can send it an inl
 private chat with a bot or from a supergroup. The bot receives `inline_query` with the account,
 query, offset and appropriate `chat_type`, subject to its update subscription.
 
+### User locations
+
+A bot created with `requests_inline_location: true` stands in for BotFather's inline location
+setting. An account can then share a `location` with its queries, which the bot receives in
+`inline_query` and in the `chosen_inline_result` of a result sent from that query, as the official
+server's [`JsonInlineQuery`][inline-query-json] and `JsonChosenInlineResult` show TDLib's user
+location. As TDLib's `get_input_geo_point` sends it to Telegram, a horizontal accuracy is rounded up
+to whole meters, and 0 means unknown. Telegram's apps share a location only with bots that request
+it, so the emulator refuses a location for any other bot with `409`; coordinates outside ±90° and
+±180° or an accuracy above 1500 meters are refused with `400`.
+
 The bot answers with `answerInlineQuery`. Tests can inspect the answer and choose a result, sending
 it to the original chat as the account's message with `via_bot`. The inline bot need not be a member
 of the destination supergroup. Choices can be repeated while the account can still write there.
@@ -40,7 +51,9 @@ surrounding whitespace, and reuses the answer for the account that received it w
 not personal is also reused for other accounts, as the Bot API documents for Telegram's server
 cache. The server's cache key is not in the open-source code, so the emulator uses TDLib's. Reused
 answers expire with the original, and the bot cannot answer a query that received one. Bots that
-need a fresh answer every time answer with `cache_time: 0`.
+need a fresh answer every time answer with `cache_time: 0`. For a bot that requests locations,
+TDLib's key also includes a shared location's coordinates in whole ten-thousandths of a degree, so a
+query from elsewhere, or without a location, reaches the bot.
 
 ## Intentional deviations
 
@@ -76,9 +89,6 @@ TDLib-compatible encoding. Tests should treat them as opaque values.
   invoices and other content types do not. Compare the result dispatch in
   [`InlineQueriesManager::get_input_bot_inline_result`][results].
 
-- **User locations.** Inline queries cannot carry a simulated user location, preventing tests of
-  location-dependent inline behavior.
-
 - **Prepared messages and sharing.** Prepared inline messages and result-sharing flows are not
   implemented. Tests currently have to use the supported query-and-choice workflow.
 
@@ -104,5 +114,6 @@ remote expiry and repeated-answer rules were not verified through live calls.
 [edit-inline]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L23183-L23292
 [results]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L870-L1280
 [answer]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L696-L760
+[inline-query-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L5439-L5535
 [cache]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L1335-L1410
 [cache-expiry]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L2280-L2320

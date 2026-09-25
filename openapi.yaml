@@ -943,13 +943,18 @@ paths:
         bot, and `supergroup` for a supergroup. The bot answers asynchronously with
         answerInlineQuery; read the answer from the created inline query, and send one of its
         results to the chat with the query's chosen-results route. The emulator never expires
-        inline queries by time, and does not report user locations.
+        inline queries by time.
+
+        An account can share its location only with a bot created with
+        `requests_inline_location`, as Telegram's apps do; the bot receives it in the inline_query
+        update and in the chosen_inline_result update of a result sent from the query.
 
         A query that repeats one answered within the answer's `cache_time` is created already
         answered with the same answer, and the bot receives no update for it. A query repeats
-        another when it is sent to the same bot from the same kind of chat, with the same offset
-        and the same text apart from surrounding whitespace. A personal answer is reused only for
-        the account that received it.
+        another when it is sent to the same bot from the same kind of chat, with the same offset,
+        the same text apart from surrounding whitespace, and, as TDLib compares them, a location
+        with the same coordinates in whole ten-thousandths of a degree, or no location. A personal
+        answer is reused only for the account that received it.
       requestBody:
         required: true
         content:
@@ -971,7 +976,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/InlineQueryResponse'
         '400':
-          description: The request is invalid, such as a query longer than 256 characters.
+          description: >-
+            The request is invalid, such as a query longer than 256 characters or a location
+            outside the valid coordinates.
         '403':
           description: The account is not a member of the supergroup.
         '404':
@@ -979,7 +986,9 @@ paths:
             The session, account, inline bot, supergroup, or bot of the private chat does not
             exist.
         '409':
-          description: The bot was not created with inline mode turned on.
+          description: >-
+            The bot was not created with inline mode turned on, or the query shares a location
+            with a bot not created with `requests_inline_location`.
   /sessions/{sessionId}/accounts/{accountId}/inline-queries/{inlineQueryId}:
     description: One inline query sent by an account.
     parameters:
@@ -3233,6 +3242,12 @@ components:
             Turns on the bot's inline feedback, as BotFather does, so that it receives a
             `chosen_inline_result` update for each inline query result an account sends. It has
             effect only with inline mode.
+        requests_inline_location:
+          type: boolean
+          default: false
+          description: >-
+            Turns on the bot's inline location requests, as BotFather does, so that accounts can
+            share their location with its inline queries. It has effect only with inline mode.
     CreatedBot:
       type: object
       additionalProperties: false
@@ -4642,7 +4657,7 @@ components:
     BotApiInlineQuery:
       type: object
       additionalProperties: false
-      description: An inline query, in the field order Telegram uses. User locations are not supported.
+      description: An inline query, in the field order Telegram uses.
       required:
         - id
         - from
@@ -4656,6 +4671,11 @@ components:
         from:
           $ref: '#/components/schemas/Account'
           description: The account that sent the query.
+        location:
+          $ref: '#/components/schemas/Location'
+          description: >-
+            Where the account is, present only when it shared its location with a bot created with
+            `requests_inline_location`.
         chat_type:
           type: string
           enum:
@@ -4698,6 +4718,9 @@ components:
         from:
           $ref: '#/components/schemas/Account'
           description: The account that sent the result.
+        location:
+          $ref: '#/components/schemas/Location'
+          description: The location the account shared with the query, if any.
         inline_message_id:
           type: string
           description: Identifier of the sent message, present only when it has an inline keyboard.
@@ -4706,6 +4729,30 @@ components:
           description: The query of the answer that held the result.
         result_id:
           type: string
+    Location:
+      type: object
+      additionalProperties: false
+      description: A point on Earth, in the field order Telegram uses.
+      required:
+        - latitude
+        - longitude
+      properties:
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        horizontal_accuracy:
+          type: number
+          minimum: 0
+          maximum: 1500
+          description: >-
+            The radius of uncertainty in meters; omitted when unknown. As TDLib sends it to
+            Telegram, a shared accuracy shows rounded up to whole meters, and an accuracy of 0 means
+            unknown.
     CallbackQueryUpdate:
       type: object
       additionalProperties: false
@@ -6375,6 +6422,11 @@ components:
           default: ''
           description: >-
             The `next_offset` of an earlier answer, requesting more results; empty for the first.
+        location:
+          $ref: '#/components/schemas/Location'
+          description: >-
+            Where the account is, shared only with a bot created with `requests_inline_location`;
+            omitted to share no location.
     ChooseInlineQueryResultRequest:
       type: object
       additionalProperties: false
@@ -6408,6 +6460,9 @@ components:
           type: string
         offset:
           type: string
+        location:
+          $ref: '#/components/schemas/Location'
+          description: The location the account shared with the bot; omitted for none.
         status:
           type: string
           enum:

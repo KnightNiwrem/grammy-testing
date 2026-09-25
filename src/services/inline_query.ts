@@ -1,5 +1,6 @@
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import type { ChatMembership } from '../types/chat_membership.ts';
+import type { GeoLocation } from '../types/geo_location.ts';
 import {
   findInlineQueryResult,
   type InlineQuery,
@@ -41,12 +42,15 @@ export interface SendInlineQueryInput {
   readonly query: string;
   /** The `next_offset` of an earlier answer, or empty for the first results. */
   readonly offset: string;
+  /** Where the account is, for a bot that requests it; omitted to share no location. */
+  readonly userLocation?: GeoLocation;
 }
 
 export type SendInlineQueryFailureReason =
   | 'account_not_found'
   | 'bot_not_found'
   | 'inline_mode_disabled'
+  | 'inline_location_not_requested'
   | 'chat_not_found'
   | 'not_a_member';
 
@@ -267,7 +271,8 @@ export class InlineQueryService {
 
   /**
    * Sends an inline query from an account, typed in its private chat with a bot or in a supergroup
-   * it is a member of, to a bot with inline mode turned on, and publishes it for that bot.
+   * it is a member of, to a bot with inline mode turned on, and publishes it for that bot. The
+   * account may share its location only with a bot that requests it.
    *
    * A query answered within its cache time is not sent again: the new query receives the same
    * answer at once, and the bot learns nothing of it. TDLib's
@@ -286,6 +291,10 @@ export class InlineQueryService {
     if (!bot.profile.supports_inline_queries) {
       return { sent: false, reason: 'inline_mode_disabled' };
     }
+    // Telegram's apps share a location only with bots that request it.
+    if (input.userLocation !== undefined && !bot.requestsInlineLocation) {
+      return { sent: false, reason: 'inline_location_not_requested' };
+    }
     const chatFailure = this.#checkChatAccess(input.fromAccountId, input.chat);
     if (chatFailure !== undefined) {
       return { sent: false, reason: chatFailure };
@@ -297,6 +306,7 @@ export class InlineQueryService {
       chat: input.chat,
       query: input.query,
       offset: input.offset,
+      ...(input.userLocation === undefined ? {} : { userLocation: input.userLocation }),
     });
     const cachedState = this.#findCachedAnswer(inlineQuery);
     if (cachedState !== undefined) {

@@ -1,5 +1,6 @@
 import type { ButtonStyle } from './button_appearance.ts';
 import type { SupergroupAdministratorRight } from './chat_membership.ts';
+import type { GeoLocation } from './geo_location.ts';
 import type { VirtualAccountProfile } from './virtual_account.ts';
 import type { PlainTextEntityType } from './virtual_message.ts';
 
@@ -350,9 +351,32 @@ export type BotApiCallbackQuery =
   };
 
 /** An inline query, in the field order Telegram uses. User locations are not supported. */
+/** A location, in the field order of the official Bot API server's `JsonLocation`. */
+export interface BotApiLocation {
+  readonly latitude: number;
+  readonly longitude: number;
+  /** Omitted when unknown. */
+  readonly horizontal_accuracy?: number;
+}
+
+/** Shows a location as the official Bot API server's `JsonLocation` does. */
+export function toBotApiLocation(
+  { latitude, longitude, horizontalAccuracyMeters }: GeoLocation,
+): BotApiLocation {
+  return {
+    latitude,
+    longitude,
+    ...(horizontalAccuracyMeters === undefined
+      ? {}
+      : { horizontal_accuracy: horizontalAccuracyMeters }),
+  };
+}
+
 export interface BotApiInlineQuery {
   readonly id: string;
   readonly from: VirtualAccountProfile;
+  /** Present only when the account shared its location with a bot that requests it. */
+  readonly location?: BotApiLocation;
   /** `sender` for the private chat between the account and the inline bot itself. */
   readonly chat_type: 'sender' | 'private' | 'supergroup';
   readonly query: string;
@@ -362,6 +386,8 @@ export interface BotApiInlineQuery {
 /** An inline query result an account sent, in the field order Telegram uses. */
 export interface BotApiChosenInlineResult {
   readonly from: VirtualAccountProfile;
+  /** The location the account shared with the query, if any. */
+  readonly location?: BotApiLocation;
   /** Present only when the sent message has an inline keyboard. */
   readonly inline_message_id?: string;
   readonly query: string;

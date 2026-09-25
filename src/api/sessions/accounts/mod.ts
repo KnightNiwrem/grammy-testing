@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { basePath } from 'hono/route';
 import { z } from 'zod';
 
+import { toBotApiLocation } from '../../../types/bot_api.ts';
 import type { BotCommand } from '../../../types/bot_command.ts';
 import type { CallbackQuery } from '../../../types/callback_query.ts';
 import {
@@ -9,6 +10,7 @@ import {
   SUPERGROUP_ADMINISTRATOR_RIGHTS,
 } from '../../../types/chat_membership.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
+import { createGeoLocation, MAX_HORIZONTAL_ACCURACY_METERS } from '../../../types/geo_location.ts';
 import {
   type InlineQuery,
   type InlineQueryResult,
@@ -203,6 +205,14 @@ const sendInlineQueryRequestSchema = z.strictObject({
   query: z.string().default('').refine((query) => [...query].length <= MAX_INLINE_QUERY_LENGTH),
   /** The `next_offset` of an earlier answer, requesting more results; empty for the first. */
   offset: z.string().default(''),
+  /** Where the account is, shared with a bot that requests it. */
+  location: z.strictObject({
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    horizontal_accuracy: z.number().min(0).max(MAX_HORIZONTAL_ACCURACY_METERS).default(0),
+  }).transform(({ latitude, longitude, horizontal_accuracy }) =>
+    createGeoLocation(latitude, longitude, horizontal_accuracy)
+  ).optional(),
 });
 
 const chooseInlineQueryResultRequestSchema = z.strictObject({
@@ -1048,12 +1058,16 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       chat: parsedRequest.data.chat,
       query: parsedRequest.data.query,
       offset: parsedRequest.data.offset,
+      ...(parsedRequest.data.location === undefined
+        ? {}
+        : { userLocation: parsedRequest.data.location }),
     });
     if (!result.sent) {
       switch (result.reason) {
         case 'not_a_member':
           return context.body(null, 403);
         case 'inline_mode_disabled':
+        case 'inline_location_not_requested':
           return context.body(null, 409);
         default:
           return context.body(null, 404);
@@ -1401,13 +1415,16 @@ function viewChatMessageForAccount(
 }
 
 /** Shows an inline query to the account that sent it, with the bot's answer once given. */
-function presentInlineQueryForAccount({ id, botId, chat, query, offset, state }: InlineQuery) {
+function presentInlineQueryForAccount(
+  { id, botId, chat, query, offset, userLocation, state }: InlineQuery,
+) {
   return {
     id,
     bot_id: botId,
     chat,
     query,
     offset,
+    ...(userLocation === undefined ? {} : { location: toBotApiLocation(userLocation) }),
     status: state.status,
     answer: state.status !== 'answered' ? null : {
       results: state.answer.results.map(presentInlineQueryResultForAccount),

@@ -23,6 +23,7 @@
           "src/types/chat_domain_event.ts",
           "src/types/callback_query.ts",
           "src/types/inline_query.ts",
+          "src/types/geo_location.ts",
           "src/types/button_appearance.ts",
           "src/types/inline_keyboard.ts",
           "src/types/reply_interface.ts",

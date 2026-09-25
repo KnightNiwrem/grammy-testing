@@ -1,3 +1,4 @@
+import type { GeoLocation } from '../types/geo_location.ts';
 import type {
   InlineQuery,
   InlineQueryAnswer,
@@ -11,6 +12,7 @@ export interface AddInlineQueryInput {
   readonly chat: InlineQueryChat;
   readonly query: string;
   readonly offset: string;
+  readonly userLocation?: GeoLocation;
 }
 
 /** Stores inline queries and their answers under session-unique identifiers. */
@@ -26,6 +28,7 @@ export class InlineQueryRepository {
       chat: { ...input.chat },
       query: input.query,
       offset: input.offset,
+      ...(input.userLocation === undefined ? {} : { userLocation: input.userLocation }),
       state: { status: 'awaiting_answer' },
     };
     this.#inlineQueriesById.set(inlineQuery.id, inlineQuery);

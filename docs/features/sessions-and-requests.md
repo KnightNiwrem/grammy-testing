@@ -9,11 +9,11 @@ or [TypeScript client](../typescript-client.md). The response supplies `botApiRo
 token authenticates calls under `<botApiRoot>/bot<token>/<method>`. `getMe` returns its profile.
 
 Sessions isolate users, chats, messages, files, update queues and bot settings. Bot creation accepts
-`can_read_all_group_messages`, `supports_inline_queries` and `receives_chosen_inline_results`, all
-false by default. These stand in for selected BotFather settings. Account profiles can include a
-username and language code. Usernames are unique within a session, compared without case. Account
-creation also accepts `has_private_forwards`, false by default, which stands in for the
-["Forwarded messages" privacy setting](messages.md#forwarding-and-copying).
+`can_read_all_group_messages`, `supports_inline_queries`, `receives_chosen_inline_results` and
+`requests_inline_location`, all false by default. These stand in for selected BotFather settings.
+Account profiles can include a username and language code. Usernames are unique within a session,
+compared without case. Account creation also accepts `has_private_forwards`, false by default, which
+stands in for the ["Forwarded messages" privacy setting](messages.md#forwarding-and-copying).
 
 `DELETE /sessions/{sessionId}` or `session.end()` discards the session and stops webhook delivery
 and waiting long polls. State lives in memory and is lost on process restart. There is no account

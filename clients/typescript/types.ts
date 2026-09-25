@@ -22,6 +22,11 @@ export interface CreateVirtualBotInput {
    * result of its inline queries that an account sends. Defaults to `false`.
    */
   readonly receives_chosen_inline_results?: boolean;
+  /**
+   * Asks accounts to share their location with the bot's inline queries. Defaults to `false`, in
+   * which case accounts cannot share it.
+   */
+  readonly requests_inline_location?: boolean;
 }
 
 export interface VirtualBotProfile {
@@ -730,6 +735,29 @@ export interface SendInlineQueryInput {
   readonly query?: string;
   /** The `next_offset` of an earlier answer, requesting more results; omitted for the first. */
   readonly offset?: string;
+  /**
+   * Where the account is, shared only with a bot created with `requests_inline_location`;
+   * omitted to share no location.
+   */
+  readonly location?: LocationInput;
+}
+
+/** A point on Earth an account shares. */
+export interface LocationInput {
+  /** From -90 to 90 degrees. */
+  readonly latitude: number;
+  /** From -180 to 180 degrees. */
+  readonly longitude: number;
+  /** The radius of uncertainty, from 0 to 1500 meters; omitted or 0 when unknown. */
+  readonly horizontal_accuracy?: number;
+}
+
+/** A point on Earth, as Telegram shows it. */
+export interface Location {
+  readonly latitude: number;
+  readonly longitude: number;
+  /** The radius of uncertainty in whole meters; omitted when unknown. */
+  readonly horizontal_accuracy?: number;
 }
 
 /** A result of an answer as the account's client lists it. */
@@ -766,6 +794,8 @@ export interface InlineQuery {
   readonly chat: MessageTarget;
   readonly query: string;
   readonly offset: string;
+  /** The location the account shared with the bot; omitted for none. */
+  readonly location?: Location;
   readonly status: InlineQueryStatus;
   /** The bot's answer when `status` is `answered`, and `null` otherwise. */
   readonly answer: InlineQueryAnswer | null;

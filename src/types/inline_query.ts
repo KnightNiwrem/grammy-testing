@@ -1,3 +1,4 @@
+import type { GeoLocation } from './geo_location.ts';
 import type { InlineKeyboard } from './inline_keyboard.ts';
 import type { StoredFileId } from './stored_file.ts';
 import type { MessageContent } from './virtual_message.ts';
@@ -124,6 +125,11 @@ export interface InlineQuery {
   readonly query: string;
   /** The `next_offset` of an earlier answer, requesting more results; empty for the first. */
   readonly offset: string;
+  /**
+   * Where the account is, which it shares only with a bot that requests it; omitted when not
+   * shared.
+   */
+  readonly userLocation?: GeoLocation;
   readonly state: InlineQueryState;
 }
 
@@ -140,20 +146,38 @@ export function getInlineQueryChatType(
   return chat.botId === botId ? 'sender' : 'private';
 }
 
+type InlineQueryRequest = Pick<InlineQuery, 'botId' | 'chat' | 'query' | 'offset' | 'userLocation'>;
+
 /**
  * Whether two queries ask a bot the same, so that an answer to one can be reused for the other.
  * As TDLib's `InlineQueriesManager::send_inline_query` identifies a query, they must be sent to
  * the same bot from the same kind of chat, with the same offset and the same text apart from
- * surrounding ASCII whitespace.
+ * surrounding ASCII whitespace, and from the same place when they share the user's location.
  */
 export function isSameInlineQueryRequest(
-  first: Pick<InlineQuery, 'botId' | 'chat' | 'query' | 'offset'>,
-  second: Pick<InlineQuery, 'botId' | 'chat' | 'query' | 'offset'>,
+  first: InlineQueryRequest,
+  second: InlineQueryRequest,
 ): boolean {
   return first.botId === second.botId &&
     getInlineQueryChatType(first) === getInlineQueryChatType(second) &&
     trimTdlibWhitespace(first.query) === trimTdlibWhitespace(second.query) &&
-    first.offset === second.offset;
+    first.offset === second.offset &&
+    isSameInlineQueryPlace(first.userLocation, second.userLocation);
+}
+
+/**
+ * Whether two shared locations identify the same query place: TDLib keys a location by its
+ * coordinates in whole ten-thousandths of a degree, ignoring the accuracy.
+ */
+function isSameInlineQueryPlace(
+  first: GeoLocation | undefined,
+  second: GeoLocation | undefined,
+): boolean {
+  if (first === undefined || second === undefined) {
+    return first === second;
+  }
+  return Math.trunc(first.latitude * 1e4) === Math.trunc(second.latitude * 1e4) &&
+    Math.trunc(first.longitude * 1e4) === Math.trunc(second.longitude * 1e4);
 }
 
 /** Removes the characters that TDLib's `trim` treats as whitespace from both ends. */

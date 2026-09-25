@@ -649,6 +649,7 @@ Deno.test('TypeScript client sends inline queries and results through an inline 
     username: 'cats_bot',
     supports_inline_queries: true,
     receives_chosen_inline_results: true,
+    requests_inline_location: true,
   });
   const { account } = await session.createAccount({ first_name: 'Ada' });
   const supergroup = await account.createSupergroup({ title: 'Team' });
@@ -657,6 +658,7 @@ Deno.test('TypeScript client sends inline queries and results through an inline 
     bot_id: bot.id,
     chat: { type: 'supergroup', chatId: supergroup.id },
     query: 'cats',
+    location: { latitude: 51.5, longitude: -0.12, horizontal_accuracy: 20 },
   });
   const answerResponse = await api.request(
     `/sessions/${session.id}/bot-api/bot${token}/answerInlineQuery`,
@@ -682,6 +684,8 @@ Deno.test('TypeScript client sends inline queries and results through an inline 
   });
   if (
     bot.supports_inline_queries !== true || inlineQuery.status !== 'awaiting_answer' ||
+    JSON.stringify(inlineQuery.location) !==
+      JSON.stringify({ latitude: 51.5, longitude: -0.12, horizontal_accuracy: 20 }) ||
     answerResponse.status !== 200 || answeredQuery.answer?.results[0]?.title !== 'Cat fact' ||
     answeredQuery.answer.button === undefined || !('web_app' in answeredQuery.answer.button) ||
     message.text !== 'Cats sleep a lot' || message.via_bot?.username !== 'cats_bot' ||

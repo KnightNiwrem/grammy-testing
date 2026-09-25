@@ -51,6 +51,8 @@ export type {
   InlineQueryStatus,
   KeyboardButtonFace,
   LeaveChatInput,
+  Location,
+  LocationInput,
   MembershipChangeContent,
   MessageContent,
   MessageEntity,

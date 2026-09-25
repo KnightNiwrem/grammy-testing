@@ -1,36 +1,37 @@
-import type {
-  BotApiBotUser,
-  BotApiCallbackQuery,
-  BotApiChatMember,
-  BotApiChatMemberUpdated,
-  BotApiChosenInlineResult,
-  BotApiDocument,
-  BotApiExternalReplyInfo,
-  BotApiExternalReplyMedia,
-  BotApiGroupChat,
-  BotApiGroupChatBotMember,
-  BotApiInlineKeyboardButton,
-  BotApiInlineKeyboardMarkup,
-  BotApiInlineQuery,
-  BotApiKeyboardButtonFace,
-  BotApiMembershipServiceContent,
-  BotApiMessage,
-  BotApiMessageContent,
-  BotApiMessageEntity,
-  BotApiMessageOrigin,
-  BotApiMyChatMemberUpdated,
-  BotApiPhotoSize,
-  BotApiPrivateChat,
-  BotApiPrivateChatBotMember,
-  BotApiPrivateMessage,
-  BotApiRepliedPrivateMessage,
-  BotApiRepliedSupergroupMessage,
-  BotApiSupergroupAdministratorRights,
-  BotApiSupergroupChat,
-  BotApiSupergroupMessage,
-  BotApiSupergroupMessageContent,
-  BotApiTextQuote,
-  BotApiUser,
+import {
+  type BotApiBotUser,
+  type BotApiCallbackQuery,
+  type BotApiChatMember,
+  type BotApiChatMemberUpdated,
+  type BotApiChosenInlineResult,
+  type BotApiDocument,
+  type BotApiExternalReplyInfo,
+  type BotApiExternalReplyMedia,
+  type BotApiGroupChat,
+  type BotApiGroupChatBotMember,
+  type BotApiInlineKeyboardButton,
+  type BotApiInlineKeyboardMarkup,
+  type BotApiInlineQuery,
+  type BotApiKeyboardButtonFace,
+  type BotApiMembershipServiceContent,
+  type BotApiMessage,
+  type BotApiMessageContent,
+  type BotApiMessageEntity,
+  type BotApiMessageOrigin,
+  type BotApiMyChatMemberUpdated,
+  type BotApiPhotoSize,
+  type BotApiPrivateChat,
+  type BotApiPrivateChatBotMember,
+  type BotApiPrivateMessage,
+  type BotApiRepliedPrivateMessage,
+  type BotApiRepliedSupergroupMessage,
+  type BotApiSupergroupAdministratorRights,
+  type BotApiSupergroupChat,
+  type BotApiSupergroupMessage,
+  type BotApiSupergroupMessageContent,
+  type BotApiTextQuote,
+  type BotApiUser,
+  toBotApiLocation,
 } from '../types/bot_api.ts';
 import type { ButtonAppearance } from '../types/button_appearance.ts';
 import type { CallbackQuery } from '../types/callback_query.ts';
@@ -463,6 +464,9 @@ export function projectInlineQueryForBot(
   return {
     id: inlineQuery.id,
     from: account,
+    ...(inlineQuery.userLocation === undefined
+      ? {}
+      : { location: toBotApiLocation(inlineQuery.userLocation) }),
     chat_type: getInlineQueryChatType(inlineQuery),
     query: inlineQuery.query,
     offset: inlineQuery.offset,
@@ -470,9 +474,9 @@ export function projectInlineQueryForBot(
 }
 
 /**
- * Projects an account's choice of an inline query result as the inline bot receives it. As on
- * Telegram, the bot learns the sent message's identifier only when the message has an inline
- * keyboard.
+ * Projects an account's choice of an inline query result as the inline bot receives it, with the
+ * location the account shared with the query. As on Telegram, the bot learns the sent message's
+ * identifier only when the message has an inline keyboard.
  */
 export function projectChosenInlineResultForBot(
   { inlineQuery, resultId, message }: InlineQueryResultChosenEvent,
@@ -480,6 +484,9 @@ export function projectChosenInlineResultForBot(
 ): BotApiChosenInlineResult {
   return {
     from: account,
+    ...(inlineQuery.userLocation === undefined
+      ? {}
+      : { location: toBotApiLocation(inlineQuery.userLocation) }),
     ...(message.inlineKeyboard === undefined || message.viaBot === undefined
       ? {}
       : { inline_message_id: message.viaBot.inlineMessageId }),

@@ -478,6 +478,11 @@ const inlineQuerySchema: z.ZodType<InlineQuery> = z.strictObject({
   chat: messageTargetSchema,
   query: z.string(),
   offset: z.string(),
+  location: z.strictObject({
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    horizontal_accuracy: z.int().min(1).max(1500).optional(),
+  }).optional(),
   status: z.enum(['awaiting_answer', 'answered']),
   answer: z.strictObject({
     results: z.array(z.strictObject({
