@@ -34,6 +34,7 @@ import {
   MAX_TEXT_MESSAGE_LENGTH,
 } from '../../../types/virtual_message.ts';
 import { readMessageEntitiesParameter } from '../bot_api/message_entities_parameter.ts';
+import { readJsonRequestBody } from '../json_request_body.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 
 const ACCOUNT_ID_PARAMETER = 'accountId';
@@ -88,14 +89,33 @@ const supergroupChatIdSchema = z.number().int()
   .min(MIN_SUPERGROUP_OR_CHANNEL_ID)
   .max(MAX_SUPERGROUP_OR_CHANNEL_ID);
 const supergroupChatIdPathParameterSchema = z.coerce.number().pipe(supergroupChatIdSchema);
-/** The path parameters of a supergroup member as an account addresses it. */
-const supergroupMemberPathSchema = z.object({
-  [ACCOUNT_ID_PARAMETER]: telegramUserIdPathParameterSchema,
-  [CHAT_ID_PARAMETER]: supergroupChatIdPathParameterSchema,
-  [USER_ID_PARAMETER]: telegramUserIdPathParameterSchema,
-});
 /** A message's ID as the chat's bots see it, which is how these routes show messages. */
 const messageIdPathParameterSchema = z.coerce.number().pipe(z.int().positive());
+
+/** The path parameters of the account a route acts as. */
+const accountPathSchema = z.object({
+  [ACCOUNT_ID_PARAMETER]: telegramUserIdPathParameterSchema,
+});
+/** The path parameters of an account's private chat with a bot. */
+const privateConversationPathSchema = accountPathSchema.extend({
+  [BOT_ID_PARAMETER]: telegramUserIdPathParameterSchema,
+});
+/** The path parameters of a message of an account's private chat with a bot. */
+const privateMessagePathSchema = privateConversationPathSchema.extend({
+  [MESSAGE_ID_PARAMETER]: messageIdPathParameterSchema,
+});
+/** The path parameters of a supergroup as an account addresses it. */
+const supergroupConversationPathSchema = accountPathSchema.extend({
+  [CHAT_ID_PARAMETER]: supergroupChatIdPathParameterSchema,
+});
+/** The path parameters of a supergroup message as an account addresses it. */
+const supergroupMessagePathSchema = supergroupConversationPathSchema.extend({
+  [MESSAGE_ID_PARAMETER]: messageIdPathParameterSchema,
+});
+/** The path parameters of a supergroup member as an account addresses it. */
+const supergroupMemberPathSchema = supergroupConversationPathSchema.extend({
+  [USER_ID_PARAMETER]: telegramUserIdPathParameterSchema,
+});
 
 /**
  * The chat a message goes to or a button is on: a private chat with a bot, or a supergroup the
@@ -264,19 +284,12 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   const accountRoutes = new Hono<SessionRouteContextTypes>();
 
   accountRoutes.post('/', async (context) => {
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
+    const requestBody = await readJsonRequestBody(context.req, createAccountRequestSchema);
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
 
-    const parsedRequest = createAccountRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
-      return context.body(null, 400);
-    }
-
-    const result = context.get('emulationSession').virtualUsers.createAccount(parsedRequest.data);
+    const result = context.get('emulationSession').virtualUsers.createAccount(requestBody);
     if (!result.created) {
       return context.body(null, result.reason === 'username_taken' ? 409 : 507);
     }
@@ -290,21 +303,14 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.post(ACCOUNT_MESSAGE_COLLECTION_PATH, async (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    if (!accountId.success) {
+    const accountPath = accountPathSchema.safeParse(context.req.param());
+    if (!accountPath.success) {
       return context.body(null, 400);
     }
+    const { accountId } = accountPath.data;
 
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
-      return context.body(null, 400);
-    }
-    const parsedRequest = sendMessageRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
+    const requestBody = await readJsonRequestBody(context.req, sendMessageRequestSchema);
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
 
@@ -315,10 +321,10 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       botMessageViews,
       mediaFiles,
     } = context.get('emulationSession');
-    if ('forward' in parsedRequest.data) {
-      const { to, forward } = parsedRequest.data;
+    if ('forward' in requestBody) {
+      const { to, forward } = requestBody;
       const result = messageForwarding.forwardAccountMessage({
-        fromAccountId: accountId.data,
+        fromAccountId: accountId,
         fromChat: forward.chat,
         messageId: forward.message_id,
         toChat: to,
@@ -327,18 +333,18 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
         return context.body(null, forwardFailureStatus(result.reason));
       }
       return context.json(
-        { message: viewChatMessageForAccount(botMessageViews, result.message, accountId.data) },
+        { message: viewChatMessageForAccount(botMessageViews, result.message, accountId) },
         201,
       );
     }
-    const content = readAccountMessageContent(parsedRequest.data, mediaFiles);
+    const content = readAccountMessageContent(requestBody, mediaFiles);
     if (content === undefined) {
       return context.body(null, 400);
     }
-    const { to, reply_to_message_id: replyToMessageId } = parsedRequest.data;
+    const { to, reply_to_message_id: replyToMessageId } = requestBody;
     if (to.type === 'supergroup') {
       const result = supergroupMessaging.sendAccountMessage({
-        fromAccountId: accountId.data,
+        fromAccountId: accountId,
         chatId: to.chatId,
         content,
         replyToMessageId,
@@ -347,13 +353,13 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
         return context.body(null, supergroupMemberFailureStatus(result.reason));
       }
       return context.json(
-        { message: botMessageViews.viewSupergroupMessage(result.message, accountId.data) },
+        { message: botMessageViews.viewSupergroupMessage(result.message, accountId) },
         201,
       );
     }
 
     const result = privateMessaging.sendAccountMessage({
-      fromAccountId: accountId.data,
+      fromAccountId: accountId,
       to,
       content,
       replyToBotMessageId: replyToMessageId,
@@ -369,27 +375,20 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.post(SUPERGROUP_COLLECTION_PATH, async (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    if (!accountId.success) {
+    const accountPath = accountPathSchema.safeParse(context.req.param());
+    if (!accountPath.success) {
+      return context.body(null, 400);
+    }
+    const { accountId } = accountPath.data;
+
+    const requestBody = await readJsonRequestBody(context.req, createSupergroupRequestSchema);
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
 
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
-      return context.body(null, 400);
-    }
-    const parsedRequest = createSupergroupRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
-      return context.body(null, 400);
-    }
-
-    const { title, username, description } = parsedRequest.data;
+    const { title, username, description } = requestBody;
     const result = context.get('emulationSession').sharedChatAdministration.createSupergroup({
-      creatorAccountId: accountId.data,
+      creatorAccountId: accountId,
       title,
       ...(username === undefined ? {} : { username }),
       description,
@@ -513,14 +512,8 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     if (!memberPath.success) {
       return context.body(null, 400);
     }
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
-      return context.body(null, 400);
-    }
-    const parsedRequest = promoteChatMemberRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
+    const requestBody = await readJsonRequestBody(context.req, promoteChatMemberRequestSchema);
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
     const { accountId, chatId, userId } = memberPath.data;
@@ -530,7 +523,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       chatId,
       memberId: userId,
       rights: grantSupergroupAdministratorRights(
-        SUPERGROUP_ADMINISTRATOR_RIGHTS.filter((right) => parsedRequest.data[right] === true),
+        SUPERGROUP_ADMINISTRATOR_RIGHTS.filter((right) => requestBody[right] === true),
       ),
     });
     if (result.promoted) {
@@ -548,14 +541,8 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     if (!memberPath.success) {
       return context.body(null, 400);
     }
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
-      return context.body(null, 400);
-    }
-    const parsedRequest = setCustomTitleRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
+    const requestBody = await readJsonRequestBody(context.req, setCustomTitleRequestSchema);
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
     const { accountId, chatId, userId } = memberPath.data;
@@ -564,7 +551,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
       actorAccountId: accountId,
       chatId,
       memberId: userId,
-      customTitle: parsedRequest.data.custom_title,
+      customTitle: requestBody.custom_title,
     });
     if (result.set) {
       return context.body(null, 204);
@@ -615,45 +602,37 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.get(SUPERGROUP_MESSAGE_HISTORY_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const chatId = supergroupChatIdPathParameterSchema.safeParse(
-      context.req.param(CHAT_ID_PARAMETER),
-    );
-    if (!accountId.success || !chatId.success) {
+    const conversationPath = supergroupConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, chatId } = conversationPath.data;
 
     const { supergroupMessaging, botMessageViews } = context.get('emulationSession');
     const result = supergroupMessaging.getMessageHistory({
-      accountId: accountId.data,
-      chatId: chatId.data,
+      accountId,
+      chatId,
     });
     if (!result.found) {
       return context.body(null, supergroupMemberFailureStatus(result.reason));
     }
     return context.json({
       messages: result.messages.map((message) =>
-        botMessageViews.viewSupergroupMessage(message, accountId.data)
+        botMessageViews.viewSupergroupMessage(message, accountId)
       ),
     });
   });
 
   accountRoutes.get(SUPERGROUP_COMMANDS_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const chatId = supergroupChatIdPathParameterSchema.safeParse(
-      context.req.param(CHAT_ID_PARAMETER),
-    );
-    if (!accountId.success || !chatId.success) {
+    const conversationPath = supergroupConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, chatId } = conversationPath.data;
 
     const result = context.get('emulationSession').botCommands.getSupergroupCommands({
-      accountId: accountId.data,
-      chatId: chatId.data,
+      accountId,
+      chatId,
     });
     if (!result.found) {
       return context.body(null, supergroupMemberFailureStatus(result.reason));
@@ -667,19 +646,15 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.get(SUPERGROUP_CHAT_ACTIONS_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const chatId = supergroupChatIdPathParameterSchema.safeParse(
-      context.req.param(CHAT_ID_PARAMETER),
-    );
-    if (!accountId.success || !chatId.success) {
+    const conversationPath = supergroupConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, chatId } = conversationPath.data;
 
     const result = context.get('emulationSession').chatActions.getSupergroupChatActions({
-      accountId: accountId.data,
-      chatId: chatId.data,
+      accountId,
+      chatId,
     });
     if (!result.found) {
       return context.body(null, result.reason === 'not_a_member' ? 403 : 404);
@@ -688,20 +663,16 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.get(SUPERGROUP_NOTIFICATIONS_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const chatId = supergroupChatIdPathParameterSchema.safeParse(
-      context.req.param(CHAT_ID_PARAMETER),
-    );
-    if (!accountId.success || !chatId.success) {
+    const conversationPath = supergroupConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, chatId } = conversationPath.data;
 
     const { supergroupMessaging, botMessageViews } = context.get('emulationSession');
     const result = supergroupMessaging.getMessageHistory({
-      accountId: accountId.data,
-      chatId: chatId.data,
+      accountId,
+      chatId,
     });
     if (!result.found) {
       return context.body(null, supergroupMemberFailureStatus(result.reason));
@@ -709,27 +680,23 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     return context.json({
       notifications: presentNotificationsForAccount(
         result.messages,
-        accountId.data,
-        (message) => botMessageViews.viewSupergroupMessage(message, accountId.data).message_id,
+        accountId,
+        (message) => botMessageViews.viewSupergroupMessage(message, accountId).message_id,
       ),
     });
   });
 
   accountRoutes.get(SUPERGROUP_REPLY_INTERFACE_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const chatId = supergroupChatIdPathParameterSchema.safeParse(
-      context.req.param(CHAT_ID_PARAMETER),
-    );
-    if (!accountId.success || !chatId.success) {
+    const conversationPath = supergroupConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, chatId } = conversationPath.data;
 
     const { supergroupMessaging, botMessageViews } = context.get('emulationSession');
     const result = supergroupMessaging.getReplyInterface({
-      accountId: accountId.data,
-      chatId: chatId.data,
+      accountId,
+      chatId,
     });
     if (!result.found) {
       return context.body(null, supergroupMemberFailureStatus(result.reason));
@@ -737,7 +704,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     const { shownReplyInterface } = result;
     return context.json({
       reply_interface: shownReplyInterface === undefined ? null : presentReplyInterfaceForAccount(
-        botMessageViews.viewSupergroupMessage(shownReplyInterface.message, accountId.data)
+        botMessageViews.viewSupergroupMessage(shownReplyInterface.message, accountId)
           .message_id,
         shownReplyInterface.replyInterface,
       ),
@@ -745,64 +712,44 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.patch(SUPERGROUP_MESSAGE_PATH, async (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const chatId = supergroupChatIdPathParameterSchema.safeParse(
-      context.req.param(CHAT_ID_PARAMETER),
-    );
-    const messageId = messageIdPathParameterSchema.safeParse(
-      context.req.param(MESSAGE_ID_PARAMETER),
-    );
-    if (!accountId.success || !chatId.success || !messageId.success) {
+    const messagePath = supergroupMessagePathSchema.safeParse(context.req.param());
+    if (!messagePath.success) {
       return context.body(null, 400);
     }
+    const { accountId, chatId, messageId } = messagePath.data;
 
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
-      return context.body(null, 400);
-    }
-    const parsedRequest = editMessageRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
+    const requestBody = await readJsonRequestBody(context.req, editMessageRequestSchema);
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
 
     const { supergroupMessaging, botMessageViews } = context.get('emulationSession');
     const result = supergroupMessaging.editAccountMessage({
-      fromAccountId: accountId.data,
-      chatId: chatId.data,
-      messageId: messageId.data,
-      edit: readAccountMessageEdit(parsedRequest.data),
+      fromAccountId: accountId,
+      chatId,
+      messageId,
+      edit: readAccountMessageEdit(requestBody),
     });
     if (!result.edited) {
       return context.body(null, supergroupMemberFailureStatus(result.reason));
     }
     return context.json({
-      message: botMessageViews.viewSupergroupMessage(result.message, accountId.data),
+      message: botMessageViews.viewSupergroupMessage(result.message, accountId),
     });
   });
 
   // The account deletes the message for every member, as Telegram's clients do.
   accountRoutes.delete(SUPERGROUP_MESSAGE_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const chatId = supergroupChatIdPathParameterSchema.safeParse(
-      context.req.param(CHAT_ID_PARAMETER),
-    );
-    const messageId = messageIdPathParameterSchema.safeParse(
-      context.req.param(MESSAGE_ID_PARAMETER),
-    );
-    if (!accountId.success || !chatId.success || !messageId.success) {
+    const messagePath = supergroupMessagePathSchema.safeParse(context.req.param());
+    if (!messagePath.success) {
       return context.body(null, 400);
     }
+    const { accountId, chatId, messageId } = messagePath.data;
 
     const result = context.get('emulationSession').supergroupMessaging.deleteAccountMessage({
-      fromAccountId: accountId.data,
-      chatId: chatId.data,
-      messageId: messageId.data,
+      fromAccountId: accountId,
+      chatId,
+      messageId,
     });
     if (result.deleted) {
       return context.body(null, 204);
@@ -816,18 +763,16 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.get(PRIVATE_MESSAGE_HISTORY_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
-    if (!accountId.success || !botId.success) {
+    const conversationPath = privateConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, botId } = conversationPath.data;
 
     const { privateMessaging, botMessageViews } = context.get('emulationSession');
     const result = privateMessaging.getPrivateMessageHistory({
-      accountId: accountId.data,
-      botId: botId.data,
+      accountId,
+      botId,
     });
     if (!result.found) {
       return context.body(null, 404);
@@ -839,34 +784,23 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.patch(PRIVATE_MESSAGE_PATH, async (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
-    const messageId = messageIdPathParameterSchema.safeParse(
-      context.req.param(MESSAGE_ID_PARAMETER),
-    );
-    if (!accountId.success || !botId.success || !messageId.success) {
+    const messagePath = privateMessagePathSchema.safeParse(context.req.param());
+    if (!messagePath.success) {
       return context.body(null, 400);
     }
+    const { accountId, botId, messageId } = messagePath.data;
 
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
-      return context.body(null, 400);
-    }
-    const parsedRequest = editMessageRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
+    const requestBody = await readJsonRequestBody(context.req, editMessageRequestSchema);
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
 
     const { privateMessaging, botMessageViews } = context.get('emulationSession');
     const result = privateMessaging.editAccountMessage({
-      fromAccountId: accountId.data,
-      chat: { type: 'private', botId: botId.data },
-      botMessageId: messageId.data,
-      edit: readAccountMessageEdit(parsedRequest.data),
+      fromAccountId: accountId,
+      chat: { type: 'private', botId },
+      botMessageId: messageId,
+      edit: readAccountMessageEdit(requestBody),
     });
     if (!result.edited) {
       const isNotFound = result.reason === 'account_not_found' ||
@@ -878,69 +812,58 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
 
   // The account deletes the message for both participants, as Telegram's clients can.
   accountRoutes.delete(PRIVATE_MESSAGE_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
-    const messageId = messageIdPathParameterSchema.safeParse(
-      context.req.param(MESSAGE_ID_PARAMETER),
-    );
-    if (!accountId.success || !botId.success || !messageId.success) {
+    const messagePath = privateMessagePathSchema.safeParse(context.req.param());
+    if (!messagePath.success) {
       return context.body(null, 400);
     }
+    const { accountId, botId, messageId } = messagePath.data;
 
     const result = context.get('emulationSession').privateMessaging.deleteAccountMessage({
-      fromAccountId: accountId.data,
-      botId: botId.data,
-      botMessageId: messageId.data,
+      fromAccountId: accountId,
+      botId,
+      botMessageId: messageId,
     });
     return context.body(null, result.deleted ? 204 : 404);
   });
 
   accountRoutes.put(BLOCKED_BOT_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
-    if (!accountId.success || !botId.success) {
+    const conversationPath = privateConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, botId } = conversationPath.data;
 
     const result = context.get('emulationSession').botBlocking.blockBot({
-      accountId: accountId.data,
-      botId: botId.data,
+      accountId,
+      botId,
     });
     return context.body(null, result.applied ? 204 : 404);
   });
 
   accountRoutes.delete(BLOCKED_BOT_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
-    if (!accountId.success || !botId.success) {
+    const conversationPath = privateConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, botId } = conversationPath.data;
 
     const result = context.get('emulationSession').botBlocking.unblockBot({
-      accountId: accountId.data,
-      botId: botId.data,
+      accountId,
+      botId,
     });
     return context.body(null, result.applied ? 204 : 404);
   });
 
   accountRoutes.get(PRIVATE_CHAT_COMMANDS_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
-    if (!accountId.success || !botId.success) {
+    const conversationPath = privateConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, botId } = conversationPath.data;
 
     const result = context.get('emulationSession').botCommands.getPrivateChatCommands({
-      accountId: accountId.data,
-      botId: botId.data,
+      accountId,
+      botId,
     });
     if (!result.found) {
       return context.body(null, 404);
@@ -949,17 +872,15 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.get(PRIVATE_CHAT_MENU_BUTTON_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
-    if (!accountId.success || !botId.success) {
+    const conversationPath = privateConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, botId } = conversationPath.data;
 
     const result = context.get('emulationSession').botMenuButtons.getPrivateChatMenuButton({
-      accountId: accountId.data,
-      botId: botId.data,
+      accountId,
+      botId,
     });
     if (!result.found) {
       return context.body(null, 404);
@@ -968,17 +889,15 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.get(PRIVATE_CHAT_ACTIONS_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
-    if (!accountId.success || !botId.success) {
+    const conversationPath = privateConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, botId } = conversationPath.data;
 
     const result = context.get('emulationSession').chatActions.getPrivateChatActions({
-      accountId: accountId.data,
-      botId: botId.data,
+      accountId,
+      botId,
     });
     if (!result.found) {
       return context.body(null, 404);
@@ -987,18 +906,16 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.get(PRIVATE_CHAT_NOTIFICATIONS_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
-    if (!accountId.success || !botId.success) {
+    const conversationPath = privateConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, botId } = conversationPath.data;
 
     const { privateMessaging, botMessageViews } = context.get('emulationSession');
     const result = privateMessaging.getPrivateMessageHistory({
-      accountId: accountId.data,
-      botId: botId.data,
+      accountId,
+      botId,
     });
     if (!result.found) {
       return context.body(null, 404);
@@ -1006,25 +923,23 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
     return context.json({
       notifications: presentNotificationsForAccount(
         result.messages,
-        accountId.data,
+        accountId,
         (message) => botMessageViews.viewPrivateMessageForBot(message).message_id,
       ),
     });
   });
 
   accountRoutes.get(PRIVATE_CHAT_REPLY_INTERFACE_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    const botId = telegramUserIdPathParameterSchema.safeParse(context.req.param(BOT_ID_PARAMETER));
-    if (!accountId.success || !botId.success) {
+    const conversationPath = privateConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
       return context.body(null, 400);
     }
+    const { accountId, botId } = conversationPath.data;
 
     const { privateMessaging, botMessageViews } = context.get('emulationSession');
     const result = privateMessaging.getPrivateChatReplyInterface({
-      accountId: accountId.data,
-      botId: botId.data,
+      accountId,
+      botId,
     });
     if (!result.found) {
       return context.body(null, 404);
@@ -1039,31 +954,27 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.post(REPLY_KEYBOARD_PRESS_COLLECTION_PATH, async (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    if (!accountId.success) {
+    const accountPath = accountPathSchema.safeParse(context.req.param());
+    if (!accountPath.success) {
       return context.body(null, 400);
     }
+    const { accountId } = accountPath.data;
 
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
-      return context.body(null, 400);
-    }
-    const parsedRequest = pressReplyKeyboardButtonRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
+    const requestBody = await readJsonRequestBody(
+      context.req,
+      pressReplyKeyboardButtonRequestSchema,
+    );
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
 
     const { privateMessaging, supergroupMessaging, botMessageViews } = context.get(
       'emulationSession',
     );
-    const { chat, text } = parsedRequest.data;
+    const { chat, text } = requestBody;
     if (chat.type === 'supergroup') {
       const result = supergroupMessaging.pressReplyKeyboardButton({
-        fromAccountId: accountId.data,
+        fromAccountId: accountId,
         chatId: chat.chatId,
         text,
       });
@@ -1071,12 +982,12 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
         return context.body(null, supergroupMemberFailureStatus(result.reason));
       }
       return context.json(
-        { message: botMessageViews.viewSupergroupMessage(result.message, accountId.data) },
+        { message: botMessageViews.viewSupergroupMessage(result.message, accountId) },
         201,
       );
     }
     const result = privateMessaging.pressReplyKeyboardButton({
-      fromAccountId: accountId.data,
+      fromAccountId: accountId,
       chat,
       text,
     });
@@ -1090,30 +1001,23 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.post(CALLBACK_QUERY_COLLECTION_PATH, async (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    if (!accountId.success) {
+    const accountPath = accountPathSchema.safeParse(context.req.param());
+    if (!accountPath.success) {
       return context.body(null, 400);
     }
+    const { accountId } = accountPath.data;
 
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
-      return context.body(null, 400);
-    }
-    const parsedRequest = pressCallbackButtonRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
+    const requestBody = await readJsonRequestBody(context.req, pressCallbackButtonRequestSchema);
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
 
     const result = context.get('emulationSession').callbackQueries.pressCallbackButton({
-      fromAccountId: accountId.data,
-      chat: parsedRequest.data.chat,
-      messageId: parsedRequest.data.message_id,
-      callbackData: parsedRequest.data.callback_data,
-      expired: parsedRequest.data.expired,
+      fromAccountId: accountId,
+      chat: requestBody.chat,
+      messageId: requestBody.message_id,
+      callbackData: requestBody.callback_data,
+      expired: requestBody.expired,
     });
     if (!result.pressed) {
       switch (result.reason) {
@@ -1128,7 +1032,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
 
     const callbackQueryPath = `${
       basePath(context)
-    }/${accountId.data}/callback-queries/${result.callbackQuery.id}`;
+    }/${accountId}/callback-queries/${result.callbackQuery.id}`;
     return context.json(
       { callback_query: presentCallbackQueryForAccount(result.callbackQuery) },
       201,
@@ -1137,15 +1041,14 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.get(CALLBACK_QUERY_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    if (!accountId.success) {
+    const accountPath = accountPathSchema.safeParse(context.req.param());
+    if (!accountPath.success) {
       return context.body(null, 400);
     }
+    const { accountId } = accountPath.data;
 
     const callbackQuery = context.get('emulationSession').callbackQueries.getAccountCallbackQuery({
-      accountId: accountId.data,
+      accountId,
       callbackQueryId: context.req.param(CALLBACK_QUERY_ID_PARAMETER),
     });
     if (callbackQuery === undefined) {
@@ -1155,33 +1058,24 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.post(INLINE_QUERY_COLLECTION_PATH, async (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    if (!accountId.success) {
+    const accountPath = accountPathSchema.safeParse(context.req.param());
+    if (!accountPath.success) {
       return context.body(null, 400);
     }
+    const { accountId } = accountPath.data;
 
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
-      return context.body(null, 400);
-    }
-    const parsedRequest = sendInlineQueryRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
+    const requestBody = await readJsonRequestBody(context.req, sendInlineQueryRequestSchema);
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
 
     const result = context.get('emulationSession').inlineQueries.sendInlineQuery({
-      fromAccountId: accountId.data,
-      botId: parsedRequest.data.bot_id,
-      chat: parsedRequest.data.chat,
-      query: parsedRequest.data.query,
-      offset: parsedRequest.data.offset,
-      ...(parsedRequest.data.location === undefined
-        ? {}
-        : { userLocation: parsedRequest.data.location }),
+      fromAccountId: accountId,
+      botId: requestBody.bot_id,
+      chat: requestBody.chat,
+      query: requestBody.query,
+      offset: requestBody.offset,
+      ...(requestBody.location === undefined ? {} : { userLocation: requestBody.location }),
     });
     if (!result.sent) {
       switch (result.reason) {
@@ -1197,7 +1091,7 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
 
     const inlineQueryPath = `${
       basePath(context)
-    }/${accountId.data}/inline-queries/${result.inlineQuery.id}`;
+    }/${accountId}/inline-queries/${result.inlineQuery.id}`;
     return context.json(
       { inline_query: presentInlineQueryForAccount(result.inlineQuery) },
       201,
@@ -1206,15 +1100,14 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.get(INLINE_QUERY_PATH, (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    if (!accountId.success) {
+    const accountPath = accountPathSchema.safeParse(context.req.param());
+    if (!accountPath.success) {
       return context.body(null, 400);
     }
+    const { accountId } = accountPath.data;
 
     const inlineQuery = context.get('emulationSession').inlineQueries.getAccountInlineQuery({
-      accountId: accountId.data,
+      accountId,
       inlineQueryId: context.req.param(INLINE_QUERY_ID_PARAMETER),
     });
     if (inlineQuery === undefined) {
@@ -1224,35 +1117,31 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
   });
 
   accountRoutes.post(CHOSEN_INLINE_RESULT_COLLECTION_PATH, async (context) => {
-    const accountId = telegramUserIdPathParameterSchema.safeParse(
-      context.req.param(ACCOUNT_ID_PARAMETER),
-    );
-    if (!accountId.success) {
+    const accountPath = accountPathSchema.safeParse(context.req.param());
+    if (!accountPath.success) {
       return context.body(null, 400);
     }
+    const { accountId } = accountPath.data;
 
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
-      return context.body(null, 400);
-    }
-    const parsedRequest = chooseInlineQueryResultRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
+    const requestBody = await readJsonRequestBody(
+      context.req,
+      chooseInlineQueryResultRequestSchema,
+    );
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
 
     const { inlineQueries, botMessageViews } = context.get('emulationSession');
     const result = inlineQueries.chooseInlineQueryResult({
-      accountId: accountId.data,
+      accountId,
       inlineQueryId: context.req.param(INLINE_QUERY_ID_PARAMETER),
-      resultId: parsedRequest.data.result_id,
+      resultId: requestBody.result_id,
     });
     if (!result.chosen) {
       return context.body(null, chosenInlineResultFailureStatus(result.reason));
     }
     return context.json(
-      { message: viewChatMessageForAccount(botMessageViews, result.message, accountId.data) },
+      { message: viewChatMessageForAccount(botMessageViews, result.message, accountId) },
       201,
     );
   });
@@ -1413,19 +1302,15 @@ function setSupergroupContentProtection(
   context: Context<SessionRouteContextTypes>,
   hasProtectedContent: boolean,
 ): Response {
-  const accountId = telegramUserIdPathParameterSchema.safeParse(
-    context.req.param(ACCOUNT_ID_PARAMETER),
-  );
-  const chatId = supergroupChatIdPathParameterSchema.safeParse(
-    context.req.param(CHAT_ID_PARAMETER),
-  );
-  if (!accountId.success || !chatId.success) {
+  const conversationPath = supergroupConversationPathSchema.safeParse(context.req.param());
+  if (!conversationPath.success) {
     return context.body(null, 400);
   }
+  const { accountId, chatId } = conversationPath.data;
 
   const result = context.get('emulationSession').sharedChatAdministration.setContentProtection({
-    actorAccountId: accountId.data,
-    chatId: chatId.data,
+    actorAccountId: accountId,
+    chatId,
     hasProtectedContent,
   });
   if (result.set) {

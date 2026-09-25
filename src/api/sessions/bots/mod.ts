@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { QueuedRateLimitResponses } from '../../../types/bot_rate_limit.ts';
 import { MAX_TELEGRAM_USER_ID, MIN_TELEGRAM_USER_ID } from '../../../types/telegram_identity.ts';
 import { findBotApiMethod } from '../bot_api/mod.ts';
+import { readJsonRequestBody } from '../json_request_body.ts';
 import type { SessionRouteContextTypes } from '../session_route_context_types.ts';
 
 const BOT_ID_PARAMETER = 'botId';
@@ -38,19 +39,12 @@ export function createBotRoutes(): Hono<SessionRouteContextTypes> {
   const botRoutes = new Hono<SessionRouteContextTypes>();
 
   botRoutes.post('/', async (context) => {
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
+    const requestBody = await readJsonRequestBody(context.req, createBotRequestSchema);
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
 
-    const parsedRequest = createBotRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
-      return context.body(null, 400);
-    }
-
-    const result = context.get('emulationSession').virtualUsers.createBot(parsedRequest.data);
+    const result = context.get('emulationSession').virtualUsers.createBot(requestBody);
     if (!result.created) {
       return context.body(null, result.reason === 'username_taken' ? 409 : 507);
     }
@@ -71,17 +65,14 @@ export function createBotRoutes(): Hono<SessionRouteContextTypes> {
     if (!botId.success) {
       return context.body(null, 404);
     }
-    let requestBody: unknown;
-    try {
-      requestBody = await context.req.json();
-    } catch {
+    const requestBody = await readJsonRequestBody(
+      context.req,
+      queueRateLimitResponsesRequestSchema,
+    );
+    if (requestBody === undefined) {
       return context.body(null, 400);
     }
-    const parsedRequest = queueRateLimitResponsesRequestSchema.safeParse(requestBody);
-    if (!parsedRequest.success) {
-      return context.body(null, 400);
-    }
-    const { method: methodName, retry_after: retryAfterSeconds, count } = parsedRequest.data;
+    const { method: methodName, retry_after: retryAfterSeconds, count } = requestBody;
     const method = methodName === undefined ? undefined : findBotApiMethod(methodName);
     if (methodName !== undefined && method === undefined) {
       return context.body(null, 400);

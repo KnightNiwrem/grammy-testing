@@ -36,7 +36,7 @@ const supergroupIdSchema = z.number().int()
   .min(MIN_SUPERGROUP_OR_CHANNEL_ID)
   .max(MAX_SUPERGROUP_OR_CHANNEL_ID);
 
-export const virtualBotProfileSchema: z.ZodType<VirtualBotProfile> = z.strictObject({
+const virtualBotProfileSchema: z.ZodType<VirtualBotProfile> = z.strictObject({
   id: telegramUserIdSchema,
   is_bot: z.literal(true),
   first_name: z.string(),
@@ -343,7 +343,7 @@ function membershipChangeMessageSchemas<Header extends z.ZodRawShape>(header: He
 // a reply to another chat or a quote, which a replied message still shows.
 const privateMessageHeader = { ...messageHeaderShape(privateChatSchema), ...messageReplyInfoShape };
 
-export const privateMessageSchema: z.ZodType<PrivateMessage> = z.union(contentMessageSchemas({
+const privateMessageSchema: z.ZodType<PrivateMessage> = z.union(contentMessageSchemas({
   ...privateMessageHeader,
   reply_to_message: z.union(contentMessageSchemas(privateMessageHeader)).optional(),
 }));

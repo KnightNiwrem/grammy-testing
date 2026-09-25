@@ -128,6 +128,36 @@ Deno.test('POST bots and accounts create virtual users in one ID namespace', asy
   }
 });
 
+Deno.test('emulator routes reject request bodies that are not JSON or not as specified', async () => {
+  const { api, sessionPath, createdBot, createdAccount } = await createPrivateConversationFixture();
+  const accountMessagesPath = `${sessionPath}/accounts/${createdAccount.account.id}/messages`;
+  const requests = [
+    { path: accountMessagesPath, body: '{"to":' },
+    { path: accountMessagesPath, body: JSON.stringify({ to: { type: 'private' }, text: 'Hi' }) },
+    { path: `${sessionPath}/bots`, body: 'not JSON' },
+    { path: `${sessionPath}/bots`, body: JSON.stringify({ first_name: 'Nameless Bot' }) },
+  ];
+  for (const { path, body } of requests) {
+    const response = await api.request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    if (response.status !== 400) {
+      throw new Error(`Expected ${body} for ${path} to be rejected, received ${response.status}`);
+    }
+  }
+
+  const validResponse = await api.request(accountMessagesPath, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to: { type: 'private', botId: createdBot.bot.id }, text: 'Hi' }),
+  });
+  if (validResponse.status !== 201) {
+    throw new Error(`Expected a specified message to be sent, received ${validResponse.status}`);
+  }
+});
+
 Deno.test('Bot API rejects unknown tokens before resolving methods or parameters', async () => {
   const api = createEmulationApi({
     sessionLifecycle: createSessionLifecycleService(),

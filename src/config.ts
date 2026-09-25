@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { DEFAULT_PORT } from './server.ts';
 
-export const DEFAULT_DOMAIN = 'localhost';
+const DEFAULT_DOMAIN = 'localhost';
 
 const serverEnvironmentSchema = z.object({
   DOMAIN: z.string().trim().pipe(z.hostname()).default(DEFAULT_DOMAIN),
