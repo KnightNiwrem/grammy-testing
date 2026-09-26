@@ -3277,11 +3277,6 @@ type FileResolution<File> =
   | { readonly resolved: false; readonly failure: FileResolutionFailure };
 
 /**
- * Reads a button's link as TDLib's `get_inline_keyboard_button` does: a `tg://user?id=` link opens
- * the user's profile and is kept in that canonical form, and any other link must pass
- * `check_link`, which normalizes it.
- */
-/**
  * A button action's link as TDLib reads it: normalized, for a button that opens one, or TDLib's
  * description of the button it cannot read.
  */
@@ -3296,6 +3291,11 @@ function hasButtonLink<Action extends RichMessageButtonAction>(
   return action.kind === 'url' || action.kind === 'login_url' || action.kind === 'web_app';
 }
 
+/**
+ * Reads a URL button's link as TDLib's `get_inline_keyboard_button` does: a `tg://user?id=` link
+ * opens the user's profile and is kept in that canonical form, and any other link must pass
+ * `check_link`, which normalizes it.
+ */
 function readInlineButtonUrl(url: string): ButtonActionReading {
   const userId = getLinkUserId(url);
   if (userId !== undefined) {
