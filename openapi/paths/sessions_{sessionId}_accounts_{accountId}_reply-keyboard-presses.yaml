@@ -31,8 +31,9 @@ post:
               - $ref: ../components/schemas/SentSupergroupMessage.yaml
     '400':
       description: >-
-        The request is invalid, or the chat shows no reply keyboard with a button of that
-        text.
+        The request is invalid, the chat shows no reply keyboard with a button of that text,
+        or the button has a request, such as for the user's contact, which the emulator
+        cannot answer.
     '403':
       description: The account is not a member of the supergroup.
     '404':

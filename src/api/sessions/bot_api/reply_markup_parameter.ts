@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+import {
+  CHAT_ADMINISTRATOR_RIGHT_NAMES,
+  normalizeDefaultAdministratorRights,
+} from '../../../types/bot_default_administrator_rights.ts';
 import type { ButtonAppearance } from '../../../types/button_appearance.ts';
 import {
   type InlineKeyboard,
@@ -11,6 +15,7 @@ import type {
   BotMessageReplyMarkup,
   ReplyInterfaceMarkup,
   ReplyKeyboardButton,
+  ReplyKeyboardButtonRequest,
 } from '../../../types/reply_interface.ts';
 import { jsonParameter, optionalInt64Identifier } from './request_parameters.ts';
 
@@ -190,14 +195,144 @@ export const inlineKeyboardMarkupSchema = z.strictObject({
   inline_keyboard.length === 0 ? undefined : inline_keyboard
 );
 
+/** Telegram reads a request's identifier as a signed 32-bit integer. */
+const requestIdSchema = z.int().min(-(2 ** 31)).max(2 ** 31 - 1);
+
+/**
+ * `ChatAdministratorRights` that a chat request requires, read as the official Bot API server's
+ * `get_chat_administrator_rights` reads them, where a missing right is not required.
+ */
+const requiredAdministratorRightsSchema = z.strictObject(
+  Object.fromEntries(CHAT_ADMINISTRATOR_RIGHT_NAMES.map((name) => [name, z.boolean().optional()])),
+).transform((rights) => CHAT_ADMINISTRATOR_RIGHT_NAMES.filter((name) => rights[name] === true));
+
+/**
+ * The fields of a reply keyboard button's request, which must be exactly one request, as the
+ * official Bot API server's `get_keyboard_button_type` reads them under their documented names.
+ * Telegram also reads legacy names and managed bot requests, and buttons with several requests,
+ * using the first it recognizes; rejecting them instead surfaces ambiguous markup in tests.
+ */
+const replyKeyboardButtonRequestSchema = z.union([
+  z.strictObject({ request_contact: z.literal(true) })
+    .transform((): ReplyKeyboardButtonRequest => ({ kind: 'contact' })),
+  z.strictObject({ request_location: z.literal(true) })
+    .transform((): ReplyKeyboardButtonRequest => ({ kind: 'location' })),
+  z.strictObject({
+    request_poll: z.strictObject({ type: z.enum(['quiz', 'regular']).optional() }),
+  }).transform(({ request_poll }): ReplyKeyboardButtonRequest => ({
+    kind: 'poll',
+    ...(request_poll.type === undefined ? {} : { pollType: request_poll.type }),
+  })),
+  // Sending checks the URL as Telegram does.
+  z.strictObject({ web_app: z.strictObject({ url: z.string() }) })
+    .transform(({ web_app }): ReplyKeyboardButtonRequest => ({
+      kind: 'web_app',
+      url: web_app.url,
+    })),
+  z.strictObject({
+    request_users: z.strictObject({
+      request_id: requestIdSchema,
+      user_is_bot: z.boolean().optional(),
+      user_is_premium: z.boolean().optional(),
+      max_quantity: z.int().min(1).max(10).default(1),
+      request_name: z.boolean().default(false),
+      request_username: z.boolean().default(false),
+      request_photo: z.boolean().default(false),
+    }),
+  }).transform(({ request_users: request }): ReplyKeyboardButtonRequest => ({
+    kind: 'users',
+    requestId: request.request_id,
+    ...(request.user_is_bot === undefined ? {} : { userIsBot: request.user_is_bot }),
+    ...(request.user_is_premium === undefined ? {} : { userIsPremium: request.user_is_premium }),
+    maxQuantity: request.max_quantity,
+    requestsName: request.request_name,
+    requestsUsername: request.request_username,
+    requestsPhoto: request.request_photo,
+  })),
+  z.strictObject({
+    request_chat: z.strictObject({
+      request_id: requestIdSchema,
+      chat_is_channel: z.boolean(),
+      chat_is_forum: z.boolean().optional(),
+      chat_has_username: z.boolean().optional(),
+      chat_is_created: z.boolean().default(false),
+      user_administrator_rights: requiredAdministratorRightsSchema.optional(),
+      bot_administrator_rights: requiredAdministratorRightsSchema.optional(),
+      bot_is_member: z.boolean().default(false),
+      request_title: z.boolean().default(false),
+      request_username: z.boolean().default(false),
+      request_photo: z.boolean().default(false),
+    }),
+  }).transform(({ request_chat: request }): ReplyKeyboardButtonRequest => {
+    // As TDLib's `RequestedDialogType` does, the rights are kept for the requested kind of chat.
+    const chatKind = request.chat_is_channel ? 'channel' : 'group';
+    return {
+      kind: 'chat',
+      requestId: request.request_id,
+      chatIsChannel: request.chat_is_channel,
+      ...(request.chat_is_forum === undefined ? {} : { chatIsForum: request.chat_is_forum }),
+      ...(request.chat_has_username === undefined
+        ? {}
+        : { chatHasUsername: request.chat_has_username }),
+      chatIsCreated: request.chat_is_created,
+      ...(request.user_administrator_rights === undefined ? {} : {
+        userAdministratorRights: normalizeDefaultAdministratorRights(
+          chatKind,
+          request.user_administrator_rights,
+        ),
+      }),
+      ...(request.bot_administrator_rights === undefined ? {} : {
+        botAdministratorRights: normalizeDefaultAdministratorRights(
+          chatKind,
+          request.bot_administrator_rights,
+        ),
+      }),
+      botIsMember: request.bot_is_member,
+      requestsTitle: request.request_title,
+      requestsUsername: request.request_username,
+      requestsPhoto: request.request_photo,
+    };
+  }),
+]);
+
+const replyKeyboardButtonFaceSchema = z.strictObject({
+  text: z.string().min(1),
+  ...buttonAppearanceShape,
+});
+
+/**
+ * A reply keyboard button: its text, which Telegram also reads from a plain string, its
+ * appearance, and at most one request, as `replyKeyboardButtonRequestSchema` reads it.
+ */
 const replyKeyboardButtonSchema = z.union([
-  z.string().min(1),
-  z.strictObject({ text: z.string().min(1), ...buttonAppearanceShape }),
-]).transform((button): ReplyKeyboardButton =>
-  typeof button === 'string'
-    ? { text: button }
-    : { text: button.text, ...readButtonAppearance(button) }
-);
+  z.string().min(1).transform((text): ReplyKeyboardButton => ({ text })),
+  z.record(z.string(), z.unknown()).transform((fields, context): ReplyKeyboardButton => {
+    const faceFields: Record<string, unknown> = {};
+    const requestFields: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(fields)) {
+      (Object.hasOwn(replyKeyboardButtonFaceSchema.shape, name) ? faceFields : requestFields)[
+        name
+      ] = value;
+    }
+    const face = replyKeyboardButtonFaceSchema.safeParse(faceFields);
+    const request = Object.keys(requestFields).length === 0
+      ? undefined
+      : replyKeyboardButtonRequestSchema.safeParse(requestFields);
+    if (!face.success || request?.success === false) {
+      context.issues.push({
+        code: 'custom',
+        message: 'Expected the fields of a reply keyboard button and of at most one request',
+        input: fields,
+      });
+      return z.NEVER;
+    }
+    return {
+      text: face.data.text,
+      ...readButtonAppearance(face.data),
+      ...(request === undefined ? {} : { request: request.data }),
+    };
+  }),
+]);
 
 const inputFieldPlaceholderSchema = z.string().min(1).max(MAX_INPUT_FIELD_PLACEHOLDER_LENGTH);
 
@@ -264,9 +399,8 @@ export function inlineKeyboardMarkupParameter() {
  * A `reply_markup` parameter of a method that sends a message: an inline keyboard, as
  * `inlineKeyboardMarkupParameter` reads it, or a reply keyboard, its removal, or a forced reply.
  *
- * As on Telegram, a keyboard without rows attaches no markup. Reply keyboard buttons that request
- * a contact, location, poll, users, chat, or web app are not supported, and neither is markup
- * that combines kinds, which Telegram resolves by precedence; both are rejected.
+ * As on Telegram, a keyboard without rows attaches no markup. Markup that combines kinds, which
+ * Telegram resolves by precedence, is rejected.
  */
 export function messageReplyMarkupParameter() {
   return jsonParameter(

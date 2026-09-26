@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { toBotApiLocation } from '../../../types/bot_api.ts';
 import type { BotCommand } from '../../../types/bot_command.ts';
+import { getApplicableAdministratorRightFlags } from '../../../types/bot_default_administrator_rights.ts';
 import { toBotApiMenuButton } from '../../../types/bot_menu_button.ts';
 import type { CallbackQuery } from '../../../types/callback_query.ts';
 import {
@@ -19,7 +20,11 @@ import {
   type InlineQueryResultsButton,
   MAX_INLINE_QUERY_LENGTH,
 } from '../../../types/inline_query.ts';
-import type { ReplyInterface, ReplyKeyboardButton } from '../../../types/reply_interface.ts';
+import type {
+  ReplyInterface,
+  ReplyKeyboardButton,
+  ReplyKeyboardButtonRequest,
+} from '../../../types/reply_interface.ts';
 import {
   MAX_SUPERGROUP_OR_CHANNEL_ID,
   MAX_TELEGRAM_USER_ID,
@@ -1385,15 +1390,81 @@ function presentReplyInterfaceForAccount(messageId: number, replyInterface: Repl
   }
 }
 
-/** Shows a reply keyboard button's text and appearance, as the Bot API writes a `KeyboardButton`. */
+/**
+ * Shows a reply keyboard button's text, appearance and request, as the Bot API writes a
+ * `KeyboardButton`.
+ */
 function presentReplyKeyboardButtonForAccount(
-  { text, style, iconCustomEmojiId }: ReplyKeyboardButton,
+  { text, style, iconCustomEmojiId, request }: ReplyKeyboardButton,
 ) {
   return {
     text,
     ...(iconCustomEmojiId === undefined ? {} : { icon_custom_emoji_id: iconCustomEmojiId }),
     ...(style === undefined ? {} : { style }),
+    ...(request === undefined ? {} : presentReplyKeyboardButtonRequest(request)),
   };
+}
+
+/** Shows what a reply keyboard button requests, in the fields of a Bot API `KeyboardButton`. */
+function presentReplyKeyboardButtonRequest(request: ReplyKeyboardButtonRequest) {
+  switch (request.kind) {
+    case 'contact':
+      return { request_contact: true };
+    case 'location':
+      return { request_location: true };
+    case 'poll':
+      return { request_poll: request.pollType === undefined ? {} : { type: request.pollType } };
+    case 'web_app':
+      return { web_app: { url: request.url } };
+    case 'users':
+      return {
+        request_users: {
+          request_id: request.requestId,
+          ...(request.userIsBot === undefined ? {} : { user_is_bot: request.userIsBot }),
+          ...(request.userIsPremium === undefined
+            ? {}
+            : { user_is_premium: request.userIsPremium }),
+          max_quantity: request.maxQuantity,
+          request_name: request.requestsName,
+          request_username: request.requestsUsername,
+          request_photo: request.requestsPhoto,
+        },
+      };
+    case 'chat': {
+      const chatKind = request.chatIsChannel ? 'channel' : 'group';
+      return {
+        request_chat: {
+          request_id: request.requestId,
+          chat_is_channel: request.chatIsChannel,
+          ...(request.chatIsForum === undefined ? {} : { chat_is_forum: request.chatIsForum }),
+          ...(request.chatHasUsername === undefined
+            ? {}
+            : { chat_has_username: request.chatHasUsername }),
+          chat_is_created: request.chatIsCreated,
+          ...(request.userAdministratorRights === undefined ? {} : {
+            user_administrator_rights: getApplicableAdministratorRightFlags(
+              chatKind,
+              request.userAdministratorRights,
+            ),
+          }),
+          ...(request.botAdministratorRights === undefined ? {} : {
+            bot_administrator_rights: getApplicableAdministratorRightFlags(
+              chatKind,
+              request.botAdministratorRights,
+            ),
+          }),
+          bot_is_member: request.botIsMember,
+          request_title: request.requestsTitle,
+          request_username: request.requestsUsername,
+          request_photo: request.requestsPhoto,
+        },
+      };
+    }
+    default: {
+      const unhandledRequest: never = request;
+      throw new Error(`Unhandled reply keyboard request: ${JSON.stringify(unhandledRequest)}`);
+    }
+  }
 }
 
 /** Shows a callback query to the account that created it, with the bot's answer once given. */

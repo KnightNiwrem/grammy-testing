@@ -88,6 +88,26 @@ removal follow the corresponding private-chat logic in TDLib's
 uneditable, even after the interface clears. A forced reply stays shown after the account replies;
 its dismissal is an [intentional deviation](#intentional-deviations).
 
+### Request buttons
+
+Reply keyboard buttons can also request something instead of sending their text: `request_contact`,
+`request_location`, `request_poll`, `web_app`, `request_users` and `request_chat`, which the
+official server's [`get_keyboard_button_type`][reply-button-type] reads. As TDLib's
+[`KeyboardButton::get_keyboard_button`][td-keyboard-button] requires, only private chats allow them;
+elsewhere sending fails with its error, such as
+`Bad Request: phone number can be requested in private chats only`. A `web_app` button's link is
+checked as for [inline Web App buttons](#login-and-web-app-buttons), but named as a keyboard
+button's: `Bad Request: keyboard button Web App URL '…' is invalid: Only HTTPS links are allowed`.
+The administrator rights a chat request requires are kept for the requested kind of chat, as TDLib's
+[`RequestedDialogType`][requested-dialog-type] keeps them, where any right includes
+`can_manage_chat`.
+
+Accounts see each request in the fields of a Bot API `KeyboardButton`, with every field of
+`request_users` and `request_chat` and the normalized Web App link. Telegram's clients answer such a
+button with what it requests rather than its text, which the emulator [cannot do](#real-gaps), so
+pressing one fails with `400`. Legacy names that the server also reads, `request_phone_number` and
+`request_user`, and `request_managed_bot` for the missing managed bots, are rejected.
+
 ### In supergroups
 
 Bots also send reply keyboards, removals and forced replies to supergroups, which the official
@@ -108,8 +128,7 @@ removed from the supergroup, as TDLib does for that service message and in
 Pressing a button sends its text as the account's message, replying to the keyboard's message as
 Telegram Desktop's [`HistoryWidget::sendBotCommand`][desktop-bot-command] does outside private
 chats. The bot that sent the keyboard therefore receives the press even in privacy mode. Reply
-buttons that request contacts, locations or other data are [missing](#real-gaps); TDLib only allows
-them in private chats.
+buttons with a [request](#request-buttons) are refused, as TDLib allows them only in private chats.
 
 ## Button appearance
 
@@ -159,9 +178,11 @@ no buttons, and it checks only the icon identifier's syntax, as it does for
 - **Game and payment buttons.** These inline buttons need their
   [missing features](README.md#unimplemented-areas). Tests cannot exercise those button definitions
   or actions.
-- **Reply keyboard request buttons.** Requests for contacts, locations, polls, users, chats and web
-  apps are absent. Compare these missing types and fields with upstream's
-  [keyboard button parsing][button-parsing].
+- **Answering reply keyboard requests.** Accounts cannot answer a
+  [request button](#request-buttons): sharing a contact, location, users or a chat, creating a poll,
+  or sending Web App data. Contacts, locations and polls are among the
+  [missing message kinds](README.md#unimplemented-areas), and the `users_shared`, `chat_shared` and
+  `web_app_data` service messages are missing too.
 
 ## Comparison limits
 
@@ -192,6 +213,9 @@ server behavior.
 [button-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L4247-L4263
 [td-button-equality]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L84-L87
 [login-web-app-parsing]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10442-L10488
+[reply-button-type]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10248-L10345
+[td-keyboard-button]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/KeyboardButton.cpp#L82-L179
+[requested-dialog-type]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/RequestedDialogType.cpp#L33-L51
 [td-login-web-app]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L315-L369
 [td-button-clone]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L42-L82
 [button-type-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L18115-L18201

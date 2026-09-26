@@ -4389,7 +4389,8 @@ Deno.test("sendMessage changes the reply interface the account's client shows", 
   const invalidMarkups: unknown[] = [
     { keyboard: [[]] },
     { keyboard: [['']] },
-    { keyboard: [[{ text: 'Share phone', request_contact: true }]] },
+    { keyboard: [[{ text: 'Share', request_contact: true, request_location: true }]] },
+    { keyboard: [[{ text: 'Share phone', request_contact: false }]] },
     { keyboard: [['Red']], input_field_placeholder: 'x'.repeat(65) },
     { keyboard: [['Red']], inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] },
     { remove_keyboard: false },
@@ -4412,6 +4413,152 @@ Deno.test("sendMessage changes the reply interface the account's client shows", 
     (await api.request(`${accountPath}/conversations/private/999/reply-interface`)).status !== 404
   ) {
     throw new Error('Expected unknown participants to be not found');
+  }
+});
+
+Deno.test('reply keyboard buttons request data only in private chats', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  await sendText('/start');
+  const accountId = createdAccount.account.id;
+  const accountPath = `${sessionPath}/accounts/${accountId}`;
+  const sendKeyboard = (chatId: number, keyboard: unknown, path = botApiPath) =>
+    callBotApi(api, `${path}/sendMessage`, {
+      chat_id: chatId,
+      text: 'Share',
+      reply_markup: { keyboard },
+    });
+
+  const sent = await sendKeyboard(accountId, [
+    [{ text: 'Phone', request_contact: true }, { text: 'Here', request_location: true }],
+    [{ text: 'Quiz', request_poll: { type: 'quiz' } }, { text: 'Poll', request_poll: {} }],
+    [{ text: 'Shop', web_app: { url: 'HTTPS://shop.example' } }],
+    [{ text: 'Friends', request_users: { request_id: 1, user_is_bot: false, max_quantity: 3 } }],
+    [{
+      text: 'Group',
+      request_chat: {
+        request_id: 2,
+        chat_is_channel: false,
+        chat_has_username: true,
+        bot_administrator_rights: { can_pin_messages: true, can_post_messages: true },
+        request_title: true,
+      },
+    }],
+  ]);
+  const replyInterface = (await (await api.request(
+    `${accountPath}/conversations/private/${createdBot.bot.id}/reply-interface`,
+  )).json() as { reply_interface?: { keyboard?: unknown } }).reply_interface;
+  const groupRights = Object.fromEntries(
+    [
+      'can_manage_chat',
+      'can_change_info',
+      'can_delete_messages',
+      'can_invite_users',
+      'can_restrict_members',
+      'can_pin_messages',
+      'can_manage_topics',
+      'can_promote_members',
+      'can_manage_video_chats',
+      'can_post_stories',
+      'can_edit_stories',
+      'can_delete_stories',
+      'can_manage_tags',
+      'can_send_welcome_messages',
+      'is_anonymous',
+    ].map((right) => [right, right === 'can_manage_chat' || right === 'can_pin_messages']),
+  );
+  const expectedKeyboard = [
+    [{ text: 'Phone', request_contact: true }, { text: 'Here', request_location: true }],
+    [{ text: 'Quiz', request_poll: { type: 'quiz' } }, { text: 'Poll', request_poll: {} }],
+    [{ text: 'Shop', web_app: { url: 'https://shop.example/' } }],
+    [{
+      text: 'Friends',
+      request_users: {
+        request_id: 1,
+        user_is_bot: false,
+        max_quantity: 3,
+        request_name: false,
+        request_username: false,
+        request_photo: false,
+      },
+    }],
+    [{
+      text: 'Group',
+      request_chat: {
+        request_id: 2,
+        chat_is_channel: false,
+        chat_has_username: true,
+        chat_is_created: false,
+        bot_administrator_rights: groupRights,
+        bot_is_member: false,
+        request_title: true,
+        request_username: false,
+        request_photo: false,
+      },
+    }],
+  ];
+  if (
+    sent.status !== 200 ||
+    JSON.stringify(replyInterface?.keyboard) !== JSON.stringify(expectedKeyboard)
+  ) {
+    throw new Error(
+      `Expected the account to see every request, received ${
+        JSON.stringify([sent, replyInterface])
+      }`,
+    );
+  }
+
+  const press = await api.request(
+    `${accountPath}/reply-keyboard-presses`,
+    jsonRequest('POST', { chat: { type: 'private', botId: createdBot.bot.id }, text: 'Phone' }),
+  );
+  if (press.status !== 400) {
+    throw new Error(`Expected a request button not to send its text, received ${press.status}`);
+  }
+
+  const invalidWebApps: Array<[string, string]> = [
+    [
+      'http://shop.example',
+      "Bad Request: keyboard button Web App URL 'http://shop.example' is invalid: " +
+      'Only HTTPS links are allowed',
+    ],
+    ['tg://user?id=1', "Bad Request: link to a user can't be used in Web App URL buttons"],
+  ];
+  for (const [url, expectedDescription] of invalidWebApps) {
+    const { body } = await sendKeyboard(accountId, [[{ text: 'Shop', web_app: { url } }]]);
+    if (!isBadRequestResponse(body) || body.description !== expectedDescription) {
+      throw new Error(`Expected ${url} to fail with ${expectedDescription}`);
+    }
+  }
+
+  const group = await createSupergroupFixture();
+  const groupRequests: Array<[unknown, string]> = [
+    [{ request_contact: true }, 'phone number can be requested in private chats only'],
+    [{ request_location: true }, 'location can be requested in private chats only'],
+    [{ request_poll: {} }, 'poll can be requested in private chats only'],
+    [
+      { web_app: { url: 'http://shop.example' } },
+      'web App buttons can be used in private chats only',
+    ],
+    [{ request_users: { request_id: 1 } }, 'users can be requested in private chats only'],
+    [
+      { request_chat: { request_id: 2, chat_is_channel: true } },
+      'chats can be requested in private chats only',
+    ],
+  ];
+  for (const [request, expectedError] of groupRequests) {
+    const { body } = await callBotApi(group.api, `${group.bot.botApiPath}/sendMessage`, {
+      chat_id: group.supergroup.id,
+      text: 'Share',
+      reply_markup: { keyboard: [['Hello', { text: 'Share', ...request as object }]] },
+    });
+    if (!isBadRequestResponse(body) || body.description !== `Bad Request: ${expectedError}`) {
+      throw new Error(
+        `Expected ${JSON.stringify(request)} to fail in a supergroup, received ${
+          JSON.stringify(body)
+        }`,
+      );
+    }
   }
 });
 

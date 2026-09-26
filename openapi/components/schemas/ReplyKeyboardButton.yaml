@@ -1,12 +1,201 @@
-type: object
-additionalProperties: false
-required:
-  - text
-properties:
-  text:
-    type: string
-    minLength: 1
-  icon_custom_emoji_id:
-    $ref: ./ButtonIconCustomEmojiId.yaml
-  style:
-    $ref: ./ButtonStyle.yaml
+description: >-
+  A reply keyboard button: a button that sends its text, or one with a request that asks the
+  client to share something instead. As TDLib does, only a private chat allows buttons with a
+  request; elsewhere sending fails with TDLib's error, such as `Bad Request: phone number can be
+  requested in private chats only`. Responses show every field of a request. The emulator cannot
+  answer requests, so accounts cannot press such buttons. Telegram also reads legacy request
+  names, managed bot requests, and buttons with several requests, using the first it
+  recognizes; the emulator rejects them.
+oneOf:
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - request_contact
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      request_contact:
+        type: boolean
+        const: true
+        description: Asks the client to share the user's phone number as a contact.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - request_location
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      request_location:
+        type: boolean
+        const: true
+        description: Asks the client to share the user's current location.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - request_poll
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      request_poll:
+        type: object
+        additionalProperties: false
+        description: Asks the client to create a poll, of the given type if one is given.
+        properties:
+          type:
+            type: string
+            enum:
+              - quiz
+              - regular
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - web_app
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      web_app:
+        type: object
+        additionalProperties: false
+        description: >-
+          Opens a Web App of the bot. Its link must be HTTPS and cannot open a user's
+          profile, as TDLib requires (`Bad Request: keyboard button Web App URL '…' is invalid:
+          Only HTTPS links are allowed`); responses show it normalized.
+        required:
+          - url
+        properties:
+          url:
+            type: string
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - request_users
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      request_users:
+        type: object
+        additionalProperties: false
+        description: Asks the client to share users with the bot.
+        required:
+          - request_id
+        properties:
+          request_id:
+            type: integer
+            format: int32
+          user_is_bot:
+            type: boolean
+            description: Requires bots when true and other users when false; omitted for either.
+          user_is_premium:
+            type: boolean
+            description: >-
+              Requires Premium users when true and other users when false; omitted for either.
+          max_quantity:
+            type: integer
+            minimum: 1
+            maximum: 10
+            default: 1
+          request_name:
+            type: boolean
+            default: false
+          request_username:
+            type: boolean
+            default: false
+          request_photo:
+            type: boolean
+            default: false
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - request_chat
+    properties:
+      text:
+        type: string
+        minLength: 1
+      icon_custom_emoji_id:
+        $ref: ./ButtonIconCustomEmojiId.yaml
+      style:
+        $ref: ./ButtonStyle.yaml
+      request_chat:
+        type: object
+        additionalProperties: false
+        description: >-
+          Asks the client to share a chat with the bot. Required administrator rights are
+          kept for the requested kind of chat, as TDLib keeps them, so responses show every
+          right that applies to it.
+        required:
+          - request_id
+          - chat_is_channel
+        properties:
+          request_id:
+            type: integer
+            format: int32
+          chat_is_channel:
+            type: boolean
+          chat_is_forum:
+            type: boolean
+            description: Omitted for either.
+          chat_has_username:
+            type: boolean
+            description: Omitted for either.
+          chat_is_created:
+            type: boolean
+            default: false
+          user_administrator_rights:
+            $ref: ./ChatAdministratorRights.yaml
+          bot_administrator_rights:
+            $ref: ./ChatAdministratorRights.yaml
+          bot_is_member:
+            type: boolean
+            default: false
+          request_title:
+            type: boolean
+            default: false
+          request_username:
+            type: boolean
+            default: false
+          request_photo:
+            type: boolean
+            default: false

@@ -15,10 +15,10 @@ import type {
 } from '../types/bot_api.ts';
 import type { BotCommand, BotCommandScope } from '../types/bot_command.ts';
 import {
-  APPLICABLE_ADMINISTRATOR_RIGHT_NAMES,
   type ChatAdministratorRightName,
   type DefaultAdministratorRights,
   type DefaultAdministratorRightsChatKind,
+  getApplicableAdministratorRightFlags,
 } from '../types/bot_default_administrator_rights.ts';
 import type { BotDescriptionKind } from '../types/bot_description.ts';
 import { type BotMenuButton, toBotApiMenuButton } from '../types/bot_menu_button.ts';
@@ -42,7 +42,12 @@ import {
   type PrivateForwardNameLookup,
 } from '../types/message_forward.ts';
 import { createExternalReply, type ExternalReplyTarget } from '../types/message_reply.ts';
-import type { BotMessageReplyMarkup } from '../types/reply_interface.ts';
+import {
+  type BotMessageReplyMarkup,
+  getGroupReplyKeyboardRequestError,
+  type ReplyInterfaceMarkup,
+  type ReplyKeyboardButton,
+} from '../types/reply_interface.ts';
 import {
   convertRichMessageFiles,
   listRichMessageFiles,
@@ -142,6 +147,14 @@ export type ReadFormattedTextResult =
 
 export type ReadInlineKeyboardResult =
   | { readonly read: true; readonly inlineKeyboard: InlineKeyboard }
+  | {
+    readonly read: false;
+    /** TDLib's description of the button it cannot read. */
+    readonly keyboardError: string;
+  };
+
+export type ReadReplyInterfaceMarkupResult =
+  | { readonly read: true; readonly replyInterfaceMarkup: ReplyInterfaceMarkup }
   | {
     readonly read: false;
     /** TDLib's description of the button it cannot read. */
@@ -1510,6 +1523,43 @@ export class BotApiService {
   }
 
   /**
+   * Reads reply interface markup as TDLib's `KeyboardButton::get_keyboard_button` reads the
+   * buttons of a reply keyboard being sent. As TDLib does, only a private chat allows buttons with
+   * a request, and a Web App button needs an HTTPS link, which cannot open a profile. The
+   * keyboard keeps the link as `check_link` normalizes it, which is how the user's client shows
+   * it.
+   */
+  readReplyInterfaceMarkup(
+    replyInterfaceMarkup: ReplyInterfaceMarkup,
+    { allowsRequestButtons }: { readonly allowsRequestButtons: boolean },
+  ): ReadReplyInterfaceMarkupResult {
+    if (replyInterfaceMarkup.kind !== 'reply_keyboard') {
+      return { read: true, replyInterfaceMarkup };
+    }
+    const readRows: ReplyKeyboardButton[][] = [];
+    for (const row of replyInterfaceMarkup.rows) {
+      const readRow: ReplyKeyboardButton[] = [];
+      for (const button of row) {
+        const { request } = button;
+        if (request !== undefined && !allowsRequestButtons) {
+          return { read: false, keyboardError: getGroupReplyKeyboardRequestError(request) };
+        }
+        if (request?.kind !== 'web_app') {
+          readRow.push(button);
+          continue;
+        }
+        const urlReading = readHttpsButtonUrl(request.url, 'Keyboard button Web App');
+        if (!urlReading.read) {
+          return urlReading;
+        }
+        readRow.push({ ...button, request: { ...request, url: urlReading.url } });
+      }
+      readRows.push(readRow);
+    }
+    return { read: true, replyInterfaceMarkup: { ...replyInterfaceMarkup, rows: readRows } };
+  }
+
+  /**
    * Reads the buttons of a rich message, in rows and in its text, as TDLib's
    * `get_inline_keyboard_button` reads them for a rich message: as `readInlineKeyboard` reads the
    * buttons of an inline keyboard.
@@ -1573,10 +1623,10 @@ export class BotApiService {
             return { read: false, keyboardError: `bot "${authorizingBotUsername}" not found` };
           }
         }
-        return readHttpsButtonUrl(action.url, 'login');
+        return readHttpsButtonUrl(action.url, 'Inline keyboard button login');
       }
       case 'web_app':
-        return readHttpsButtonUrl(action.url, 'Web App');
+        return readHttpsButtonUrl(action.url, 'Inline keyboard button Web App');
       case 'switch_inline_query':
         return action.target.kind === 'chosen_chat' &&
             !allowsSomeInlineQueryChat(action.target.chatTypes)
@@ -2983,9 +3033,7 @@ export class BotApiService {
     if (!result.found) {
       throw new Error(`Authenticated bot ${authenticatedBot.id} does not exist`);
     }
-    return Object.fromEntries(
-      APPLICABLE_ADMINISTRATOR_RIGHT_NAMES[kind].map((right) => [right, result.rights.has(right)]),
-    );
+    return getApplicableAdministratorRightFlags(kind, result.rights);
   }
 
   /**
@@ -3261,21 +3309,29 @@ function readInlineButtonUrl(url: string): ButtonActionReading {
 
 /**
  * Reads the link of a login or Web App button, as TDLib does: an HTTPS link, as `check_link`
- * normalizes it, which cannot open a user's profile.
+ * normalizes it, which cannot open a user's profile. TDLib names the button in its errors, as
+ * `Inline keyboard button login` or `Keyboard button Web App`.
  */
-function readHttpsButtonUrl(url: string, buttonKindName: 'login' | 'Web App'): ButtonActionReading {
+function readHttpsButtonUrl(
+  url: string,
+  buttonDescription:
+    | 'Inline keyboard button login'
+    | 'Inline keyboard button Web App'
+    | 'Keyboard button Web App',
+): { readonly read: true; readonly url: string } | {
+  readonly read: false;
+  readonly keyboardError: string;
+} {
   if (getLinkUserId(url) !== undefined) {
-    return {
-      read: false,
-      keyboardError: `Link to a user can't be used in ${
-        buttonKindName === 'login' ? 'login URL' : 'Web App URL'
-      } buttons`,
-    };
+    const buttonKind = buttonDescription === 'Inline keyboard button login'
+      ? 'login URL'
+      : 'Web App URL';
+    return { read: false, keyboardError: `Link to a user can't be used in ${buttonKind} buttons` };
   }
   const linkCheck = checkLink(url, { httpsOnly: true });
   return linkCheck.valid
     ? { read: true, url: linkCheck.url }
-    : { read: false, keyboardError: `Inline keyboard button ${buttonKindName} ${linkCheck.error}` };
+    : { read: false, keyboardError: `${buttonDescription} ${linkCheck.error}` };
 }
 
 /** Looks up what a file of a request resolved to, which must have been resolved before. */

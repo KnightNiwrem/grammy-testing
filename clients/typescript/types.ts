@@ -931,8 +931,56 @@ export type SupergroupMessage =
   & SupergroupMessageContent
   & MessageTrailer;
 
-/** A reply keyboard button, which sends its text to the chat when pressed. */
-export type ReplyKeyboardButton = KeyboardButtonFace;
+/**
+ * Administrator rights that a chat request requires: every right that applies to the requested
+ * kind of chat, by its Bot API name, required or not.
+ */
+export type RequiredChatAdministratorRights = Readonly<Record<string, boolean>>;
+
+/**
+ * What a reply keyboard button asks the client to share instead of sending its text, in the
+ * fields of a Bot API `KeyboardButton`. The emulator cannot answer these requests, so such
+ * buttons cannot be pressed.
+ */
+export type ReplyKeyboardButtonRequest =
+  | { readonly request_contact: true }
+  | { readonly request_location: true }
+  | { readonly request_poll: { readonly type?: 'quiz' | 'regular' } }
+  | { readonly web_app: { readonly url: string } }
+  | {
+    readonly request_users: {
+      readonly request_id: number;
+      readonly user_is_bot?: boolean;
+      readonly user_is_premium?: boolean;
+      readonly max_quantity: number;
+      readonly request_name: boolean;
+      readonly request_username: boolean;
+      readonly request_photo: boolean;
+    };
+  }
+  | {
+    readonly request_chat: {
+      readonly request_id: number;
+      readonly chat_is_channel: boolean;
+      readonly chat_is_forum?: boolean;
+      readonly chat_has_username?: boolean;
+      readonly chat_is_created: boolean;
+      readonly user_administrator_rights?: RequiredChatAdministratorRights;
+      readonly bot_administrator_rights?: RequiredChatAdministratorRights;
+      readonly bot_is_member: boolean;
+      readonly request_title: boolean;
+      readonly request_username: boolean;
+      readonly request_photo: boolean;
+    };
+  };
+
+/**
+ * A reply keyboard button, which sends its text to the chat when pressed, or asks the client to
+ * share what its request describes.
+ */
+export type ReplyKeyboardButton =
+  | KeyboardButtonFace
+  | (KeyboardButtonFace & ReplyKeyboardButtonRequest);
 
 /** A custom keyboard the account's client shows in place of its letter keyboard. */
 export interface ReplyKeyboardInterface {

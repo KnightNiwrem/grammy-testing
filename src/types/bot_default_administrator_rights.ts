@@ -96,3 +96,16 @@ export function normalizeDefaultAdministratorRights(
   }
   return rights;
 }
+
+/**
+ * Administrator rights as flags for every right that applies to a kind of chat, held or not, in
+ * the order the official Bot API server's `json_store_administrator_rights` shows them.
+ */
+export function getApplicableAdministratorRightFlags(
+  kind: DefaultAdministratorRightsChatKind,
+  rights: DefaultAdministratorRights,
+): { readonly [Right in ChatAdministratorRightName]?: boolean } {
+  return Object.fromEntries(
+    APPLICABLE_ADMINISTRATOR_RIGHT_NAMES[kind].map((right) => [right, rights.has(right)]),
+  );
+}

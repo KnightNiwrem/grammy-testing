@@ -8,7 +8,9 @@ import {
 import { MAX_CALLBACK_QUERY_ANSWER_TEXT_LENGTH } from '../../../types/callback_query.ts';
 import type { EmulationSession } from '../../../types/emulation_session.ts';
 import type { InlineKeyboard } from '../../../types/inline_keyboard.ts';
+import type { BotMessageReplyMarkup } from '../../../types/reply_interface.ts';
 import { MAX_PHOTO_UPLOAD_BYTES, type StoredFile } from '../../../types/stored_file.ts';
+import { isUserId } from '../../../types/telegram_identity.ts';
 import type { VirtualBotProfile } from '../../../types/virtual_bot.ts';
 import type { ChatAction } from '../../../types/virtual_chat.ts';
 import { fileDownloadResponse } from '../file_download.ts';
@@ -1586,9 +1588,9 @@ function readSendOptions(
   if (chatId === undefined) {
     return { read: false, errorAnswer: botApiError(400, CHAT_ID_EMPTY_DESCRIPTION) };
   }
-  const keyboardReading = readInlineKeyboardParameter(context, replyMarkup.inlineKeyboard);
-  if (!keyboardReading.read) {
-    return keyboardReading;
+  const markupReading = readMessageReplyMarkupParameter(context, replyMarkup, chatId);
+  if (!markupReading.read) {
+    return markupReading;
   }
   const replyChatId = replyTarget?.chatId === undefined
     ? undefined
@@ -1599,9 +1601,7 @@ function readSendOptions(
   return {
     read: true,
     options: {
-      ...(keyboardReading.inlineKeyboard === undefined
-        ? replyMarkup
-        : { inlineKeyboard: keyboardReading.inlineKeyboard }),
+      ...markupReading.replyMarkup,
       chatId,
       replyTo: replyTarget === undefined ? undefined : {
         messageId: replyTarget.messageId,
@@ -1615,6 +1615,43 @@ function readSendOptions(
       isSilent,
       messageEffectId,
     },
+  };
+}
+
+/**
+ * Reads the reply markup of a message being sent to a chat: an inline keyboard, as
+ * `readInlineKeyboardParameter` reads it, or reply interface markup, as
+ * `BotApiService.readReplyInterfaceMarkup` reads it, which allows buttons with a request only in a
+ * private chat. Answers Telegram's error for a button it cannot read.
+ */
+function readMessageReplyMarkupParameter(
+  context: BotApiMethodContext,
+  replyMarkup: BotMessageReplyMarkup,
+  chatId: number,
+):
+  | { readonly read: true; readonly replyMarkup: BotMessageReplyMarkup }
+  | { readonly read: false; readonly errorAnswer: BotApiMethodAnswer } {
+  if (replyMarkup.replyInterfaceMarkup !== undefined) {
+    const reading = context.session.botApi.readReplyInterfaceMarkup(
+      replyMarkup.replyInterfaceMarkup,
+      { allowsRequestButtons: isUserId(chatId) },
+    );
+    return reading.read
+      ? { read: true, replyMarkup: { replyInterfaceMarkup: reading.replyInterfaceMarkup } }
+      : {
+        read: false,
+        errorAnswer: botApiError(400, badRequestDescription(reading.keyboardError)),
+      };
+  }
+  const keyboardReading = readInlineKeyboardParameter(context, replyMarkup.inlineKeyboard);
+  if (!keyboardReading.read) {
+    return keyboardReading;
+  }
+  return {
+    read: true,
+    replyMarkup: keyboardReading.inlineKeyboard === undefined
+      ? {}
+      : { inlineKeyboard: keyboardReading.inlineKeyboard },
   };
 }
 

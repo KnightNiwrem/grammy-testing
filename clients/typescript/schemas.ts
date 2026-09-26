@@ -19,6 +19,7 @@ import type {
   PrivateMessage,
   RateLimitResponses,
   ReplyInterface,
+  ReplyKeyboardButton,
   RichBlock,
   RichMessage,
   RichMessageButton,
@@ -653,11 +654,53 @@ export const supergroupBotCommandsResponseSchema = z.strictObject({
   })),
 });
 
+const requiredChatAdministratorRightsSchema = z.record(z.string(), z.boolean());
+
+/** A reply keyboard button, with at most one request. */
+const replyKeyboardButtonSchema: z.ZodType<ReplyKeyboardButton> = z.union([
+  z.strictObject(keyboardButtonFaceShape),
+  z.strictObject({ ...keyboardButtonFaceShape, request_contact: z.literal(true) }),
+  z.strictObject({ ...keyboardButtonFaceShape, request_location: z.literal(true) }),
+  z.strictObject({
+    ...keyboardButtonFaceShape,
+    request_poll: z.strictObject({ type: z.enum(['quiz', 'regular']).optional() }),
+  }),
+  z.strictObject({ ...keyboardButtonFaceShape, web_app: z.strictObject({ url: z.string() }) }),
+  z.strictObject({
+    ...keyboardButtonFaceShape,
+    request_users: z.strictObject({
+      request_id: z.int(),
+      user_is_bot: z.boolean().optional(),
+      user_is_premium: z.boolean().optional(),
+      max_quantity: z.int().min(1),
+      request_name: z.boolean(),
+      request_username: z.boolean(),
+      request_photo: z.boolean(),
+    }),
+  }),
+  z.strictObject({
+    ...keyboardButtonFaceShape,
+    request_chat: z.strictObject({
+      request_id: z.int(),
+      chat_is_channel: z.boolean(),
+      chat_is_forum: z.boolean().optional(),
+      chat_has_username: z.boolean().optional(),
+      chat_is_created: z.boolean(),
+      user_administrator_rights: requiredChatAdministratorRightsSchema.optional(),
+      bot_administrator_rights: requiredChatAdministratorRightsSchema.optional(),
+      bot_is_member: z.boolean(),
+      request_title: z.boolean(),
+      request_username: z.boolean(),
+      request_photo: z.boolean(),
+    }),
+  }),
+]);
+
 const replyInterfaceSchema: z.ZodType<ReplyInterface> = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('keyboard'),
     message_id: z.number().int().positive(),
-    keyboard: z.array(z.array(z.strictObject(keyboardButtonFaceShape)).min(1)).min(1),
+    keyboard: z.array(z.array(replyKeyboardButtonSchema).min(1)).min(1),
     is_persistent: z.boolean(),
     resize_keyboard: z.boolean(),
     one_time_keyboard: z.boolean(),

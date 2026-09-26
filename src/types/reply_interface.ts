@@ -1,9 +1,85 @@
+import type { DefaultAdministratorRights } from './bot_default_administrator_rights.ts';
 import type { ButtonAppearance } from './button_appearance.ts';
 import type { InlineKeyboard } from './inline_keyboard.ts';
 
-/** A reply keyboard button, which sends its text to the chat as the user's message. */
+/**
+ * A request that the user choose users to share with the bot, as the Bot API's
+ * `KeyboardButtonRequestUsers` describes it.
+ */
+export interface ReplyKeyboardUsersRequest {
+  readonly kind: 'users';
+  /** Identifies the request in the service message that shares the users. */
+  readonly requestId: number;
+  /** Requires bots when `true` and other users when `false`; omitted for either. */
+  readonly userIsBot?: boolean;
+  /** Requires Premium users when `true` and other users when `false`; omitted for either. */
+  readonly userIsPremium?: boolean;
+  /** How many users the user may choose, from 1 to 10. */
+  readonly maxQuantity: number;
+  readonly requestsName: boolean;
+  readonly requestsUsername: boolean;
+  readonly requestsPhoto: boolean;
+}
+
+/**
+ * A request that the user choose a chat to share with the bot, as the Bot API's
+ * `KeyboardButtonRequestChat` describes it.
+ */
+export interface ReplyKeyboardChatRequest {
+  readonly kind: 'chat';
+  /** Identifies the request in the service message that shares the chat. */
+  readonly requestId: number;
+  /** Requires a channel rather than a group. */
+  readonly chatIsChannel: boolean;
+  /** Requires a forum when `true` and another chat when `false`; omitted for either. */
+  readonly chatIsForum?: boolean;
+  /** Requires a public chat when `true` and a private one when `false`; omitted for either. */
+  readonly chatHasUsername?: boolean;
+  /** Requires a chat the user created. */
+  readonly chatIsCreated: boolean;
+  /**
+   * The rights the user must have in the chat, kept for the chat's kind as TDLib's
+   * `AdministratorRights` keeps them; omitted for no requirement.
+   */
+  readonly userAdministratorRights?: DefaultAdministratorRights;
+  /** The rights the bot must have in the chat, kept as `userAdministratorRights` is. */
+  readonly botAdministratorRights?: DefaultAdministratorRights;
+  /** Requires a chat of which the bot is a member. */
+  readonly botIsMember: boolean;
+  readonly requestsTitle: boolean;
+  readonly requestsUsername: boolean;
+  readonly requestsPhoto: boolean;
+}
+
+/**
+ * What a reply keyboard button asks the user's client to do instead of sending the button's text:
+ * share the user's contact or location, create a poll, open a Web App, or share users or a chat.
+ * TDLib allows such buttons only in private chats.
+ */
+export type ReplyKeyboardButtonRequest =
+  | { readonly kind: 'contact' }
+  | { readonly kind: 'location' }
+  | {
+    readonly kind: 'poll';
+    /** The only type of poll the user may create; omitted for either. */
+    readonly pollType?: 'quiz' | 'regular';
+  }
+  | {
+    readonly kind: 'web_app';
+    /** The HTTPS page the Web App opens. */
+    readonly url: string;
+  }
+  | ReplyKeyboardUsersRequest
+  | ReplyKeyboardChatRequest;
+
+/**
+ * A reply keyboard button, which sends its text to the chat as the user's message, or asks the
+ * user's client to do what its request describes.
+ */
 export interface ReplyKeyboardButton extends ButtonAppearance {
   readonly text: string;
+  /** Omitted for a button that sends its text. */
+  readonly request?: ReplyKeyboardButtonRequest;
 }
 
 /**
@@ -60,9 +136,44 @@ export interface ReplyKeyboardRemoval {
  */
 export type ReplyInterfaceMarkup = ReplyInterface | ReplyKeyboardRemoval;
 
-/** Whether a reply keyboard has a button with the given text, which pressing it sends. */
-export function hasReplyKeyboardButton(replyKeyboard: ReplyKeyboard, text: string): boolean {
-  return replyKeyboard.rows.some((row) => row.some((button) => button.text === text));
+/**
+ * Finds the button of a reply keyboard with the given text, which pressing it sends unless the
+ * button has a request. Returns `undefined` if the keyboard has no such button.
+ */
+export function findReplyKeyboardButton(
+  replyKeyboard: ReplyKeyboard,
+  text: string,
+): ReplyKeyboardButton | undefined {
+  for (const row of replyKeyboard.rows) {
+    const button = row.find((candidate) => candidate.text === text);
+    if (button !== undefined) {
+      return button;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * TDLib's description of a reply keyboard button request that a chat other than a private chat
+ * cannot show, as its `KeyboardButton::get_keyboard_button` describes it.
+ */
+const GROUP_REPLY_KEYBOARD_REQUEST_ERRORS: {
+  readonly [Kind in ReplyKeyboardButtonRequest['kind']]: string;
+} = {
+  contact: 'Phone number can be requested in private chats only',
+  location: 'Location can be requested in private chats only',
+  poll: 'Poll can be requested in private chats only',
+  web_app: 'Web App buttons can be used in private chats only',
+  users: 'Users can be requested in private chats only',
+  chat: 'Chats can be requested in private chats only',
+};
+
+/**
+ * TDLib's description of a request that a chat other than a private chat cannot show on a reply
+ * keyboard button.
+ */
+export function getGroupReplyKeyboardRequestError(request: ReplyKeyboardButtonRequest): string {
+  return GROUP_REPLY_KEYBOARD_REQUEST_ERRORS[request.kind];
 }
 
 /**

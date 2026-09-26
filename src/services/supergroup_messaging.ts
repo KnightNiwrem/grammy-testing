@@ -11,7 +11,7 @@ import type { MessageForward } from '../types/message_forward.ts';
 import {
   appliesReplyInterfaceTo,
   type BotMessageReplyMarkup,
-  hasReplyKeyboardButton,
+  findReplyKeyboardButton,
   type ReplyInterface,
   type ReplyInterfaceMarkup,
 } from '../types/reply_interface.ts';
@@ -910,7 +910,7 @@ export class SupergroupMessagingService {
     const shownReplyInterface = this.#findShownReplyInterface(chatId, fromAccountId);
     if (
       shownReplyInterface?.replyInterface.kind !== 'reply_keyboard' ||
-      !hasReplyKeyboardButton(shownReplyInterface.replyInterface, text)
+      findReplyKeyboardButton(shownReplyInterface.replyInterface, text) === undefined
     ) {
       return { sent: false, reason: 'reply_keyboard_button_not_found' };
     }

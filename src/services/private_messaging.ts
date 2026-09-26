@@ -4,7 +4,7 @@ import type { ExternalReplyTarget } from '../types/message_reply.ts';
 import type { MessageForward } from '../types/message_forward.ts';
 import {
   type BotMessageReplyMarkup,
-  hasReplyKeyboardButton,
+  findReplyKeyboardButton,
   type ReplyInterface,
   type ReplyInterfaceMarkup,
 } from '../types/reply_interface.ts';
@@ -379,7 +379,12 @@ export interface PressReplyKeyboardButtonInput {
 
 export type PressReplyKeyboardButtonResult =
   | SendAccountMessageResult
-  | { readonly sent: false; readonly reason: 'reply_keyboard_button_not_found' };
+  | {
+    readonly sent: false;
+    readonly reason:
+      | 'reply_keyboard_button_not_found'
+      | 'reply_keyboard_button_request_unsupported';
+  };
 
 export interface GetMessageForBotInput {
   readonly botId: number;
@@ -983,7 +988,9 @@ export class PrivateMessagingService {
   /**
    * Presses a button of the reply keyboard the account's client shows, which, as on Telegram,
    * sends the button's text to the bot as the account's message. The keyboard stays shown, even a
-   * one-time keyboard, which Telegram clients only hide until the user shows it again.
+   * one-time keyboard, which Telegram clients only hide until the user shows it again. A button
+   * with a request, such as for the user's contact, cannot be pressed: Telegram's clients answer
+   * it with what it requests rather than its text, which the emulator does not model.
    */
   pressReplyKeyboardButton(input: PressReplyKeyboardButtonInput): PressReplyKeyboardButtonResult {
     if (this.#accounts.getById(input.fromAccountId) === undefined) {
@@ -996,11 +1003,14 @@ export class PrivateMessagingService {
       accountId: input.fromAccountId,
       botId: input.chat.botId,
     })?.replyInterface;
-    if (
-      replyInterface?.kind !== 'reply_keyboard' ||
-      !hasReplyKeyboardButton(replyInterface, input.text)
-    ) {
+    const button = replyInterface?.kind === 'reply_keyboard'
+      ? findReplyKeyboardButton(replyInterface, input.text)
+      : undefined;
+    if (button === undefined) {
       return { sent: false, reason: 'reply_keyboard_button_not_found' };
+    }
+    if (button.request !== undefined) {
+      return { sent: false, reason: 'reply_keyboard_button_request_unsupported' };
     }
 
     return this.sendAccountMessage({
