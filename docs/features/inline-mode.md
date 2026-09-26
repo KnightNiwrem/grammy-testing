@@ -26,12 +26,20 @@ of the destination supergroup. Choices can be repeated while the account can sti
 Eligible chat bots receive the resulting account message; privacy mode includes messages sent
 through the observing bot.
 
-Supported results are articles with text input content, and cached photos/documents identified by a
-`file_id` the bot knows. Photo/document results may instead specify text input content. Supported
-caption formatting and inline keyboards apply. Answers allow up to 50 results, unique nonempty
-result IDs of at most 64 UTF-8 bytes and a `next_offset` of at most 64 UTF-8 bytes. The emulator
-checks button options, result count and message content before query state and result metadata,
-producing errors such as `RESULT_ID_DUPLICATE` and the query-too-old error.
+Supported results are articles with text or rich message input content, and cached photos/documents
+identified by a `file_id` the bot knows. Photo/document results may instead specify text or rich
+message input content. Supported caption formatting and inline keyboards apply. A rich message,
+which the official server's [`get_input_message_content`][input-message-content] reads in place of
+text, is read as for [`sendRichMessage`](rich-messages.md#sending-and-editing), and its buttons work
+as in any inline message. As TDLib's
+[`InlineQueriesManager::get_inline_message`][inline-rich-message] requires, its photos and documents
+are files the bot knows by `file_id`; an upload fails with
+`Bad Request: invalid inline message content specified`. The server prefixes its own descriptions of
+a rich message it cannot read with `can't parse InlineQueryResult:`, which the emulator words as for
+`sendRichMessage`. Answers allow up to 50 results, unique nonempty result IDs of at most 64 UTF-8
+bytes and a `next_offset` of at most 64 UTF-8 bytes. The emulator checks button options, result
+count and message content before query state and result metadata, producing errors such as
+`RESULT_ID_DUPLICATE` and the query-too-old error.
 
 With `receives_chosen_inline_results: true`, a choice also generates `chosen_inline_result` for the
 inline bot. If the result has an inline keyboard, that update supplies `inline_message_id`. Callback
@@ -85,8 +93,8 @@ TDLib-compatible encoding. Tests should treat them as opaque values.
 ## Real gaps
 
 - **Additional results and input content.** URL-backed photo/document results and all other result
-  kinds are unsupported. Only text `input_message_content` works; locations, venues, contacts,
-  invoices and other content types do not. Compare the result dispatch in
+  kinds are unsupported. Only text and rich message `input_message_content` works; locations,
+  venues, contacts, invoices and other content types do not. Compare the result dispatch in
   [`InlineQueriesManager::get_input_bot_inline_result`][results].
 
 - **Prepared messages and sharing.** Prepared inline messages and result-sharing flows are not
@@ -115,5 +123,7 @@ remote expiry and repeated-answer rules were not verified through live calls.
 [results]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L870-L1280
 [answer]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L696-L760
 [inline-query-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L5439-L5535
+[input-message-content]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10842-L10848
+[inline-rich-message]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L584-L598
 [cache]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L1335-L1410
 [cache-expiry]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineQueriesManager.cpp#L2280-L2320

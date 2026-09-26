@@ -28,7 +28,8 @@ import type {
 } from '../types/virtual_message.ts';
 import {
   type ContentNormalizationFailure,
-  hasOnlyValidCallbackData,
+  hasOnlyValidButtonCallbackData,
+  type NormalizedOutgoingContent,
   normalizeOutgoingContent,
   type OutgoingMessageContent,
   toContentOfStoredFile,
@@ -86,7 +87,8 @@ type SpecifiedInlineQueryResultListing =
 
 /**
  * A result of an answer as the bot specified it, before Telegram's checks. Its message content is
- * the text the bot specified, or else the result's own photo or document with a caption.
+ * the text or rich message the bot specified, or else the result's own photo or document with a
+ * caption.
  */
 export type SpecifiedInlineQueryResult = SpecifiedInlineQueryResultListing & {
   readonly id: string;
@@ -336,7 +338,7 @@ export class InlineQueryService {
     if (input.results.length > MAX_INLINE_QUERY_RESULT_COUNT) {
       return { answered: false, reason: 'too_many_results' };
     }
-    const messageContents: MessageContent[] = [];
+    const messageContents: NormalizedOutgoingContent[] = [];
     for (const result of input.results) {
       const normalization = normalizeOutgoingContent(
         result.messageContent,
@@ -346,7 +348,7 @@ export class InlineQueryService {
       if (!normalization.normalized) {
         return { answered: false, ...normalization.failure };
       }
-      messageContents.push(toContentOfStoredFile(normalization.content));
+      messageContents.push(normalization.content);
     }
 
     const inlineQuery = this.#inlineQueries.getInlineQuery(input.inlineQueryId);
@@ -359,7 +361,7 @@ export class InlineQueryService {
     if (utf8Encoder.encode(input.nextOffset).length > MAX_INLINE_QUERY_NEXT_OFFSET_BYTES) {
       return { answered: false, reason: 'next_offset_invalid' };
     }
-    const resultFailure = checkSpecifiedResults(input.results);
+    const resultFailure = checkSpecifiedResults(input.results, messageContents);
     if (resultFailure !== undefined) {
       return { answered: false, reason: resultFailure };
     }
@@ -370,7 +372,7 @@ export class InlineQueryService {
         inlineQuery.id,
         {
           results: input.results.map((result, resultIndex) =>
-            toInlineQueryResult(result, messageContents[resultIndex])
+            toInlineQueryResult(result, toContentOfStoredFile(messageContents[resultIndex]))
           ),
           cacheTimeSeconds: input.cacheTimeSeconds,
           isPersonal: input.isPersonal,
@@ -521,12 +523,16 @@ function checkResultsButton(
     : 'start_parameter_invalid';
 }
 
-/** Telegram's checks of the results' identifiers, titles, and keyboards. */
+/**
+ * Telegram's checks of the results' identifiers, titles, and buttons, in their keyboards and in
+ * the rich messages they send, whose normalized content `messageContents` holds in order.
+ */
 function checkSpecifiedResults(
   results: readonly SpecifiedInlineQueryResult[],
+  messageContents: readonly NormalizedOutgoingContent[],
 ): AnswerInlineQueryFailureReason | undefined {
   const resultIds = new Set<string>();
-  for (const result of results) {
+  for (const [resultIndex, result] of results.entries()) {
     if (result.id.length === 0) {
       return 'result_id_empty';
     }
@@ -543,7 +549,7 @@ function checkSpecifiedResults(
     if (result.kind === 'document' && result.title.length === 0) {
       return 'document_title_empty';
     }
-    if (result.inlineKeyboard !== undefined && !hasOnlyValidCallbackData(result.inlineKeyboard)) {
+    if (!hasOnlyValidButtonCallbackData(result.inlineKeyboard, messageContents[resultIndex])) {
       return 'callback_data_invalid';
     }
   }

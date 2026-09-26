@@ -28,5 +28,9 @@ properties:
   reply_markup:
     $ref: ./InlineKeyboardMarkup.yaml
   input_message_content:
-    $ref: ./InputTextMessageContent.yaml
-    description: Text that sending the result writes instead of the photo, if it has text.
+    oneOf:
+      - $ref: ./InputTextMessageContent.yaml
+      - $ref: ./InputRichMessageContent.yaml
+    description: >-
+      Text, if it has text, or a rich message that sending the result writes instead of the
+      photo.

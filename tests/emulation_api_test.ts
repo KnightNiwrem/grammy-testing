@@ -8305,7 +8305,7 @@ Deno.test('answerInlineQuery and the inline query routes follow Telegram checks'
       'Bad Request: inline query results of type "gif" are not supported',
       `Bad Request: can't parse InlineQueryResult: type "poll" is unsupported for the inline query result`,
       "Bad Request: can't parse InlineQueryResult: Input message content is not specified",
-      'Bad Request: inline query results sending a location, venue, contact, invoice, or rich message are not supported',
+      'Bad Request: inline query results sending a location, venue, contact, or invoice are not supported',
       "Bad Request: can't parse InlineQueryResult: Can't parse entities: Character '.' is reserved and must be escaped with the preceding '\\'",
       'Bad Request: sending files by URL is not supported',
       "Bad Request: wrong remote file identifier specified: can't unserialize it",
@@ -8360,6 +8360,121 @@ Deno.test('answerInlineQuery and the inline query routes follow Telegram checks'
     JSON.stringify(chooseFailures) !== JSON.stringify([400, 409, 404, 404])
   ) {
     throw new Error(`Expected results to be refused, received ${chooseFailures}`);
+  }
+});
+
+Deno.test('inline query results send rich messages that reuse files', async () => {
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin: 'http://emulator.example:9000',
+  });
+  const sessionPath = (await api.request('/sessions', { method: 'POST' })).headers.get('Location');
+  if (sessionPath === null) {
+    throw new Error('Expected the created session to have a Location');
+  }
+  const account = await createAccount(api, sessionPath, 'Ada');
+  const inlineBot = await createBot(api, sessionPath, 'cats_bot', {
+    supports_inline_queries: true,
+    receives_chosen_inline_results: true,
+  });
+  const accountPath = `${sessionPath}/accounts/${account.id}`;
+  const chat = { type: 'private', botId: inlineBot.bot.id };
+  await api.request(`${accountPath}/messages`, jsonRequest('POST', { to: chat, text: '/start' }));
+  const photoFileId = photoSizeOf(botApiResult(
+    (await callBotApiWithFiles(api, `${inlineBot.botApiPath}/sendPhoto`, {
+      chat_id: String(account.id),
+    }, { photo: new File([gifImage(4, 4)], 'cat.gif') })).body,
+  ))?.file_id;
+  const sendQuery = async () => {
+    const response = await api.request(
+      `${accountPath}/inline-queries`,
+      jsonRequest('POST', { bot_id: inlineBot.bot.id, chat, query: `cats ${crypto.randomUUID()}` }),
+    );
+    return (await response.json() as { inline_query: { id: string } }).inline_query.id;
+  };
+  const answer = (inlineQueryId: string, richMessage: unknown, files: Record<string, File> = {}) =>
+    callBotApiWithFiles(api, `${inlineBot.botApiPath}/answerInlineQuery`, {
+      inline_query_id: inlineQueryId,
+      results: JSON.stringify([{
+        type: 'article',
+        id: 'cats',
+        title: 'Cats',
+        input_message_content: { rich_message: richMessage },
+      }]),
+    }, files);
+
+  const inlineQueryId = await sendQuery();
+  const answered = await answer(inlineQueryId, {
+    blocks: [
+      { type: 'paragraph', text: 'Cats at grammy.dev' },
+      { type: 'photo', photo: { type: 'photo', media: photoFileId } },
+      { type: 'buttons', buttons: [{ text: 'More', callback_data: 'more' }] },
+    ],
+  });
+  const chosen = await api.request(
+    `${accountPath}/inline-queries/${inlineQueryId}/chosen-results`,
+    jsonRequest('POST', { result_id: 'cats' }),
+  );
+  const { message } = await chosen.json() as {
+    message: { message_id: number; rich_message?: { blocks: unknown[] }; via_bot?: unknown };
+  };
+  const press = await api.request(
+    `${accountPath}/callback-queries`,
+    jsonRequest('POST', { chat, message_id: message.message_id, callback_data: 'more' }),
+  );
+  const pressedUpdates = await (await api.request(`${inlineBot.botApiPath}/getUpdates`)).json() as {
+    result: Array<{ callback_query?: { inline_message_id?: string; data?: string } }>;
+  };
+  const callbackQuery = pressedUpdates.result.find((update) => update.callback_query)
+    ?.callback_query;
+  if (
+    JSON.stringify(answered.body) !== JSON.stringify({ ok: true, result: true }) ||
+    message.rich_message?.blocks.length !== 3 || message.via_bot === undefined ||
+    !JSON.stringify(message.rich_message).includes('"type":"url"') ||
+    press.status !== 201 || callbackQuery?.inline_message_id === undefined ||
+    callbackQuery.data !== 'more'
+  ) {
+    throw new Error(
+      `Expected the chosen rich message and its callback, received ${
+        JSON.stringify([answered, message, press.status, callbackQuery])
+      }`,
+    );
+  }
+
+  const refusals = [
+    await answer(
+      await sendQuery(),
+      { blocks: [{ type: 'photo', photo: { type: 'photo', media: 'attach://cat' } }] },
+      { cat: new File([gifImage(4, 4)], 'cat.gif') },
+    ),
+    await answer(await sendQuery(), {
+      blocks: [{ type: 'buttons', buttons: [{ text: 'More', callback_data: 'x'.repeat(65) }] }],
+    }),
+    await answer(await sendQuery(), {
+      blocks: [{ type: 'photo', photo: { type: 'photo', media: 'unknown' } }],
+    }),
+    await callBotApi(api, `${inlineBot.botApiPath}/answerInlineQuery`, {
+      inline_query_id: await sendQuery(),
+      results: [{
+        type: 'article',
+        id: 'cats',
+        title: 'Cats',
+        input_message_content: {
+          message_text: 'Cats',
+          rich_message: { blocks: [{ type: 'paragraph', text: 'Cats' }] },
+        },
+      }],
+    }),
+  ].map(({ body }) => isBadRequestResponse(body) ? body.description : JSON.stringify(body));
+  if (
+    JSON.stringify(refusals) !== JSON.stringify([
+      'Bad Request: invalid inline message content specified',
+      'Bad Request: BUTTON_DATA_INVALID',
+      "Bad Request: wrong remote file identifier specified: can't unserialize it",
+      'Bad Request: invalid answerInlineQuery parameters',
+    ])
+  ) {
+    throw new Error(`Expected Telegram's errors, received ${JSON.stringify(refusals)}`);
   }
 });
 

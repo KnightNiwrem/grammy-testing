@@ -13,6 +13,14 @@ export interface UnreadFormattedText {
   readonly entities?: readonly unknown[];
 }
 
+/**
+ * What a result's `input_message_content` sends, before its text is read: text, or a rich
+ * message, which is still the JSON `InputRichMessage` the bot specified.
+ */
+export type UnreadInputMessageContent =
+  | { readonly kind: 'text'; readonly text: UnreadFormattedText }
+  | { readonly kind: 'rich_message'; readonly richMessage: Readonly<Record<string, unknown>> };
+
 interface InlineQueryResultParameterBase {
   readonly id: string;
   /** Empty for none. */
@@ -23,7 +31,7 @@ interface InlineQueryResultParameterBase {
 
 /**
  * An inline query result as `answerInlineQuery` specifies it, before its text is read and its
- * file resolved. `messageText` is the text of its `input_message_content`.
+ * file resolved. `messageContent` is what its `input_message_content` sends.
  */
 export type InlineQueryResultParameter =
   | (InlineQueryResultParameterBase & {
@@ -31,7 +39,7 @@ export type InlineQueryResultParameter =
     readonly title: string;
     /** Empty for none, including a URL the bot asks clients to hide. */
     readonly url: string;
-    readonly messageText: UnreadFormattedText;
+    readonly messageContent: UnreadInputMessageContent;
   })
   | (InlineQueryResultParameterBase & {
     readonly kind: 'photo';
@@ -41,7 +49,7 @@ export type InlineQueryResultParameter =
     readonly title: string;
     readonly caption: UnreadFormattedText;
     readonly showsCaptionAboveMedia: boolean;
-    readonly messageText?: UnreadFormattedText;
+    readonly messageContent?: UnreadInputMessageContent;
   })
   | (InlineQueryResultParameterBase & {
     readonly kind: 'document';
@@ -49,7 +57,7 @@ export type InlineQueryResultParameter =
     readonly documentFileId: string;
     readonly title: string;
     readonly caption: UnreadFormattedText;
-    readonly messageText?: UnreadFormattedText;
+    readonly messageContent?: UnreadInputMessageContent;
   });
 
 export type InlineQueryResultsParameterReading =
@@ -74,20 +82,19 @@ const UNSUPPORTED_RESULT_TYPES = [
 ] as const;
 
 /**
- * Fields by which Telegram recognizes `input_message_content` of a location, venue, contact,
- * invoice, or rich message, which the emulator does not support.
+ * Fields by which Telegram recognizes `input_message_content` of a location, venue, contact, or
+ * invoice, which the emulator does not support.
  */
 const UNSUPPORTED_INPUT_MESSAGE_CONTENT_FIELDS = [
   'latitude',
   'longitude',
   'phone_number',
   'payload',
-  'rich_message',
 ] as const;
 
 const UNSUPPORTED_INPUT_MESSAGE_CONTENT_DESCRIPTION =
-  'Bad Request: inline query results sending a location, venue, contact, invoice, or rich ' +
-  'message are not supported';
+  'Bad Request: inline query results sending a location, venue, contact, or invoice are not ' +
+  'supported';
 
 // TDLib reads an empty text as none, so the text of a photo or document result may be empty.
 const inputTextMessageContentSchema = z.strictObject({
@@ -96,7 +103,30 @@ const inputTextMessageContentSchema = z.strictObject({
   entities: z.array(z.unknown()).optional(),
   link_preview_options: linkPreviewOptionsSchema.optional(),
   disable_web_page_preview: z.boolean().optional(),
-});
+}).transform(({ message_text, parse_mode, entities }): UnreadInputMessageContent | undefined =>
+  message_text.length === 0 ? undefined : {
+    kind: 'text',
+    text: {
+      text: message_text,
+      ...(parse_mode === undefined ? {} : { parseMode: parse_mode }),
+      ...(entities === undefined ? {} : { entities }),
+    },
+  }
+);
+
+// The official Bot API server's `get_input_message_content` reads a `rich_message` in place of
+// any text; the emulator rejects content with both, to surface the ambiguity in tests.
+const inputRichMessageContentSchema = z.strictObject({
+  rich_message: z.record(z.string(), z.unknown()),
+}).transform(({ rich_message }): UnreadInputMessageContent => ({
+  kind: 'rich_message',
+  richMessage: rich_message,
+}));
+
+const inputMessageContentSchema = z.union([
+  inputRichMessageContentSchema,
+  inputTextMessageContentSchema,
+]);
 
 /**
  * Thumbnails, which clients show in the list of results; the emulator validates and ignores
@@ -113,7 +143,7 @@ const sharedResultShape = {
   id: z.string(),
   description: z.string().default(''),
   reply_markup: inlineKeyboardMarkupSchema.optional(),
-  input_message_content: inputTextMessageContentSchema.optional(),
+  input_message_content: inputMessageContentSchema.optional(),
 };
 
 const captionShape = {
@@ -159,7 +189,8 @@ const documentResultSchema = z.strictObject({
  * Reads the elements of an `answerInlineQuery` `results` parameter as the official Bot API
  * server's `get_inline_query_result` does, failing with Telegram's description for a result it
  * cannot read. Article, photo, and document results are supported, the latter two only with files
- * given by `file_id`; other result types and message contents fail as unsupported.
+ * given by `file_id`; other result types fail as unsupported. A result's `input_message_content`
+ * may send text or a rich message; other message contents fail as unsupported.
  *
  * `invalidParametersDescription` answers results that Telegram would read leniently, such as
  * numbers written as strings, which are rejected instead to surface the bot's mistake in tests.
@@ -246,9 +277,9 @@ function readArticleResult(value: unknown): InlineQueryResultReading {
     return { kind: 'malformed' };
   }
   const { data } = parsing;
-  const messageText = readMessageText(data.input_message_content);
-  // An article sends only the text of its `input_message_content`, which it requires.
-  if (messageText === undefined) {
+  const messageContent = data.input_message_content;
+  // An article sends only its `input_message_content`, which it requires.
+  if (messageContent === undefined) {
     return {
       kind: 'failure',
       description:
@@ -262,7 +293,7 @@ function readArticleResult(value: unknown): InlineQueryResultReading {
       ...readSharedFields(data),
       title: data.title,
       url: data.hide_url ? '' : data.url,
-      messageText,
+      messageContent,
     },
   };
 }
@@ -277,7 +308,7 @@ function readPhotoResult(value: unknown): InlineQueryResultReading {
   if (fileReading.kind !== 'file_id') {
     return fileReading;
   }
-  const messageText = readMessageText(data.input_message_content);
+  const messageContent = data.input_message_content;
   return {
     kind: 'result',
     result: {
@@ -287,7 +318,7 @@ function readPhotoResult(value: unknown): InlineQueryResultReading {
       title: data.title,
       caption: readCaption(data),
       showsCaptionAboveMedia: data.show_caption_above_media,
-      ...(messageText === undefined ? {} : { messageText }),
+      ...(messageContent === undefined ? {} : { messageContent }),
     },
   };
 }
@@ -302,7 +333,7 @@ function readDocumentResult(value: unknown): InlineQueryResultReading {
   if (fileReading.kind !== 'file_id') {
     return fileReading;
   }
-  const messageText = readMessageText(data.input_message_content);
+  const messageContent = data.input_message_content;
   return {
     kind: 'result',
     result: {
@@ -311,7 +342,7 @@ function readDocumentResult(value: unknown): InlineQueryResultReading {
       documentFileId: fileReading.fileId,
       title: data.title,
       caption: readCaption(data),
-      ...(messageText === undefined ? {} : { messageText }),
+      ...(messageContent === undefined ? {} : { messageContent }),
     },
   };
 }
@@ -347,21 +378,6 @@ function readResultFile(
   return file.includes('.')
     ? { kind: 'failure', description: FILE_URL_UNSUPPORTED_DESCRIPTION }
     : { kind: 'file_id', fileId: file };
-}
-
-/** The text an `input_message_content` sends, or `undefined` for none, as TDLib reads it. */
-function readMessageText(
-  inputMessageContent: z.infer<typeof inputTextMessageContentSchema> | undefined,
-): UnreadFormattedText | undefined {
-  if (inputMessageContent === undefined || inputMessageContent.message_text.length === 0) {
-    return undefined;
-  }
-  const { message_text, parse_mode, entities } = inputMessageContent;
-  return {
-    text: message_text,
-    ...(parse_mode === undefined ? {} : { parseMode: parse_mode }),
-    ...(entities === undefined ? {} : { entities }),
-  };
 }
 
 function readCaption(

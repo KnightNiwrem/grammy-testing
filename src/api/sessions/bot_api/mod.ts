@@ -31,6 +31,7 @@ import {
   inlineQueryResultsButtonParameter,
   readInlineQueryResultsParameter,
   type UnreadFormattedText,
+  type UnreadInputMessageContent,
 } from './inline_query_answer_parameters.ts';
 import {
   FILE_URL_UNSUPPORTED_DESCRIPTION,
@@ -231,6 +232,7 @@ const ANSWER_INLINE_QUERY_FAILURE_DESCRIPTIONS = {
   message_text_too_long: 'Bad Request: MESSAGE_TOO_LONG',
   caption_too_long: 'Bad Request: MEDIA_CAPTION_TOO_LONG',
   file_id_invalid: "Bad Request: wrong remote file identifier specified: can't unserialize it",
+  inline_message_content_invalid: 'Bad Request: invalid inline message content specified',
 } as const;
 
 /** How the Bot API server reports that it cannot read an inline query result. */
@@ -675,6 +677,9 @@ type InlineMessageEditResult =
 type InlineQueryResultRequest = Parameters<
   EmulationSession['botApi']['answerInlineQuery']
 >[1]['results'][number];
+
+/** What an inline query result's `input_message_content` sends, as the service reads it. */
+type InlineResultMessageContentRequest = NonNullable<InlineQueryResultRequest['messageContent']>;
 
 /** A rich message as a bot specified it. */
 type SpecifiedRichMessage = Pick<
@@ -2933,6 +2938,7 @@ function handleGetMyShortDescription(
 function handleAnswerInlineQuery(
   context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
+  uploadedFiles: BotApiUploadedFiles,
 ): BotApiMethodAnswer {
   const invalidParametersDescription = 'Bad Request: invalid answerInlineQuery parameters';
   const parsedParameters = answerInlineQueryParametersSchema.safeParse(parameters);
@@ -2953,9 +2959,10 @@ function handleAnswerInlineQuery(
     if (!keyboardReading.read) {
       return keyboardReading.errorAnswer;
     }
-    const resultReading = readInlineQueryResultText(
+    const resultReading = readInlineQueryResultContent(
       context,
       { ...result, inlineKeyboard: keyboardReading.inlineKeyboard },
+      uploadedFiles,
       invalidParametersDescription,
     );
     if (!resultReading.read) {
@@ -2999,17 +3006,19 @@ function handleAnswerInlineQuery(
 }
 
 /**
- * Reads the text of an inline query result, the text of its `input_message_content` and its
- * caption, with their parse mode or entities.
+ * Reads what an inline query result sends and shows: its `input_message_content`, whose text is
+ * read with its parse mode or entities and whose rich message is read as `sendRichMessage` reads
+ * one, and its caption.
  */
-function readInlineQueryResultText(
+function readInlineQueryResultContent(
   context: BotApiMethodContext,
   result: InlineQueryResultParameter,
+  uploadedFiles: BotApiUploadedFiles,
   invalidParametersDescription: string,
 ):
   | { readonly read: true; readonly result: InlineQueryResultRequest }
   | { readonly read: false; readonly description: string } {
-  const read = (text: UnreadFormattedText) =>
+  const readText = (text: UnreadFormattedText) =>
     readEmbeddedFormattedText(
       context,
       text,
@@ -3021,29 +3030,29 @@ function readInlineQueryResultText(
     description: result.description,
     ...(result.inlineKeyboard === undefined ? {} : { inlineKeyboard: result.inlineKeyboard }),
   };
+  const messageContentReading = result.messageContent === undefined
+    ? undefined
+    : readInlineResultMessageContent(
+      context,
+      result.messageContent,
+      uploadedFiles,
+      invalidParametersDescription,
+    );
+  if (messageContentReading?.read === false) {
+    return messageContentReading;
+  }
+  const messageContent = messageContentReading?.content;
   if (result.kind === 'article') {
-    const messageTextReading = read(result.messageText);
-    return messageTextReading.read
-      ? {
-        read: true,
-        result: {
-          ...shared,
-          kind: 'article',
-          title: result.title,
-          url: result.url,
-          messageText: messageTextReading.formattedText,
-        },
-      }
-      : messageTextReading;
+    if (messageContent === undefined) {
+      throw new Error('Expected an article result to send its input message content');
+    }
+    return {
+      read: true,
+      result: { ...shared, kind: 'article', title: result.title, url: result.url, messageContent },
+    };
   }
 
-  const messageTextReading = result.messageText === undefined
-    ? undefined
-    : read(result.messageText);
-  if (messageTextReading?.read === false) {
-    return messageTextReading;
-  }
-  const captionReading = read(result.caption);
+  const captionReading = readText(result.caption);
   if (!captionReading.read) {
     return captionReading;
   }
@@ -3051,7 +3060,7 @@ function readInlineQueryResultText(
     ...shared,
     title: result.title,
     caption: captionReading.formattedText,
-    ...(messageTextReading === undefined ? {} : { messageText: messageTextReading.formattedText }),
+    ...(messageContent === undefined ? {} : { messageContent }),
   };
   return {
     read: true,
@@ -3064,6 +3073,55 @@ function readInlineQueryResultText(
       }
       : { ...media, kind: 'document', documentFileId: result.documentFileId },
   };
+}
+
+/**
+ * Reads what a result's `input_message_content` sends: text with its parse mode or entities, or a
+ * rich message, read as `readSpecifiedRichMessage` reads the `rich_message` of `sendRichMessage`.
+ * Its uploads are read so that answering can refuse them, as TDLib refuses an inline message's
+ * uploads. The official server prefixes its own descriptions of a rich message it cannot read with
+ * `can't parse InlineQueryResult: `, which the emulator words as for `sendRichMessage`.
+ */
+function readInlineResultMessageContent(
+  context: BotApiMethodContext,
+  content: UnreadInputMessageContent,
+  uploadedFiles: BotApiUploadedFiles,
+  invalidParametersDescription: string,
+):
+  | { readonly read: true; readonly content: InlineResultMessageContentRequest }
+  | { readonly read: false; readonly description: string } {
+  if (content.kind === 'text') {
+    const textReading = readEmbeddedFormattedText(
+      context,
+      content.text,
+      invalidParametersDescription,
+      INLINE_QUERY_RESULT_ERROR_PREFIX,
+    );
+    return textReading.read
+      ? { read: true, content: { kind: 'text', text: textReading.formattedText } }
+      : textReading;
+  }
+  const richMessageReading = readRichMessageParameter(
+    JSON.stringify(content.richMessage),
+    uploadedFiles,
+    invalidParametersDescription,
+  );
+  if (!richMessageReading.read) {
+    return richMessageReading;
+  }
+  const buttonReading = context.session.botApi.readRichMessageButtons(
+    richMessageReading.richMessage,
+  );
+  return buttonReading.read
+    ? {
+      read: true,
+      content: {
+        kind: 'rich_message',
+        richMessage: buttonReading.richMessage,
+        detectsEntities: richMessageReading.detectsEntities,
+      },
+    }
+    : { read: false, description: badRequestDescription(buttonReading.keyboardError) };
 }
 
 /**

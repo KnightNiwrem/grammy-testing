@@ -110,8 +110,9 @@ finds no caption in a rich message.
 - **Other media blocks.** Animation, audio, video and voice note blocks fail with
   `Bad Request: rich message blocks with an animation, audio, video, or voice note are not supported`,
   as these [media types](media-and-files.md#additional-media-types-and-methods) are missing.
-- **Rich inline results and accounts' rich messages.** Inline query results cannot send rich
-  messages, and accounts cannot send or copy them. Accounts forward them as other messages.
+- **Accounts' rich messages.** Accounts cannot send or copy rich messages; they forward them as
+  other messages. [Inline query results](inline-mode.md#supported-behavior) can send rich messages
+  on an account's behalf.
 
 ## Comparison limits
 

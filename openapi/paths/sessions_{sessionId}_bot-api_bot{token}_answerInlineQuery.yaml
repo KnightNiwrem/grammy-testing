@@ -4,11 +4,14 @@ description: >-
   document results with files the bot knows by `file_id`, are supported. Results of other
   types (`Bad Request: inline query results of type "<type>" are not supported`), files given
   by URL (`Bad Request: sending files by URL is not supported`), and `input_message_content`
-  of a location, venue, contact, invoice, or rich message (`Bad Request: inline query results
-  sending a location, venue, contact, invoice, or rich message are not supported`) are
-  rejected with these emulator errors. Thumbnails, and the dimensions of
-  a photo, are validated and ignored. Text and captions are read and normalized as by
-  `sendMessage` and `sendPhoto`. The older `switch_pm_text` and `switch_pm_parameter`
+  of a location, venue, contact, or invoice (`Bad Request: inline query results sending a
+  location, venue, contact, or invoice are not supported`) are rejected with these emulator
+  errors. Thumbnails, and the dimensions of a photo, are validated and ignored. Text and
+  captions are read and normalized as by `sendMessage` and `sendPhoto`, and a rich message as
+  by `sendRichMessage`, whose files must be reused by `file_id`: TDLib refuses an uploaded file
+  (`Bad Request: invalid inline message content specified`). The official server prefixes its
+  own descriptions of a rich message it cannot read with `Bad Request: can't parse
+  InlineQueryResult: `, which the emulator words as for `sendRichMessage`. The older `switch_pm_text` and `switch_pm_parameter`
   parameters form the `button` when it is omitted.
 parameters:
   - $ref: ../components/parameters/SessionId.yaml

@@ -610,13 +610,26 @@ interface InlineQueryResultRequestBase {
  * A result of `answerInlineQuery`, as the Bot API specifies it. `messageText` is the text of its
  * `input_message_content`, which a photo or document result sends instead of its own file.
  */
+/**
+ * What a result's `input_message_content` sends: text, or a rich message, which reuses its files
+ * by the `file_id` the bot knows them by.
+ */
+export type InlineResultMessageContentRequest =
+  | { readonly kind: 'text'; readonly text: SpecifiedFormattedText }
+  | {
+    readonly kind: 'rich_message';
+    readonly richMessage: RichMessage<BotApiRichMessageFileTypes>;
+    /** Whether Telegram marks the entities it detects in the text. */
+    readonly detectsEntities: boolean;
+  };
+
 export type InlineQueryResultRequest =
   | (InlineQueryResultRequestBase & {
     readonly kind: 'article';
     readonly title: string;
     /** Empty for none. */
     readonly url: string;
-    readonly messageText: SpecifiedFormattedText;
+    readonly messageContent: InlineResultMessageContentRequest;
   })
   | (InlineQueryResultRequestBase & {
     readonly kind: 'photo';
@@ -627,7 +640,7 @@ export type InlineQueryResultRequest =
     /** Empty text for no caption. */
     readonly caption: SpecifiedFormattedText;
     readonly showsCaptionAboveMedia: boolean;
-    readonly messageText?: SpecifiedFormattedText;
+    readonly messageContent?: InlineResultMessageContentRequest;
   })
   | (InlineQueryResultRequestBase & {
     readonly kind: 'document';
@@ -636,7 +649,7 @@ export type InlineQueryResultRequest =
     readonly title: string;
     /** Empty text for no caption. */
     readonly caption: SpecifiedFormattedText;
-    readonly messageText?: SpecifiedFormattedText;
+    readonly messageContent?: InlineResultMessageContentRequest;
   });
 
 export interface AnswerInlineQueryRequest {
@@ -655,7 +668,12 @@ export type BotApiAnswerInlineQueryResult =
   | (
     & { readonly answered: false }
     & (
-      | { readonly reason: AnswerInlineQueryFailureReason | 'file_id_invalid' }
+      | {
+        readonly reason:
+          | AnswerInlineQueryFailureReason
+          | 'file_id_invalid'
+          | 'inline_message_content_invalid';
+      }
       | ContentNormalizationFailure
       | FileTypeMismatchFailure
     )
@@ -3269,8 +3287,9 @@ export class BotApiService {
   }
 
   /**
-   * Resolves the files of a result the bot specified and the message content it sends: the text
-   * of its `input_message_content`, or else its own photo or document with its caption.
+   * Resolves the files of an inline query result as TDLib's `answer_inline_query` does: its photo
+   * or document, and the files of a rich message it sends, which must reuse files by `file_id`
+   * because an inline message cannot receive an upload.
    */
   #resolveInlineQueryResult(
     authenticatedBot: VirtualBotProfile,
@@ -3279,20 +3298,27 @@ export class BotApiService {
     | { readonly resolved: true; readonly result: SpecifiedInlineQueryResult }
     | {
       readonly resolved: false;
-      readonly failure: { readonly reason: 'file_id_invalid' } | FileTypeMismatchFailure;
+      readonly failure:
+        | { readonly reason: 'file_id_invalid' | 'inline_message_content_invalid' }
+        | FileTypeMismatchFailure;
     } {
     const shared = {
       id: result.id,
       description: result.description,
       ...(result.inlineKeyboard === undefined ? {} : { inlineKeyboard: result.inlineKeyboard }),
     };
-    const textContent = (text: SpecifiedFormattedText): OutgoingMessageContent => ({
-      kind: 'text',
-      text: text.text,
-      entities: text.entities,
-    });
+    const contentResolution = result.messageContent === undefined
+      ? undefined
+      : this.#resolveInlineResultMessageContent(authenticatedBot, result.messageContent);
+    if (contentResolution?.resolved === false) {
+      return contentResolution;
+    }
+    const messageContent = contentResolution?.content;
     switch (result.kind) {
       case 'article':
+        if (messageContent === undefined) {
+          throw new Error('Expected an article result to send its input message content');
+        }
         return {
           resolved: true,
           result: {
@@ -3300,7 +3326,7 @@ export class BotApiService {
             kind: 'article',
             title: result.title,
             url: result.url,
-            messageContent: textContent(result.messageText),
+            messageContent,
           },
         };
       case 'photo': {
@@ -3315,16 +3341,14 @@ export class BotApiService {
             kind: 'photo',
             photo: file,
             title: result.title,
-            messageContent: result.messageText === undefined
-              ? {
-                kind: 'photo',
-                photo: { kind: 'stored', file },
-                caption: result.caption.text,
-                captionEntities: result.caption.entities,
-                hasSpoiler: false,
-                showsCaptionAboveMedia: result.showsCaptionAboveMedia,
-              }
-              : textContent(result.messageText),
+            messageContent: messageContent ?? {
+              kind: 'photo',
+              photo: { kind: 'stored', file },
+              caption: result.caption.text,
+              captionEntities: result.caption.entities,
+              hasSpoiler: false,
+              showsCaptionAboveMedia: result.showsCaptionAboveMedia,
+            },
           },
         };
       }
@@ -3340,14 +3364,12 @@ export class BotApiService {
             kind: 'document',
             document: file,
             title: result.title,
-            messageContent: result.messageText === undefined
-              ? {
-                kind: 'document',
-                document: { kind: 'stored', file },
-                caption: result.caption.text,
-                captionEntities: result.caption.entities,
-              }
-              : textContent(result.messageText),
+            messageContent: messageContent ?? {
+              kind: 'document',
+              document: { kind: 'stored', file },
+              caption: result.caption.text,
+              captionEntities: result.caption.entities,
+            },
           },
         };
       }
@@ -3355,6 +3377,57 @@ export class BotApiService {
         const unhandledResult: never = result;
         throw new Error(`Unhandled inline query result: ${JSON.stringify(unhandledResult)}`);
       }
+    }
+  }
+
+  /**
+   * Resolves what a result's `input_message_content` sends: its text, or a rich message, whose
+   * files must be reused by `file_id`, as TDLib's `get_input_rich_message` requires of an inline
+   * message.
+   */
+  #resolveInlineResultMessageContent(
+    authenticatedBot: VirtualBotProfile,
+    content: InlineResultMessageContentRequest,
+  ):
+    | { readonly resolved: true; readonly content: OutgoingMessageContent }
+    | {
+      readonly resolved: false;
+      readonly failure:
+        | { readonly reason: 'file_id_invalid' | 'inline_message_content_invalid' }
+        | FileTypeMismatchFailure;
+    } {
+    if (content.kind === 'text') {
+      return {
+        resolved: true,
+        content: { kind: 'text', text: content.text.text, entities: content.text.entities },
+      };
+    }
+    if (
+      listRichMessageFiles(content.richMessage).some((file) =>
+        (file.kind === 'photo' ? file.file : file.file.document).kind === 'upload'
+      )
+    ) {
+      return { resolved: false, failure: { reason: 'inline_message_content_invalid' } };
+    }
+    const resolution = this.#resolveRichMessageFiles(authenticatedBot, content.richMessage);
+    if (resolution.resolved) {
+      return {
+        resolved: true,
+        content: {
+          kind: 'rich_message',
+          richMessage: resolution.richMessage,
+          detectsEntities: content.detectsEntities,
+        },
+      };
+    }
+    const { failure } = resolution;
+    switch (failure.reason) {
+      case 'file_id_invalid':
+        return { resolved: false, failure: { reason: failure.reason } };
+      case 'file_type_mismatch':
+        return { resolved: false, failure };
+      default:
+        throw new Error(`Expected only reused files, which failed with ${failure.reason}`);
     }
   }
 

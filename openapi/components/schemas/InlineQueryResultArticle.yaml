@@ -15,8 +15,12 @@ properties:
     type: string
     minLength: 1
   input_message_content:
-    $ref: ./InputTextMessageContent.yaml
-    description: The text message that sending the article writes, which must have text.
+    oneOf:
+      - $ref: ./InputTextMessageContent.yaml
+      - $ref: ./InputRichMessageContent.yaml
+    description: >-
+      The text message, which must have text, or the rich message that sending the article
+      writes.
   reply_markup:
     $ref: ./InlineKeyboardMarkup.yaml
   url:
