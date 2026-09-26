@@ -85,6 +85,8 @@ const SUPERGROUP_ADMINISTRATOR_PATH =
 const SUPERGROUP_CUSTOM_TITLE_PATH = `${SUPERGROUP_ADMINISTRATOR_PATH}/custom-title` as const;
 const SUPERGROUP_CONTENT_PROTECTION_PATH =
   `${SUPERGROUP_CONVERSATION_PATH}/content-protection` as const;
+const SUPERGROUP_TITLE_PATH = `${SUPERGROUP_CONVERSATION_PATH}/title` as const;
+const SUPERGROUP_DESCRIPTION_PATH = `${SUPERGROUP_CONVERSATION_PATH}/description` as const;
 
 const telegramUserIdSchema = z.number().int()
   .min(MIN_TELEGRAM_USER_ID)
@@ -228,6 +230,12 @@ const setCustomTitleRequestSchema = z.strictObject({
     .refine((title) => [...title].length <= MAX_CUSTOM_TITLE_LENGTH)
     .refine((title) => !/\p{Extended_Pictographic}/u.test(title)),
 });
+
+/** A supergroup's new title, which Telegram cleans; one that cleans to nothing is refused. */
+const changeSupergroupTitleRequestSchema = z.strictObject({ title: z.string() });
+
+/** A supergroup's new description, which Telegram cleans; empty removes it. */
+const changeSupergroupDescriptionRequestSchema = z.strictObject({ description: z.string() });
 
 const createSupergroupRequestSchema = z.strictObject({
   title: z.string().min(1),
@@ -576,6 +584,58 @@ export function createAccountRoutes(): Hono<SessionRouteContextTypes> {
         throw new Error(`Unhandled custom title failure: ${unhandledReason}`);
       }
     }
+  });
+
+  // A member changes the supergroup's title, which a service message records.
+  accountRoutes.put(SUPERGROUP_TITLE_PATH, async (context) => {
+    const conversationPath = supergroupConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
+      return context.body(null, 400);
+    }
+    const requestBody = await readJsonRequestBody(
+      context.req,
+      changeSupergroupTitleRequestSchema,
+    );
+    if (requestBody === undefined) {
+      return context.body(null, 400);
+    }
+    const { accountId, chatId } = conversationPath.data;
+
+    const result = context.get('emulationSession').sharedChatAdministration
+      .changeSupergroupTitle({
+        actor: { kind: 'account', accountId },
+        chatId,
+        title: requestBody.title,
+      });
+    return result.changed
+      ? context.body(null, 204)
+      : context.body(null, supergroupInfoChangeFailureStatus(result.reason));
+  });
+
+  // A member changes the supergroup's description, which no service message records.
+  accountRoutes.put(SUPERGROUP_DESCRIPTION_PATH, async (context) => {
+    const conversationPath = supergroupConversationPathSchema.safeParse(context.req.param());
+    if (!conversationPath.success) {
+      return context.body(null, 400);
+    }
+    const requestBody = await readJsonRequestBody(
+      context.req,
+      changeSupergroupDescriptionRequestSchema,
+    );
+    if (requestBody === undefined) {
+      return context.body(null, 400);
+    }
+    const { accountId, chatId } = conversationPath.data;
+
+    const result = context.get('emulationSession').sharedChatAdministration
+      .changeSupergroupDescription({
+        actor: { kind: 'account', accountId },
+        chatId,
+        description: requestBody.description,
+      });
+    return result.changed
+      ? context.body(null, 204)
+      : context.body(null, supergroupInfoChangeFailureStatus(result.reason));
   });
 
   // The owner protects all content of the supergroup from forwarding and saving, or lifts that.
@@ -1323,6 +1383,43 @@ function setSupergroupContentProtection(
   }
   return context.body(null, result.reason === 'actor_not_authorized' ? 403 : 404);
 }
+
+/**
+ * A missing account or supergroup is not found; an account that is not a member, or may not
+ * change the supergroup's information, is forbidden from it; a description the supergroup has
+ * conflicts with it, as Telegram refuses it; text Telegram cannot use rejects the request.
+ */
+function supergroupInfoChangeFailureStatus(
+  reason: Extract<
+    | ReturnType<SupergroupAdministration['changeSupergroupTitle']>
+    | ReturnType<SupergroupAdministration['changeSupergroupDescription']>,
+    { readonly changed: false }
+  >['reason'],
+): 400 | 403 | 404 | 409 {
+  switch (reason) {
+    case 'actor_not_found':
+    case 'chat_not_found':
+      return 404;
+    case 'not_a_member':
+    case 'not_enough_rights':
+      return 403;
+    case 'description_not_modified':
+      return 409;
+    case 'text_encoding_invalid':
+    case 'title_empty':
+      return 400;
+    // Only bots are refused for their former membership.
+    case 'bot_not_a_member':
+    case 'bot_kicked':
+      throw new Error(`Account refused as a bot: ${reason}`);
+    default: {
+      const unhandledReason: never = reason;
+      throw new Error(`Unhandled supergroup information failure: ${unhandledReason}`);
+    }
+  }
+}
+
+type SupergroupAdministration = EmulationSession['sharedChatAdministration'];
 
 /** Shows a supergroup as the Bot API shows a chat, with its description when it has one. */
 function presentSupergroup({ id, title, username, description }: Supergroup) {

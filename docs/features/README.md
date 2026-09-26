@@ -56,6 +56,7 @@ The two legacy aliases below are also accepted.
 | Bot profile      | `setMyDescription`, `getMyDescription`, `setMyShortDescription`, `getMyShortDescription`                                                           |
 | Bot settings     | `setChatMenuButton`, `getChatMenuButton`, `setMyDefaultAdministratorRights`, `getMyDefaultAdministratorRights`                                     |
 | Chat information | `getChat`                                                                                                                                          |
+| Chat settings    | `setChatTitle`, `setChatDescription`                                                                                                               |
 | Membership       | `leaveChat`, `getChatMember`, `getChatAdministrators`, `getChatMemberCount`, `banChatMember`, `unbanChatMember`, `setChatAdministratorCustomTitle` |
 | Legacy aliases   | `getChatMembersCount` → `getChatMemberCount`, `kickChatMember` → `banChatMember`                                                                   |
 
@@ -76,7 +77,7 @@ above determines whether an individual method is available.
 - Media other than photos and documents, albums, stickers and sticker sets, polls, dice, locations,
   venues, contacts, games, checklists, ephemeral messages, drafts and stories. Rich messages lack
   [drafts and some blocks](rich-messages.md#real-gaps).
-- Reactions, pins, chat metadata changes and photos, invite links, join requests, member
+- Reactions, pins, chat photos and other chat settings, invite links, join requests, member
   restrictions, and promotion through the Bot API. Tests can promote supergroup members through the
   emulation API.
 - Payments, invoices, shipping, Telegram Stars, gifts, paid broadcasts and paid media.

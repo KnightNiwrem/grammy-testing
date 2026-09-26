@@ -1,0 +1,15 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat: for a supergroup, its negative chat ID; for a private chat, which
+      has no description a bot can change, the account's user ID.
+  description:
+    type: string
+    description: >-
+      The new description, which TDLib's `strip_empty_characters` cleans, keeping at most 255
+      characters; empty or omitted removes it.

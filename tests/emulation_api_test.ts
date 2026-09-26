@@ -6529,6 +6529,153 @@ Deno.test('the owner sets custom titles, which bots see but cannot change', asyn
   }
 });
 
+Deno.test('bots with can_change_info change a supergroup title and description', async () => {
+  const { api, owner, bot, readerBot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const readUpdates = createUpdateReader(api);
+  const setTitle = (title: string) =>
+    callBotApi(api, `${bot.botApiPath}/setChatTitle`, { chat_id: supergroup.id, title });
+  const setDescription = (description: string) =>
+    callBotApi(api, `${bot.botApiPath}/setChatDescription`, {
+      chat_id: supergroup.id,
+      description,
+    });
+  const describe = ({ body }: { body: unknown }) =>
+    isBadRequestResponse(body) ? body.description : JSON.stringify(body);
+  await readUpdates(bot.botApiPath);
+  await readUpdates(readerBot.botApiPath);
+
+  const refusedBeforePromotion = [await setTitle('Team'), await setDescription('About')];
+  const promotion = await api.request(
+    `${supergroupPath(owner.id)}/administrators/${bot.bot.id}`,
+    jsonRequest('PUT', { can_change_info: true }),
+  );
+  const titleChange = await setTitle('  New\n  Team  ');
+  const unchangedTitle = await setTitle('New Team');
+  const emptyTitle = await setTitle(' ​\n');
+  const descriptionChange = await setDescription('  About us  ');
+  const unchangedDescription = await setDescription('About us');
+  const chat = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/getChat`, { chat_id: supergroup.id })).body,
+  );
+  const descriptionRemoval = await setDescription('');
+  const chatWithoutDescription = botApiResult(
+    (await callBotApi(api, `${bot.botApiPath}/getChat`, { chat_id: supergroup.id })).body,
+  );
+  if (
+    JSON.stringify(refusedBeforePromotion.map(describe)) !== JSON.stringify([
+        'Bad Request: not enough rights to change chat title',
+        'Bad Request: not enough rights to set chat description',
+      ]) ||
+    promotion.status !== 204 ||
+    JSON.stringify([titleChange.body, unchangedTitle.body, descriptionChange.body]) !==
+      JSON.stringify(Array(3).fill({ ok: true, result: true })) ||
+    describe(emptyTitle) !== 'Bad Request: title must be non-empty' ||
+    describe(unchangedDescription) !== 'Bad Request: chat description is not modified' ||
+    chat?.title !== 'New Team' || chat.description !== 'About us' ||
+    descriptionRemoval.status !== 200 || chatWithoutDescription === undefined ||
+    'description' in chatWithoutDescription
+  ) {
+    throw new Error(
+      `Expected Telegram's title and description changes, received ${
+        JSON.stringify([
+          refusedBeforePromotion,
+          promotion.status,
+          titleChange,
+          unchangedTitle,
+          emptyTitle,
+          descriptionChange,
+          unchangedDescription,
+          chat,
+          chatWithoutDescription,
+        ])
+      }`,
+    );
+  }
+
+  const serviceMessages = async (botApiPath: string) =>
+    (await readUpdates(botApiPath)).flatMap(({ message }) => {
+      const { new_chat_title: newChatTitle, from } = message as {
+        new_chat_title?: string;
+        from?: { id: number };
+      } ?? {};
+      return newChatTitle === undefined ? [] : [{ newChatTitle, fromId: from?.id }];
+    });
+  const expectedServiceMessages = [{ newChatTitle: 'New Team', fromId: bot.bot.id }];
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: Array<{ new_chat_title?: string }>;
+  };
+  if (
+    JSON.stringify(await serviceMessages(bot.botApiPath)) !==
+      JSON.stringify(expectedServiceMessages) ||
+    JSON.stringify(await serviceMessages(readerBot.botApiPath)) !==
+      JSON.stringify(expectedServiceMessages) ||
+    history.messages.filter((message) => message.new_chat_title !== undefined).length !== 1
+  ) {
+    throw new Error('Expected one service message for the changed title, seen by every bot');
+  }
+
+  const privateChat = await createPrivateConversationFixture();
+  await privateChat.sendText('/start');
+  const privateDescription = await callBotApi(
+    privateChat.api,
+    `${privateChat.botApiPath}/setChatDescription`,
+    { chat_id: privateChat.createdAccount.account.id, description: 'Chat' },
+  );
+  const privateTitle = await callBotApi(
+    privateChat.api,
+    `${privateChat.botApiPath}/setChatTitle`,
+    { chat_id: privateChat.createdAccount.account.id, title: 'Chat' },
+  );
+  if (
+    describe(privateTitle) !== "Bad Request: can't change private chat title" ||
+    describe(privateDescription) !== "Bad Request: can't change private chat description"
+  ) {
+    throw new Error(
+      `Expected private chats to have no title to change, received ${
+        JSON.stringify([privateTitle, privateDescription])
+      }`,
+    );
+  }
+});
+
+Deno.test('accounts change a supergroup title that bots see as a service message', async () => {
+  const { api, sessionPath, member, bot, supergroup, supergroupPath } =
+    await createSupergroupFixture();
+  const readUpdates = createUpdateReader(api);
+  await readUpdates(bot.botApiPath);
+  const outsider = await createAccount(api, sessionPath, 'Linus');
+  const put = (accountId: number, path: 'title' | 'description', body: unknown) =>
+    api.request(`${supergroupPath(accountId)}/${path}`, jsonRequest('PUT', body));
+
+  const statuses = [
+    (await put(member.id, 'title', { title: 'Grace and friends' })).status,
+    (await put(member.id, 'title', { title: '⠀' })).status,
+    (await put(outsider.id, 'title', { title: 'Mine' })).status,
+    (await put(member.id, 'description', { description: 'Hello' })).status,
+    (await put(member.id, 'description', { description: 'Hello' })).status,
+    (await put(member.id, 'title', { name: 'Grace' })).status,
+  ];
+  const titleUpdates = (await readUpdates(bot.botApiPath)).flatMap(({ message }) => {
+    const { new_chat_title: newChatTitle, from } = message as {
+      new_chat_title?: string;
+      from?: { id: number };
+    } ?? {};
+    return newChatTitle === undefined ? [] : [{ newChatTitle, fromId: from?.id }];
+  });
+  if (
+    JSON.stringify(statuses) !== JSON.stringify([204, 400, 403, 204, 409, 400]) ||
+    JSON.stringify(titleUpdates) !==
+      JSON.stringify([{ newChatTitle: 'Grace and friends', fromId: member.id }])
+  ) {
+    throw new Error(
+      `Expected a member's title change to reach the bot, received ${
+        JSON.stringify([statuses, titleUpdates])
+      }`,
+    );
+  }
+});
+
 Deno.test('the owner protects all supergroup content from forwarding and saving', async () => {
   const { api, sessionPath, owner, member, bot, supergroup, supergroupPath, sendSupergroupText } =
     await createSupergroupFixture();

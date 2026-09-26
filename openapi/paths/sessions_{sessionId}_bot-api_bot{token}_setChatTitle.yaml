@@ -1,0 +1,63 @@
+description: >-
+  Telegram Bot API method for changing the title of a supergroup. As TDLib's
+  `set_dialog_title` does, the title is cleaned, must not be empty, and needs the bot to be an
+  administrator with `can_change_info`, a right that bots, unlike accounts, never get from the
+  supergroup's default permissions. A new title is recorded as the bot's service message with
+  `new_chat_title`, which every bot of the supergroup receives, the bot itself included, as the
+  official server's `need_skip_update_message` lets it; the title the supergroup has changes
+  nothing.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: setChatTitle
+  summary: Change the title of a supergroup as the authenticated virtual bot
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/SetChatTitleRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/SetChatTitleRequest.yaml
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/SetChatTitleRequest.yaml
+  responses:
+    '200':
+      description: The supergroup has the title.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/TrueResultResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, or Telegram would reject
+        it: `chat_id` is missing (`Bad Request: chat_id is empty`); the chat is not found
+        (`Bad Request: chat not found`); the chat is a private chat with an account that has
+        written to the bot (`Bad Request: can't change private chat title`); the title is
+        empty once cleaned (`Bad Request: title must be non-empty`); or the bot lacks the
+        right (`Bad Request: not enough rights to change chat title`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The bot left the supergroup (`Forbidden: bot is not a member of the supergroup chat`) or
+        was removed from it (`Forbidden: bot was kicked from the supergroup chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

@@ -319,9 +319,15 @@ function projectSupergroupMessageContent(
   content: SupergroupMessageContent,
   context: MessageProjectionContext,
 ): BotApiSupergroupMessageContent {
-  return content.kind === 'members_joined' || content.kind === 'member_left'
-    ? projectMembershipServiceContent(content, context)
-    : projectMessageContent(content, context);
+  switch (content.kind) {
+    case 'members_joined':
+    case 'member_left':
+      return projectMembershipServiceContent(content, context);
+    case 'title_changed':
+      return { new_chat_title: content.title };
+    default:
+      return projectMessageContent(content, context);
+  }
 }
 
 /** Projects a membership change with the members the context resolved for it. */

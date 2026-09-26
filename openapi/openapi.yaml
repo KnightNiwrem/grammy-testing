@@ -77,6 +77,10 @@ paths:
     $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_administrators_{userId}_custom-title.yaml
   /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/content-protection:
     $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_content-protection.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/title:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_title.yaml
+  /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/description:
+    $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_description.yaml
   /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/messages:
     $ref: paths/sessions_{sessionId}_accounts_{accountId}_conversations_supergroup_{chatId}_messages.yaml
   /sessions/{sessionId}/accounts/{accountId}/conversations/supergroup/{chatId}/commands:
@@ -165,6 +169,10 @@ paths:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_sendChatAction.yaml
   /sessions/{sessionId}/bot-api/bot{token}/leaveChat:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_leaveChat.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/setChatTitle:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_setChatTitle.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/setChatDescription:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_setChatDescription.yaml
   /sessions/{sessionId}/bot-api/bot{token}/getChat:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getChat.yaml
   /sessions/{sessionId}/bot-api/bot{token}/getChatMember:

@@ -69,6 +69,7 @@ import {
   type MessageForwardInfo,
   type PrivateMessage,
   type SupergroupMessage,
+  type SupergroupMessageAuthor,
   type TextEntity,
 } from '../types/virtual_message.ts';
 import type { GetUpdatesRequest, GetUpdatesResult } from './bot_update_polling.ts';
@@ -81,6 +82,8 @@ import type {
 } from './bot_webhook.ts';
 import type {
   BanChatMemberResult,
+  ChangeSupergroupDescriptionResult,
+  ChangeSupergroupTitleResult,
   GetChatAdministratorsResult,
   GetChatMemberCountResult,
   GetChatMemberStatusResult,
@@ -710,6 +713,40 @@ export type BotApiLeaveChatResult =
   | { readonly left: true }
   | { readonly left: false; readonly reason: BotApiLeaveChatFailureReason };
 
+export interface SetChatTitleRequest {
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
+  readonly chatId: number;
+  /** The title as the bot specified it, before Telegram cleans it. */
+  readonly title: string;
+}
+
+export interface SetChatDescriptionRequest {
+  /** The Bot API `chat_id`, as `SendRequestOptions` describes it. */
+  readonly chatId: number;
+  /** The description as the bot specified it, before Telegram cleans it; empty removes it. */
+  readonly description: string;
+}
+
+/** Why a bot cannot change a chat's title or description, in the order Telegram checks them. */
+type BotApiChatInfoChangeFailureReason =
+  | 'chat_not_found'
+  | FormerSupergroupMemberFailureReason
+  /** A private chat has no title or description a bot can change. */
+  | 'private_chat_info_unchangeable'
+  | 'text_encoding_invalid'
+  | 'not_enough_rights';
+
+export type BotApiSetChatTitleResult =
+  | { readonly set: true }
+  | { readonly set: false; readonly reason: BotApiChatInfoChangeFailureReason | 'title_empty' };
+
+export type BotApiSetChatDescriptionResult =
+  | { readonly set: true }
+  | {
+    readonly set: false;
+    readonly reason: BotApiChatInfoChangeFailureReason | 'description_not_modified';
+  };
+
 export type DeleteMessageRequest = MessageTarget;
 
 export type DeleteMessageResult =
@@ -1182,6 +1219,16 @@ interface ChatMemberships {
     readonly memberId: number;
     readonly onlyIfBanned: boolean;
   }): UnbanChatMemberResult;
+  changeSupergroupTitle(input: {
+    readonly actor: SupergroupMessageAuthor;
+    readonly chatId: number;
+    readonly title: string;
+  }): ChangeSupergroupTitleResult;
+  changeSupergroupDescription(input: {
+    readonly actor: SupergroupMessageAuthor;
+    readonly chatId: number;
+    readonly description: string;
+  }): ChangeSupergroupDescriptionResult;
 }
 
 interface MediaFiles {
@@ -2470,6 +2517,89 @@ export class BotApiService {
         throw new Error(`Unhandled chat action failure: ${unhandledReason}`);
       }
     }
+  }
+
+  /**
+   * Changes a supergroup's title as `SharedChatAdministrationService.changeSupergroupTitle`
+   * changes it for a bot, which then receives its own service message. As TDLib's
+   * `set_dialog_title` refuses, a private chat's title cannot be changed.
+   */
+  setChatTitle(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, title }: SetChatTitleRequest,
+  ): BotApiSetChatTitleResult {
+    if (isUserId(chatId)) {
+      return {
+        set: false,
+        reason: this.#getPrivateChatInfoChangeFailureReason(authenticatedBot, chatId),
+      };
+    }
+    const result = this.#chatMemberships.changeSupergroupTitle({
+      actor: { kind: 'bot', botId: authenticatedBot.id },
+      chatId,
+      title,
+    });
+    if (result.changed) {
+      return { set: true };
+    }
+    switch (result.reason) {
+      // The authenticated bot exists, and a bot is not refused as an account that is no member.
+      case 'actor_not_found':
+      case 'not_a_member':
+        throw new Error(
+          `Bot ${authenticatedBot.id} could not act in chat ${chatId}: ${result.reason}`,
+        );
+      default:
+        return { set: false, reason: result.reason };
+    }
+  }
+
+  /**
+   * Changes a supergroup's description as
+   * `SharedChatAdministrationService.changeSupergroupDescription` changes it for a bot. As TDLib's
+   * `set_dialog_description` refuses, a private chat's description cannot be changed.
+   */
+  setChatDescription(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, description }: SetChatDescriptionRequest,
+  ): BotApiSetChatDescriptionResult {
+    if (isUserId(chatId)) {
+      return {
+        set: false,
+        reason: this.#getPrivateChatInfoChangeFailureReason(authenticatedBot, chatId),
+      };
+    }
+    const result = this.#chatMemberships.changeSupergroupDescription({
+      actor: { kind: 'bot', botId: authenticatedBot.id },
+      chatId,
+      description,
+    });
+    if (result.changed) {
+      return { set: true };
+    }
+    switch (result.reason) {
+      // The authenticated bot exists, and a bot is not refused as an account that is no member.
+      case 'actor_not_found':
+      case 'not_a_member':
+        throw new Error(
+          `Bot ${authenticatedBot.id} could not act in chat ${chatId}: ${result.reason}`,
+        );
+      default:
+        return { set: false, reason: result.reason };
+    }
+  }
+
+  /**
+   * Why a bot cannot change the information of a private chat: it has none to change, or, as for
+   * any method, the bot does not know the chat.
+   */
+  #getPrivateChatInfoChangeFailureReason(
+    authenticatedBot: VirtualBotProfile,
+    chatId: number,
+  ): 'chat_not_found' | 'private_chat_info_unchangeable' {
+    return this.#isPrivateChatKnown(authenticatedBot, chatId)
+      ? 'private_chat_info_unchangeable'
+      : 'chat_not_found';
   }
 
   /**

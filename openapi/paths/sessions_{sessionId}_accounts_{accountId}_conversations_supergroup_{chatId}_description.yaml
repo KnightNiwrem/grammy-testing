@@ -1,0 +1,37 @@
+description: >-
+  The description of a supergroup, which members change as Telegram's clients do through TDLib's
+  `set_dialog_description`.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/SupergroupChatId.yaml
+put:
+  operationId: changeSupergroupDescription
+  summary: Change the description of a supergroup the account is a member of
+  description: >-
+    The description is cleaned as for the Bot API's `setChatDescription`; an empty description
+    removes it, and no service message records the change. As for the title, any member may
+    change it.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+            - description
+          properties:
+            description:
+              type: string
+  responses:
+    '204':
+      description: The supergroup has the description.
+    '400':
+      description: A path identifier or the body is invalid, or the text is not well-formed Unicode.
+    '403':
+      description: The account is not a member of the supergroup.
+    '404':
+      description: The session, account, or supergroup does not exist.
+    '409':
+      description: The supergroup already has the description, which Telegram's servers refuse.

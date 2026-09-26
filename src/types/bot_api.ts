@@ -265,10 +265,16 @@ export type BotApiMembershipServiceContent =
     readonly left_chat_member: BotApiUser;
   };
 
-/** What a supergroup message shows: content, or a membership change. */
+/** The field of a service message about a title change, which takes the place of content. */
+export interface BotApiTitleChangeServiceContent {
+  readonly new_chat_title: string;
+}
+
+/** What a supergroup message shows: content, or a change of the supergroup. */
 export type BotApiSupergroupMessageContent =
   | BotApiMessageContent
-  | BotApiMembershipServiceContent;
+  | BotApiMembershipServiceContent
+  | BotApiTitleChangeServiceContent;
 
 /** Where a forward first appeared: a user, because the emulator's senders are users. */
 export interface BotApiMessageOriginUser {

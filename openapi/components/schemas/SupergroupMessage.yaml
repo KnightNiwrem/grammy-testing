@@ -2,8 +2,8 @@ type: object
 additionalProperties: false
 description: >-
   A supergroup message as the requesting member sees it: one a member wrote, or a service
-  message recording that members joined (`new_chat_members`) or that a member left or was
-  removed (`left_chat_member`). As Telegram does, a service message also carries the legacy
+  message recording that members joined (`new_chat_members`), that a member left or was
+  removed (`left_chat_member`), or that a member changed the title (`new_chat_title`). As Telegram does, a service message also carries the legacy
   fields `new_chat_participant` and `new_chat_member`, or `left_chat_participant`. Members see
   the same message, apart from the `file_id` of its file and the legacy `new_chat_member`.
   Its other fields mean what they mean for a private message.
@@ -28,6 +28,8 @@ oneOf:
   - required:
       - left_chat_participant
       - left_chat_member
+  - required:
+      - new_chat_title
 properties:
   message_id:
     type: integer
@@ -35,8 +37,8 @@ properties:
     description: Message ID in the supergroup's own message sequence.
   from:
     description: >-
-      The member, an account or a bot, that wrote the message, or that added, removed, or
-      left as a service message records.
+      The member, an account or a bot, that wrote the message, or that added, removed, or left,
+      or changed the title, as a service message records.
     oneOf:
       - $ref: ./Account.yaml
       - $ref: ./MessageSenderBot.yaml
@@ -127,6 +129,10 @@ properties:
   left_chat_member:
     $ref: ./MessageUser.yaml
     description: The account or bot that left or was removed.
+  new_chat_title:
+    type: string
+    minLength: 1
+    description: The supergroup's new title, which the service message's sender set.
   rich_message:
     $ref: ./RichMessage.yaml
     description: >-

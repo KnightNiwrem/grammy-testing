@@ -181,6 +181,28 @@ export class SharedChatRepository {
     return { added: true };
   }
 
+  /**
+   * Changes a supergroup's title and description, whichever `info` gives, where an empty
+   * description removes it; returns false for an unknown supergroup.
+   */
+  updateSupergroupInfo(
+    chatId: number,
+    info: { readonly title?: string; readonly description?: string },
+  ): boolean {
+    const chat = this.#sharedChatsById.get(chatId);
+    if (chat?.kind !== 'supergroup') {
+      return false;
+    }
+    const { description: _, ...chatWithoutDescription } = chat;
+    const description = info.description ?? chat.description;
+    this.#sharedChatsById.set(chatId, {
+      ...chatWithoutDescription,
+      title: info.title ?? chat.title,
+      ...(description === undefined || description.length === 0 ? {} : { description }),
+    });
+    return true;
+  }
+
   /** Sets whether a supergroup protects all its content; returns false for an unknown supergroup. */
   updateSupergroupContentProtection(chatId: number, hasProtectedContent: boolean): boolean {
     const chat = this.#sharedChatsById.get(chatId);

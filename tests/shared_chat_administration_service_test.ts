@@ -13,7 +13,7 @@ import {
   SharedChatAdministrationService,
   type SupergroupCreationResult,
 } from '../src/services/shared_chat_administration.ts';
-import type { RecordSupergroupMembershipChangeInput } from '../src/services/supergroup_messaging.ts';
+import type { RecordSupergroupServiceMessageInput } from '../src/services/supergroup_messaging.ts';
 import { VirtualUserService } from '../src/services/virtual_user.ts';
 import type { ChatDomainEvent } from '../src/types/chat_domain_event.ts';
 import {
@@ -164,7 +164,7 @@ Deno.test('SharedChatAdministrationService adds permitted members to shared chat
     virtualUsers,
     sharedChats,
     publishedEvents,
-    recordedMembershipChanges,
+    recordedServiceMessages,
     sharedChatAdministration,
   } = createSharedChatAdministrationFixture();
   const owner = createAccount(virtualUsers, 'Ada');
@@ -237,10 +237,10 @@ Deno.test('SharedChatAdministrationService adds permitted members to shared chat
     content: { kind: 'members_joined', memberIds: [bot.profile.id] },
     changedAtUnixSeconds: 1_700_000_000,
   }];
-  if (JSON.stringify(recordedMembershipChanges) !== JSON.stringify(expectedMembershipChanges)) {
+  if (JSON.stringify(recordedServiceMessages) !== JSON.stringify(expectedMembershipChanges)) {
     throw new Error(
       `Expected only the supergroup to record the addition, received ${
-        JSON.stringify(recordedMembershipChanges)
+        JSON.stringify(recordedServiceMessages)
       }`,
     );
   }
@@ -437,7 +437,7 @@ Deno.test('SharedChatAdministrationService ends memberships as members leave or 
     virtualUsers,
     sharedChats,
     publishedEvents,
-    recordedMembershipChanges,
+    recordedServiceMessages,
     sharedChatAdministration,
   } = createSharedChatAdministrationFixture();
   const owner = createAccount(virtualUsers, 'Ada');
@@ -455,7 +455,7 @@ Deno.test('SharedChatAdministrationService ends memberships as members leave or 
     }));
   }
   publishedEvents.length = 0;
-  recordedMembershipChanges.length = 0;
+  recordedServiceMessages.length = 0;
 
   const refusals = [
     sharedChatAdministration.removeChatMember({
@@ -479,7 +479,7 @@ Deno.test('SharedChatAdministrationService ends memberships as members leave or 
   ];
   if (
     JSON.stringify(refusals.map(failureReason)) !== JSON.stringify(expectedRefusals) ||
-    publishedEvents.length !== 0 || recordedMembershipChanges.length !== 0
+    publishedEvents.length !== 0 || recordedServiceMessages.length !== 0
   ) {
     throw new Error(`Expected refusals to change nothing, received ${JSON.stringify(refusals)}`);
   }
@@ -526,11 +526,11 @@ Deno.test('SharedChatAdministrationService ends memberships as members leave or 
   }));
   if (
     JSON.stringify(publishedEvents) !== JSON.stringify(expectedEvents) ||
-    JSON.stringify(recordedMembershipChanges) !== JSON.stringify(expectedChanges)
+    JSON.stringify(recordedServiceMessages) !== JSON.stringify(expectedChanges)
   ) {
     throw new Error(
       `Expected each departure to be published and recorded, received ${
-        JSON.stringify([publishedEvents, recordedMembershipChanges])
+        JSON.stringify([publishedEvents, recordedServiceMessages])
       }`,
     );
   }
@@ -655,7 +655,7 @@ Deno.test('SharedChatAdministrationService lets bots ban and unban users in TDLi
     supergroup,
     sharedChats,
     publishedEvents,
-    recordedMembershipChanges,
+    recordedServiceMessages,
     sharedChatAdministration,
   } = createModerationFixture();
   const now = 1_700_000_000;
@@ -717,7 +717,7 @@ Deno.test('SharedChatAdministrationService lets bots ban and unban users in TDLi
     });
   }
   publishedEvents.length = 0;
-  recordedMembershipChanges.length = 0;
+  recordedServiceMessages.length = 0;
 
   // Telegram lets a bot ban only administrators it promoted, and bots promote none here.
   const outcomes = [
@@ -762,7 +762,7 @@ Deno.test('SharedChatAdministrationService lets bots ban and unban users in TDLi
   };
   if (
     JSON.stringify(banChanges) !== JSON.stringify(expectedBanChanges) ||
-    JSON.stringify(recordedMembershipChanges.splice(0)) !== JSON.stringify([removalRecord])
+    JSON.stringify(recordedServiceMessages.splice(0)) !== JSON.stringify([removalRecord])
   ) {
     throw new Error(`Expected each ban once, received ${JSON.stringify(banChanges)}`);
   }
@@ -775,7 +775,7 @@ Deno.test('SharedChatAdministrationService lets bots ban and unban users in TDLi
     memberId: member.profile.id,
   });
   publishedEvents.length = 0;
-  recordedMembershipChanges.length = 0;
+  recordedServiceMessages.length = 0;
   const unbanOutcomes = [
     unban(member.profile.id, true),
     unban(stranger.profile.id),
@@ -809,7 +809,7 @@ Deno.test('SharedChatAdministrationService lets bots ban and unban users in TDLi
   ];
   if (
     JSON.stringify(unbanChanges) !== JSON.stringify(expectedUnbanChanges) ||
-    recordedMembershipChanges.length !== 2
+    recordedServiceMessages.length !== 2
   ) {
     throw new Error(
       `Expected unbans to change standings, received ${JSON.stringify(unbanChanges)}`,
@@ -909,7 +909,7 @@ function describeStatus(status: ChatMemberStatus): string {
  */
 function createModerationFixture() {
   const fixture = createSharedChatAdministrationFixture();
-  const { virtualUsers, sharedChatAdministration, publishedEvents, recordedMembershipChanges } =
+  const { virtualUsers, sharedChatAdministration, publishedEvents, recordedServiceMessages } =
     fixture;
   const owner = createAccount(virtualUsers, 'Ada');
   const member = createAccount(virtualUsers, 'Grace');
@@ -928,7 +928,7 @@ function createModerationFixture() {
     }));
   }
   publishedEvents.length = 0;
-  recordedMembershipChanges.length = 0;
+  recordedServiceMessages.length = 0;
   return { ...fixture, owner, member, stranger, moderatorBot, otherBot, supergroup };
 }
 
@@ -946,14 +946,14 @@ function createSharedChatAdministrationFixture() {
   const virtualUsers = new VirtualUserService({ identities, accounts, bots });
   const sharedChats = new SharedChatRepository();
   const publishedEvents: ChatDomainEvent[] = [];
-  const recordedMembershipChanges: RecordSupergroupMembershipChangeInput[] = [];
+  const recordedServiceMessages: RecordSupergroupServiceMessageInput[] = [];
   const sharedChatAdministration = new SharedChatAdministrationService({
     identities,
     accounts,
     bots,
     sharedChats,
     supergroupMessages: {
-      recordMembershipChange: (change) => recordedMembershipChanges.push(change),
+      recordServiceMessage: (change) => recordedServiceMessages.push(change),
     },
     events: { publish: (event) => publishedEvents.push(event) },
     currentUnixTimeSeconds: () => 1_700_000_000,
@@ -963,7 +963,7 @@ function createSharedChatAdministrationFixture() {
     virtualUsers,
     sharedChats,
     publishedEvents,
-    recordedMembershipChanges,
+    recordedServiceMessages,
     sharedChatAdministration,
   };
 }

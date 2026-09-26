@@ -37,10 +37,10 @@ letters or digits of any script is no mention, nor is one inside code, a link or
 
 As Telegram's [Bot FAQ][privacy-faq] describes, an unqualified command such as `/start` reaches only
 the bot that last sent a message to the group. Only bots' own messages count: not an account's
-message sent through an inline bot, nor a membership service message a bot causes. When that bot
-already receives all messages, as an administrator or with privacy mode disabled, no privacy-enabled
-bot receives the command. Before any bot has sent a message, every privacy-enabled bot receives it,
-an [intentional routing rule](#intentional-deviations).
+message sent through an inline bot, nor a service message a bot causes. When that bot already
+receives all messages, as an administrator or with privacy mode disabled, no privacy-enabled bot
+receives the command. Before any bot has sent a message, every privacy-enabled bot receives it, an
+[intentional routing rule](#intentional-deviations).
 
 Multiple-recipient mention routing is a [real gap](#real-gaps). Ranking `via_bot` before an
 addressed command is also an intentional routing rule.
@@ -54,10 +54,11 @@ Owners grant administrator rights by their Bot API names. Promotion and demotion
 bot's `my_chat_member` status, and administrator status bypasses privacy mode. The implemented
 rights with behavioral effects are:
 
-| Right                  | Effect                                                        |
-| ---------------------- | ------------------------------------------------------------- |
-| `can_delete_messages`  | Delete other members' content and membership service messages |
-| `can_restrict_members` | Call `banChatMember` and `unbanChatMember`                    |
+| Right                  | Effect                                             |
+| ---------------------- | -------------------------------------------------- |
+| `can_change_info`      | Call `setChatTitle` and `setChatDescription`       |
+| `can_delete_messages`  | Delete other members' content and service messages |
+| `can_restrict_members` | Call `banChatMember` and `unbanChatMember`         |
 
 `banChatMember` removes a current member and records a service message authored by the bot.
 `unbanChatMember` lifts a ban; unless `only_if_banned` is true, it also removes a current member.
@@ -112,6 +113,31 @@ nobody configured further shows:
 - A supergroup's `permissions` grant everything, since member restrictions and default permissions
   are a [real gap](#real-gaps).
 
+### Title and description
+
+Bots change a supergroup's title with `setChatTitle` and its description with `setChatDescription`,
+and members through the emulation API, as Telegram's clients do through TDLib's
+[`set_dialog_title`][set-title] and [`set_channel_description`][set-description]. A title is cleaned
+as TDLib's `clean_name` cleans it: unusual spaces become spaces, each run of spaces and line breaks
+becomes one space, and at most 128 characters are kept; one that cleans to nothing fails with
+`Bad Request: title must be non-empty`. A description keeps at most 255 characters, and an empty one
+removes it. Bots and members then see the change in `getChat` and in the supergroup's messages.
+
+As TDLib's [`apply_restrictions`][apply-restrictions] decides, a bot needs to be an administrator
+with `can_change_info`: default permissions never extend to bots. Otherwise the change fails with
+`Bad Request: not enough rights to change chat title` or
+`Bad Request: not enough rights to set chat description`. Accounts also get what the supergroup's
+default permissions allow, which the emulator does not restrict, so any member may change them. A
+private chat has neither: `Bad Request: can't change private chat title`, or
+`Bad Request: can't change private chat description`.
+
+A new title is recorded as the changer's service message with `new_chat_title`, which, like a
+membership service message, every bot of the supergroup receives. As the official server's
+[`need_skip_update_message`][skip-update] lets it, that includes a bot that changed the title
+itself. Setting the title the supergroup has changes nothing. Telegram's servers refuse the
+description the supergroup has, which the official server reports as
+`Bad Request: chat description is not modified`, and no service message records a description.
+
 ## Intentional deviations
 
 **No automatic message deletion.** Message fixtures remain available until explicitly deleted or the
@@ -157,9 +183,9 @@ production read permissions.
   other bots. Tests of cooperating bots need the setting and its routing. Telegram's servers apply
   these rules; the Bot API and TDLib source at the comparison baseline show no trace of the setting.
 
-- **Administrator rights enforcement.** Rights other than `can_delete_messages` and
-  `can_restrict_members` are stored without corresponding enforcement. Tests need their behavioral
-  effects as the associated features are supported.
+- **Administrator rights enforcement.** Rights other than `can_change_info`, `can_delete_messages`
+  and `can_restrict_members` are stored without corresponding enforcement. Tests need their
+  behavioral effects as the associated features are supported.
 
 - **Member restrictions and default permissions.** `restrictChatMember` and default chat permissions
   are absent. Tests cannot apply partial restrictions to members.
@@ -170,8 +196,8 @@ production read permissions.
   who can edit another administrator's status.
 - **Invitation and joining workflows.** Invite links, join requests and account self-joining are
   absent; additions require the owner.
-- **Additional service messages.** Only membership service messages are produced. Other service
-  events, such as title changes or pins, need corresponding messages as their features are
+- **Additional service messages.** Only membership and title service messages are produced. Other
+  service events, such as photo changes or pins, need corresponding messages as their features are
   supported.
 
 - **Basic groups and channels.** Internal representations exist, but there is no usable HTTP
@@ -204,3 +230,7 @@ production read permissions.
 [ban-expiry]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogParticipant.cpp#L595-L715
 [ban-member]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogParticipantManager.cpp#L2385-L2413
 [owner-leave]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogParticipantManager.cpp#L2860-L2890
+[set-title]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogManager.cpp#L2341-L2383
+[set-description]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/ChatManager.cpp#L3678-L3689
+[apply-restrictions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/DialogParticipant.cpp#L558-L591
+[skip-update]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L18833-L18878

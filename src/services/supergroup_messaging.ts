@@ -26,7 +26,6 @@ import {
   getMessageAuthorId,
   type InlineMessageId,
   isSupergroupContentMessage,
-  type MembershipServiceContent,
   mentionsUser,
   type MessageContent,
   type MessageForwardInfo,
@@ -34,6 +33,7 @@ import {
   type SupergroupMessage,
   type SupergroupMessageAuthor,
   type SupergroupMessageContent,
+  type SupergroupServiceContent,
   type TextQuote,
 } from '../types/virtual_message.ts';
 import {
@@ -363,11 +363,14 @@ export type SendSupergroupBotChatActionResult =
   | { readonly sent: true }
   | { readonly sent: false; readonly reason: 'bot_not_found' | SupergroupBotAccessFailureReason };
 
-export interface RecordSupergroupMembershipChangeInput {
+export interface RecordSupergroupServiceMessageInput {
   readonly chatId: number;
-  /** The member who made the change: the one who added members, left, or removed a member. */
+  /**
+   * The member who made the change: the one who added members, left, removed a member, or changed
+   * the title.
+   */
   readonly author: SupergroupMessageAuthor;
-  readonly content: MembershipServiceContent;
+  readonly content: SupergroupServiceContent;
   readonly changedAtUnixSeconds: number;
 }
 
@@ -906,11 +909,11 @@ export class SupergroupMessagingService {
   }
 
   /**
-   * Records a change of a supergroup's members, which the caller has made, as a service message of
-   * the member who made it. As on Telegram, the service message is numbered like any message.
+   * Records a change of a supergroup, which the caller has made, as a service message of the member
+   * who made it. As on Telegram, the service message is numbered like any message.
    */
-  recordMembershipChange(
-    { chatId, author, content, changedAtUnixSeconds }: RecordSupergroupMembershipChangeInput,
+  recordServiceMessage(
+    { chatId, author, content, changedAtUnixSeconds }: RecordSupergroupServiceMessageInput,
   ): SupergroupMessage {
     return this.#commitMessage({
       chatId,

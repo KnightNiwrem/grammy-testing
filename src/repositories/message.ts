@@ -406,6 +406,7 @@ function copyContent(content: SupergroupMessageContent): SupergroupMessageConten
     case 'members_joined':
       return { ...content, memberIds: [...content.memberIds] };
     case 'member_left':
+    case 'title_changed':
       return { ...content };
     default: {
       const unhandledContent: never = content;

@@ -1,0 +1,15 @@
+type: object
+additionalProperties: false
+required:
+  - chat_id
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat: for a supergroup, its negative chat ID; for a private chat, which
+      has no title a bot can change, the account's user ID.
+  title:
+    type: string
+    description: >-
+      The new title, which TDLib's `clean_name` cleans: unusual spaces become spaces, runs of
+      spaces and line breaks become one space, and at most 128 characters are kept.

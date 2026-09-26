@@ -210,7 +210,7 @@ export class BotUpdateDeliveryService {
     updateType: MessageUpdateType,
   ): void {
     if (!isSupergroupContentMessage(message)) {
-      this.#deliverMembershipServiceMessage(message);
+      this.#deliverServiceMessage(message);
       return;
     }
     if (message.author.kind === 'bot') {
@@ -241,13 +241,15 @@ export class BotUpdateDeliveryService {
   }
 
   /**
-   * A service message about a membership change is observed by every bot of the supergroup,
-   * privacy mode notwithstanding, and by a bot that left or was removed, which, as on Telegram,
-   * still learns of its own departure. Telegram delivers service messages to every bot, so, unlike
-   * other messages, a bot's service message, about its leaving or its removal of a member, reaches
-   * the other bots too, and, as the Bot API server does for removals, the bot that made it.
+   * A service message about a change of the supergroup's members or title is observed by every
+   * bot of the supergroup, privacy mode notwithstanding, and by a bot that left or was removed,
+   * which, as on Telegram, still learns of its own departure. Telegram delivers service messages
+   * to every bot, so, unlike other messages, a bot's service message, about its leaving, its
+   * removal of a member, or its change of the title, reaches the other bots too, and, as the Bot
+   * API server's `need_skip_update_message` does for removals and title changes, the bot that
+   * made it.
    */
-  #deliverMembershipServiceMessage(message: SupergroupMessage): void {
+  #deliverServiceMessage(message: SupergroupMessage): void {
     const departedMemberIds = message.content.kind === 'member_left'
       ? [message.content.memberId]
       : [];

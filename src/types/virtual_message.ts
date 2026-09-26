@@ -211,14 +211,32 @@ export interface MemberLeftMessageContent {
   readonly memberId: number;
 }
 
-/**
- * What a service message shows instead of content: a change of the supergroup's members, which
- * Telegram records as a message of the member who made the change.
- */
+/** A change of a supergroup's members, which Telegram records as a service message. */
 export type MembershipServiceContent = MembersJoinedMessageContent | MemberLeftMessageContent;
 
-/** What a supergroup message shows: content its author wrote, or a membership change. */
-export type SupergroupMessageContent = MessageContent | MembershipServiceContent;
+/** A service message's record that a supergroup's title changed. */
+export interface TitleChangedMessageContent {
+  readonly kind: 'title_changed';
+  /** The new title. */
+  readonly title: string;
+}
+
+/**
+ * What a service message shows instead of content: a change of the supergroup's members or of its
+ * title, which Telegram records as a message of whoever made the change.
+ */
+export type SupergroupServiceContent = MembershipServiceContent | TitleChangedMessageContent;
+
+/** What a supergroup message shows: content its author wrote, or a change of the supergroup. */
+export type SupergroupMessageContent = MessageContent | SupergroupServiceContent;
+
+/** Whether a supergroup message's content records a change of the supergroup. */
+export function isSupergroupServiceContent(
+  content: SupergroupMessageContent,
+): content is SupergroupServiceContent {
+  return content.kind === 'members_joined' || content.kind === 'member_left' ||
+    content.kind === 'title_changed';
+}
 
 /**
  * The text a message's content carries: the text of a text message, or the caption of a media
@@ -235,6 +253,7 @@ export function getContentText(content: SupergroupMessageContent): FormattedText
     case 'rich_message':
     case 'members_joined':
     case 'member_left':
+    case 'title_changed':
       return { text: '', entities: [] };
     default: {
       const unhandledContent: never = content;
@@ -493,17 +512,17 @@ export function getMessageNotification(
   return getMessageAuthorId(message) === accountId ? undefined : { isSilent: message.isSilent };
 }
 
-/** A supergroup message that shows content its author wrote, rather than a membership change. */
+/** A supergroup message that shows content its author wrote, rather than a service message. */
 export type SupergroupContentMessage = SupergroupMessage & { readonly content: MessageContent };
 
 /** Whether a supergroup message shows content its author wrote, which only such a message has. */
 export function isSupergroupContentMessage(
   message: SupergroupMessage,
 ): message is SupergroupContentMessage {
-  return message.content.kind !== 'members_joined' && message.content.kind !== 'member_left';
+  return !isSupergroupServiceContent(message.content);
 }
 
-/** A message of any chat that shows content its author wrote, rather than a membership change. */
+/** A message of any chat that shows content its author wrote, rather than a service message. */
 export type ContentMessage = PrivateMessage | SupergroupContentMessage;
 
 /** Whether a message of any chat shows content its author wrote. */

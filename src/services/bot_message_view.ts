@@ -407,6 +407,8 @@ export class BotMessageViewService {
           ...context,
           changedMembers: this.#findChangedMembers([content.memberId], message),
         };
+      case 'title_changed':
+        return context;
       default: {
         const unhandledContent: never = content;
         throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);

@@ -12,6 +12,11 @@ import type {
   IdentityReservationResult,
   TelegramIdentity,
 } from '../repositories/telegram_identity.ts';
+import {
+  cleanInputString,
+  cleanName,
+  stripEmptyCharacters,
+} from '../text_entities/input_string.ts';
 import type { ChatDomainEvent } from '../types/chat_domain_event.ts';
 import {
   type ChatMembership,
@@ -35,8 +40,8 @@ import {
   type Supergroup,
 } from '../types/virtual_chat.ts';
 import type {
-  MembershipServiceContent,
   SupergroupMessageAuthor,
+  SupergroupServiceContent,
 } from '../types/virtual_message.ts';
 
 export interface CreateBasicGroupInput {
@@ -230,6 +235,53 @@ export type SetContentProtectionResult =
     readonly reason: 'actor_account_not_found' | 'chat_not_found' | 'actor_not_authorized';
   };
 
+/** The most characters of a chat's title, which TDLib keeps and Telegram's servers accept. */
+const MAX_CHAT_TITLE_LENGTH = 128;
+
+/** The most characters of a chat's description, which TDLib keeps and Telegram's servers accept. */
+const MAX_CHAT_DESCRIPTION_LENGTH = 255;
+
+export interface ChangeSupergroupTitleInput {
+  /** The account or bot that changes the title, which the service message names. */
+  readonly actor: SupergroupMessageAuthor;
+  readonly chatId: number;
+  /** The title as the actor specified it, before Telegram cleans it. */
+  readonly title: string;
+}
+
+export interface ChangeSupergroupDescriptionInput {
+  /** The account or bot that changes the description. */
+  readonly actor: SupergroupMessageAuthor;
+  readonly chatId: number;
+  /** The description as the actor specified it, before Telegram cleans it; empty removes it. */
+  readonly description: string;
+}
+
+/** Why an account or a bot cannot change a supergroup's information, in TDLib's order. */
+type SupergroupInfoChangeFailureReason =
+  | 'actor_not_found'
+  | SupergroupBotAccessFailureReason
+  /** The actor is an account that is not a member of the supergroup. */
+  | 'not_a_member'
+  /** The text is not well-formed Unicode, which Telegram rejects as not encoded in UTF-8. */
+  | 'text_encoding_invalid'
+  /** The actor may not change the supergroup's information, as `canChangeSupergroupInfo` decides. */
+  | 'not_enough_rights';
+
+export type ChangeSupergroupTitleResult =
+  | { readonly changed: true }
+  | {
+    readonly changed: false;
+    readonly reason: SupergroupInfoChangeFailureReason | 'title_empty';
+  };
+
+export type ChangeSupergroupDescriptionResult =
+  | { readonly changed: true }
+  | {
+    readonly changed: false;
+    readonly reason: SupergroupInfoChangeFailureReason | 'description_not_modified';
+  };
+
 export interface DemoteChatMemberInput {
   /** The owner, who alone demotes administrators here. */
   readonly actorAccountId: number;
@@ -390,6 +442,10 @@ interface ChatMembershipStore {
     memberId: number,
     customTitle: string | undefined,
   ): CustomTitleUpdateResult;
+  updateSupergroupInfo(
+    chatId: number,
+    info: { readonly title?: string; readonly description?: string },
+  ): boolean;
   updateSupergroupContentProtection(chatId: number, hasProtectedContent: boolean): boolean;
   removeChatMember(
     chatId: number,
@@ -412,11 +468,11 @@ interface ChatDomainEventSink {
   publish(event: ChatDomainEvent): void;
 }
 
-interface SupergroupMembershipChangeRecorder {
-  recordMembershipChange(input: {
+interface SupergroupServiceMessageRecorder {
+  recordServiceMessage(input: {
     readonly chatId: number;
     readonly author: SupergroupMessageAuthor;
-    readonly content: MembershipServiceContent;
+    readonly content: SupergroupServiceContent;
     readonly changedAtUnixSeconds: number;
   }): void;
 }
@@ -426,9 +482,25 @@ interface SharedChatAdministrationServiceDependencies {
   readonly accounts: AccountLookup;
   readonly bots: BotLookup;
   readonly sharedChats: SharedChatStore;
-  readonly supergroupMessages: SupergroupMembershipChangeRecorder;
+  readonly supergroupMessages: SupergroupServiceMessageRecorder;
   readonly events: ChatDomainEventSink;
   readonly currentUnixTimeSeconds: () => number;
+}
+
+/**
+ * Whether a member may change a supergroup's title and description, as TDLib's
+ * `can_change_info_and_settings` decides once `apply_restrictions` applies the supergroup's default
+ * permissions: the owner may, and so may an administrator with `can_change_info`. Other accounts
+ * may too, because the supergroup's default permissions, which the emulator does not restrict, let
+ * members change its information. A bot gets no right from default permissions, so it needs the
+ * administrator right.
+ */
+function canChangeSupergroupInfo(
+  actor: SupergroupMessageAuthor,
+  membership: ChatMembership,
+): boolean {
+  return actor.kind === 'account' ||
+    holdsSupergroupAdministratorRight(membership, 'can_change_info');
 }
 
 /**
@@ -438,14 +510,16 @@ interface SharedChatAdministrationServiceDependencies {
  * arrival or departure is recorded in a supergroup as a service message, as Telegram does. Service
  * messages of basic groups and channels, whose messages are not supported, are not recorded.
  *
- * Bots also read the standing of a supergroup's users here, as a member of the supergroup.
+ * Members and bots also change a supergroup's title and description here, and a new title is
+ * recorded as a service message too. Bots also read the standing of a supergroup's users here, as
+ * a member of the supergroup.
  */
 export class SharedChatAdministrationService {
   readonly #identities: SharedChatIdentityReservationStore;
   readonly #accounts: AccountLookup;
   readonly #bots: BotLookup;
   readonly #sharedChats: SharedChatStore;
-  readonly #supergroupMessages: SupergroupMembershipChangeRecorder;
+  readonly #supergroupMessages: SupergroupServiceMessageRecorder;
   readonly #events: ChatDomainEventSink;
   readonly #currentUnixTimeSeconds: () => number;
 
@@ -595,7 +669,7 @@ export class SharedChatAdministrationService {
       newStatus: { status: 'member' },
       changedAtUnixSeconds: addedAtUnixSeconds,
     });
-    this.#recordSupergroupMembershipChange(chat, {
+    this.#recordSupergroupServiceMessage(chat, {
       author: { kind: 'account', accountId: input.actorAccountId },
       content: { kind: 'members_joined', memberIds: [input.memberId] },
       changedAtUnixSeconds: addedAtUnixSeconds,
@@ -908,6 +982,75 @@ export class SharedChatAdministrationService {
   }
 
   /**
+   * Changes a supergroup's title as an account or a bot, as TDLib's `set_dialog_title` does: the
+   * title is cleaned as `cleanName` cleans it, keeping at most 128 characters, and must not be
+   * empty; then the actor must be allowed to, as `canChangeSupergroupInfo` decides. A title the
+   * supergroup has succeeds without effect; a new one is recorded as the actor's service message.
+   */
+  changeSupergroupTitle(input: ChangeSupergroupTitleInput): ChangeSupergroupTitleResult {
+    const access = this.#resolveSupergroupInfoEditor(input);
+    if (!access.resolved) {
+      return { changed: false, reason: access.reason };
+    }
+    const cleanedTitle = cleanInputString(input.title);
+    if (cleanedTitle === undefined) {
+      return { changed: false, reason: 'text_encoding_invalid' };
+    }
+    const title = cleanName(cleanedTitle, MAX_CHAT_TITLE_LENGTH);
+    if (title.length === 0) {
+      return { changed: false, reason: 'title_empty' };
+    }
+    if (!canChangeSupergroupInfo(input.actor, access.membership)) {
+      return { changed: false, reason: 'not_enough_rights' };
+    }
+    if (access.supergroup.title === title) {
+      return { changed: true };
+    }
+
+    if (!this.#sharedChats.updateSupergroupInfo(input.chatId, { title })) {
+      throw new Error(`Supergroup ${input.chatId} could not be updated`);
+    }
+    this.#recordSupergroupServiceMessage(access.supergroup, {
+      author: input.actor,
+      content: { kind: 'title_changed', title },
+      changedAtUnixSeconds: this.#currentUnixTimeSeconds(),
+    });
+    return { changed: true };
+  }
+
+  /**
+   * Changes a supergroup's description as an account or a bot, as TDLib's
+   * `set_channel_description` does: the description is stripped as `stripEmptyCharacters` strips
+   * it, keeping at most 255 characters, and the actor must be allowed to, as
+   * `canChangeSupergroupInfo` decides. Telegram's servers refuse a description the supergroup has.
+   * No service message records the change.
+   */
+  changeSupergroupDescription(
+    input: ChangeSupergroupDescriptionInput,
+  ): ChangeSupergroupDescriptionResult {
+    const access = this.#resolveSupergroupInfoEditor(input);
+    if (!access.resolved) {
+      return { changed: false, reason: access.reason };
+    }
+    const cleanedDescription = cleanInputString(input.description);
+    if (cleanedDescription === undefined) {
+      return { changed: false, reason: 'text_encoding_invalid' };
+    }
+    const description = stripEmptyCharacters(cleanedDescription, MAX_CHAT_DESCRIPTION_LENGTH);
+    if (!canChangeSupergroupInfo(input.actor, access.membership)) {
+      return { changed: false, reason: 'not_enough_rights' };
+    }
+    if ((access.supergroup.description ?? '') === description) {
+      return { changed: false, reason: 'description_not_modified' };
+    }
+
+    if (!this.#sharedChats.updateSupergroupInfo(input.chatId, { description })) {
+      throw new Error(`Supergroup ${input.chatId} could not be updated`);
+    }
+    return { changed: true };
+  }
+
+  /**
    * Finds the chat a bot addresses by a public username, as the official Bot API server's
    * `check_chat` finds it with `searchPublicChat`: a public supergroup, or the private chat with a
    * bot, whose ID is the bot's. An account's username names no chat a bot may address this way.
@@ -921,6 +1064,46 @@ export class SharedChatAdministrationService {
       default:
         return undefined;
     }
+  }
+
+  /**
+   * Resolves a supergroup whose information an account or a bot changes, and the actor's
+   * membership: a bot as the Bot API server's `check_chat` requires for writing, and an account
+   * as a member of the supergroup.
+   */
+  #resolveSupergroupInfoEditor(
+    { actor, chatId }: { readonly actor: SupergroupMessageAuthor; readonly chatId: number },
+  ):
+    | {
+      readonly resolved: true;
+      readonly supergroup: Supergroup;
+      readonly membership: ChatMembership;
+    }
+    | {
+      readonly resolved: false;
+      readonly reason: 'actor_not_found' | SupergroupBotAccessFailureReason | 'not_a_member';
+    } {
+    if (actor.kind === 'bot') {
+      const access = this.#resolveBotObserver({ observerBotId: actor.botId, chatId });
+      if (access.resolved) {
+        return access;
+      }
+      return {
+        resolved: false,
+        reason: access.reason === 'bot_not_found' ? 'actor_not_found' : access.reason,
+      };
+    }
+    if (this.#accounts.getById(actor.accountId) === undefined) {
+      return { resolved: false, reason: 'actor_not_found' };
+    }
+    const supergroup = this.#sharedChats.getSharedChat(chatId);
+    if (supergroup?.kind !== 'supergroup') {
+      return { resolved: false, reason: 'chat_not_found' };
+    }
+    const membership = this.#sharedChats.getChatMembership(chatId, actor.accountId);
+    return membership === undefined
+      ? { resolved: false, reason: 'not_a_member' }
+      : { resolved: true, supergroup, membership };
   }
 
   /** Resolves a member of a supergroup that the acting account owns, for the owner to manage. */
@@ -1145,23 +1328,23 @@ export class SharedChatAdministrationService {
       newStatus: statusAfterLeaving,
       changedAtUnixSeconds: leftAtUnixSeconds,
     });
-    this.#recordSupergroupMembershipChange(chat, {
+    this.#recordSupergroupServiceMessage(chat, {
       author: actor,
       content: { kind: 'member_left', memberId },
       changedAtUnixSeconds: leftAtUnixSeconds,
     });
   }
 
-  #recordSupergroupMembershipChange(
+  #recordSupergroupServiceMessage(
     chat: SharedChat,
     change: {
       readonly author: SupergroupMessageAuthor;
-      readonly content: MembershipServiceContent;
+      readonly content: SupergroupServiceContent;
       readonly changedAtUnixSeconds: number;
     },
   ): void {
     if (chat.kind === 'supergroup') {
-      this.#supergroupMessages.recordMembershipChange({ chatId: chat.id, ...change });
+      this.#supergroupMessages.recordServiceMessage({ chatId: chat.id, ...change });
     }
   }
 

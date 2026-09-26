@@ -527,11 +527,15 @@ function contentMessageSchemas<Header extends z.ZodRawShape>(header: Header) {
   ] as const;
 }
 
-/** A service message about members joining or leaving, as `contentMessageSchemas` reads others. */
-function membershipChangeMessageSchemas<Header extends z.ZodRawShape>(header: Header) {
+/**
+ * A service message about members joining or leaving, or about a new title, as
+ * `contentMessageSchemas` reads others.
+ */
+function serviceMessageSchemas<Header extends z.ZodRawShape>(header: Header) {
   return [
     z.strictObject({ ...header, ...membersJoinedContentShape, ...messageTrailerShape }),
     z.strictObject({ ...header, ...memberLeftContentShape, ...messageTrailerShape }),
+    z.strictObject({ ...header, new_chat_title: z.string().min(1), ...messageTrailerShape }),
   ] as const;
 }
 
@@ -549,9 +553,9 @@ const supergroupMessageHeader = {
   ...messageReplyInfoShape,
 };
 
-/** Supergroup messages, which service messages about members joining or leaving are among. */
+/** Supergroup messages, which service messages about changes of the supergroup are among. */
 function supergroupMessageSchemas<Header extends z.ZodRawShape>(header: Header) {
-  return [...contentMessageSchemas(header), ...membershipChangeMessageSchemas(header)] as const;
+  return [...contentMessageSchemas(header), ...serviceMessageSchemas(header)] as const;
 }
 
 const supergroupMessageSchema: z.ZodType<SupergroupMessage> = z.union(supergroupMessageSchemas({

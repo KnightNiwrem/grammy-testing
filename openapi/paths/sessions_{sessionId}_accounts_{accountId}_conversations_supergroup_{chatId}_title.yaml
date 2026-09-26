@@ -1,0 +1,38 @@
+description: >-
+  The title of a supergroup, which members change as Telegram's clients do through TDLib's
+  `set_dialog_title`.
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/AccountId.yaml
+  - $ref: ../components/parameters/SupergroupChatId.yaml
+put:
+  operationId: changeSupergroupTitle
+  summary: Change the title of a supergroup the account is a member of
+  description: >-
+    The title is cleaned as for the Bot API's `setChatTitle`. Bots of the supergroup receive the
+    account's service message with `new_chat_title`; the title the supergroup has changes
+    nothing. As TDLib decides with the supergroup's default permissions applied, any member
+    may change it, because the emulator's default permissions let members change information.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+            - title
+          properties:
+            title:
+              type: string
+  responses:
+    '204':
+      description: The supergroup has the title.
+    '400':
+      description: >-
+        A path identifier or the body is invalid, or the title is empty once cleaned or not
+        well-formed Unicode.
+    '403':
+      description: The account is not a member of the supergroup.
+    '404':
+      description: The session, account, or supergroup does not exist.

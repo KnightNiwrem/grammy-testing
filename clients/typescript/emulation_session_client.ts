@@ -47,6 +47,8 @@ import type {
   BotBlockInput,
   BotCommand,
   CallbackQuery,
+  ChangeSupergroupDescriptionInput,
+  ChangeSupergroupTitleInput,
   ChatAction,
   ChooseInlineQueryResultInput,
   CreatedVirtualAccount,
@@ -425,6 +427,22 @@ function createVirtualAccountClient(
         method: input.hasProtectedContent ? 'PUT' : 'DELETE',
         url: `${conversationUrl(accountUrl, input.chat)}/content-protection`,
         expectedStatus: HTTP_STATUS_NO_CONTENT,
+      });
+    },
+    async changeSupergroupTitle(input: ChangeSupergroupTitleInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'PUT',
+        url: `${conversationUrl(accountUrl, input.chat)}/title`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+        body: { title: input.title },
+      });
+    },
+    async changeSupergroupDescription(input: ChangeSupergroupDescriptionInput): Promise<void> {
+      await requestEmptyResponse(fetchImplementation, {
+        method: 'PUT',
+        url: `${conversationUrl(accountUrl, input.chat)}/description`,
+        expectedStatus: HTTP_STATUS_NO_CONTENT,
+        body: { description: input.description },
       });
     },
     async blockBot(input: BotBlockInput): Promise<void> {

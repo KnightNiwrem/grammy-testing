@@ -605,6 +605,37 @@ Deno.test('TypeScript client runs supergroups with members, messages, and button
   throw new Error('Expected a non-member to be refused the supergroup history');
 });
 
+Deno.test('TypeScript client changes a supergroup title and reads its service message', async () => {
+  const publicOrigin = 'http://emulator.example:9000';
+  const api = createEmulationApi({
+    sessionLifecycle: createSessionLifecycleService(),
+    publicOrigin,
+  });
+  const client = new TelegramEmulationClient(publicOrigin, {
+    fetch: createInProcessFetch(api.fetch),
+  });
+  const session = await client.createSession();
+  const { account: owner } = await session.createAccount({ first_name: 'Ada' });
+  const supergroup = await owner.createSupergroup({ title: 'Team' });
+  const chat = { type: 'supergroup', chatId: supergroup.id } as const;
+
+  await owner.changeSupergroupTitle({ chat, title: '  Team\n news ' });
+  await owner.changeSupergroupDescription({ chat, description: 'News of the team' });
+  const [titleChange] = (await owner.getMessages({ chat })).slice(-1);
+  if (titleChange?.new_chat_title !== 'Team news' || titleChange.from.id !== owner.id) {
+    throw new Error(`Expected the title change, received ${JSON.stringify(titleChange)}`);
+  }
+  let refusal: unknown;
+  try {
+    await owner.changeSupergroupDescription({ chat, description: 'News of the team' });
+  } catch (error) {
+    refusal = error;
+  }
+  if (!(refusal instanceof EmulationClientError) || refusal.status !== 409) {
+    throw new Error(`Expected the unchanged description to be refused, received ${refusal}`);
+  }
+});
+
 Deno.test('TypeScript client sends, edits, and downloads photos and documents', async () => {
   const publicOrigin = 'http://emulator.example:9000';
   const api = createEmulationApi({

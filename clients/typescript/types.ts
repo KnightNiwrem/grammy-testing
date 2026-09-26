@@ -232,6 +232,18 @@ export interface SetContentProtectionInput {
   readonly hasProtectedContent: boolean;
 }
 
+export interface ChangeSupergroupTitleInput {
+  readonly chat: SupergroupMessageTarget;
+  /** The new title, which Telegram cleans; one that cleans to nothing is refused. */
+  readonly title: string;
+}
+
+export interface ChangeSupergroupDescriptionInput {
+  readonly chat: SupergroupMessageTarget;
+  /** The new description, which Telegram cleans; empty removes it. */
+  readonly description: string;
+}
+
 export interface SetCustomTitleInput {
   readonly chat: SupergroupMessageTarget;
   /** The owner itself or an administrator, account or bot. */
@@ -755,13 +767,14 @@ export type MessageContent =
     readonly rich_message: RichMessage;
   };
 
-/** The fields of a membership change, which content never has. */
-interface NoMembershipChange {
+/** The fields of a change of a supergroup's members or title, which content never has. */
+interface NoSupergroupChange {
   readonly new_chat_participant?: never;
   readonly new_chat_member?: never;
   readonly new_chat_members?: never;
   readonly left_chat_participant?: never;
   readonly left_chat_member?: never;
+  readonly new_chat_title?: never;
 }
 
 /** The fields of content, which a service message never has. */
@@ -781,6 +794,7 @@ interface NoContent {
  */
 export type MembershipChangeContent =
   | (NoContent & {
+    readonly new_chat_title?: never;
     /** Legacy alias of `new_chat_member`. */
     readonly new_chat_participant: VirtualAccountProfile | MessageSenderBot;
     /** Legacy: the requesting account if it joined, otherwise the first new member. */
@@ -790,6 +804,7 @@ export type MembershipChangeContent =
     readonly left_chat_member?: never;
   })
   | (NoContent & {
+    readonly new_chat_title?: never;
     readonly new_chat_participant?: never;
     readonly new_chat_member?: never;
     readonly new_chat_members?: never;
@@ -799,10 +814,17 @@ export type MembershipChangeContent =
     readonly left_chat_member: VirtualAccountProfile | MessageSenderBot;
   });
 
-/** What a supergroup message shows: content, or a membership change. */
+/** The field of a service message about a supergroup's new title. */
+export type TitleChangeContent =
+  & NoContent
+  & Omit<NoSupergroupChange, 'new_chat_title'>
+  & { readonly new_chat_title: string };
+
+/** What a supergroup message shows: content, or a change of the supergroup's members or title. */
 export type SupergroupMessageContent =
-  | (MessageContent & NoMembershipChange)
-  | MembershipChangeContent;
+  | (MessageContent & NoSupergroupChange)
+  | MembershipChangeContent
+  | TitleChangeContent;
 
 /** Who first sent a forwarded message, and when. */
 export interface MessageOriginUser {
@@ -1263,6 +1285,17 @@ export interface VirtualAccountClient extends VirtualAccountProfile {
    * `has_protected_content`, and only bots can copy them.
    */
   setContentProtection(input: SetContentProtectionInput): Promise<void>;
+  /**
+   * Changes the title of a supergroup this account is a member of, which Telegram cleans. Bots of
+   * the supergroup receive a service message with `new_chat_title`; a title the supergroup has
+   * changes nothing.
+   */
+  changeSupergroupTitle(input: ChangeSupergroupTitleInput): Promise<void>;
+  /**
+   * Changes the description of a supergroup this account is a member of, which Telegram cleans;
+   * no service message records it. Telegram refuses the description the supergroup has.
+   */
+  changeSupergroupDescription(input: ChangeSupergroupDescriptionInput): Promise<void>;
   /**
    * Blocks a bot, which Telegram calls stopping it. The bot receives a `my_chat_member` update
    * showing it as `kicked`, its messages to this account fail with `403 Forbidden: bot was
