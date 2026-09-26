@@ -82,8 +82,8 @@ notification; a deleted message has none.
 
 ## Editing and deleting
 
-Bots edit text, captions and inline keyboards with `editMessageText`, `editMessageCaption` and
-`editMessageReplyMarkup`; `editMessageText` also turns text into a
+Bots edit text, captions, media and inline keyboards with `editMessageText`, `editMessageCaption`,
+`editMessageMedia` and `editMessageReplyMarkup`; `editMessageText` also turns text into a
 [rich message](rich-messages.md#sending-and-editing) and back. Omitting the inline keyboard in an
 edit removes it. Unchanged content and markup produce the message-not-modified error. Accounts can
 edit their own text or captions through the emulation API, producing `edited_message` updates for
@@ -114,9 +114,19 @@ Message deletion does not consider message age, and account edits have no age li
 messages and automatic deletion timers are absent. These timing simplifications are
 [intentional](#intentional-deviations).
 
-Media edits are limited to captions and inline keyboards. Replacing media is a
-[real gap](#real-gaps), and deleting a message only for the account is an
-[intentional deviation](#intentional-deviations).
+`editMessageMedia` replaces a message's content with a photo or document and its caption, read from
+an `InputMediaPhoto` or `InputMediaDocument` as the official server's
+[`get_input_media`][input-media] reads it: the `media` is a `file_id` the bot knows or
+`attach://<part name>`, and a document may have a thumbnail as for `sendDocument`. As TDLib's
+[`edit_message_media`][edit-media] allows, a photo or document changes its media, and a text or rich
+message becomes media; the old caption goes with the old content. A caption or file is refused as by
+`sendPhoto` and `sendDocument`, and media Telegram cannot read fails with its description prefixed
+by `Bad Request: can't parse InputMedia:`. Animations, audio, live photos and videos are
+[missing](README.md#unimplemented-areas) and refused with
+`Bad Request: InputMedia of type "…" is not supported`. An inline message's new media must reuse a
+file by its `file_id`, as for [rich messages](rich-messages.md#sending-and-editing).
+
+Deleting a message only for the account is an [intentional deviation](#intentional-deviations).
 
 ## Blocking
 
@@ -197,8 +207,6 @@ Other origins are users. Channel and chat origins, video start timestamps and me
 - **Checklist and poll reply targets.** Replies cannot target an individual checklist task or poll
   option. These targets are read by the upstream reply parser,
   [`Client::get_reply_parameters`][reply-parameters], and are missing from the emulator.
-- **Replacing media.** `editMessageMedia` is not implemented, preventing tests from exercising bots
-  that replace message media.
 - **Channel and chat origins.** Forward origins are users or hidden users. Tests cannot exercise
   channel or chat origins, which TDLib's [forward origin model][forward-origin] supports; they need
   the missing channels and anonymous administrators.
@@ -226,6 +234,8 @@ Other origins are users. Channel and chat origins, video start timestamps and me
 [quote-entities]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessageEntity.cpp#L4840-L4853
 [replied-message-info]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/RepliedMessageInfo.cpp#L142-L200
 [reply-parameters]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10130-L10180
+[input-media]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L12794-L12883
+[edit-media]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L23720-L23763
 [edit-permissions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L23183-L23292
 [delete-permissions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8405-L8520
 [forward-permissions]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/MessagesManager.cpp#L8270-L8330

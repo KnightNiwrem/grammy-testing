@@ -48,7 +48,7 @@ The two legacy aliases below are also accepted.
 | Updates          | `getUpdates`, `setWebhook`, `deleteWebhook`, `getWebhookInfo`                                                                                      |
 | Sending          | `sendMessage`, `sendRichMessage`, `sendPhoto`, `sendDocument`, `sendChatAction`                                                                    |
 | Reusing messages | `forwardMessage`, `forwardMessages`, `copyMessage`, `copyMessages`                                                                                 |
-| Editing          | `editMessageText`, `editMessageCaption`, `editMessageReplyMarkup`                                                                                  |
+| Editing          | `editMessageText`, `editMessageCaption`, `editMessageMedia`, `editMessageReplyMarkup`                                                              |
 | Deletion         | `deleteMessage`, `deleteMessages`                                                                                                                  |
 | Files            | `getFile`, plus HTTP file downloads                                                                                                                |
 | Interaction      | `answerCallbackQuery`, `answerInlineQuery`                                                                                                         |

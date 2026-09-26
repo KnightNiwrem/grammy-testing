@@ -7441,6 +7441,231 @@ Deno.test('editMessageCaption follows Telegram checks', async () => {
   }
 });
 
+Deno.test('editMessageMedia replaces the media of a message', async () => {
+  const { api, sessionPath, botApiPath, createdBot, createdAccount, sendText } =
+    await createPrivateConversationFixture();
+  await sendText('/start');
+  const chatId = createdAccount.account.id;
+  const sentPhoto = await callBotApiWithFiles(api, `${botApiPath}/sendPhoto`, {
+    chat_id: String(chatId),
+    caption: 'Old photo',
+  }, { photo: new File([gifImage(8, 8)], 'old.gif') });
+  const photoMessage = botApiResult(sentPhoto.body);
+  const photoFileId = photoSizeOf(photoMessage)?.file_id;
+  const sentText = botApiResult(
+    (await callBotApi(api, `${botApiPath}/sendMessage`, { chat_id: chatId, text: 'Soon' })).body,
+  );
+  const editMedia = (messageId: unknown, media: unknown, files: Record<string, File> = {}) =>
+    callBotApiWithFiles(api, `${botApiPath}/editMessageMedia`, {
+      chat_id: String(chatId),
+      message_id: String(messageId),
+      media: JSON.stringify(media),
+      reply_markup: JSON.stringify({
+        inline_keyboard: [[{ text: 'Open', callback_data: 'open' }]],
+      }),
+    }, files);
+
+  const documentEdit = await editMedia(photoMessage?.message_id, {
+    type: 'document',
+    media: 'attach://report',
+    caption: '<b>Report</b>',
+    parse_mode: 'HTML',
+  }, { report: new File(['numbers'], 'report.txt', { type: 'text/plain' }) });
+  const editedDocument = botApiResult(documentEdit.body);
+  const photoEdit = await editMedia(sentText?.message_id, {
+    type: 'photo',
+    media: photoFileId,
+    has_spoiler: true,
+    show_caption_above_media: true,
+    caption: 'Now a photo',
+  });
+  const editedText = botApiResult(photoEdit.body);
+  const unchangedEdit = await editMedia(sentText?.message_id, {
+    type: 'photo',
+    media: photoFileId,
+    has_spoiler: true,
+    show_caption_above_media: true,
+    caption: 'Now a photo',
+  });
+  const keyboard = { inline_keyboard: [[{ text: 'Open', callback_data: 'open' }]] };
+  if (
+    documentEdit.status !== 200 || 'photo' in (editedDocument ?? {}) ||
+    (editedDocument?.document as { file_name?: string } | undefined)?.file_name !==
+      'report.txt' ||
+    editedDocument?.caption !== 'Report' ||
+    JSON.stringify(editedDocument.caption_entities) !==
+      JSON.stringify([{ type: 'bold', offset: 0, length: 6 }]) ||
+    JSON.stringify(editedDocument.reply_markup) !== JSON.stringify(keyboard) ||
+    typeof editedDocument.edit_date !== 'number' ||
+    photoEdit.status !== 200 || 'text' in (editedText ?? {}) ||
+    photoSizeOf(editedText)?.file_id !== photoFileId || editedText?.has_media_spoiler !== true ||
+    editedText.show_caption_above_media !== true || editedText.caption !== 'Now a photo' ||
+    !isBadRequestResponse(unchangedEdit.body) ||
+    !unchangedEdit.body.description.startsWith('Bad Request: message is not modified')
+  ) {
+    throw new Error(
+      `Expected the media to be replaced, received ${
+        JSON.stringify([documentEdit, photoEdit, unchangedEdit])
+      }`,
+    );
+  }
+  const updatesBody: unknown = await (await api.request(`${botApiPath}/getUpdates`)).json();
+  if (
+    !isGetUpdatesResponse(updatesBody) ||
+    updatesBody.result.some((update) => 'edited_message' in update)
+  ) {
+    throw new Error('Expected the bot to receive no update for editing its own message');
+  }
+
+  const refusals: Array<[unknown, string]> = [
+    [undefined, 'Bad Request: parameter "media" is required'],
+    ['{', "Bad Request: can't parse input media JSON object"],
+    [[], "Bad Request: can't parse InputMedia: expected an Object"],
+    [{ media: photoFileId }, `Bad Request: can't parse InputMedia: Can't find field "type"`],
+    [
+      { type: 'sticker', media: photoFileId },
+      `Bad Request: can't parse InputMedia: type "sticker" is unsupported`,
+    ],
+    [
+      { type: 'video', media: photoFileId },
+      'Bad Request: InputMedia of type "video" is not supported',
+    ],
+    [
+      { type: 'photo', media: 'attach://missing' },
+      "Bad Request: can't parse InputMedia: media not found",
+    ],
+    [
+      { type: 'photo', media: 'https://grammy.dev/cat.gif' },
+      'Bad Request: sending files by URL is not supported',
+    ],
+    [
+      { type: 'photo', media: photoFileId, caption: '<b>Bold', parse_mode: 'HTML' },
+      "Bad Request: can't parse InputMedia: Can't parse entities: Can't find end tag corresponding to start tag \"b\"",
+    ],
+    [
+      { type: 'document', media: photoFileId },
+      "Bad Request: can't use file of type Photo as Document",
+    ],
+    [
+      { type: 'document', media: photoFileId, has_spoiler: true },
+      'Bad Request: invalid editMessageMedia parameters',
+    ],
+  ];
+  const descriptions = [];
+  for (const [media] of refusals) {
+    const { body } = await callBotApiWithFiles(api, `${botApiPath}/editMessageMedia`, {
+      chat_id: String(chatId),
+      message_id: String(photoMessage?.message_id),
+      ...(media === undefined
+        ? {}
+        : { media: typeof media === 'string' ? media : JSON.stringify(media) }),
+    }, {});
+    descriptions.push(isBadRequestResponse(body) ? body.description : JSON.stringify(body));
+  }
+  if (
+    JSON.stringify(descriptions) !== JSON.stringify(refusals.map(([, description]) => description))
+  ) {
+    throw new Error(`Expected Telegram's errors, received ${JSON.stringify(descriptions)}`);
+  }
+
+  const inlineBot = await createBot(api, sessionPath, 'cats_bot', {
+    supports_inline_queries: true,
+    receives_chosen_inline_results: true,
+  });
+  const accountPath = `${sessionPath}/accounts/${chatId}`;
+  const chat = { type: 'private', botId: createdBot.bot.id };
+  await api.request(
+    `${accountPath}/messages`,
+    jsonRequest('POST', { to: { type: 'private', botId: inlineBot.bot.id }, text: '/start' }),
+  );
+  const queryResponse = await api.request(
+    `${accountPath}/inline-queries`,
+    jsonRequest('POST', { bot_id: inlineBot.bot.id, chat, query: 'cats' }),
+  );
+  const { inline_query: inlineQuery } = await queryResponse.json() as {
+    inline_query: { id: string };
+  };
+  await callBotApi(api, `${inlineBot.botApiPath}/answerInlineQuery`, {
+    inline_query_id: inlineQuery.id,
+    results: [{
+      type: 'article',
+      id: 'cats',
+      title: 'Cats',
+      input_message_content: { message_text: 'Cats' },
+      reply_markup: { inline_keyboard: [[{ text: 'More', callback_data: 'more' }]] },
+    }],
+  });
+  const chosen = await api.request(
+    `${accountPath}/inline-queries/${inlineQuery.id}/chosen-results`,
+    jsonRequest('POST', { result_id: 'cats' }),
+  );
+  const { message: inlineMessage } = await chosen.json() as { message: { message_id: number } };
+  const inlineMessageId = await (async () => {
+    const updates = await (await api.request(`${inlineBot.botApiPath}/getUpdates`)).json() as {
+      result: Array<{ chosen_inline_result?: { inline_message_id?: string } }>;
+    };
+    return updates.result.find((update) => update.chosen_inline_result !== undefined)
+      ?.chosen_inline_result?.inline_message_id;
+  })();
+  const inlinePhoto = botApiResult(
+    (await callBotApiWithFiles(api, `${inlineBot.botApiPath}/sendPhoto`, {
+      chat_id: String(chatId),
+    }, { photo: new File([gifImage(4, 4)], 'cat.gif') })).body,
+  );
+  const editInline = (media: unknown, files: Record<string, File> = {}) =>
+    callBotApiWithFiles(api, `${inlineBot.botApiPath}/editMessageMedia`, {
+      inline_message_id: String(inlineMessageId),
+      media: JSON.stringify(media),
+    }, files);
+  const inlineUpload = await editInline(
+    { type: 'photo', media: 'attach://cat' },
+    { cat: new File([gifImage(4, 4)], 'cat.gif') },
+  );
+  const inlineEdit = await editInline({ type: 'photo', media: photoSizeOf(inlinePhoto)?.file_id });
+  const history = await (await api.request(
+    `${accountPath}/conversations/private/${createdBot.bot.id}/messages`,
+  )).json() as { messages: Array<Record<string, unknown>> };
+  const editedInlineMessage = history.messages.find(({ message_id }) =>
+    message_id === inlineMessage.message_id
+  );
+  if (
+    !isBadRequestResponse(inlineUpload.body) ||
+    inlineUpload.body.description !== 'Bad Request: invalid message content specified' ||
+    JSON.stringify(inlineEdit.body) !== JSON.stringify({ ok: true, result: true }) ||
+    photoSizeOf(editedInlineMessage)?.file_unique_id !== photoSizeOf(inlinePhoto)?.file_unique_id
+  ) {
+    throw new Error(
+      `Expected an inline message's media to be replaced only by file_id, received ${
+        JSON.stringify([inlineUpload, inlineEdit, editedInlineMessage])
+      }`,
+    );
+  }
+});
+
+Deno.test('editMessageMedia replaces the media of a supergroup message', async () => {
+  const { api, owner, bot, supergroup, supergroupPath } = await createSupergroupFixture();
+  const sent = await callBotApiWithFiles(api, `${bot.botApiPath}/sendDocument`, {
+    chat_id: String(supergroup.id),
+  }, { document: new File(['draft'], 'draft.txt') });
+  const edit = await callBotApiWithFiles(api, `${bot.botApiPath}/editMessageMedia`, {
+    chat_id: String(supergroup.id),
+    message_id: String(botApiResult(sent.body)?.message_id),
+    media: JSON.stringify({ type: 'photo', media: 'attach://chart', caption: 'Chart' }),
+  }, { chart: new File([gifImage(6, 3)], 'chart.gif') });
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: Array<Record<string, unknown>>;
+  };
+  const editedMessage = history.messages.at(-1);
+  if (
+    edit.status !== 200 || editedMessage?.caption !== 'Chart' || 'document' in editedMessage ||
+    (photoSizeOf(editedMessage) as { width?: number } | undefined)?.width !== 6
+  ) {
+    throw new Error(
+      `Expected members to see the new photo, received ${JSON.stringify([edit, editedMessage])}`,
+    );
+  }
+});
+
 Deno.test('account message routes send and edit photos and documents', async () => {
   const { api, sessionPath, botApiPath, createdBot, createdAccount } =
     await createPrivateConversationFixture();

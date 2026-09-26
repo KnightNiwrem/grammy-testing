@@ -1,0 +1,26 @@
+type: object
+additionalProperties: false
+description: >-
+  Addresses a message of a chat by `chat_id` and `message_id`, or a message sent through the
+  bot's inline mode by `inline_message_id`.
+required:
+  - media
+properties:
+  chat_id:
+    $ref: ./ChatIdentifier.yaml
+    description: >-
+      Identifier of the chat: for a private chat, the account's user ID; for a supergroup,
+      its negative chat ID.
+  message_id:
+    type: integer
+    description: Identifier of the message in the bot's chat.
+  inline_message_id:
+    type: string
+    description: >-
+      Identifier of a message sent through the bot's inline mode, used without `chat_id` and
+      `message_id`.
+  media:
+    $ref: ./InputMedia.yaml
+  reply_markup:
+    $ref: ./InlineKeyboardMarkup.yaml
+    description: Keyboard the edited message shows; omitting it removes the keyboard.

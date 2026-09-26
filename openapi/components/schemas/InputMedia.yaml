@@ -1,0 +1,61 @@
+description: >-
+  New media of a message, as the Bot API's `InputMediaPhoto` and `InputMediaDocument` describe
+  it. `media` is the `file_id` of a file of that type the bot knows, or `attach://<part name>`
+  for a file uploaded in that part (`Bad Request: can't parse InputMedia: media not found` when
+  no part has that name). Telegram also downloads files by URL, which the emulator does not
+  (`Bad Request: sending files by URL is not supported`). Telegram's `animation`, `audio`,
+  `live_photo`, and `video` media are not supported (`Bad Request: InputMedia of type "…" is not
+  supported`), and other types are refused as Telegram refuses them (`Bad Request: can't parse
+  InputMedia: type "…" is unsupported`). The caption is formatted and normalized as by
+  `sendPhoto`; a caption Telegram cannot read fails with its description prefixed by `Bad
+  Request: can't parse InputMedia: `.
+oneOf:
+  - type: object
+    additionalProperties: false
+    required:
+      - type
+      - media
+    properties:
+      type:
+        type: string
+        const: photo
+      media:
+        type: string
+      caption:
+        $ref: ./Caption.yaml
+      parse_mode:
+        $ref: ./ParseMode.yaml
+      caption_entities:
+        $ref: ./CaptionEntitiesParameter.yaml
+      show_caption_above_media:
+        type: boolean
+        default: false
+      has_spoiler:
+        type: boolean
+        default: false
+  - type: object
+    additionalProperties: false
+    required:
+      - type
+      - media
+    properties:
+      type:
+        type: string
+        const: document
+      media:
+        type: string
+      thumbnail:
+        type: string
+        description: >-
+          `attach://<part name>` for a thumbnail uploaded in that part, which works as the
+          thumbnail of `sendDocument` does.
+      caption:
+        $ref: ./Caption.yaml
+      parse_mode:
+        $ref: ./ParseMode.yaml
+      caption_entities:
+        $ref: ./CaptionEntitiesParameter.yaml
+      disable_content_type_detection:
+        type: boolean
+        description: >-
+          Accepted and ignored: the emulator never detects other media types in documents.

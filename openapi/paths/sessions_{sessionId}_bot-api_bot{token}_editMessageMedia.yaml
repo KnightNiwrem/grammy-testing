@@ -1,0 +1,77 @@
+description: >-
+  Telegram Bot API method for replacing the content of a message the bot sent to a private chat
+  or a supergroup with a new photo or document and its caption. As TDLib's `edit_message_media`
+  allows, a photo or document message changes its media, and a text or rich message becomes
+  media; the old caption goes with the old content. As on Telegram, the edited message keeps
+  only the inline keyboard given in `reply_markup`, and the bot receives no update for its own
+  edit. Without `chat_id` and `message_id`, the method edits a message an account sent through
+  the bot's inline mode, which `inline_message_id` identifies, as `editMessageText` does; as
+  TDLib requires, such a message's new media must reuse a file by its `file_id` (`Bad Request:
+  invalid message content specified`).
+parameters:
+  - $ref: ../components/parameters/SessionId.yaml
+  - $ref: ../components/parameters/BotToken.yaml
+post:
+  operationId: editMessageMedia
+  summary: Replace the media of a message the authenticated virtual bot sent
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/EditMessageMediaRequest.yaml
+      application/x-www-form-urlencoded:
+        schema:
+          $ref: ../components/schemas/EditMessageMediaRequest.yaml
+        encoding:
+          media:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+      multipart/form-data:
+        schema:
+          $ref: ../components/schemas/EditMessageMediaRequest.yaml
+        encoding:
+          media:
+            contentType: application/json
+          reply_markup:
+            contentType: application/json
+  responses:
+    '200':
+      description: >-
+        The message was edited: the edited message for a message of a chat, or `true` for an
+        inline message.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/EditMessageResponse.yaml
+    '400':
+      description: >-
+        The request cannot be decoded or has unsupported parameters, the `media` parameter is
+        missing (`Bad Request: parameter "media" is required`) or cannot be read as the
+        `InputMedia` schema describes, the file cannot be sent as for `sendPhoto` and
+        `sendDocument`, or Telegram would reject the edit for the reasons `editMessageCaption`
+        gives, apart from the message's kind: any message the bot can edit can take new media.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '401':
+      description: The token does not belong to a virtual bot in the addressed session.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '403':
+      description: >-
+        The chat is a supergroup that the bot left (`Forbidden: bot is not a member of the
+        supergroup chat`) or was removed from (`Forbidden: bot was kicked from the supergroup
+        chat`).
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/BotApiErrorResponse.yaml
+    '404':
+      description: No active test session has the supplied identifier.
+    '429':
+      $ref: ../components/responses/BotApiRateLimited.yaml

@@ -38,12 +38,14 @@ import {
   hasOnlyValidButtonCallbackData,
   isSameMessageContent,
   isUnchangedContent,
+  type MediaContent,
   type NormalizedOutgoingContent,
   normalizeOutgoingContent,
   type OutgoingContentNormalization,
   type OutgoingMessageContent,
   replaceAccountMessageContent,
   replaceMessageCaption,
+  replaceMessageMedia,
   replaceMessageText,
   resolveReplyQuote,
   type SpecifiedCaption,
@@ -229,6 +231,13 @@ export type EditBotMessageCaptionInput = EditBotMessageTarget & SpecifiedCaption
   readonly inlineKeyboard?: InlineKeyboard;
 };
 
+export type EditBotMessageMediaInput = EditBotMessageTarget & {
+  /** The new media and its caption with the formatting the bot specified. */
+  readonly media: MediaContent;
+  /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
+  readonly inlineKeyboard?: InlineKeyboard;
+};
+
 export type EditBotMessageInlineKeyboardInput = EditBotMessageTarget & {
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
@@ -254,6 +263,10 @@ export type EditBotMessageCaptionFailureReason =
   | 'message_has_no_caption'
   | 'caption_too_long';
 
+export type EditBotMessageMediaFailureReason =
+  | EditBotMessageInlineKeyboardFailureReason
+  | 'caption_too_long';
+
 export type PrivateMessageEditResult<FailureReason extends string> =
   | {
     readonly edited: true;
@@ -270,6 +283,10 @@ export type EditBotMessageTextResult =
 
 export type EditBotMessageCaptionResult =
   | PrivateMessageEditResult<EditBotMessageCaptionFailureReason>
+  | ({ readonly edited: false } & TextInvalidFailure);
+
+export type EditBotMessageMediaResult =
+  | PrivateMessageEditResult<EditBotMessageMediaFailureReason>
   | ({ readonly edited: false } & TextInvalidFailure);
 
 export interface EditAccountMessageInput {
@@ -770,6 +787,27 @@ export class PrivateMessagingService {
     return this.#editBotMessageContent(
       message,
       replaceMessageCaption(message.content, input, 'bot', this.#textFixingContext),
+      input.inlineKeyboard,
+    );
+  }
+
+  /**
+   * Replaces the content, with its caption, and the inline keyboard of a message the bot sent, or
+   * that was sent through its inline mode, with new media, as `replaceMessageMedia` replaces it.
+   * Only changed content dates the edit. Updates follow `editBotMessageText`.
+   */
+  editBotMessageMedia(input: EditBotMessageMediaInput): EditBotMessageMediaResult {
+    if (this.#bots.getById(input.fromBotId) === undefined) {
+      return { edited: false, reason: 'bot_not_found' };
+    }
+    const resolution = this.#resolveEditableBotMessage(input);
+    if (!resolution.resolved) {
+      return { edited: false, reason: resolution.reason };
+    }
+    const { message } = resolution;
+    return this.#editBotMessageContent(
+      message,
+      replaceMessageMedia(message.content, input.media, this.#textFixingContext),
       input.inlineKeyboard,
     );
   }

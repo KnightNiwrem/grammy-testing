@@ -17,7 +17,8 @@ Photo uploads larger than 10 × 1024 × 1024 bytes fail before the image is read
 accounts alike, as TDLib's [`check_full_local_location`][photo-size-limit] refuses them; bots
 receive
 `Bad Request: file of size <size> bytes is too big for a photo; the maximum size is 10485760 bytes`.
-Captions can be edited with `editMessageCaption` or the account client.
+Captions can be edited with `editMessageCaption` or the account client, and bots replace a message's
+photo or document with [`editMessageMedia`](messages.md#editing-and-deleting).
 
 A bot can upload a thumbnail with `sendDocument`: the part that `thumbnail` names with
 `attach://<part-name>`, or else the part named `thumbnail`, and failing both, likewise for the
@@ -113,8 +114,7 @@ inputs.
 ### Additional media types and methods
 
 Media types other than photos/documents, albums, stickers and sticker sets are missing, including
-`sendMediaGroup`. Replacing media with `editMessageMedia` is also a
-[real gap](messages.md#real-gaps).
+`sendMediaGroup`. `editMessageMedia` therefore replaces media only with photos and documents.
 
 ## Local evidence
 

@@ -177,7 +177,25 @@ export function normalizeOutgoingContent(
   if (content.kind === 'existing') {
     return normalizeExistingContent(content.content, content.captionReplacement, sender, context);
   }
+  return normalizeMediaContent(content, sender, context);
+}
 
+/** New media of a message with its caption, as its sender specified it. */
+export type MediaContent = Extract<
+  OutgoingMessageContent,
+  { readonly kind: 'photo' | 'document' }
+>;
+
+type MediaContentNormalization =
+  | { readonly normalized: true; readonly content: NormalizedOutgoingContent }
+  | { readonly normalized: false; readonly failure: CaptionNormalizationFailure };
+
+/** Normalizes the caption of new media as `normalizeCaption` does. */
+function normalizeMediaContent(
+  content: MediaContent,
+  sender: MessageSenderKind,
+  context: FormattedTextFixingContext,
+): MediaContentNormalization {
   const captionNormalization = normalizeCaption(content, sender, context);
   if (!captionNormalization.normalized) {
     return captionNormalization;
@@ -305,12 +323,11 @@ function normalizeTextMessageReplacement(
     : textNormalization;
 }
 
+type CaptionNormalizationFailure = TextInvalidFailure | { readonly reason: 'caption_too_long' };
+
 type CaptionNormalization =
   | { readonly normalized: true; readonly caption: FormattedText }
-  | {
-    readonly normalized: false;
-    readonly failure: TextInvalidFailure | { readonly reason: 'caption_too_long' };
-  };
+  | { readonly normalized: false; readonly failure: CaptionNormalizationFailure };
 
 /**
  * Normalizes a caption and the entities its sender specified as Telegram does, which also marks
@@ -431,6 +448,35 @@ export function replaceMessageCaption(
       ),
     },
   };
+}
+
+/**
+ * Replaces a message's content with new media and its caption, normalized as when a bot sends
+ * them, as TDLib's `edit_message_media` does: the old caption goes with the old content, so new
+ * media without a caption has none. As TDLib's `can_edit_message_media` allows, the old content
+ * may be any content the emulator has: a photo or a document, whose media is replaced, or text or
+ * a rich message, which becomes media.
+ */
+export function replaceMessageMedia(
+  content: MessageContent,
+  media: MediaContent,
+  context: FormattedTextFixingContext,
+): ContentReplacement<'caption_too_long'> {
+  switch (content.kind) {
+    case 'text':
+    case 'photo':
+    case 'document':
+    case 'rich_message': {
+      const normalization = normalizeMediaContent(media, 'bot', context);
+      return normalization.normalized
+        ? { replaced: true, content: normalization.content }
+        : { replaced: false, failure: normalization.failure };
+    }
+    default: {
+      const unhandledContent: never = content;
+      throw new Error(`Unhandled message content: ${JSON.stringify(unhandledContent)}`);
+    }
+  }
 }
 
 /**

@@ -32,7 +32,12 @@ import {
   readInlineQueryResultsParameter,
   type UnreadFormattedText,
 } from './inline_query_answer_parameters.ts';
-import { readInputFileParameter, readThumbnailParameter } from './input_file_parameter.ts';
+import {
+  FILE_URL_UNSUPPORTED_DESCRIPTION,
+  readInputFileParameter,
+  readThumbnailParameter,
+} from './input_file_parameter.ts';
+import { readInputMediaParameter } from './input_media_parameter.ts';
 import { linkPreviewOptionsParameter } from './link_preview_options_parameter.ts';
 import {
   replyParametersParameter,
@@ -151,9 +156,6 @@ const TDLIB_FILE_TYPE_NAMES = {
   thumbnail: 'Thumbnail',
 } as const;
 
-/** The emulator's description for a file sent by URL, which Telegram downloads itself. */
-const FILE_URL_UNSUPPORTED_DESCRIPTION = 'Bad Request: sending files by URL is not supported';
-
 /** Telegram's descriptions for rejected getFile requests. */
 const FILE_ID_NOT_SPECIFIED_DESCRIPTION = 'Bad Request: file_id not specified';
 const GET_FILE_ID_INVALID_DESCRIPTION = 'Bad Request: invalid file_id';
@@ -233,6 +235,9 @@ const ANSWER_INLINE_QUERY_FAILURE_DESCRIPTIONS = {
 
 /** How the Bot API server reports that it cannot read an inline query result. */
 const INLINE_QUERY_RESULT_ERROR_PREFIX = "can't parse InlineQueryResult: ";
+
+/** How the Bot API server reports that it cannot read the `InputMedia` of `editMessageMedia`. */
+const INPUT_MEDIA_ERROR_PREFIX = "can't parse InputMedia: ";
 
 /** Telegram's default and range for how long clients may cache an inline query's answer. */
 const DEFAULT_INLINE_QUERY_CACHE_TIME_SECONDS = 300;
@@ -473,6 +478,12 @@ const editMessageCaptionParametersSchema = z.strictObject({
   reply_markup: inlineKeyboardMarkupParameter().optional(),
 });
 
+const editMessageMediaParametersSchema = z.strictObject({
+  ...editedMessageParametersShape,
+  media: z.string().optional(),
+  reply_markup: inlineKeyboardMarkupParameter().optional(),
+});
+
 const editMessageReplyMarkupParametersSchema = z.strictObject({
   ...editedMessageParametersShape,
   reply_markup: inlineKeyboardMarkupParameter().optional(),
@@ -641,7 +652,8 @@ interface BotApiRouteContextTypes {
 /** The outcome of any edit method; each fails for a subset of the reasons. */
 type MessageEditResult =
   | ReturnType<EmulationSession['botApi']['editMessageText']>
-  | ReturnType<EmulationSession['botApi']['editMessageCaption']>;
+  | ReturnType<EmulationSession['botApi']['editMessageCaption']>
+  | ReturnType<EmulationSession['botApi']['editMessageMedia']>;
 
 type SendResult = ReturnType<EmulationSession['botApi']['sendMessage']>;
 
@@ -657,7 +669,8 @@ type RepeatMessagesResult =
 /** The outcome of any edit method for an inline message; each fails for a subset of the reasons. */
 type InlineMessageEditResult =
   | ReturnType<EmulationSession['botApi']['editInlineMessageText']>
-  | ReturnType<EmulationSession['botApi']['editInlineMessageCaption']>;
+  | ReturnType<EmulationSession['botApi']['editInlineMessageCaption']>
+  | ReturnType<EmulationSession['botApi']['editInlineMessageMedia']>;
 
 type InlineQueryResultRequest = Parameters<
   EmulationSession['botApi']['answerInlineQuery']
@@ -780,6 +793,7 @@ const BOT_API_METHODS: readonly BotApiMethod[] = [
   { name: 'deleteMyCommands', handler: handleDeleteMyCommands },
   { name: 'deleteWebhook', handler: handleDeleteWebhook },
   { name: 'editMessageCaption', handler: handleEditMessageCaption },
+  { name: 'editMessageMedia', handler: handleEditMessageMedia },
   { name: 'editMessageReplyMarkup', handler: handleEditMessageReplyMarkup },
   { name: 'editMessageText', handler: handleEditMessageText },
   { name: 'forwardMessage', handler: handleForwardMessage },
@@ -1874,6 +1888,59 @@ function handleEditMessageCaption(
     : editMessageAnswer(botApi.editMessageCaption(context.bot, { ...target, ...edit }));
 }
 
+/**
+ * Replaces a message's media, as the official Bot API server's `process_edit_message_media_query`
+ * does: the `media` parameter is read as `readInputMediaParameter` reads it, with its caption
+ * reported as media Telegram cannot read, before the message is looked for.
+ */
+function handleEditMessageMedia(
+  context: BotApiMethodContext,
+  parameters: BotApiRequestParameters,
+  uploadedFiles: BotApiUploadedFiles,
+): BotApiMethodAnswer {
+  const invalidParametersDescription = 'Bad Request: invalid editMessageMedia parameters';
+  const parsedParameters = editMessageMediaParametersSchema.safeParse(parameters);
+  if (!parsedParameters.success) {
+    return botApiError(400, invalidParametersDescription);
+  }
+  const { data } = parsedParameters;
+  const mediaReading = readInputMediaParameter(
+    data.media,
+    uploadedFiles,
+    invalidParametersDescription,
+  );
+  if (!mediaReading.read) {
+    return botApiError(400, mediaReading.description);
+  }
+  const captionReading = readEmbeddedFormattedText(
+    context,
+    mediaReading.media.caption,
+    invalidParametersDescription,
+    INPUT_MEDIA_ERROR_PREFIX,
+  );
+  if (!captionReading.read) {
+    return botApiError(400, captionReading.description);
+  }
+  const targetReading = readEditedMessageTarget(data);
+  if (!targetReading.read) {
+    return targetReading.errorAnswer;
+  }
+  const keyboardReading = readInlineKeyboardParameter(context, data.reply_markup);
+  if (!keyboardReading.read) {
+    return keyboardReading.errorAnswer;
+  }
+
+  const { target } = targetReading;
+  const { botApi } = context.session;
+  const edit = {
+    media: { ...mediaReading.media, caption: captionReading.formattedText },
+    inlineKeyboard: keyboardReading.inlineKeyboard,
+  };
+  return target.kind === 'inline_message'
+    ? inlineMessageEditAnswer(botApi.editInlineMessageMedia(context.bot, { ...target, ...edit }))
+    : editMessageAnswer(botApi.editMessageMedia(context.bot, { ...target, ...edit }));
+}
+
 function handleEditMessageReplyMarkup(
   context: BotApiMethodContext,
   parameters: BotApiRequestParameters,
@@ -2943,7 +3010,12 @@ function readInlineQueryResultText(
   | { readonly read: true; readonly result: InlineQueryResultRequest }
   | { readonly read: false; readonly description: string } {
   const read = (text: UnreadFormattedText) =>
-    readInlineQueryResultFormattedText(context, text, invalidParametersDescription);
+    readEmbeddedFormattedText(
+      context,
+      text,
+      invalidParametersDescription,
+      INLINE_QUERY_RESULT_ERROR_PREFIX,
+    );
   const shared = {
     id: result.id,
     description: result.description,
@@ -2995,13 +3067,15 @@ function readInlineQueryResultText(
 }
 
 /**
- * Reads text of an inline query result as `readFormattedTextParameters` does. The Bot API server
- * reports text it cannot read as a result it cannot read, prefixing Telegram's own description.
+ * Reads text of an object that a parameter holds as JSON, such as an inline query result, as
+ * `readFormattedTextParameters` does. The Bot API server reports text it cannot read as an object
+ * it cannot read, prefixing Telegram's own description with `objectErrorPrefix`.
  */
-function readInlineQueryResultFormattedText(
+function readEmbeddedFormattedText(
   context: BotApiMethodContext,
   { text, parseMode, entities }: UnreadFormattedText,
   invalidParametersDescription: string,
+  objectErrorPrefix: string,
 ): { readonly read: true; readonly formattedText: SpecifiedFormattedText } | {
   readonly read: false;
   readonly description: string;
@@ -3018,7 +3092,7 @@ function readInlineQueryResultFormattedText(
   const telegramError = reading.description.slice(BAD_REQUEST_PREFIX.length);
   return {
     read: false,
-    description: `${BAD_REQUEST_PREFIX}${INLINE_QUERY_RESULT_ERROR_PREFIX}${
+    description: `${BAD_REQUEST_PREFIX}${objectErrorPrefix}${
       telegramError.charAt(0).toUpperCase()
     }${telegramError.slice(1)}`,
   };

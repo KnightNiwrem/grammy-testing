@@ -143,6 +143,8 @@ paths:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_copyMessages.yaml
   /sessions/{sessionId}/bot-api/bot{token}/editMessageCaption:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_editMessageCaption.yaml
+  /sessions/{sessionId}/bot-api/bot{token}/editMessageMedia:
+    $ref: paths/sessions_{sessionId}_bot-api_bot{token}_editMessageMedia.yaml
   /sessions/{sessionId}/bot-api/bot{token}/getFile:
     $ref: paths/sessions_{sessionId}_bot-api_bot{token}_getFile.yaml
   /sessions/{sessionId}/bot-api/file/bot{token}/{fileDirectory}/{fileName}:

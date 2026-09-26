@@ -35,9 +35,9 @@ producing errors such as `RESULT_ID_DUPLICATE` and the query-too-old error.
 
 With `receives_chosen_inline_results: true`, a choice also generates `chosen_inline_result` for the
 inline bot. If the result has an inline keyboard, that update supplies `inline_message_id`. Callback
-presses then reach the inline bot without a message payload. That bot can edit text, captions and
-keyboards using the inline ID, with a result of `true`, even without access to the chat. If it can
-access the chat, it can also edit via `chat_id`/`message_id`; another bot cannot edit the inline
+presses then reach the inline bot without a message payload. That bot can edit text, captions, media
+and keyboards using the inline ID, with a result of `true`, even without access to the chat. If it
+can access the chat, it can also edit via `chat_id`/`message_id`; another bot cannot edit the inline
 message. TDLib makes the originating bot check in
 [`MessagesManager::can_edit_message`][edit-inline].
 

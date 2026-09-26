@@ -96,6 +96,7 @@ import type {
 } from './inline_query.ts';
 import type {
   ContentNormalizationFailure,
+  MediaContent,
   OutgoingDocument,
   OutgoingMessageContent,
   OutgoingPhoto,
@@ -446,6 +447,36 @@ export interface EditMessageCaptionRequest extends MessageTarget {
   readonly inlineKeyboard?: InlineKeyboard;
 }
 
+/**
+ * New media of a message and its caption, as `editMessageMedia` specifies them: a photo or a
+ * document, uploaded with the request or reused by the `file_id` the bot knows it by.
+ */
+export type MediaReplacementRequest =
+  | {
+    readonly kind: 'photo';
+    readonly photo: BotApiInputFile;
+    /** Empty text for no caption. */
+    readonly caption: SpecifiedFormattedText;
+    /** The Bot API `has_spoiler`. */
+    readonly hasSpoiler: boolean;
+    /** The Bot API `show_caption_above_media`. */
+    readonly showsCaptionAboveMedia: boolean;
+  }
+  | {
+    readonly kind: 'document';
+    readonly document: BotApiInputFile;
+    /** The content of the thumbnail uploaded for the document; omitted for none. */
+    readonly thumbnail?: Uint8Array<ArrayBuffer>;
+    /** Empty text for no caption. */
+    readonly caption: SpecifiedFormattedText;
+  };
+
+export interface EditMessageMediaRequest extends MessageTarget {
+  readonly media: MediaReplacementRequest;
+  /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
+  readonly inlineKeyboard?: InlineKeyboard;
+}
+
 export interface EditMessageReplyMarkupRequest extends MessageTarget {
   /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
   readonly inlineKeyboard?: InlineKeyboard;
@@ -471,6 +502,10 @@ export type EditMessageCaptionFailureReason =
   | 'message_has_no_caption'
   | 'caption_too_long';
 
+export type EditMessageMediaFailureReason =
+  | EditMessageReplyMarkupFailureReason
+  | 'caption_too_long';
+
 export type EditMessageResult<FailureReason extends string> =
   | { readonly edited: true; readonly message: BotApiMessage }
   | { readonly edited: false; readonly reason: FailureReason };
@@ -482,6 +517,10 @@ export type EditMessageTextResult =
 export type EditMessageCaptionResult =
   | EditMessageResult<EditMessageCaptionFailureReason>
   | ({ readonly edited: false } & TextInvalidFailure);
+
+export type EditMessageMediaResult =
+  | EditMessageResult<EditMessageMediaFailureReason>
+  | ({ readonly edited: false } & (TextInvalidFailure | FileResolutionFailure));
 
 /** A message sent through the bot's inline mode, as the Bot API addresses it. */
 interface InlineMessageTarget {
@@ -500,6 +539,12 @@ export interface EditInlineMessageCaptionRequest extends InlineMessageTarget {
   readonly caption: SpecifiedFormattedText;
   /** The Bot API `show_caption_above_media`, which only a photo honors. */
   readonly showsCaptionAboveMedia: boolean;
+  /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
+  readonly inlineKeyboard?: InlineKeyboard;
+}
+
+export interface EditInlineMessageMediaRequest extends InlineMessageTarget {
+  readonly media: MediaReplacementRequest;
   /** Omitting the keyboard removes the message's keyboard, as on Telegram. */
   readonly inlineKeyboard?: InlineKeyboard;
 }
@@ -532,6 +577,12 @@ export type EditInlineMessageCaptionFailureReason =
   | 'message_has_no_caption'
   | 'caption_too_long';
 
+export type EditInlineMessageMediaFailureReason =
+  | EditInlineMessageReplyMarkupFailureReason
+  | 'caption_too_long'
+  /** The new media is uploaded, which an inline message cannot receive. */
+  | 'inline_message_upload_unsupported';
+
 /** The Bot API answers an edit of an inline message with `true` rather than the message. */
 export type EditInlineMessageResult<FailureReason extends string> =
   | { readonly edited: true }
@@ -540,6 +591,10 @@ export type EditInlineMessageResult<FailureReason extends string> =
 
 export type EditInlineMessageTextResult =
   | EditInlineMessageResult<EditInlineMessageTextFailureReason>
+  | ({ readonly edited: false } & FileResolutionFailure);
+
+export type EditInlineMessageMediaResult =
+  | EditInlineMessageResult<EditInlineMessageMediaFailureReason>
   | ({ readonly edited: false } & FileResolutionFailure);
 
 interface InlineQueryResultRequestBase {
@@ -923,6 +978,14 @@ interface BotMessaging {
       BotMessageEditFailureReason | 'message_has_no_caption' | 'caption_too_long'
     >
     | ({ readonly edited: false } & TextInvalidFailure);
+  editBotMessageMedia(
+    input: PrivateMessageEditTarget & {
+      readonly media: MediaContent;
+      readonly inlineKeyboard?: InlineKeyboard;
+    },
+  ):
+    | BotMessageEditingResult<BotMessageEditFailureReason | 'caption_too_long'>
+    | ({ readonly edited: false } & TextInvalidFailure);
   editBotMessageInlineKeyboard(
     input: PrivateMessageEditTarget & { readonly inlineKeyboard?: InlineKeyboard },
   ): BotMessageEditingResult<BotMessageEditFailureReason>;
@@ -1035,6 +1098,14 @@ interface SupergroupBotMessaging {
     | SupergroupBotMessageEditingResult<
       SupergroupBotMessageEditFailureReason | 'message_has_no_caption' | 'caption_too_long'
     >
+    | ({ readonly edited: false } & TextInvalidFailure);
+  editBotMessageMedia(
+    input: SupergroupMessageEditTarget & {
+      readonly media: MediaContent;
+      readonly inlineKeyboard?: InlineKeyboard;
+    },
+  ):
+    | SupergroupBotMessageEditingResult<SupergroupBotMessageEditFailureReason | 'caption_too_long'>
     | ({ readonly edited: false } & TextInvalidFailure);
   editBotMessageInlineKeyboard(
     input: SupergroupMessageEditTarget & { readonly inlineKeyboard?: InlineKeyboard },
@@ -2239,6 +2310,36 @@ export class BotApiService {
       : { resolved: false, failure: { reason: preparation.reason } };
   }
 
+  /**
+   * Resolves the file of new media, as `#resolvePhoto` and `#resolveDocument` resolve a photo and
+   * a document.
+   */
+  #resolveMediaReplacement(
+    authenticatedBot: VirtualBotProfile,
+    media: MediaReplacementRequest,
+  ): FileResolution<MediaContent> {
+    const caption = { caption: media.caption.text, captionEntities: media.caption.entities };
+    if (media.kind === 'photo') {
+      const resolution = this.#resolvePhoto(authenticatedBot, media.photo);
+      return resolution.resolved
+        ? {
+          resolved: true,
+          file: {
+            kind: 'photo',
+            photo: resolution.file,
+            ...caption,
+            hasSpoiler: media.hasSpoiler,
+            showsCaptionAboveMedia: media.showsCaptionAboveMedia,
+          },
+        }
+        : resolution;
+    }
+    const resolution = this.#resolveDocument(authenticatedBot, media.document, media.thumbnail);
+    return resolution.resolved
+      ? { resolved: true, file: { kind: 'document', document: resolution.file, ...caption } }
+      : resolution;
+  }
+
   /** Resolves new content of a text or rich message: the files of a rich message. */
   #resolveTextMessageReplacement(
     authenticatedBot: VirtualBotProfile,
@@ -2678,6 +2779,55 @@ export class BotApiService {
     }
   }
 
+  /**
+   * Replaces the content, caption and inline keyboard of a message the bot sent with a new photo
+   * or document, as TDLib's `edit_message_media` does; a photo or document message changes its
+   * media, and a text or rich message becomes media. As for `sendPhoto` and `sendDocument`, the
+   * file is resolved before the message is found.
+   */
+  editMessageMedia(
+    authenticatedBot: VirtualBotProfile,
+    { chatId, messageId, media, inlineKeyboard }: EditMessageMediaRequest,
+  ): EditMessageMediaResult {
+    const mediaResolution = this.#resolveMediaReplacement(authenticatedBot, media);
+    if (!mediaResolution.resolved) {
+      return { edited: false, ...mediaResolution.failure };
+    }
+    const result = isUserId(chatId)
+      ? this.#presentPrivateEdit(this.#botMessages.editBotMessageMedia({
+        fromBotId: authenticatedBot.id,
+        chat: { type: 'private', accountId: chatId },
+        botMessageId: messageId,
+        media: mediaResolution.file,
+        inlineKeyboard,
+      }))
+      : this.#presentSupergroupEdit(
+        authenticatedBot,
+        this.#supergroupBotMessages.editBotMessageMedia({
+          fromBotId: authenticatedBot.id,
+          chatId,
+          messageId,
+          media: mediaResolution.file,
+          inlineKeyboard,
+        }),
+      );
+    if (result.edited) {
+      return result;
+    }
+
+    switch (result.reason) {
+      case 'text_invalid':
+        return result;
+      case 'caption_too_long':
+        return { edited: false, reason: result.reason };
+      default:
+        return {
+          edited: false,
+          reason: toEditMessageFailureReason(authenticatedBot, result.reason),
+        };
+    }
+  }
+
   /** Replaces the inline keyboard of a message the bot sent. */
   editMessageReplyMarkup(
     authenticatedBot: VirtualBotProfile,
@@ -2875,6 +3025,52 @@ export class BotApiService {
       case 'text_invalid':
         return result;
       case 'message_has_no_caption':
+      case 'caption_too_long':
+        return { edited: false, reason: result.reason };
+      default:
+        return {
+          edited: false,
+          reason: toEditInlineMessageFailureReason(authenticatedBot, result.reason),
+        };
+    }
+  }
+
+  /**
+   * Replaces the content, caption and inline keyboard of a message sent through the bot with a
+   * new photo or document, as `editMessageMedia` replaces them. As TDLib's
+   * `edit_inline_message_media` requires, the media may reuse a file by its `file_id` but not
+   * upload one.
+   */
+  editInlineMessageMedia(
+    authenticatedBot: VirtualBotProfile,
+    { inlineMessageId, media, inlineKeyboard }: EditInlineMessageMediaRequest,
+  ): EditInlineMessageMediaResult {
+    const message = this.#findOwnInlineMessage(authenticatedBot, inlineMessageId);
+    if (message === undefined) {
+      return { edited: false, reason: 'inline_message_not_found' };
+    }
+    if ((media.kind === 'photo' ? media.photo : media.document).kind === 'upload') {
+      return { edited: false, reason: 'inline_message_upload_unsupported' };
+    }
+    const mediaResolution = this.#resolveMediaReplacement(authenticatedBot, media);
+    if (!mediaResolution.resolved) {
+      return { edited: false, ...mediaResolution.failure };
+    }
+    const edit = {
+      fromBotId: authenticatedBot.id,
+      inlineMessageId,
+      media: mediaResolution.file,
+      inlineKeyboard,
+    };
+    const result = message.kind === 'private_message'
+      ? this.#botMessages.editBotMessageMedia(edit)
+      : this.#supergroupBotMessages.editBotMessageMedia(edit);
+    if (result.edited) {
+      return { edited: true };
+    }
+    switch (result.reason) {
+      case 'text_invalid':
+        return result;
       case 'caption_too_long':
         return { edited: false, reason: result.reason };
       default:

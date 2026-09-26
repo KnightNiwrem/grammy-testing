@@ -48,12 +48,14 @@ import {
   hasWebAppButton,
   isSameMessageContent,
   isUnchangedContent,
+  type MediaContent,
   type NormalizedOutgoingContent,
   normalizeOutgoingContent,
   type OutgoingContentNormalization,
   type OutgoingMessageContent,
   replaceAccountMessageContent,
   replaceMessageCaption,
+  replaceMessageMedia,
   replaceMessageText,
   resolveReplyQuote,
   type SpecifiedCaption,
@@ -237,6 +239,13 @@ export type EditSupergroupBotMessageCaptionInput =
     readonly inlineKeyboard?: InlineKeyboard;
   };
 
+export type EditSupergroupBotMessageMediaInput = EditSupergroupBotMessageTarget & {
+  /** The new media and its caption with the formatting the bot specified. */
+  readonly media: MediaContent;
+  /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
+  readonly inlineKeyboard?: InlineKeyboard;
+};
+
 export type EditSupergroupBotMessageInlineKeyboardInput = EditSupergroupBotMessageTarget & {
   /** The keyboard the edited message shows; omitting it removes the message's keyboard. */
   readonly inlineKeyboard?: InlineKeyboard;
@@ -262,6 +271,10 @@ export type EditSupergroupBotMessageCaptionFailureReason =
   | 'message_has_no_caption'
   | 'caption_too_long';
 
+export type EditSupergroupBotMessageMediaFailureReason =
+  | EditSupergroupBotMessageInlineKeyboardFailureReason
+  | 'caption_too_long';
+
 export type SupergroupMessageEditResult<FailureReason extends string> =
   | { readonly edited: true; readonly message: SupergroupMessage }
   | { readonly edited: false; readonly reason: FailureReason };
@@ -272,6 +285,10 @@ export type EditSupergroupBotMessageTextResult =
 
 export type EditSupergroupBotMessageCaptionResult =
   | SupergroupMessageEditResult<EditSupergroupBotMessageCaptionFailureReason>
+  | ({ readonly edited: false } & TextInvalidFailure);
+
+export type EditSupergroupBotMessageMediaResult =
+  | SupergroupMessageEditResult<EditSupergroupBotMessageMediaFailureReason>
   | ({ readonly edited: false } & TextInvalidFailure);
 
 export interface EditSupergroupAccountMessageInput {
@@ -703,6 +720,29 @@ export class SupergroupMessagingService {
     return this.#editBotMessageContent(
       message,
       replaceMessageCaption(message.content, input, 'bot', this.#textFixingContext),
+      input.inlineKeyboard,
+    );
+  }
+
+  /**
+   * Replaces the content, with its caption, and the inline keyboard of a message the bot sent, or
+   * that was sent through its inline mode, with new media, as `replaceMessageMedia` replaces it.
+   * Only changed content dates the edit. Updates follow `editBotMessageText`.
+   */
+  editBotMessageMedia(
+    input: EditSupergroupBotMessageMediaInput,
+  ): EditSupergroupBotMessageMediaResult {
+    if (this.#bots.getById(input.fromBotId) === undefined) {
+      return { edited: false, reason: 'bot_not_found' };
+    }
+    const resolution = this.#resolveEditableBotMessage(input);
+    if (!resolution.resolved) {
+      return { edited: false, reason: resolution.reason };
+    }
+    const { message } = resolution;
+    return this.#editBotMessageContent(
+      message,
+      replaceMessageMedia(message.content, input.media, this.#textFixingContext),
       input.inlineKeyboard,
     );
   }

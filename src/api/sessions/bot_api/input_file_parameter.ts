@@ -3,6 +3,10 @@ import type { BotApiUploadedFiles } from './request_parameters.ts';
 
 type BotApiInputFile = Parameters<EmulationSession['botApi']['sendPhoto']>[1]['photo'];
 
+/** The emulator's description for a file sent by URL, which Telegram downloads itself. */
+export const FILE_URL_UNSUPPORTED_DESCRIPTION =
+  'Bad Request: sending files by URL is not supported';
+
 /** The prefix of a parameter value that names the multipart part carrying the file. */
 const ATTACHED_FILE_PREFIX = 'attach://';
 
