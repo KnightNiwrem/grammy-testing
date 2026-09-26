@@ -63,6 +63,20 @@ is intentionally omitted; tests that need a preview upload a thumbnail. An uploa
 kept as sent, like a photo: Telegram asks for a JPEG of at most 320 pixels a side, and its server's
 handling of other thumbnails is not visible in the source.
 
+### The cloud server's file handling
+
+The emulator models the official server as Telegram hosts it at `api.telegram.org`, without
+`--local`. As that server's [file handling][download-limit] does outside local mode, bots cannot
+download files larger than 20 × 1024 × 1024 bytes: `getFile` fails with
+`Bad Request: file is too big`, so there is no path to download them from.
+[`Client::get_input_file`][file-input] reads local filesystem paths and `file://` URIs only in local
+mode, so the emulator does not read them either.
+
+[Local mode][local-mode] is a setting of a self-hosted server, not behavior of the bot under test,
+and it chiefly relaxes limits and gives the bot direct access to the server's filesystem, which an
+isolated test session has no use for. Tests of a bot deployed against a local server exercise its
+Bot API calls with the cloud limits; files the bot would read from disk are uploaded instead.
+
 ### Opaque session file identifiers
 
 `file_id` and `file_unique_id` are opaque emulator identifiers. Tests should treat them as session
@@ -96,20 +110,16 @@ Tests need to exercise media classification and the flag's effect.
 
 ### File limits and sources
 
-| Concern                            | Emulator                                         | Upstream comparison                                                          |
-| ---------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Bot downloads                      | Rejects files larger than 20 × 1024 × 1024 bytes | C++ server enforces this cap outside local mode; local mode bypasses it      |
-| Document upload sizes              | No byte cap                                      | Server-side 50 MB cap, 2000 MB in local mode; its error is not in the source |
-| HTTP URL file sources              | Rejected                                         | `get_input_file` and TDLib support remote sources                            |
-| Local filesystem paths / `file://` | Unsupported                                      | Official `--local` mode can use local paths                                  |
+| Concern               | Emulator    | Upstream comparison                                                          |
+| --------------------- | ----------- | ---------------------------------------------------------------------------- |
+| Document upload sizes | No byte cap | Server-side 50 MB cap, 2000 MB in local mode; its error is not in the source |
+| HTTP URL file sources | Rejected    | `get_input_file` and TDLib support remote sources                            |
 
-Download limits are explicit in [`Client` file handling][download-limit]; upload/path handling is in
-[`Client::get_input_file`][file-input]. The public [document][send-document] method reference
-documents the cloud upload ceiling, and the official [local-mode description][local-mode] explains
-its relaxed limits. Passing a large document to the emulator does not test those ceilings.
+Upload handling is in [`Client::get_input_file`][file-input]. The public [document][send-document]
+method reference documents the cloud upload ceiling. Passing a large document to the emulator does
+not test it.
 
-Tests need the local-mode download exemption, document size validation, and URL and filesystem
-inputs.
+Tests need document size validation and files sent by URL.
 
 ### Additional media types and methods
 
