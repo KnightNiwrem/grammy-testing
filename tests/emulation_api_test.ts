@@ -6640,8 +6640,7 @@ Deno.test('bots with can_change_info change a supergroup title and description',
 });
 
 Deno.test('accounts change a supergroup title that bots see as a service message', async () => {
-  const { api, sessionPath, member, bot, supergroup, supergroupPath } =
-    await createSupergroupFixture();
+  const { api, sessionPath, member, bot, supergroupPath } = await createSupergroupFixture();
   const readUpdates = createUpdateReader(api);
   await readUpdates(bot.botApiPath);
   const outsider = await createAccount(api, sessionPath, 'Linus');
