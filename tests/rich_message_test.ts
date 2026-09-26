@@ -246,8 +246,8 @@ Deno.test('rich messages mention users by text mentions and detected usernames',
   }
 });
 
-Deno.test('repeated rich messages keep URL and copy-text buttons and disable the others', () => {
-  const [row] = repeatRichMessage({
+Deno.test('repeated rich messages keep URL, copy-text and login buttons and disable the others', () => {
+  const richMessage: RichMessage = {
     blocks: [{
       kind: 'buttons',
       buttons: [
@@ -258,17 +258,42 @@ Deno.test('repeated rich messages keep URL and copy-text buttons and disable the
           text: plain('Share'),
           action: { kind: 'switch_inline_query', query: '', target: { kind: 'current_chat' } },
         },
+        { text: plain('Open'), action: { kind: 'web_app', url: 'https://grammy.dev/app' } },
+        {
+          text: plain('Log in'),
+          action: {
+            kind: 'login_url',
+            url: 'https://grammy.dev/login',
+            forwardText: 'Log in to grammY',
+            requestsWriteAccess: true,
+          },
+        },
       ],
     }],
     isRightToLeft: false,
-  }).blocks;
-  expectJson(row, {
+  };
+  const unchangedButtons = [
+    { text: plain('Go'), style: 'primary', action: { kind: 'disabled' } },
+    { text: plain('Docs'), action: { kind: 'url', url: 'https://grammy.dev/' } },
+    { text: plain('Copy'), action: { kind: 'copy_text', copiedText: 'code' } },
+    { text: plain('Share'), action: { kind: 'disabled' } },
+    { text: plain('Open'), action: { kind: 'disabled' } },
+  ];
+  expectJson(repeatRichMessage(richMessage, 'forward').blocks, [{
     kind: 'buttons',
     buttons: [
-      { text: plain('Go'), style: 'primary', action: { kind: 'disabled' } },
-      { text: plain('Docs'), action: { kind: 'url', url: 'https://grammy.dev/' } },
-      { text: plain('Copy'), action: { kind: 'copy_text', copiedText: 'code' } },
-      { text: plain('Share'), action: { kind: 'disabled' } },
+      ...unchangedButtons,
+      {
+        text: plain('Log in to grammY'),
+        action: { kind: 'login_url', url: 'https://grammy.dev/login', requestsWriteAccess: true },
+      },
     ],
-  }, 'the buttons of a forward or copy');
+  }], 'the buttons of a forward');
+  expectJson(repeatRichMessage(richMessage, 'copy').blocks, [{
+    kind: 'buttons',
+    buttons: [
+      ...unchangedButtons,
+      { text: plain('Log in'), action: { kind: 'url', url: 'https://grammy.dev/login' } },
+    ],
+  }], 'the buttons of a copy');
 });

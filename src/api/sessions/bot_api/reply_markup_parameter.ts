@@ -46,9 +46,9 @@ function readButtonAppearance(
 
 /**
  * The fields of a button's action, which must be exactly one supported action: a callback, a URL,
- * copying text, switching to inline mode, or none. Telegram also accepts other actions, and
- * buttons with several, using the first action it recognizes; rejecting them instead surfaces
- * unsupported or ambiguous markup in tests.
+ * copying text, switching to inline mode, a login URL, a Web App, or none. Telegram also accepts
+ * game and payment buttons, and buttons with several actions, using the first action it
+ * recognizes; rejecting them instead surfaces unsupported or ambiguous markup in tests.
  */
 const buttonActionSchema = z.union([
   z.strictObject({ callback_data: z.string().min(1) })
@@ -112,6 +112,33 @@ const buttonActionSchema = z.union([
       query: switch_inline_query_current_chat,
       target: { kind: 'current_chat' },
     })),
+  // Sending checks the URL and the bot's username as Telegram does. The official Bot API server
+  // reads a `bot_username` with or without its `@`.
+  z.strictObject({
+    login_url: z.strictObject({
+      url: z.string(),
+      forward_text: z.string().optional(),
+      bot_username: z.string().optional(),
+      request_write_access: z.boolean().default(false),
+    }),
+  }).transform(({ login_url: loginUrl }): RichMessageButtonAction => {
+    const authorizingBotUsername = loginUrl.bot_username?.replace(/^@/, '');
+    return {
+      kind: 'login_url',
+      url: loginUrl.url,
+      // As in TDLib, empty forward text keeps the button's text in forwards.
+      ...(loginUrl.forward_text === undefined || loginUrl.forward_text.length === 0
+        ? {}
+        : { forwardText: loginUrl.forward_text }),
+      ...(loginUrl.bot_username === undefined || loginUrl.bot_username.length === 0
+        ? {}
+        : { authorizingBotUsername }),
+      requestsWriteAccess: loginUrl.request_write_access,
+    };
+  }),
+  // Sending checks the URL as Telegram does.
+  z.strictObject({ web_app: z.strictObject({ url: z.string() }) })
+    .transform(({ web_app }): RichMessageButtonAction => ({ kind: 'web_app', url: web_app.url })),
   // Telegram reads any `disabled` value; the emulator requires the documented empty object.
   z.strictObject({ disabled: z.strictObject({}) })
     .transform((): RichMessageButtonAction => ({ kind: 'disabled' })),
@@ -221,10 +248,10 @@ const forcedReplySchema = z.strictObject({
 
 /**
  * A `reply_markup` parameter holding an inline keyboard of callback, URL, copy-text,
- * switch-inline and disabled buttons, for methods that edit a message.
+ * switch-inline, login, Web App and disabled buttons, for methods that edit a message.
  *
  * As on Telegram, a keyboard without rows attaches no keyboard, so it parses as `undefined`.
- * Telegram also accepts other button types and buttons with several actions, using the first
+ * Telegram also accepts game and payment buttons and buttons with several actions, using the first
  * action it recognizes; rejecting them instead surfaces unsupported or ambiguous markup in tests.
  * Telegram rejects callback data longer than 64 bytes only when sending, so that limit is checked
  * there.

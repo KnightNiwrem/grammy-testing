@@ -4,7 +4,9 @@ description: >-
   Its text may hold only plain text, custom emoji, and dates, as the Bot API documents. As for
   inline keyboards, other actions, and buttons with several, are rejected. A forward or copy of
   the message keeps URL and copy-text buttons, and shows the others as disabled buttons with
-  their text and style, as TDLib's `InlineKeyboardButton::clone` does.
+  their text and style, as TDLib's `InlineKeyboardButton::clone` does, except for login buttons:
+  a forward keeps them, with their forward text as their text when they have one, and a copy
+  shows them as URL buttons.
 oneOf:
   - type: object
     additionalProperties: false
@@ -122,6 +124,68 @@ oneOf:
             type: boolean
           allow_channel_chats:
             type: boolean
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - login_url
+    properties:
+      text:
+        $ref: ./RichText.yaml
+      style:
+        $ref: ./RichMessageButtonStyle.yaml
+      login_url:
+        type: object
+        additionalProperties: false
+        description: >-
+          A request field for a button that opens an HTTPS page as a user Telegram has
+          authorized for the page's site, in place of the Telegram Login Widget. Pressing it
+          does not involve the bot. As on Telegram, responses show the button as a `url` button
+          with the normalized link. A link that is not HTTPS or that opens a user's profile
+          fails with TDLib's error, such as `Bad Request: inline keyboard button login URL '…'
+          is invalid: Only HTTPS links are allowed`.
+        required:
+          - url
+        properties:
+          url:
+            type: string
+          forward_text:
+            type: string
+            description: >-
+              The button's text in forwards of the message; empty or omitted to keep its text.
+          bot_username:
+            type: string
+            description: >-
+              The username, with or without `@`, of the bot that the user authorizes; omitted
+              for the bot that sends the message. It must name a bot (`Bad Request: bot "…" not
+              found`), and a button of a rich message cannot name one.
+          request_write_access:
+            type: boolean
+            description: Whether the user is also asked to let the bot send it messages.
+  - type: object
+    additionalProperties: false
+    required:
+      - text
+      - web_app
+    properties:
+      text:
+        $ref: ./RichText.yaml
+      style:
+        $ref: ./RichMessageButtonStyle.yaml
+      web_app:
+        type: object
+        additionalProperties: false
+        description: >-
+          A Web App of the message's bot, which pressing the button opens in the user's client
+          without involving the bot. Its HTTPS link is read as for a `login_url` button. As the
+          Bot API documents, Web App buttons work only in private chats with the bot; the
+          emulator refuses them in supergroup messages with `Bad Request:
+          BUTTON_TYPE_INVALID`.
+        required:
+          - url
+        properties:
+          url:
+            type: string
   - type: object
     additionalProperties: false
     required:

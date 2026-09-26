@@ -116,6 +116,8 @@ const CHAT_NOT_FOUND_DESCRIPTION = 'Bad Request: chat not found';
 const REPLY_MESSAGE_NOT_FOUND_DESCRIPTION = 'Bad Request: message to be replied not found';
 const MESSAGE_TEXT_TOO_LONG_DESCRIPTION = 'Bad Request: message is too long';
 const BUTTON_DATA_INVALID_DESCRIPTION = 'Bad Request: BUTTON_DATA_INVALID';
+/** Telegram's description for a button its servers do not allow in the chat, such as a Web App. */
+const BUTTON_TYPE_INVALID_DESCRIPTION = 'Bad Request: BUTTON_TYPE_INVALID';
 const QUOTE_TEXT_INVALID_DESCRIPTION = 'Bad Request: QUOTE_TEXT_INVALID';
 const URL_INVALID_DESCRIPTION = 'Bad Request: URL_INVALID';
 
@@ -1671,6 +1673,8 @@ function sendMethodAnswer(result: SendResult | SendFailure): BotApiMethodAnswer 
       return botApiError(400, CAPTION_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':
       return botApiError(400, BUTTON_DATA_INVALID_DESCRIPTION);
+    case 'button_type_invalid':
+      return botApiError(400, BUTTON_TYPE_INVALID_DESCRIPTION);
     case 'quote_invalid':
       return botApiError(400, QUOTE_TEXT_INVALID_DESCRIPTION);
     case 'bot_blocked':
@@ -2025,6 +2029,8 @@ function editMessageAnswer(result: MessageEditResult): BotApiMethodAnswer {
       return botApiError(400, CAPTION_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':
       return botApiError(400, BUTTON_DATA_INVALID_DESCRIPTION);
+    case 'button_type_invalid':
+      return botApiError(400, BUTTON_TYPE_INVALID_DESCRIPTION);
     case 'message_not_modified':
       return botApiError(400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
     case 'file_empty':
@@ -2064,6 +2070,8 @@ function inlineMessageEditAnswer(result: InlineMessageEditResult): BotApiMethodA
       return botApiError(400, CAPTION_TOO_LONG_DESCRIPTION);
     case 'callback_data_invalid':
       return botApiError(400, BUTTON_DATA_INVALID_DESCRIPTION);
+    case 'button_type_invalid':
+      return botApiError(400, BUTTON_TYPE_INVALID_DESCRIPTION);
     case 'message_not_modified':
       return botApiError(400, MESSAGE_NOT_MODIFIED_DESCRIPTION);
     case 'inline_message_upload_unsupported':

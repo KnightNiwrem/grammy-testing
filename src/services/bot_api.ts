@@ -288,6 +288,7 @@ export type SendFailureReason =
   | 'message_text_too_long'
   | 'caption_too_long'
   | 'callback_data_invalid'
+  | 'button_type_invalid'
   | 'quote_invalid'
   | 'bot_blocked'
   | 'file_empty'
@@ -443,6 +444,7 @@ export type EditMessageReplyMarkupFailureReason =
   | 'message_not_found'
   | 'message_not_editable'
   | 'callback_data_invalid'
+  | 'button_type_invalid'
   | 'message_not_modified';
 
 export type EditMessageTextFailureReason =
@@ -501,6 +503,7 @@ export interface EditInlineMessageReplyMarkupRequest extends InlineMessageTarget
 export type EditInlineMessageReplyMarkupFailureReason =
   | 'inline_message_not_found'
   | 'callback_data_invalid'
+  | 'button_type_invalid'
   | 'message_not_modified';
 
 export type EditInlineMessageTextFailureReason =
@@ -948,6 +951,7 @@ type SupergroupBotMessageEditFailureReason =
   | 'message_not_found'
   | 'message_not_editable'
   | 'callback_data_invalid'
+  | 'button_type_invalid'
   | 'message_not_modified';
 
 interface SupergroupBotMessaging {
@@ -997,6 +1001,7 @@ interface SupergroupBotMessaging {
         | 'reply_message_not_found'
         | 'message_effect_not_allowed_in_chat'
         | 'callback_data_invalid'
+        | 'button_type_invalid'
         | 'quote_invalid';
     }
     | ({ readonly sent: false } & ContentNormalizationFailure);
@@ -1481,31 +1486,23 @@ export class BotApiService {
 
   /**
    * Reads an inline keyboard as TDLib's `get_inline_keyboard_button` does for a keyboard being
-   * sent. A switch-inline button for a chosen chat must allow at least one kind of chat. Of URL
-   * buttons' links, a `tg://user?id=` link opens the user's profile and is kept in that canonical
-   * form, and any other link must pass `check_link`, which normalizes it, so that `grammy.dev`
-   * opens `http://grammy.dev/`. Telegram's servers decide whether the user of a profile link may
-   * be shown, which the emulator does not check. The keyboard still has to pass the checks that
-   * sending or editing applies.
+   * sent, with each button's action read as `#readButtonAction` reads it. The keyboard still has
+   * to pass the checks that sending or editing applies.
    */
   readInlineKeyboard(inlineKeyboard: InlineKeyboard): ReadInlineKeyboardResult {
     const readRows: InlineKeyboardButton[][] = [];
     for (const row of inlineKeyboard) {
       const readRow: InlineKeyboardButton[] = [];
       for (const button of row) {
-        const targetError = findSwitchInlineTargetError(button);
-        if (targetError !== undefined) {
-          return { read: false, keyboardError: targetError };
+        const actionReading = this.#readButtonAction(button, 'inline_keyboard');
+        if (!actionReading.read) {
+          return actionReading;
         }
-        if (button.kind !== 'url') {
-          readRow.push(button);
-          continue;
-        }
-        const urlReading = readInlineButtonUrl(button.url);
-        if (!urlReading.read) {
-          return urlReading;
-        }
-        readRow.push({ ...button, url: urlReading.url });
+        readRow.push(
+          actionReading.url === undefined || !hasButtonLink(button)
+            ? button
+            : { ...button, url: actionReading.url },
+        );
       }
       readRows.push(readRow);
     }
@@ -1526,20 +1523,74 @@ export class BotApiService {
       if (keyboardError !== undefined) {
         return button;
       }
-      keyboardError = findSwitchInlineTargetError(action);
-      if (keyboardError !== undefined || action.kind !== 'url') {
+      const actionReading = this.#readButtonAction(action, 'rich_message');
+      if (!actionReading.read) {
+        keyboardError = actionReading.keyboardError;
         return button;
       }
-      const urlReading = readInlineButtonUrl(action.url);
-      if (!urlReading.read) {
-        keyboardError = urlReading.keyboardError;
-        return button;
-      }
-      return { ...button, action: { ...action, url: urlReading.url } };
+      return actionReading.url === undefined || !hasButtonLink(action)
+        ? button
+        : { ...button, action: { ...action, url: actionReading.url } };
     });
     return keyboardError === undefined
       ? { read: true, richMessage: readRichMessage }
       : { read: false, keyboardError };
+  }
+
+  /**
+   * Reads a button's action as TDLib's `get_inline_keyboard_button` does, answering the link it
+   * opens, normalized, for a button with one. A switch-inline button for a chosen chat must allow
+   * at least one kind of chat. Of URL buttons' links, a `tg://user?id=` link opens the user's
+   * profile and is kept in that canonical form, and any other link must pass `check_link`, which
+   * normalizes it, so that `grammy.dev` opens `http://grammy.dev/`. Telegram's servers decide
+   * whether the user of a profile link may be shown, which the emulator does not check. Login and
+   * Web App buttons need an HTTPS link, which cannot open a profile.
+   *
+   * As the official Bot API server reads a login button, its bot's username consists of letters,
+   * digits and underscores, and must name a bot; the button of a rich message cannot name one.
+   */
+  #readButtonAction(
+    action: RichMessageButtonAction,
+    buttonLocation: 'inline_keyboard' | 'rich_message',
+  ): ButtonActionReading {
+    switch (action.kind) {
+      case 'url':
+        return readInlineButtonUrl(action.url);
+      case 'login_url': {
+        const { authorizingBotUsername } = action;
+        if (authorizingBotUsername !== undefined) {
+          if (buttonLocation === 'rich_message') {
+            return {
+              read: false,
+              keyboardError: 'Bot username must be empty for login_url buttons in rich messages',
+            };
+          }
+          if (!/^[A-Za-z0-9_]+$/.test(authorizingBotUsername)) {
+            return { read: false, keyboardError: 'LoginUrl bot username is invalid' };
+          }
+          const botId = this.#publicChats.findPublicChatId(authorizingBotUsername);
+          if (botId === undefined || !isUserId(botId)) {
+            return { read: false, keyboardError: `bot "${authorizingBotUsername}" not found` };
+          }
+        }
+        return readHttpsButtonUrl(action.url, 'login');
+      }
+      case 'web_app':
+        return readHttpsButtonUrl(action.url, 'Web App');
+      case 'switch_inline_query':
+        return action.target.kind === 'chosen_chat' &&
+            !allowsSomeInlineQueryChat(action.target.chatTypes)
+          ? { read: false, keyboardError: 'At least one chat type must be allowed' }
+          : { read: true };
+      case 'callback':
+      case 'copy_text':
+      case 'disabled':
+        return { read: true };
+      default: {
+        const unhandledAction: never = action;
+        throw new Error(`Unhandled button action: ${JSON.stringify(unhandledAction)}`);
+      }
+    }
   }
 
   /**
@@ -1682,7 +1733,7 @@ export class BotApiService {
     }
     const result = this.#send(authenticatedBot, {
       kind: 'existing',
-      content: getRepeatedContent(lookup.message.content),
+      content: getRepeatedContent(lookup.message.content, 'copy'),
       ...(caption === undefined ? {} : {
         captionReplacement: {
           caption: caption.text,
@@ -1731,7 +1782,7 @@ export class BotApiService {
         if (!isContentMessage(message)) {
           return undefined;
         }
-        const content = getRepeatedContent(message.content);
+        const content = getRepeatedContent(message.content, 'copy');
         return { content: removesCaptions ? withoutCaption(content) : content };
       },
     );
@@ -2076,6 +2127,7 @@ export class BotApiService {
       case 'message_text_too_long':
       case 'caption_too_long':
       case 'callback_data_invalid':
+      case 'button_type_invalid':
       case 'quote_invalid':
         return { sent: false, reason: result.reason };
       case 'bot_not_found':
@@ -3181,11 +3233,22 @@ type FileResolution<File> =
  * the user's profile and is kept in that canonical form, and any other link must pass
  * `check_link`, which normalizes it.
  */
-function readInlineButtonUrl(
-  url: string,
-):
-  | { readonly read: true; readonly url: string }
-  | { readonly read: false; readonly keyboardError: string } {
+/**
+ * A button action's link as TDLib reads it: normalized, for a button that opens one, or TDLib's
+ * description of the button it cannot read.
+ */
+type ButtonActionReading =
+  | { readonly read: true; readonly url?: string }
+  | { readonly read: false; readonly keyboardError: string };
+
+/** Whether a button opens a link, which reading it normalizes. */
+function hasButtonLink<Action extends RichMessageButtonAction>(
+  action: Action,
+): action is Extract<Action, { readonly url: string }> {
+  return action.kind === 'url' || action.kind === 'login_url' || action.kind === 'web_app';
+}
+
+function readInlineButtonUrl(url: string): ButtonActionReading {
   const userId = getLinkUserId(url);
   if (userId !== undefined) {
     return { read: true, url: `tg://user?id=${userId}` };
@@ -3197,14 +3260,22 @@ function readInlineButtonUrl(
 }
 
 /**
- * TDLib's description of a switch-inline button that lets the user choose no kind of chat;
- * `undefined` for any other button.
+ * Reads the link of a login or Web App button, as TDLib does: an HTTPS link, as `check_link`
+ * normalizes it, which cannot open a user's profile.
  */
-function findSwitchInlineTargetError(action: RichMessageButtonAction): string | undefined {
-  return action.kind === 'switch_inline_query' && action.target.kind === 'chosen_chat' &&
-      !allowsSomeInlineQueryChat(action.target.chatTypes)
-    ? 'At least one chat type must be allowed'
-    : undefined;
+function readHttpsButtonUrl(url: string, buttonKindName: 'login' | 'Web App'): ButtonActionReading {
+  if (getLinkUserId(url) !== undefined) {
+    return {
+      read: false,
+      keyboardError: `Link to a user can't be used in ${
+        buttonKindName === 'login' ? 'login URL' : 'Web App URL'
+      } buttons`,
+    };
+  }
+  const linkCheck = checkLink(url, { httpsOnly: true });
+  return linkCheck.valid
+    ? { read: true, url: linkCheck.url }
+    : { read: false, keyboardError: `Inline keyboard button ${buttonKindName} ${linkCheck.error}` };
 }
 
 /** Looks up what a file of a request resolved to, which must have been resolved before. */
@@ -3270,6 +3341,7 @@ function toEditMessageFailureReason(
     case 'message_not_found':
     case 'message_not_editable':
     case 'callback_data_invalid':
+    case 'button_type_invalid':
     case 'message_not_modified':
       return reason;
     // As for sending, a chat the bot cannot address is not found.
@@ -3296,6 +3368,7 @@ function toEditInlineMessageFailureReason(
 ): EditInlineMessageReplyMarkupFailureReason {
   switch (reason) {
     case 'callback_data_invalid':
+    case 'button_type_invalid':
     case 'message_not_modified':
       return reason;
     case 'message_not_found':

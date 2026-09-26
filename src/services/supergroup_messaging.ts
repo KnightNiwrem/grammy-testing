@@ -45,6 +45,7 @@ import {
   type FileUploadStore,
   getReplyQuoteSource,
   hasOnlyValidButtonCallbackData,
+  hasWebAppButton,
   isSameMessageContent,
   isUnchangedContent,
   type NormalizedOutgoingContent,
@@ -157,6 +158,7 @@ export type SendSupergroupBotMessageFailureReason =
   | 'reply_message_not_found'
   | 'message_effect_not_allowed_in_chat'
   | 'callback_data_invalid'
+  | 'button_type_invalid'
   | 'quote_invalid';
 
 export type SendSupergroupBotMessageResult =
@@ -246,6 +248,7 @@ export type EditSupergroupBotMessageInlineKeyboardFailureReason =
   | 'message_not_found'
   | 'message_not_editable'
   | 'callback_data_invalid'
+  | 'button_type_invalid'
   | 'message_not_modified';
 
 export type EditSupergroupBotMessageTextFailureReason =
@@ -624,6 +627,9 @@ export class SupergroupMessagingService {
     }
     if (!hasOnlyValidButtonCallbackData(input.inlineKeyboard, contentNormalization.content)) {
       return { sent: false, reason: 'callback_data_invalid' };
+    }
+    if (hasWebAppButton(input.inlineKeyboard, contentNormalization.content)) {
+      return { sent: false, reason: 'button_type_invalid' };
     }
     const quoteResolution = resolveReplyQuote(
       getReplyQuoteSource(repliedMessage, input.externalReply),
@@ -1067,7 +1073,9 @@ export class SupergroupMessagingService {
     replacement: ContentReplacement<FailureReason>,
     inlineKeyboard: InlineKeyboard | undefined,
   ):
-    | SupergroupMessageEditResult<FailureReason | 'callback_data_invalid' | 'message_not_modified'>
+    | SupergroupMessageEditResult<
+      FailureReason | 'callback_data_invalid' | 'button_type_invalid' | 'message_not_modified'
+    >
     | ({ readonly edited: false } & TextInvalidFailure) {
     if (!replacement.replaced) {
       return { edited: false, ...replacement.failure };
@@ -1092,7 +1100,12 @@ export class SupergroupMessagingService {
       readonly inlineKeyboard: InlineKeyboard | undefined;
       readonly contentEditedAtUnixSeconds: number | undefined;
     },
-  ): SupergroupMessageEditResult<'callback_data_invalid' | 'message_not_modified'> {
+  ): SupergroupMessageEditResult<
+    'callback_data_invalid' | 'button_type_invalid' | 'message_not_modified'
+  > {
+    if (hasWebAppButton(edit.inlineKeyboard, content)) {
+      return { edited: false, reason: 'button_type_invalid' };
+    }
     const editFailure = checkBotMessageEdit(message, { content, ...edit });
     if (editFailure !== undefined) {
       return { edited: false, reason: editFailure };

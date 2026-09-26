@@ -4,16 +4,17 @@
 
 ## Inline keyboards
 
-Messages can carry inline keyboards with callback, URL, copy-text, switch-inline and disabled
-buttons in private chats and supergroups. Callback data must contain 1–64 UTF-8 bytes. URL buttons
-accept the links TDLib's [`get_inline_keyboard_button`][td-inline-button] accepts: a `tg://user?id=`
-link opens the user's profile, and any other link must pass [`LinkManager::check_link`][check-link],
-the same rule the emulator applies to text links. The keyboard keeps and returns the normalized
-link, so `grammy.dev` becomes `http://grammy.dev/`, and a refused link fails with TDLib's error,
-such as `Bad Request: inline keyboard button URL 'grammy' is invalid: Wrong HTTP URL`. Telegram's
-servers decide whether a profile link's user may be shown, which the emulator does not check. Bots
-replace or remove a keyboard with `editMessageReplyMarkup`, or supply it when editing text/captions.
-An empty `inline_keyboard` removes the keyboard.
+Messages can carry inline keyboards with callback, URL, copy-text, switch-inline, login, Web App and
+disabled buttons in private chats and supergroups. Callback data must contain 1–64 UTF-8 bytes. URL
+buttons accept the links TDLib's [`get_inline_keyboard_button`][td-inline-button] accepts: a
+`tg://user?id=` link opens the user's profile, and any other link must pass
+[`LinkManager::check_link`][check-link], the same rule the emulator applies to text links. The
+keyboard keeps and returns the normalized link, so `grammy.dev` becomes `http://grammy.dev/`, and a
+refused link fails with TDLib's error, such as
+`Bad Request: inline keyboard button URL 'grammy' is invalid: Wrong HTTP URL`. Telegram's servers
+decide whether a profile link's user may be shown, which the emulator does not check. Bots replace
+or remove a keyboard with `editMessageReplyMarkup`, or supply it when editing text/captions. An
+empty `inline_keyboard` removes the keyboard.
 
 Copy-text, switch-inline and disabled buttons act only in the user's client, so the emulator stores
 them for inspection and nothing happens when they are pressed. The official server's
@@ -45,6 +46,32 @@ accepts only links that start the answering bot, recognizing the `t.me`, `telegr
 `tg://resolve?domain=<bot_username>&start=<parameter>`. Other URLs are rejected with
 `Bad Request: URL_INVALID`, which may be stricter than Telegram. The link is recorded for tests to
 inspect; the account's client does not follow it.
+
+### Login and Web App buttons
+
+Login buttons (`login_url`) and Web App buttons (`web_app`) open HTTPS pages. The official server's
+[`get_inline_keyboard_button_type`][login-web-app-parsing] reads them, and TDLib's
+[`get_inline_keyboard_button`][td-login-web-app] checks their links with `check_link`, allowing only
+HTTPS and no profile links: for example,
+`Bad Request: inline keyboard button Web App URL 'grammy.dev' is invalid: Only HTTPS links are allowed`
+or `Bad Request: link to a user can't be used in login URL buttons`. The keyboard keeps the
+normalized link. A login button's `bot_username` may start with `@`, must consist of letters, digits
+and underscores (`Bad Request: loginUrl bot username is invalid`), and must name a bot of the
+session, as the server resolves it: `Bad Request: bot "name" not found`.
+
+As the official server's [`json_store_inline_keyboard_button_type`][button-type-json] does, bots and
+accounts see a login button as a `url` button with its link. The button's `forward_text`,
+`bot_username` and `request_write_access` still count when an edit is compared with the keyboard, as
+in TDLib's [button comparison][td-button-equality], and a
+[forward](messages.md#forwarding-and-copying) shows the forward text. A forward drops a keyboard
+with a Web App button, as TDLib's [`InlineKeyboardButton::clone`][td-button-clone] does.
+
+Telegram authorizes the user and opens the pages in the user's client, without involving the bot, so
+the emulator only stores these buttons. As the Bot API reference documents, Web App buttons work
+only in private chats between a user and the bot. Telegram's servers enforce this; the emulator
+refuses them in messages that bots send or edit in supergroups with
+`Bad Request: BUTTON_TYPE_INVALID`, Telegram's error for a button type it does not accept. It does
+not check the Web App buttons of inline query results, which a user may send to any chat.
 
 ## Reply keyboards and forced replies
 
@@ -129,9 +156,9 @@ no buttons, and it checks only the icon identifier's syntax, as it does for
 
 ## Real gaps
 
-- **Inline button types.** Login and Mini App buttons are absent, along with game and payment
-  buttons, which need their [missing features](README.md#unimplemented-areas). Tests cannot exercise
-  those button definitions or actions.
+- **Game and payment buttons.** These inline buttons need their
+  [missing features](README.md#unimplemented-areas). Tests cannot exercise those button definitions
+  or actions.
 - **Reply keyboard request buttons.** Requests for contacts, locations, polls, users, chats and web
   apps are absent. Compare these missing types and fields with upstream's
   [keyboard button parsing][button-parsing].
@@ -164,6 +191,10 @@ server behavior.
 [button-style]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10226-L10246
 [button-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L4247-L4263
 [td-button-equality]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L84-L87
+[login-web-app-parsing]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L10442-L10488
+[td-login-web-app]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L315-L369
+[td-button-clone]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/InlineKeyboardButton.cpp#L42-L82
+[button-type-json]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L18115-L18201
 [answer-callback]: https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp#L15544-L15565
 [callback-answer]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/CallbackQueriesManager.cpp#L77-L90
 [td-callback]: https://github.com/tdlib/td/blob/bc9c263e2bfee06aaab41e82db51a103376030bc/td/telegram/CallbackQueriesManager.cpp#L145-L188

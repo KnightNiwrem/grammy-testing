@@ -132,9 +132,10 @@ not remove shared supergroup membership.
 `forwardMessage` forwards supported content between private chats and supergroups accessible to the
 bot. It keeps the original sender/date in `forward_origin` and legacy `forward_from`/`forward_date`,
 including when forwarding an existing forward. It preserves `via_bot` and keeps an inline keyboard
-only if every button works away from the original message: URL, copy-text and disabled buttons, and
-the switch-inline buttons of a message sent through an inline bot, which then let the user choose
-any chat. Accounts can forward messages from their own chats too.
+only if every button works away from the original message: URL, copy-text, login and disabled
+buttons, and the switch-inline buttons of a message sent through an inline bot, which then let the
+user choose any chat. A forwarded login button shows its `forward_text`, when it has one, as its
+text. Accounts can forward messages from their own chats too.
 
 `copyMessage` returns only the new `message_id`. The copy has no forward origin and uses the
 request's reply and markup. A supplied caption, including an empty one, replaces a photo/document
@@ -148,8 +149,7 @@ copy them. Service messages can be neither forwarded nor copied. The protected-c
 bot copies is explicit in TDLib's [`MessagesManager::can_forward_message`][forward-permissions].
 Keyboard filtering follows [`dup_reply_markup`][forward-markup] and
 [`InlineKeyboardButton::clone`][forward-buttons], except that a forwarded disabled button keeps its
-text, which TDLib's copy leaves empty. Upstream also retains login buttons, which the emulator
-cannot create.
+text, which TDLib's copy leaves empty.
 
 `forwardMessages` and `copyMessages` repeat up to 100 messages of one chat, whose IDs must be in
 strictly increasing order, and return the new `message_id`s. As in TDLib's

@@ -802,24 +802,45 @@ export function richMessageMentionsUser(
   return mentionsUser;
 }
 
+/** How a message is repeated: forwarded with its origin, or copied as a new message. */
+export type MessageRepetition = 'forward' | 'copy';
+
 /**
  * The rich message that a forward or copy of it shows, as TDLib's `InlineKeyboardButton::clone`
- * decides for a rich message's buttons: URL and copy-text buttons keep working, and every other
- * button keeps its text and style but does nothing. The emulator's rich messages are never sent
- * through an inline bot, whose switch-inline buttons forwards would keep.
+ * decides for a rich message's buttons: URL and copy-text buttons keep working, and so does a
+ * login button in a forward, which shows its forward text instead of its text when it has one. A
+ * copy's login button becomes a URL button that opens its URL without authorizing the user. Every
+ * other button keeps its text and style but does nothing. The emulator's rich messages are never
+ * sent through an inline bot, whose switch-inline buttons forwards would keep.
  */
-export function repeatRichMessage(richMessage: RichMessage): RichMessage {
+export function repeatRichMessage(
+  richMessage: RichMessage,
+  repetition: MessageRepetition,
+): RichMessage {
   return mapRichMessageButtons(richMessage, (button) => {
-    switch (button.action.kind) {
+    const { action } = button;
+    switch (action.kind) {
       case 'url':
       case 'copy_text':
         return button;
+      case 'login_url': {
+        if (repetition === 'copy') {
+          return { ...button, action: { kind: 'url', url: action.url } };
+        }
+        const { forwardText, ...forwardedAction } = action;
+        return {
+          ...button,
+          ...(forwardText === undefined ? {} : { text: { kind: 'plain', text: forwardText } }),
+          action: forwardedAction,
+        };
+      }
       case 'callback':
       case 'switch_inline_query':
+      case 'web_app':
       case 'disabled':
         return { ...button, action: { kind: 'disabled' } };
       default: {
-        const unhandledAction: never = button.action;
+        const unhandledAction: never = action;
         throw new Error(`Unhandled rich message button: ${JSON.stringify(unhandledAction)}`);
       }
     }

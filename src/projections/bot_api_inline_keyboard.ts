@@ -24,7 +24,8 @@ export function projectInlineKeyboardMarkup(
 /**
  * Shows what a button of an inline keyboard or a rich message does, as the official Bot API
  * server's `json_store_inline_keyboard_button_type` does: a switch-inline button for a chosen chat
- * that allows every kind of chat shows as a plain `switch_inline_query` button.
+ * that allows every kind of chat shows as a plain `switch_inline_query` button, and a login button
+ * shows only its URL, as a URL button.
  */
 export function projectInlineButtonAction(
   action: RichMessageButtonAction,
@@ -33,6 +34,7 @@ export function projectInlineButtonAction(
     case 'callback':
       return { callback_data: action.callbackData };
     case 'url':
+    case 'login_url':
       return { url: action.url };
     case 'copy_text':
       return { copy_text: { text: action.copiedText } };
@@ -54,6 +56,8 @@ export function projectInlineButtonAction(
         },
       };
     }
+    case 'web_app':
+      return { web_app: { url: action.url } };
     case 'disabled':
       return { disabled: {} };
     default: {

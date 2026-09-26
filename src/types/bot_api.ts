@@ -168,6 +168,10 @@ export interface BotApiSwitchInlineQueryChosenChatInlineKeyboardButton
   };
 }
 
+export interface BotApiWebAppInlineKeyboardButton extends BotApiKeyboardButtonFace {
+  readonly web_app: { readonly url: string };
+}
+
 export interface BotApiDisabledInlineKeyboardButton extends BotApiKeyboardButtonFace {
   readonly disabled: Record<string, never>;
 }
@@ -179,6 +183,7 @@ export type BotApiInlineKeyboardButton =
   | BotApiSwitchInlineQueryInlineKeyboardButton
   | BotApiSwitchInlineQueryCurrentChatInlineKeyboardButton
   | BotApiSwitchInlineQueryChosenChatInlineKeyboardButton
+  | BotApiWebAppInlineKeyboardButton
   | BotApiDisabledInlineKeyboardButton;
 
 export interface BotApiInlineKeyboardMarkup {

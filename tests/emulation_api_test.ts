@@ -1095,7 +1095,7 @@ Deno.test('sendMessage attaches an inline keyboard from every request encoding',
     { inline_keyboard: [[{ text: 'Plain' }]] },
     { inline_keyboard: [[{ text: 'Empty', callback_data: '' }]] },
     { inline_keyboard: [[{ text: 'Both', callback_data: 'yes', url: 'https://grammy.dev' }]] },
-    { inline_keyboard: [[{ text: 'App', web_app: { url: 'https://grammy.dev' } }]] },
+    { inline_keyboard: [[{ text: 'Pay', pay: true }]] },
     { inline_keyboard: [[]] },
     'not JSON',
   ];
@@ -1304,6 +1304,197 @@ Deno.test('copy-text, switch-inline and disabled buttons follow Telegram rules',
     if (status !== 400) {
       throw new Error(`Expected ${JSON.stringify(button)} to be rejected, received ${status}`);
     }
+  }
+});
+
+Deno.test('login and Web App buttons follow Telegram rules', async () => {
+  const { api, botApiPath, createdAccount, sendText } = await createPrivateConversationFixture();
+  await sendText('/start');
+  const accountId = createdAccount.account.id;
+  const sendButtons = (buttons: readonly unknown[]) =>
+    callBotApi(api, `${botApiPath}/sendMessage`, {
+      chat_id: accountId,
+      text: 'Welcome',
+      reply_markup: { inline_keyboard: [buttons] },
+    });
+  const loginButton = {
+    text: 'Log in',
+    login_url: {
+      url: 'https://grammy.dev/login',
+      forward_text: 'Log in to grammY',
+      bot_username: '@Test_Bot',
+      request_write_access: true,
+    },
+  };
+
+  const reply = await sendButtons([
+    loginButton,
+    { text: 'Open', web_app: { url: 'HTTPS://grammy.dev/app' } },
+  ]);
+  const sentMessage = botApiResult(reply.body);
+  if (
+    JSON.stringify(sentMessage?.reply_markup) !== JSON.stringify({
+      inline_keyboard: [[
+        { text: 'Log in', url: 'https://grammy.dev/login' },
+        { text: 'Open', web_app: { url: 'https://grammy.dev/app' } },
+      ]],
+    })
+  ) {
+    throw new Error(`Expected a login button shown by its URL, received ${JSON.stringify(reply)}`);
+  }
+
+  const editLoginButton = (loginUrl: Record<string, unknown>) =>
+    callBotApi(api, `${botApiPath}/editMessageReplyMarkup`, {
+      chat_id: accountId,
+      message_id: sentMessage?.message_id,
+      reply_markup: { inline_keyboard: [[{ text: 'Log in', login_url: loginUrl }]] },
+    });
+  const firstEdit = await editLoginButton(loginButton.login_url);
+  const unchangedEdit = await editLoginButton({
+    ...loginButton.login_url,
+    bot_username: 'test_bot',
+  });
+  const changedEdit = await editLoginButton({ ...loginButton.login_url, forward_text: 'Sign in' });
+  if (
+    firstEdit.status !== 200 || !isBadRequestResponse(unchangedEdit.body) ||
+    !unchangedEdit.body.description.startsWith('Bad Request: message is not modified') ||
+    changedEdit.status !== 200
+  ) {
+    throw new Error(
+      `Expected only a changed forward text to modify the button, received ${
+        JSON.stringify([firstEdit, unchangedEdit, changedEdit])
+      }`,
+    );
+  }
+
+  const forward = async (messageId: unknown) =>
+    botApiResult(
+      (await callBotApi(api, `${botApiPath}/forwardMessage`, {
+        chat_id: accountId,
+        from_chat_id: accountId,
+        message_id: messageId,
+      })).body,
+    )?.reply_markup;
+  const webAppMessage = botApiResult(
+    (await sendButtons([{ text: 'Open', web_app: { url: 'https://grammy.dev/app' } }])).body,
+  );
+  const forwardedMarkups = [
+    await forward(sentMessage?.message_id),
+    await forward(webAppMessage?.message_id),
+  ];
+  if (
+    JSON.stringify(forwardedMarkups) !== JSON.stringify([
+      { inline_keyboard: [[{ text: 'Sign in', url: 'https://grammy.dev/login' }]] },
+      undefined,
+    ])
+  ) {
+    throw new Error(
+      `Expected forwards to keep only login buttons, with their forward text, received ${
+        JSON.stringify(forwardedMarkups)
+      }`,
+    );
+  }
+
+  const refusedButtons: Array<[unknown, string]> = [
+    [
+      { text: 'Log in', login_url: { url: 'http://grammy.dev/login' } },
+      "Bad Request: inline keyboard button login URL 'http://grammy.dev/login' is invalid: " +
+      'Only HTTPS links are allowed',
+    ],
+    [
+      { text: 'Log in', login_url: { url: 'tg://user?id=1' } },
+      "Bad Request: link to a user can't be used in login URL buttons",
+    ],
+    [
+      { text: 'Log in', login_url: { url: 'https://grammy.dev', bot_username: 'no_such_bot' } },
+      'Bad Request: bot "no_such_bot" not found',
+    ],
+    [
+      { text: 'Log in', login_url: { url: 'https://grammy.dev', bot_username: 'test-bot' } },
+      'Bad Request: loginUrl bot username is invalid',
+    ],
+    [
+      { text: 'Open', web_app: { url: 'grammy.dev' } },
+      "Bad Request: inline keyboard button Web App URL 'grammy.dev' is invalid: " +
+      'Only HTTPS links are allowed',
+    ],
+  ];
+  for (const [button, expectedDescription] of refusedButtons) {
+    const refusal = await sendButtons([button]);
+    if (
+      !isBadRequestResponse(refusal.body) || refusal.body.description !== expectedDescription
+    ) {
+      throw new Error(
+        `Expected ${JSON.stringify(button)} to fail with ${expectedDescription}, received ${
+          JSON.stringify(refusal)
+        }`,
+      );
+    }
+  }
+  for (const button of [{ text: 'Open', web_app: {} }, { text: 'Log in', login_url: 'x' }]) {
+    const { status } = await sendButtons([button]);
+    if (status !== 400) {
+      throw new Error(`Expected ${JSON.stringify(button)} to be rejected, received ${status}`);
+    }
+  }
+});
+
+Deno.test('Web App buttons work only in private chats', async () => {
+  const { api, owner, bot, supergroup, supergroupPath } = await createSupergroupFixture();
+  const webAppKeyboard = {
+    inline_keyboard: [[{ text: 'Open', web_app: { url: 'https://a.io' } }]],
+  };
+  const webAppSend = await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+    chat_id: supergroup.id,
+    text: 'Play',
+    reply_markup: webAppKeyboard,
+  });
+  const loginSend = await callBotApi(api, `${bot.botApiPath}/sendMessage`, {
+    chat_id: supergroup.id,
+    text: 'Play',
+    reply_markup: { inline_keyboard: [[{ text: 'Log in', login_url: { url: 'https://a.io' } }]] },
+  });
+  const webAppEdit = await callBotApi(api, `${bot.botApiPath}/editMessageReplyMarkup`, {
+    chat_id: supergroup.id,
+    message_id: botApiResult(loginSend.body)?.message_id,
+    reply_markup: webAppKeyboard,
+  });
+  const richWebAppSend = await callBotApi(api, `${bot.botApiPath}/sendRichMessage`, {
+    chat_id: supergroup.id,
+    rich_message: {
+      blocks: [{ type: 'buttons', buttons: [{ text: 'Open', web_app: { url: 'https://a.io' } }] }],
+    },
+  });
+  const richLoginSend = await callBotApi(api, `${bot.botApiPath}/sendRichMessage`, {
+    chat_id: supergroup.id,
+    rich_message: {
+      blocks: [{
+        type: 'buttons',
+        buttons: [{ text: 'Log in', login_url: { url: 'https://a.io', bot_username: 'test_bot' } }],
+      }],
+    },
+  });
+  const history = await (await api.request(`${supergroupPath(owner.id)}/messages`)).json() as {
+    messages: Array<{ text?: string }>;
+  };
+  const descriptions = [webAppSend, webAppEdit, richWebAppSend, richLoginSend].map(({ body }) =>
+    isBadRequestResponse(body) ? body.description : undefined
+  );
+  if (
+    loginSend.status !== 200 ||
+    JSON.stringify(descriptions) !== JSON.stringify([
+        'Bad Request: BUTTON_TYPE_INVALID',
+        'Bad Request: BUTTON_TYPE_INVALID',
+        'Bad Request: BUTTON_TYPE_INVALID',
+        'Bad Request: bot username must be empty for login_url buttons in rich messages',
+      ]) ||
+    history.messages.filter(({ text }) => text === 'Play').length !== 1
+  ) {
+    throw new Error(
+      `Expected only the login button in the supergroup, received ${
+        JSON.stringify([loginSend, descriptions, history])
+      }`,
+    );
   }
 });
 

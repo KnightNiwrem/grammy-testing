@@ -680,6 +680,20 @@ export function hasOnlyValidButtonCallbackData(
       ));
 }
 
+/**
+ * Whether a message has a Web App button, in its inline keyboard or in its rich message. The Bot
+ * API reference allows Web App buttons only in private chats between a user and the bot, and
+ * Telegram's servers refuse them elsewhere.
+ */
+export function hasWebAppButton(
+  inlineKeyboard: InlineKeyboard | undefined,
+  content: NormalizedOutgoingContent,
+): boolean {
+  return (inlineKeyboard?.some((row) => row.some(({ kind }) => kind === 'web_app')) ?? false) ||
+    (content.kind === 'rich_message' &&
+      listRichMessageButtons(content.richMessage).some(({ action }) => action.kind === 'web_app'));
+}
+
 function hasValidCallbackData(action: RichMessageButtonAction): boolean {
   return action.kind !== 'callback' ||
     utf8Encoder.encode(action.callbackData).length <= MAX_CALLBACK_DATA_BYTES;
@@ -746,6 +760,14 @@ function isSameInlineKeyboardButtonAction(
       return second.kind === 'url' && first.url === second.url;
     case 'copy_text':
       return second.kind === 'copy_text' && first.copiedText === second.copiedText;
+    case 'login_url':
+      return second.kind === 'login_url' && first.url === second.url &&
+        first.forwardText === second.forwardText &&
+        first.authorizingBotUsername?.toLowerCase() ===
+          second.authorizingBotUsername?.toLowerCase() &&
+        first.requestsWriteAccess === second.requestsWriteAccess;
+    case 'web_app':
+      return second.kind === 'web_app' && first.url === second.url;
     case 'switch_inline_query':
       return second.kind === 'switch_inline_query' && first.query === second.query &&
         isSameInlineQuerySwitchTarget(first.target, second.target);

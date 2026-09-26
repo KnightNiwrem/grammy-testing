@@ -447,6 +447,7 @@ export interface CallbackInlineKeyboardButton extends KeyboardButtonFace {
   readonly callback_data: string;
 }
 
+/** A button that opens a link, including a login button, which the emulator shows by its URL. */
 export interface UrlInlineKeyboardButton extends KeyboardButtonFace {
   readonly url: string;
 }
@@ -480,6 +481,11 @@ export interface SwitchInlineQueryChosenChatInlineKeyboardButton extends Keyboar
   };
 }
 
+/** A button that opens a Web App of the message's bot. */
+export interface WebAppInlineKeyboardButton extends KeyboardButtonFace {
+  readonly web_app: { readonly url: string };
+}
+
 /** A button that does nothing. */
 export interface DisabledInlineKeyboardButton extends KeyboardButtonFace {
   readonly disabled: Record<string, never>;
@@ -492,6 +498,7 @@ export type InlineKeyboardButton =
   | SwitchInlineQueryInlineKeyboardButton
   | SwitchInlineQueryCurrentChatInlineKeyboardButton
   | SwitchInlineQueryChosenChatInlineKeyboardButton
+  | WebAppInlineKeyboardButton
   | DisabledInlineKeyboardButton;
 
 export interface InlineKeyboardMarkup {

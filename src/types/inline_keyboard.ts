@@ -68,6 +68,35 @@ export interface SwitchInlineQueryInlineKeyboardButton extends ButtonAppearance 
   readonly target: InlineQuerySwitchTarget;
 }
 
+/**
+ * A button that opens an HTTPS page as a user Telegram has authorized for the page's site, in
+ * place of the Telegram Login Widget. Telegram's servers and the user's client authorize the user;
+ * the bot is not involved.
+ */
+export interface LoginUrlInlineKeyboardButton extends ButtonAppearance {
+  readonly kind: 'login_url';
+  readonly text: string;
+  readonly url: string;
+  /** The text the button shows in forwards of its message; omitted to keep its text. */
+  readonly forwardText?: string;
+  /**
+   * The username, without `@`, of the bot whose domain the site must be linked to and which the
+   * user authorizes; omitted for the bot that sent the message. Sending checks that it names a
+   * bot; as on Telegram, its letter case does not matter.
+   */
+  readonly authorizingBotUsername?: string;
+  /** Whether authorizing the user also asks the user to let the bot send it messages. */
+  readonly requestsWriteAccess: boolean;
+}
+
+/** A button that opens a Web App of the message's bot in the user's client. */
+export interface WebAppInlineKeyboardButton extends ButtonAppearance {
+  readonly kind: 'web_app';
+  readonly text: string;
+  /** The HTTPS page the Web App opens. */
+  readonly url: string;
+}
+
 /** A button that does nothing when pressed. */
 export interface DisabledInlineKeyboardButton extends ButtonAppearance {
   readonly kind: 'disabled';
@@ -79,6 +108,8 @@ export type InlineKeyboardButton =
   | UrlInlineKeyboardButton
   | CopyTextInlineKeyboardButton
   | SwitchInlineQueryInlineKeyboardButton
+  | LoginUrlInlineKeyboardButton
+  | WebAppInlineKeyboardButton
   | DisabledInlineKeyboardButton;
 
 /** Rows of buttons shown below a message. A keyboard has at least one row and no empty rows. */

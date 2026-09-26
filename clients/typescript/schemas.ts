@@ -198,6 +198,7 @@ function inlineButtonSchemas<FaceShape extends z.ZodRawShape>(faceShape: FaceSha
         allow_channel_chats: z.boolean(),
       }),
     }),
+    z.strictObject({ ...faceShape, web_app: z.strictObject({ url: z.string() }) }),
     z.strictObject({ ...faceShape, disabled: z.strictObject({}) }),
   ] as const;
 }

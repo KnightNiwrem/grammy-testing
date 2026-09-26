@@ -58,9 +58,12 @@ Buttons, in rows and in text, act as inline keyboard buttons of the same kind. T
 as keyboard links are. Their style is read as the server's [`get_button_style`][button-style] reads
 a rich message's, which also accepts `link`. Callback data must fit in 64 bytes:
 `Bad Request: BUTTON_DATA_INVALID`. An account presses a callback button of a rich message by its
-`callback_data`, as it presses one of an inline keyboard. Forwards and copies keep URL and copy-text
-buttons, and show the others as disabled buttons with their text and style, as TDLib's
-[`InlineKeyboardButton::clone`][button-clone] decides. As for text, `copyMessage` ignores a
+`callback_data`, as it presses one of an inline keyboard. A login button cannot name a
+`bot_username`: `Bad Request: bot username must be empty for login_url buttons in rich messages`.
+Forwards and copies keep URL and copy-text buttons, and show the others as disabled buttons with
+their text and style, as TDLib's [`InlineKeyboardButton::clone`][button-clone] decides. Login
+buttons are the exception: a forward keeps them, showing their `forward_text` as plain text when
+they have one, and a copy turns them into URL buttons. As for text, `copyMessage` ignores a
 `caption` for a rich message.
 
 Photo and document blocks hold an `InputMediaPhoto` or `InputMediaDocument`, whose `media` is a

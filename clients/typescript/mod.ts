@@ -138,4 +138,5 @@ export type {
   VirtualAccountProfile,
   VirtualBotProfile,
   WaitForBotActivityOptions,
+  WebAppInlineKeyboardButton,
 } from './types.ts';
